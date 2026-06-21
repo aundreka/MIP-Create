@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>MRAID test harness — playable ads</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; height: 100vh; display: flex; font: 13px/1.4 -apple-system, "Segoe UI", Roboto, Arial, sans-serif; background: #0e1320; color: #e7ecf6; }
+  .stage { flex: 1; display: flex; align-items: center; justify-content: center; padding: 20px; background: repeating-conic-gradient(#0c1120 0% 25%, #0a0f1c 0% 50%) 50% / 26px 26px; overflow: auto; }
+  .device { background: #000; border: 1px solid #2a3350; border-radius: 14px; overflow: hidden; box-shadow: 0 12px 40px rgba(0,0,0,.6); position: relative; }
+  .device iframe { border: 0; display: block; background: #000; }
+  .side { width: 340px; border-left: 1px solid #2a3350; background: #161d2e; display: flex; flex-direction: column; }
+  .side h1 { font-size: 15px; margin: 0; padding: 14px 16px; border-bottom: 1px solid #2a3350; }
+  .body { padding: 14px 16px; overflow: auto; }
+  .grp { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: #8b96ad; margin: 14px 0 6px; }
+  .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+  button { font: inherit; color: #e7ecf6; background: #1d2740; border: 1px solid #2a3350; border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+  button:hover { border-color: #4f7bf0; }
+  button.on { background: #4f7bf0; border-color: #4f7bf0; }
+  button.warn { border-color: #e0556b; color: #e0556b; }
+  input[type=number] { width: 70px; background: #0c1120; color: #e7ecf6; border: 1px solid #2a3350; border-radius: 5px; padding: 4px 6px; }
+  label.file { display: block; }
+  .status { font-size: 12px; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+  .ok { background: #15402b; color: #4ade80; } .bad { background: #4a1622; color: #fb7185; } .idle { background: #2a3350; color: #8b96ad; }
+  .log { margin-top: 8px; background: #0c1120; border: 1px solid #2a3350; border-radius: 8px; padding: 8px; height: 220px; overflow: auto; font-family: ui-monospace, monospace; font-size: 11px; }
+  .log .o { color: #4ade80; } .log .e { color: #ffd34d; } .log .x { color: #fb7185; } .muted { color: #8b96ad; }
+</style>
+</head>
+<body>
+  <div class="stage"><div class="device" id="device"><iframe id="ad" title="ad"></iframe></div></div>
+  <div class="side">
+    <h1>MRAID 3.0 test container</h1>
+    <div class="body">
+      <div class="grp">Playable</div>
+      <label class="file"><input type="file" id="file" accept=".html,text/html" /></label>
+      <div class="row"><button id="reload">↻ Reload</button><span class="status">Boot: <span id="boot" class="pill idle">—</span> · MRAID: <span id="mr" class="pill idle">—</span></span></div>
+
+      <div class="grp">Device</div>
+      <div class="row">W <input type="number" id="w" value="380" /> H <input type="number" id="h" value="800" />
+        <button data-dev="380x800">Phone</button><button data-dev="320x568">iPhone SE</button><button data-dev="768x1024">Tablet</button>
+      </div>
+
+      <div class="grp">Lifecycle (drives the real MRAID events)</div>
+      <div class="row"><button id="viewable" class="on">Viewable: ON</button><span class="muted">→ ad-pause / ad-resume</span></div>
+      <div class="row"><button id="mute">Mute audio</button><span class="muted">→ audioVolumeChange</span></div>
+      <div class="row">Exposure <input type="number" id="exp" value="100" min="0" max="100" /><button id="setexp">Set</button><span class="muted">→ exposureChange</span></div>
+      <div class="row"><button id="ready">Re-fire ready</button><button id="vis">Toggle page-visibility</button></div>
+
+      <div class="grp">CTA / events</div>
+      <div class="status">CTA opens: <b id="opens">0</b></div>
+      <div class="log" id="log"></div>
+      <div class="muted" style="margin-top:8px">Loads any exported playable, injects <code>window.mraid</code> before it runs, and logs every <code>mraid.open()</code> (the install click) instead of navigating. Use the lifecycle buttons to confirm the ad pauses/mutes and the AppLovin-safe dim never clips.</div>
+    </div>
+  </div>
+
+<script>
+// ---- the MRAID 3.0 shim injected into the ad iframe (runs before the playable)
+const MRAID_SHIM = `<script>(function(){
+  var L={},state='loading',viewable=true;
+  function fire(ev){var a=[].slice.call(arguments,1);(L[ev]||[]).forEach(function(cb){try{cb.apply(null,a)}catch(e){}});}
+  window.mraid={
+    getState:function(){return state;},getVersion:function(){return '3.0';},
+    isViewable:function(){return viewable;},getPlacementType:function(){return 'interstitial';},
+    getScreenSize:function(){return {width:innerWidth,height:innerHeight};},
+    getMaxSize:function(){return {width:innerWidth,height:innerHeight};},
+    getDefaultPosition:function(){return {x:0,y:0,width:innerWidth,height:innerHeight};},
+    supports:function(){return false;},useCustomClose:function(){},expand:function(){},collapse:function(){},resize:function(){},
+    addEventListener:function(e,cb){(L[e]=L[e]||[]).push(cb);},
+    removeEventListener:function(e,cb){L[e]=(L[e]||[]).filter(function(f){return f!==cb;});},
+    open:function(url){parent.postMessage({__mraid:'open',url:url},'*');},
+    close:function(){parent.postMessage({__mraid:'close'},'*');},
+    __fire:fire,
+    __set:function(k,v){if(k==='viewable'){viewable=!!v;fire('viewableChange',!!v);}else if(k==='state'){state=v;fire('stateChange',v);}else if(k==='exposure'){fire('exposureChange',v,{x:0,y:0,width:innerWidth,height:innerHeight});}else if(k==='volume'){fire('audioVolumeChange',v);}}
+  };
+  parent.postMessage({__mraid:'present'},'*');
+  // emulate the container handing control over: loading -> ready
+  setTimeout(function(){state='default';fire('ready');parent.postMessage({__mraid:'ready'},'*');},60);
+})();<\/scr`+`ipt>`;
+
+const ad = document.getElementById('ad'), device = document.getElementById('device'), logEl = document.getElementById('log');
+let opens = 0, playableHtml = '';
+
+function log(msg, cls){ const d=document.createElement('div'); if(cls) d.className=cls; d.textContent='['+new Date().toLocaleTimeString()+'] '+msg; logEl.appendChild(d); logEl.scrollTop=logEl.scrollHeight; }
+function pill(id, txt, cls){ const e=document.getElementById(id); e.textContent=txt; e.className='pill '+cls; }
+function size(){ const w=+document.getElementById('w').value||380, h=+document.getElementById('h').value||800; device.style.width=w+'px'; device.style.height=h+'px'; ad.style.width=w+'px'; ad.style.height=h+'px'; }
+
+function load(html){
+  playableHtml = html;
+  pill('boot','booting…','idle'); pill('mr','—','idle');
+  // inject the shim ahead of the playable so window.mraid exists before initMraid()
+  ad.srcdoc = MRAID_SHIM + html;
+  ad.onload = function(){
+    setTimeout(function(){
+      try { const ok = !!ad.contentWindow.document.querySelector('.pa-root, .pa-stage, [class*="pa-"]'); pill('boot', ok?'rendered':'no DOM', ok?'ok':'bad'); }
+      catch(e){ pill('boot','x-origin','bad'); }
+    }, 400);
+  };
+  log('loaded playable ('+Math.round(html.length/1024)+' KB)', 'muted');
+}
+window.__loadPlayable = load;            // used by the file input + puppeteer
+window.__ctaOpens = () => opens;          // read by puppeteer
+function mraid(){ try { return ad.contentWindow.mraid; } catch(e){ return null; } }
+window.__fireMraid = (k,v) => { const m=mraid(); if(m&&m.__set) m.__set(k,v); };
+
+window.addEventListener('message', (e)=>{
+  const d=e.data||{}; if(!d.__mraid) return;
+  if(d.__mraid==='present') pill('mr','injected','ok');
+  else if(d.__mraid==='ready') { pill('mr','ready ✓','ok'); log('mraid: loading → ready handshake ✓','o'); }
+  else if(d.__mraid==='open'){ opens++; document.getElementById('opens').textContent=opens; log('mraid.open('+(d.url||'')+')  ← CTA / install click','o'); }
+  else if(d.__mraid==='close') log('mraid.close()','e');
+});
+
+// ---- controls
+document.getElementById('file').addEventListener('change', (e)=>{ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>load(String(r.result||'')); r.readAsText(f); });
+document.getElementById('reload').addEventListener('click', ()=> playableHtml && load(playableHtml));
+document.querySelectorAll('[data-dev]').forEach(b=> b.addEventListener('click', ()=>{ const [w,h]=b.dataset.dev.split('x'); document.getElementById('w').value=w; document.getElementById('h').value=h; size(); }));
+document.getElementById('w').addEventListener('input', size); document.getElementById('h').addEventListener('input', size);
+let viewable=true; document.getElementById('viewable').addEventListener('click', (e)=>{ viewable=!viewable; e.target.textContent='Viewable: '+(viewable?'ON':'OFF'); e.target.classList.toggle('on',viewable); window.__fireMraid('viewable',viewable); log('viewableChange('+viewable+')  → '+(viewable?'ad-resume':'ad-pause'),'e'); });
+let muted=false; document.getElementById('mute').addEventListener('click', (e)=>{ muted=!muted; e.target.textContent=muted?'Unmute audio':'Mute audio'; e.target.classList.toggle('warn',muted); window.__fireMraid('volume',muted?0:100); log('audioVolumeChange('+(muted?0:100)+')','e'); });
+document.getElementById('setexp').addEventListener('click', ()=>{ const v=+document.getElementById('exp').value; window.__fireMraid('exposure',v); log('exposureChange('+v+'%)','e'); });
+document.getElementById('ready').addEventListener('click', ()=>{ const m=mraid(); if(m&&m.__fire){ m.__fire('ready'); log('re-fired ready','e'); } });
+document.getElementById('vis').addEventListener('click', ()=> log('(toggle DevTools → Rendering → emulate page hidden to test visibilitychange)','muted'));
+
+size();
+log('Ready. Load an exported playable (.html) to begin.', 'muted');
+</script>
+</body>
+</html>

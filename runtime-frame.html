@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>runtime-frame</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Headless render surface for the editor. Receives {scene,assets} via
+         postMessage, runs the real runtime, and posts back element geometry. -->
+    <script type="module" src="/runtime/frame.ts"></script>
+  </body>
+</html>
