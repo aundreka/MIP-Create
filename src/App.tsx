@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { EditorCanvas } from './canvas/EditorCanvas'
 import { CommandPalette } from './panels/CommandPalette'
 import { buildCommands } from './commands'
@@ -12,6 +12,8 @@ import { QuizFunnel } from './panels/QuizFunnel'
 import { HomeScreen } from './panels/HomeScreen'
 import { ProfilePanel } from './panels/ProfilePanel'
 import { QaPanel } from './panels/QaPanel'
+// Lazy — keeps @supabase/supabase-js out of the main bundle until Team is opened.
+const TeamPanel = lazy(() => import('./panels/TeamPanel').then((m) => ({ default: m.TeamPanel })))
 import { ScenesStrip } from './panels/ScenesStrip'
 import { ToolRail } from './panels/ToolRail'
 import { Topbar } from './panels/Topbar'
@@ -35,6 +37,7 @@ export function App(): JSX.Element {
   const [profile, setProfile] = useState(() => location.hash.toLowerCase().includes('profile'))
   const [exportOpen, setExportOpen] = useState(() => location.hash.toLowerCase().includes('export'))
   const [qa, setQa] = useState(() => location.hash.toLowerCase().includes('qa'))
+  const [team, setTeam] = useState(() => location.hash.toLowerCase().includes('team'))
   const [cmdK, setCmdK] = useState(false)
 
   // Deep-link from a QA finding to the offending project/scene/element.
@@ -55,6 +58,7 @@ export function App(): JSX.Element {
         openHome: () => setHome(true),
         openQuizFunnel: () => setQuiz(true),
         openQa: () => setQa(true),
+        openTeam: () => setTeam(true),
       }),
     [],
   )
@@ -88,6 +92,7 @@ export function App(): JSX.Element {
         onExport={() => setExportOpen(true)}
         onQuizFunnel={() => setQuiz(true)}
         onQa={() => setQa(true)}
+        onTeam={() => setTeam(true)}
       />
       <ScenesStrip onPreviewScene={(id) => { setPreviewScene(id); setPreview(true) }} />
       <div className="body">
@@ -105,6 +110,11 @@ export function App(): JSX.Element {
       {profile && <ProfilePanel onClose={() => setProfile(false)} />}
       {exportOpen && <ExportModal onClose={() => setExportOpen(false)} />}
       {qa && <QaPanel onClose={() => setQa(false)} onNavigate={qaNavigate} />}
+      {team && (
+        <Suspense fallback={null}>
+          <TeamPanel onClose={() => setTeam(false)} />
+        </Suspense>
+      )}
       {cmdK && <CommandPalette commands={commands} onClose={() => setCmdK(false)} />}
     </div>
   )

@@ -7,6 +7,7 @@ import { GAME_TEMPLATES } from '../../runtime/games/registry'
 import type { ParamField } from '../../runtime/games/types'
 import {
   activeSceneDef,
+  addVariant,
   alignSelected,
   convertElement,
   copyStyle,
@@ -18,7 +19,10 @@ import {
   patchGeometry,
   patchMeta,
   patchSceneDef,
+  refreshScene,
   removeSelected,
+  removeVariant,
+  renameVariant,
   setSceneBg,
   setTrace,
   singleSelected,
@@ -44,6 +48,8 @@ import {
 import { AssetPicker } from './AssetPicker'
 import { SfxLibrary } from './SfxLibrary'
 import { startPathDraw } from '../drawMode'
+import { useEditLocale } from '../locale'
+import { setActiveVariant, useActiveVariant } from '../variantMode'
 import { KeyframeEditor } from './KeyframeEditor'
 
 const ANCHORS: Anchor[] = ['center', 'top', 'bottom', 'left', 'right', 'top-left', 'top-right', 'bottom-left', 'bottom-right']
@@ -200,12 +206,22 @@ function AnimRow(props: {
 
 export function Inspector(): JSX.Element {
   const state = useEditorState()
+  const editLocale = useEditLocale()
+  const activeVariant = useActiveVariant()
+  const variantName = state.project.meta.variants?.find((v) => v.id === activeVariant)?.name
+  const variantBanner = activeVariant ? (
+    <div className="variant-banner">
+      Editing variant: <b>{variantName ?? activeVariant}</b>
+      <button onClick={() => { setActiveVariant(null); refreshScene() }}>Done</button>
+    </div>
+  ) : null
   const landscape = state.orientation === 'landscape'
 
   if (state.selectedIds.length > 1) {
     const anyGroup = state.scene.elements.some((e) => state.selectedIds.includes(e.id) && e.groupId)
     return (
       <div className="panel inspector">
+        {variantBanner}
         <div className="panel-title">{state.selectedIds.length} selected</div>
         <div className="group-title">Align to canvas</div>
         <AlignRow />
@@ -238,6 +254,7 @@ export function Inspector(): JSX.Element {
     const others = state.project.scenes.filter((s) => s.id !== sd.id)
     return (
       <div className="panel inspector">
+        {variantBanner}
         <div className="panel-title">Scene: {sd.name}</div>
         <Row label="Scene name">
           <input value={sd.name} onChange={(e) => patchSceneDef(sd.id, { name: e.target.value })} />
@@ -316,6 +333,39 @@ export function Inspector(): JSX.Element {
           </Row>
         </div>
         <div className="hint pad">Client + MIP group this playable for the QA consistency check (Topbar → QA).</div>
+        <div className="group-title">Languages</div>
+        <Row label="Locales">
+          <input
+            value={(m.locales ?? []).join(', ')}
+            placeholder="es, fr, de"
+            onChange={(e) => patchMeta({ locales: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) })}
+          />
+        </Row>
+        <div className="hint pad">
+          Extra languages this playable carries. The base copy is what you type with no language selected; pick a language in the
+          top bar to translate each text. At runtime the playable auto-selects by the viewer’s browser language, falling back to
+          the base.
+        </div>
+
+        <div className="group-title">Variants</div>
+        {(m.variants ?? []).map((v) => (
+          <div className="var-row" key={v.id}>
+            <input value={v.name} onChange={(e) => renameVariant(v.id, e.target.value)} />
+            <span className="hint">{v.patches.length} override{v.patches.length === 1 ? '' : 's'}</span>
+            <button onClick={() => { setActiveVariant(v.id); refreshScene() }} title="Edit this variant">Edit</button>
+            <button className="icon-btn" title="Delete variant" onClick={() => removeVariant(v.id)}>
+              <Icon icon={X} size={13} />
+            </button>
+          </div>
+        ))}
+        <button className="wide" onClick={() => { const id = addVariant(''); setActiveVariant(id); refreshScene() }}>
+          Add variant
+        </button>
+        <div className="hint pad">
+          A variant is the same MIP with a few overrides (mechanic, win condition, swapped asset, text). Pick a variant in the top
+          bar (or “Edit”) and your changes apply only to it. Export emits one playable per variant. Languages are separate
+          (auto-detected at runtime, not a variant).
+        </div>
         <div className="grid2">
           <NumField label="Base W" value={m.baseW} onChange={(n) => patchMeta({ baseW: n })} />
           <NumField label="Base H" value={m.baseH} onChange={(n) => patchMeta({ baseH: n })} />
@@ -367,6 +417,7 @@ export function Inspector(): JSX.Element {
 
   return (
     <div className="panel inspector">
+      {variantBanner}
       <div className="panel-title">
         {el.type === 'bar' && el.mode === 'fit' ? 'rectangle' : el.type} {landscape && <span className="badge">landscape</span>}
       </div>
@@ -713,8 +764,17 @@ export function Inspector(): JSX.Element {
         <>
           <div className="group-title">Text</div>
           {el.type !== 'countdown' && (
-            <Row label="Value">
-              <textarea value={el.text.value} rows={2} onChange={(e) => setText({ value: e.target.value })} />
+            <Row label={editLocale ? `Value (${editLocale})` : 'Value'}>
+              {editLocale ? (
+                <textarea
+                  value={el.text.i18n?.[editLocale] ?? ''}
+                  rows={2}
+                  placeholder={el.text.value}
+                  onChange={(e) => setText({ i18n: { ...(el.text?.i18n ?? {}), [editLocale]: e.target.value } })}
+                />
+              ) : (
+                <textarea value={el.text.value} rows={2} onChange={(e) => setText({ value: e.target.value })} />
+              )}
             </Row>
           )}
           <div className="grid2">

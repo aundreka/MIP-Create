@@ -12,6 +12,7 @@ import { ContextMenu, type MenuItem } from '../panels/ContextMenu'
 import { getFramePos, setFramePos } from '../canvasLayout'
 import { isSceneHidden, useCanvasView } from '../canvasView'
 import { endPathDraw, pathDrawTarget, usePathDraw } from '../drawMode'
+import { useEditLocale } from '../locale'
 import {
   beginTransaction,
   bulkPatch,
@@ -79,15 +80,16 @@ function CanvasFrame(props: {
   meta: ProjectMeta
   assets: AssetMap
   renderKey: number
+  locale: string | null
   onLayout: (id: string, rects: FrameRect[], metrics: FrameMetrics) => void
 }): JSX.Element {
-  const { sceneId, def, meta, assets, renderKey, onLayout } = props
+  const { sceneId, def, meta, assets, renderKey, locale, onLayout } = props
   const ref = useRef<HTMLIFrameElement>(null)
   const ready = useRef(false)
   const post = useCallback(() => {
     const scene: Scene = { meta: { ...meta, bgMatchColor: def.bgColor ?? meta.bgMatchColor }, elements: def.elements }
-    ref.current?.contentWindow?.postMessage({ type: 'pa:render', scene, assets, interactive: false }, '*')
-  }, [def, meta, assets])
+    ref.current?.contentWindow?.postMessage({ type: 'pa:render', scene, assets, interactive: false, locale }, '*')
+  }, [def, meta, assets, locale])
   useEffect(() => {
     if (ready.current) post()
   }, [post, renderKey])
@@ -129,6 +131,7 @@ export function EditorCanvas(props: Props): JSX.Element {
   const { zoom, pan, setZoom, setPan, fitSignal } = props
   const { project, scene, assets, selectedIds, orientation, trace, activeSceneId } = useEditorState()
   useCanvasView() // re-render when canvas scene visibility changes
+  const editLocale = useEditLocale()
   const landscape = orientation === 'landscape'
   const traceSrc = trace.visible && trace.assetId ? assets[trace.assetId]?.src : undefined
   // Frames shown on the canvas: visible scenes + always the active one.
@@ -718,7 +721,7 @@ export function EditorCanvas(props: Props): JSX.Element {
                 {sd.name}
               </div>
               <div className="stage-wrap">
-                <CanvasFrame sceneId={sd.id} def={sd} meta={project.meta} assets={assets} renderKey={renderKey} onLayout={handleLayout} />
+                <CanvasFrame sceneId={sd.id} def={sd} meta={project.meta} assets={assets} renderKey={renderKey} locale={editLocale} onLayout={handleLayout} />
                 {active && traceSrc && <img className="trace-backdrop" src={traceSrc} alt="" style={{ opacity: trace.opacity }} />}
               </div>
               {active ? (

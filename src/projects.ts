@@ -115,6 +115,20 @@ export function createProject(data?: { project: Project; assets: AssetMap; trace
   return id
 }
 
+/**
+ * Import a MIP pulled from the team server into the local library under a SPECIFIC
+ * id (the cloud project id == local id, so a re-publish maps back to the same row)
+ * and open it. Overwrites the local slot if it already exists. Persists the
+ * project being left first. Used by the Team panel's "Open".
+ */
+export function importProjectData(id: string, data: ProjectData): void {
+  saveCurrent()
+  writeData(id, data)
+  upsertRecord(id, data.project.meta.name || 'untitled')
+  loadProject(data.project, data.assets, null, data.trace)
+  setCurrent(id)
+}
+
 export function duplicateProject(id: string): string | null {
   const d = loadProjectData(id)
   if (!d) return null

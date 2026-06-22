@@ -4,8 +4,10 @@
 // element mutations operate on the active scene.
 
 import { useSyncExternalStore } from 'react'
-import type { OrientationOverride, Project, ProjectMeta, Scene, SceneDef, SceneElement } from '../runtime/scene'
+import type { OrientationOverride, Project, ProjectMeta, Scene, SceneDef, SceneElement, Variant } from '../runtime/scene'
 import type { AssetEntry, AssetMap } from '../runtime/types'
+import { getActiveVariant } from './variantMode'
+import { applyVariantPatches } from './variants'
 
 export type Orientation = 'portrait' | 'landscape'
 
@@ -78,7 +80,14 @@ export function blankProject(): { project: Project; assets: AssetMap; trace?: Tr
 
 function deriveScene(project: Project, activeSceneId: string): Scene {
   const sd = project.scenes.find((s) => s.id === activeSceneId) ?? project.scenes[0]
-  return { meta: { ...project.meta, bgMatchColor: sd?.bgColor ?? project.meta.bgMatchColor }, elements: sd?.elements ?? [] }
+  let elements = sd?.elements ?? []
+  // when editing a variant, the canvas/inspector show base + that variant's overrides
+  const vid = getActiveVariant()
+  if (vid) {
+    const v = project.meta.variants?.find((x) => x.id === vid)
+    if (v) elements = applyVariantPatches(elements, v.patches)
+  }
+  return { meta: { ...project.meta, bgMatchColor: sd?.bgColor ?? project.meta.bgMatchColor }, elements }
 }
 
 const project0 = starterProject()
@@ -213,11 +222,38 @@ export function setOrientation(o: Orientation): void {
   set({ orientation: o }, false)
 }
 
+// Re-derive the active scene (e.g. after toggling variant/locale edit mode) so
+// read-consumers pick up the change without a project mutation.
+export function refreshScene(): void {
+  set({}, false)
+}
+
+// Merge a patch into the active variant's overrides for one element (variant edit
+// mode). Stored in project.meta.variants → part of undo history like any edit.
+function mergeVariantPatch(vid: string, id: string, patch: Partial<SceneElement>): void {
+  const variants = (state.project.meta.variants ?? []).map((v) => {
+    if (v.id !== vid) return v
+    const patches = [...v.patches]
+    const i = patches.findIndex((p) => p.elementId === id)
+    if (i >= 0) patches[i] = { elementId: id, patch: { ...patches[i].patch, ...patch } }
+    else patches.push({ elementId: id, patch: { ...patch } })
+    return { ...v, patches }
+  })
+  set({ dirty: true, project: { ...state.project, meta: { ...state.project.meta, variants } } })
+}
+
 // ---- element editing (active scene) ---------------------------------------
 export function patchElement(id: string, patch: Partial<SceneElement>): void {
+  const vid = getActiveVariant()
+  if (vid) return mergeVariantPatch(vid, id, patch)
   mapEl(id, (e) => ({ ...e, ...patch }))
 }
 export function patchLandscape(id: string, patch: OrientationOverride): void {
+  const vid = getActiveVariant()
+  if (vid) {
+    const cur = state.scene.elements.find((e) => e.id === id) // merged (base + variant)
+    return mergeVariantPatch(vid, id, { landscape: { ...(cur?.landscape ?? {}), ...patch } })
+  }
   mapEl(id, (e) => ({ ...e, landscape: { ...(e.landscape ?? {}), ...patch } }))
 }
 export function patchGeometry(id: string, patch: OrientationOverride): void {
@@ -366,6 +402,11 @@ export function pasteStyle(): void {
 }
 
 export function bulkPatch(patches: Record<string, Partial<SceneElement>>): void {
+  const vid = getActiveVariant()
+  if (vid) {
+    for (const [id, p] of Object.entries(patches)) mergeVariantPatch(vid, id, p)
+    return
+  }
   mapActiveScene((sd) => ({ ...sd, elements: sd.elements.map((e) => (patches[e.id] ? { ...e, ...patches[e.id] } : e)) }))
 }
 
@@ -394,6 +435,29 @@ export function convertElement(id: string, to: ConvertTo): void {
 // ---- project / scene meta -------------------------------------------------
 export function patchMeta(patch: Partial<ProjectMeta>): void {
   set({ dirty: true, project: { ...state.project, meta: { ...state.project.meta, ...patch } } })
+}
+
+// ---- variants (export-time overrides of the same MIP) ---------------------
+function setVariants(variants: Variant[]): void {
+  set({ dirty: true, project: { ...state.project, meta: { ...state.project.meta, variants } } })
+}
+export function listVariants(): Variant[] {
+  return state.project.meta.variants ?? []
+}
+export function addVariant(name: string): string {
+  const id = nextId('var')
+  setVariants([...(state.project.meta.variants ?? []), { id, name: name.trim() || `Variant ${(state.project.meta.variants?.length ?? 0) + 1}`, patches: [] }])
+  return id
+}
+export function renameVariant(id: string, name: string): void {
+  setVariants((state.project.meta.variants ?? []).map((v) => (v.id === id ? { ...v, name } : v)))
+}
+export function removeVariant(id: string): void {
+  setVariants((state.project.meta.variants ?? []).filter((v) => v.id !== id))
+}
+/** Drop a single element's override in a variant (reset it to the base). */
+export function resetVariantElement(vid: string, elementId: string): void {
+  setVariants((state.project.meta.variants ?? []).map((v) => (v.id === vid ? { ...v, patches: v.patches.filter((p) => p.elementId !== elementId) } : v)))
 }
 export function setSceneBg(color: string | undefined): void {
   mapActiveScene((sd) => ({ ...sd, bgColor: color }))

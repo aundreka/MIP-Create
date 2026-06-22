@@ -124,6 +124,119 @@ ipcMain.handle('project:load', async () => {
   }
 })
 
+// ---------------------------------------------------------------------------
+// AppLovin auto-upload. Drives the team's WordPress upload page in a real,
+// persistent-session BrowserWindow (so login survives) and fills the batch upload
+// form: it adds enough rows, sets each file input via the Chrome DevTools Protocol
+// (JS can't set file inputs), types each Iteration Name, and optionally submits.
+// Selectors are heuristic + overridable since the form is external.
+// ---------------------------------------------------------------------------
+let alWin = null
+
+function ensureAlWindow(url) {
+  if (alWin && !alWin.isDestroyed()) {
+    if (url) alWin.webContents.getURL() // keep current page; caller decides nav
+    alWin.focus()
+    return alWin
+  }
+  alWin = new BrowserWindow({
+    width: 1200,
+    height: 860,
+    autoHideMenuBar: true,
+    title: 'AppLovin upload',
+    webPreferences: { partition: 'persist:applovin', contextIsolation: true, nodeIntegration: false },
+  })
+  alWin.on('closed', () => {
+    alWin = null
+  })
+  if (url) alWin.loadURL(url)
+  return alWin
+}
+
+ipcMain.handle('applovin:open', async (_e, url) => {
+  try {
+    const w = ensureAlWindow(url)
+    if (url && w.webContents.getURL().indexOf(url) !== 0) await w.loadURL(url)
+    w.focus()
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: String(e) }
+  }
+})
+
+ipcMain.handle('applovin:upload', async (_e, payload = {}) => {
+  try {
+    const files = Array.isArray(payload.files) ? payload.files : []
+    if (!files.length) return { ok: false, error: 'no files' }
+    const w = ensureAlWindow(payload.url)
+    const wc = w.webContents
+    w.focus()
+
+    // write the playables to a temp folder for the file inputs
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-al-'))
+    const paths = files.map((f) => {
+      const safe = String(f.name || 'playable.html').replace(/[^a-z0-9_.-]+/gi, '_')
+      const p = path.join(dir, safe)
+      if (typeof f.text === 'string') fs.writeFileSync(p, f.text, 'utf8')
+      else if (typeof f.dataUrl === 'string') fs.writeFileSync(p, Buffer.from(f.dataUrl.slice(f.dataUrl.indexOf(',') + 1), 'base64'))
+      return { path: p, iteration: f.iteration || '' }
+    })
+
+    const addText = payload.addButtonText || 'Add Another Upload'
+    const uploadText = payload.uploadButtonText || 'Upload'
+
+    // 1) add rows until there are enough file inputs
+    await wc.executeJavaScript(`(function(){
+      function byText(t){ t=t.toLowerCase(); return [...document.querySelectorAll('button,a,input[type=button],input[type=submit]')].find(function(el){return ((el.innerText||el.value||'')+'').trim().toLowerCase().indexOf(t)>=0;}); }
+      var target=${paths.length}, guard=0;
+      while(document.querySelectorAll('input[type=file]').length < target && guard < 60){ var b=byText(${JSON.stringify(addText)}); if(!b) break; b.click(); guard++; }
+      return document.querySelectorAll('input[type=file]').length;
+    })()`)
+    await new Promise((r) => setTimeout(r, 350))
+
+    // 2) set each file input via CDP (JS cannot set file inputs)
+    const dbg = wc.debugger
+    try {
+      dbg.attach('1.3')
+    } catch {
+      /* already attached */
+    }
+    const doc = await dbg.sendCommand('DOM.getDocument', { depth: -1 })
+    const q = await dbg.sendCommand('DOM.querySelectorAll', { nodeId: doc.root.nodeId, selector: 'input[type=file]' })
+    const n = Math.min(paths.length, q.nodeIds.length)
+    for (let i = 0; i < n; i++) {
+      await dbg.sendCommand('DOM.setFileInputFiles', { files: [paths[i].path], nodeId: q.nodeIds[i] })
+    }
+    try {
+      dbg.detach()
+    } catch {
+      /* */
+    }
+
+    // 3) fill the Iteration Name fields (i-th visible text input) + fire events
+    await wc.executeJavaScript(`(function(){
+      var names=${JSON.stringify(paths.map((p) => p.iteration))};
+      var texts=[...document.querySelectorAll('input[type=text], input:not([type])')].filter(function(el){return el.offsetParent!==null && !el.readOnly;});
+      var k=Math.min(names.length, texts.length);
+      for(var i=0;i<k;i++){ texts[i].value=names[i]; texts[i].dispatchEvent(new Event('input',{bubbles:true})); texts[i].dispatchEvent(new Event('change',{bubbles:true})); }
+      return k;
+    })()`)
+
+    // 4) optionally submit
+    let submitted = false
+    if (payload.submit) {
+      submitted = await wc.executeJavaScript(`(function(){
+        function byText(t){ t=t.toLowerCase(); return [...document.querySelectorAll('button,a,input[type=button],input[type=submit]')].find(function(el){return ((el.innerText||el.value||'')+'').trim().toLowerCase()===t;}); }
+        var b=byText(${JSON.stringify(uploadText)}); if(b){ b.click(); return true; } return false;
+      })()`)
+    }
+
+    return { ok: true, files: n, submitted }
+  } catch (e) {
+    return { ok: false, error: String(e) }
+  }
+})
+
 app.whenReady().then(() => {
   createWindow()
   app.on('activate', () => {

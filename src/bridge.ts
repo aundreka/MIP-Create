@@ -32,6 +32,20 @@ function migrate(parsed: unknown): ProjectData | null {
   return null
 }
 
+export interface ApplovinFile {
+  name: string
+  text?: string // HTML payload (preferred for single-file playables)
+  dataUrl?: string // or a base64 data URL (e.g. a zip)
+  iteration: string
+}
+export interface ApplovinUploadOpts {
+  url?: string
+  files: ApplovinFile[]
+  submit?: boolean
+  addButtonText?: string
+  uploadButtonText?: string
+}
+
 interface NativeAPI {
   saveProject(json: string, currentPath: string | null): Promise<{ ok: boolean; path?: string; error?: string }>
   loadProject(): Promise<{ ok: boolean; json?: string; path?: string; canceled?: boolean }>
@@ -40,12 +54,30 @@ interface NativeAPI {
     kind: 'video' | 'audio',
     opts?: { maxWidth?: number; crf?: number; audioKbps?: number },
   ): Promise<{ ok: boolean; dataUrl?: string; bytes?: number; reencoded?: boolean; error?: string }>
+  applovinOpen?(url: string): Promise<{ ok: boolean; error?: string }>
+  applovinUpload?(opts: ApplovinUploadOpts): Promise<{ ok: boolean; files?: number; submitted?: boolean; error?: string }>
 }
 
 const native: NativeAPI | undefined = (window as unknown as { editorAPI?: NativeAPI }).editorAPI
 export const hasNative = !!native
 export const canTranscode = !!native?.transcodeMedia
+export const canApplovin = !!native?.applovinUpload
 export const platformLabel = native ? 'desktop' : 'browser'
+
+/** Open (or focus) the AppLovin upload site in a persistent-session window so the
+ * user can log in once. Desktop only. */
+export async function applovinOpen(url: string): Promise<boolean> {
+  if (!native?.applovinOpen) return false
+  const r = await native.applovinOpen(url)
+  return !!r.ok
+}
+
+/** Auto-fill the AppLovin batch upload form with the given playables. Desktop
+ * only. Returns a status message. */
+export async function applovinUpload(opts: ApplovinUploadOpts): Promise<{ ok: boolean; files?: number; submitted?: boolean; error?: string }> {
+  if (!native?.applovinUpload) return { ok: false, error: 'desktop app only' }
+  return native.applovinUpload(opts)
+}
 
 /** Re-encode a video/audio data URL via the Electron ffmpeg pipeline (desktop
  * only). Returns the (smaller) re-encoded data URL, or null in the browser. */

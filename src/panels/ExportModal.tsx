@@ -14,10 +14,15 @@ import {
   type AssetReport,
 } from '../export'
 import { useEditorState } from '../store'
+import { applyVariant, stripVariants } from '../variants'
+import { applovinOpen, applovinUpload, canApplovin, type ApplovinFile } from '../bridge'
 import { Modal, Slider, Toggle } from '../ui'
 import { AlertTriangle, Icon } from '../icons'
 import { FlowPreview } from '../preview/FlowPreview'
+import type { Project } from '../../runtime/scene'
 import type { AssetMap } from '../../runtime/types'
+
+const slug = (s: string): string => s.replace(/[^a-z0-9_-]+/gi, '_').replace(/^_+|_+$/g, '') || 'variant'
 
 export function ExportModal(props: { onClose: () => void }): JSX.Element {
   const { project, assets } = useEditorState()
@@ -30,6 +35,12 @@ export function ExportModal(props: { onClose: () => void }): JSX.Element {
   const [baseBytes, setBaseBytes] = useState(0)
   const [warns, setWarns] = useState<string[]>([])
   const [srcBusy, setSrcBusy] = useState(false)
+  const variants = project.meta.variants ?? []
+  const [selVars, setSelVars] = useState<Set<string>>(() => new Set(variants.map((v) => v.id)))
+  const [alUrl, setAlUrl] = useState(() => localStorage.getItem('pa:applovinUrl') || 'http://167.99.227.249/wp-login.php?redirect_to=%2F')
+  const [alSubmit, setAlSubmit] = useState(false)
+  const [alBusy, setAlBusy] = useState(false)
+  const [alStatus, setAlStatus] = useState<string | null>(null)
 
   // recompute size/optimization preview when options change
   useEffect(() => {
@@ -52,6 +63,70 @@ export function ExportModal(props: { onClose: () => void }): JSX.Element {
 
   const pct = Math.min(100, (baseBytes / MAX_BYTES) * 100)
   const over = baseBytes > MAX_BYTES
+
+  // Export one project (base or a variant) for the selected networks.
+  const exportOne = async (proj: Project, name: string): Promise<void> => {
+    const { assets: out } = await processAssets(pruneAssets(proj, assets), optimize, quality / 100)
+    const named: Project = { ...proj, meta: { ...proj.meta, name } }
+    const { outputs } = buildOutputs(named, out, NETWORKS.filter((n) => nets.has(n.name)))
+    for (const o of outputs) {
+      if (o.over) {
+        alert(`${o.net} (${name}) is ${fmtBytes(o.bytes)}, over the 5MB limit. Optimize assets or shrink the endcard.`)
+        continue
+      }
+      downloadBlob(o.filename, await o.make())
+    }
+  }
+
+  const baseName = project.meta.name || 'playable'
+  const doExportAll = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      await exportOne(stripVariants(project), baseName)
+      for (const v of variants.filter((x) => selVars.has(x.id))) await exportOne(applyVariant(project, v), `${baseName}_${slug(v.name)}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Build the AppLovin HTML for base + selected variants, for the auto-uploader.
+  const buildUploadBatch = async (): Promise<ApplovinFile[]> => {
+    const al = NETWORKS.find((n) => n.name === 'AppLovin') ?? NETWORKS[0]
+    const out: ApplovinFile[] = []
+    const one = async (proj: Project, name: string, iteration: string): Promise<void> => {
+      const { assets: a } = await processAssets(pruneAssets(proj, assets), optimize, quality / 100)
+      const named: Project = { ...proj, meta: { ...proj.meta, name } }
+      const { outputs } = buildOutputs(named, a, [al])
+      const o = outputs[0]
+      if (!o || o.over) {
+        if (o?.over) alert(`${name} is ${fmtBytes(o.bytes)}, over the 5MB limit — skipped.`)
+        return
+      }
+      out.push({ name: o.filename, text: await (await o.make()).text(), iteration })
+    }
+    await one(stripVariants(project), baseName, project.meta.mip || baseName)
+    for (const v of variants.filter((x) => selVars.has(x.id))) await one(applyVariant(project, v), `${baseName}_${slug(v.name)}`, v.name)
+    return out
+  }
+
+  const doApplovin = async (): Promise<void> => {
+    setAlBusy(true)
+    setAlStatus('Building playables…')
+    try {
+      const files = await buildUploadBatch()
+      if (!files.length) {
+        setAlStatus('Nothing to upload (all over budget?).')
+        return
+      }
+      setAlStatus('Filling the upload form…')
+      const r = await applovinUpload({ url: alUrl, files, submit: alSubmit })
+      setAlStatus(r.ok ? `Filled ${r.files} file(s)${r.submitted ? ' and submitted.' : ' — review the window and click Upload.'}` : 'Error: ' + r.error)
+    } catch (e) {
+      setAlStatus('Error: ' + (e as Error).message)
+    } finally {
+      setAlBusy(false)
+    }
+  }
 
   const doExport = async (): Promise<void> => {
     const selected = NETWORKS.filter((n) => nets.has(n.name))
@@ -135,6 +210,33 @@ export function ExportModal(props: { onClose: () => void }): JSX.Element {
       </button>
       <div className="hint pad">Single self-contained HTML per network (zipped where the network requires it). Exports download to your browser; the desktop app saves to disk.</div>
 
+      {variants.length > 0 && (
+        <>
+          <div className="group-title">Variants ({variants.length})</div>
+          <div className="net-grid">
+            {variants.map((v) => (
+              <button
+                key={v.id}
+                type="button"
+                className={'net-chip' + (selVars.has(v.id) ? ' on' : '')}
+                aria-pressed={selVars.has(v.id)}
+                onClick={() => {
+                  const next = new Set(selVars)
+                  next.has(v.id) ? next.delete(v.id) : next.add(v.id)
+                  setSelVars(next)
+                }}
+              >
+                {v.name}
+              </button>
+            ))}
+          </div>
+          <button className="primary wide" disabled={busy || !nets.size} onClick={() => void doExportAll()}>
+            Export base + {selVars.size} {selVars.size === 1 ? 'variant' : 'variants'} × {nets.size} {nets.size === 1 ? 'network' : 'networks'}
+          </button>
+          <div className="hint pad">Emits one playable per variant per selected network, named “{baseName}_variant_network”. Languages stay inside each file (auto-detected at runtime).</div>
+        </>
+      )}
+
       <div className="group-title">Developer export</div>
       <button
         className="wide"
@@ -152,6 +254,36 @@ export function ExportModal(props: { onClose: () => void }): JSX.Element {
         A runnable Vite + TypeScript repo with the full runtime source, your project and assets. Devs run <b>npm install</b> then{' '}
         <b>npm run dev</b> and edit <b>src/runtime/games/</b> to customize gameplay mechanics. Optional — not needed for ad delivery.
       </div>
+
+      {canApplovin && (
+        <>
+          <div className="group-title">Upload to AppLovin</div>
+          <label className="field">
+            <span>Upload site URL</span>
+            <input
+              className="text-input"
+              value={alUrl}
+              onChange={(e) => {
+                setAlUrl(e.target.value)
+                localStorage.setItem('pa:applovinUrl', e.target.value)
+              }}
+            />
+          </label>
+          <Toggle label="Submit automatically (otherwise it fills the form and you click Upload)" checked={alSubmit} onChange={setAlSubmit} />
+          <div className="grid2">
+            <button onClick={() => void applovinOpen(alUrl)}>Open / log in</button>
+            <button className="primary" disabled={alBusy} onClick={() => void doApplovin()}>
+              {alBusy ? 'Filling…' : `Auto-fill (${1 + (variants.length ? selVars.size : 0)})`}
+            </button>
+          </div>
+          {alStatus && <div className="figma-status">{alStatus}</div>}
+          <div className="hint pad">
+            First click <b>Open / log in</b>, sign in and open the <b>Upload File</b> page. Then <b>Auto-fill</b> drops your base +
+            selected variants into the batch form (one row each; Iteration Name = variant). Review and click Upload, or enable
+            auto-submit. Uploads the AppLovin (MRAID) build of each.
+          </div>
+        </>
+      )}
     </Modal>
   )
 }

@@ -6,6 +6,7 @@
 
 import { computeMetrics, metrics, setDesign } from './responsive'
 import { buildScene, type StageHandle } from './stage'
+import { setActiveLocale } from './i18n'
 import { playProject, type SceneManager } from './scenes'
 import type { Project, Scene } from './scene'
 import type { AssetMap } from './types'
@@ -81,8 +82,13 @@ function relayout(): void {
 window.addEventListener('message', (e: MessageEvent) => {
   const d = e.data as ParentToFrame
   if (!d || typeof d !== 'object') return
-  if (d.type === 'pa:render') render(d.scene, d.assets || {}, d.interactive ?? false)
-  else if (d.type === 'pa:play') play(d.project, d.assets || {})
+  if (d.type === 'pa:render') {
+    setActiveLocale(d.locale ?? null)
+    render(d.scene, d.assets || {}, d.interactive ?? false)
+  } else if (d.type === 'pa:play') {
+    setActiveLocale(d.locale ?? null)
+    play(d.project, d.assets || {})
+  }
   else if (d.type === 'pa:setHidden' && stage) {
     stage.setHidden(d.id, d.hidden)
     requestAnimationFrame(postLayout)

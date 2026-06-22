@@ -5,6 +5,7 @@
 
 import type { SceneElement } from '../scene'
 import type { RuntimeCtx } from '../types'
+import { localize } from '../i18n'
 
 export function createChoiceContent(el: SceneElement, ctx: RuntimeCtx): HTMLButtonElement {
   const btn = document.createElement('button')
@@ -19,7 +20,7 @@ export function createChoiceContent(el: SceneElement, ctx: RuntimeCtx): HTMLButt
     img.src = src
     btn.appendChild(img)
   } else {
-    btn.textContent = el.text?.value ?? ''
+    btn.textContent = localize(el.text)
   }
   return btn
 }

@@ -87,6 +87,9 @@ export interface SfxBinding {
 // ---- type-specific config blocks ----
 export interface TextConfig {
   value: string
+  // Per-locale overrides for `value`, keyed by language code (e.g. { es: '…' }).
+  // The runtime picks one from navigator.language at boot; `value` is the base.
+  i18n?: Record<string, string>
   fontFamily?: string
   fontSizePx: number
   fontWeight?: number
@@ -295,6 +298,28 @@ export interface ProjectMeta {
   client?: string
   mip?: string
   mipVersion?: string
+  // Localization: extra language codes this playable carries (the base copy lives
+  // in each TextConfig.value). At runtime the playable picks one from the
+  // browser language, falling back to the base. e.g. ['es','fr','de'].
+  locales?: string[]
+  defaultLocale?: string // label for the base copy (informational), e.g. 'en'
+  // Export-time variants — slightly different mechanics/win-conditions of the same
+  // MIP. Each is a set of element patches applied on top of the base; export emits
+  // one playable per variant. Editor-only field (stripped from the rendered scene).
+  variants?: Variant[]
+}
+
+// A MIP variant: overrides applied to the base project at export. `patches` map
+// an element id to a partial override (game params, win condition, swapped asset,
+// text, etc.). Language is NOT a variant — it's resolved at runtime.
+export interface VariantPatch {
+  elementId: string
+  patch: Partial<SceneElement>
+}
+export interface Variant {
+  id: string
+  name: string
+  patches: VariantPatch[]
 }
 
 // `Scene` is the per-scene RENDER UNIT (what the stage builds). A project is an

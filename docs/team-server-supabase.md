@@ -6,11 +6,13 @@ managers monitor progress and download MIPs themselves; shared templates keep
 animation/SFX styling consistent. Model: **shared library + ownership** (no live
 co-editing — each MIP is edited by its owner; everyone else has read/browse).
 
-> Status: this is the design + schema + setup. The editor code that talks to
-> Supabase (the `SupabaseProjectStore` and auth UI) is implemented **after** you
-> create the Supabase project and provide its URL + anon key, because it can't be
-> built or tested without them. Phase 1 (the QA checker) already made `client` /
-> `mip` first-class on `ProjectMeta`, which is the data this layer syncs.
+> Status: **IMPLEMENTED** (compiles + builds). The DB migration, auth, and the
+> Team panel (publish / browse / monitor / reassign) are in the repo. What's left
+> is *operational* and needs you (in Supabase): push the migration, allow the dev
+> redirect URL, and promote yourself to admin — see "Operate it" at the bottom.
+> The cloud is an **opt-in sync layer** over the local library (the editor still
+> works fully offline); it is not a full store replacement. Phase 1 already made
+> `client` / `mip` first-class on `ProjectMeta`, which is the data this layer syncs.
 
 ## Why Supabase fits
 
@@ -126,54 +128,64 @@ a new MIP from the same locked chrome / CTA pulse / SFX / transitions — this i
 structural way "consistent animation styling and SFX" is enforced, complementing the
 QA checker that *detects* drift after the fact.
 
-## 5. Editor integration (the code that follows)
+> §3 above is the abridged schema; the **canonical, runnable migration** is
+> [`supabase/migrations/20260622120000_team_server.sql`](../supabase/migrations/20260622120000_team_server.sql)
+> (adds profiles, the new-user bootstrap trigger, storage buckets + policies).
 
-Introduce a `ProjectStore` seam behind the current local library. Today
-[`src/projects.ts`](../src/projects.ts) IS the store (localStorage). Refactor its
-public surface (`listProjects`, `loadProjectData`, `saveCurrent`, `createProject`,
-`patchProjectMeta`, …) into an interface with two implementations:
+## 5. Editor integration (as built)
 
-- `LocalProjectStore` — today's localStorage code, unchanged. Default + offline cache.
-- `SupabaseProjectStore` — same methods over Postgres + Storage. On `save`: upload
-  `data.json`, bump `version` (reject if the server version moved → "a newer version
-  exists, reload"), upsert the row. On `open`: download the blob. Keep a localStorage
-  mirror so the editor works offline and pushes on reconnect.
+The cloud is an **opt-in sync layer**, not a store swap — the local library
+([`src/projects.ts`](../src/projects.ts)) stays primary so the editor works offline.
+Files:
 
-Env (Vite reads `VITE_`-prefixed vars from `.env.local`, already git-ignored by Vite
-convention):
-```
-VITE_SUPABASE_URL=https://xxxx.supabase.co
-VITE_SUPABASE_ANON_KEY=eyJhbGci...
-```
-New files: `src/cloud/supabase.ts` (client + auth), `src/cloud/SupabaseProjectStore.ts`.
-`HomeScreen.tsx` gains a "Team" tab listing client → MIPs with owner + status badges;
-a small sign-in modal uses Supabase magic-link.
+- [`src/cloud/supabase.ts`](../src/cloud/supabase.ts) — client singleton + magic-link
+  auth; `isCloudConfigured()` hides the feature when env vars are absent.
+- [`src/cloud/teamStore.ts`](../src/cloud/teamStore.ts) — `publish` (upsert row + upload
+  `<id>/data.json`, bump `version`), `pull`, `listMips`, `listProfiles`, `myRole`,
+  `setStatus`, `reassignOwner`, `deleteMip`. **The cloud project id IS the local library
+  id**, so a MIP maps 1:1 with no extra state and re-publishing updates the same row.
+- [`src/panels/TeamPanel.tsx`](../src/panels/TeamPanel.tsx) — Topbar **Team** button
+  (lazy-loaded so the SDK stays out of the main bundle). Sign in → publish the open MIP →
+  browse all team MIPs grouped by client → Open (downloads into the local library via
+  `importProjectData`) / download JSON → PM controls.
 
-On export, have [`src/export.ts`](../src/export.ts) also upload the built `export.html`
-+ a `thumb.png` to Storage so PMs always have the latest shippable build to download.
+Env (`.env.local`, git-ignored): `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`.
+
+Still optional/future: uploading `export.html` + `thumb.png` on export (a hook in
+[`src/export.ts`](../src/export.ts)); an offline write-queue that re-pushes on reconnect;
+a stale-write guard that rejects a publish when the server `version` moved.
 
 ## 6. PM monitoring
 
-A read-only dashboard over the `project` rows — either a panel in the editor (gated to
-`role = pm`) or a tiny standalone web page hosted on Suphase/Vercel using the same
-tables. Per client it lists each MIP with owner, status, `updated_at`, thumbnail, and
-**Download** (the stored `export.html` or the project JSON). PMs self-serve downloads
-and flip `status` — no designer hand-off. RLS already makes PM access read-only except
-status.
+Built into the Team panel: a PM/admin sees every MIP with owner, status, and version,
+can change **status** (draft → in_review → approved → shipped), **reassign owner**, and
+**download** any MIP's JSON — no designer hand-off. RLS keeps non-owner designers
+read-only. (A standalone web dashboard over the same tables is an easy add later if PMs
+want something outside the editor.)
 
-## 7. QA checker, now team-wide
+## 7. QA checker, now team-wide (next step)
 
 The Phase 1 engine ([`src/qa/consistency.ts`](../src/qa/consistency.ts) +
 `fingerprint.ts`) is pure and store-agnostic — `buildProfiles()` is the only part that
-reads the library. Point it at `SupabaseProjectStore` instead of localStorage and the
-exact same consistency rules run across the **whole team's** MIPs for a client, not just
-one machine. No rule changes; just a different data source.
+reads the library. A small follow-up adds a `buildProfilesFromCloud()` that lists MIPs
+via `teamStore.listMips()` + `pull()` and feeds the same rules, so consistency is checked
+across the **whole team's** MIPs, not just this machine. No rule changes.
 
-## What I need from you to build §5–§6
+## Operate it (what you do in Supabase)
 
-1. A Supabase project URL + anon key (after running §1–§3).
-2. Confirmation of the role names (designer / dev / pm / admin) and whether PMs should
-   also be able to reassign a MIP's owner.
+1. **Apply the migration.** Commit/push this repo — the GitHub integration runs
+   `supabase/migrations/*.sql` against the linked project. (Or run it by hand in the SQL
+   editor.) Verify the `org`, `project`, `client`, `member`, `profiles` tables exist.
+2. **Allow the dev redirect URL.** Auth → URL Configuration → add `http://localhost:5173`
+   (and your production editor URL) to **Redirect URLs**, or the magic link won't return.
+3. **Sign in once**, then **promote yourself to admin** so you can test PM controls:
+   ```sql
+   update public.member set role = 'admin'
+   where user_id = (select id from auth.users where email = 'you@example.com');
+   ```
+4. **Use it:** set Client + MIP on a project (Inspector → Project) → Topbar **Team** →
+   *Publish current MIP*. Sign in as a teammate to confirm they see it and can open it but
+   not overwrite it. As admin, change status / reassign owner / download.
 
-With those, the `SupabaseProjectStore`, auth UI, export-upload hook, and PM dashboard
-are a focused, testable next step.
+> Note: new emails auto-join as `designer`. For a closed team, restrict sign-ups in
+> Supabase Auth (disable open signup / add an allowlist) once everyone's in.

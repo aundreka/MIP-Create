@@ -68,6 +68,7 @@ export interface AppCommandActions {
   openHome: () => void
   openQuizFunnel: () => void
   openQa: () => void
+  openTeam: () => void
 }
 
 export function buildCommands(a: AppCommandActions): Command[] {
@@ -107,6 +108,7 @@ export function buildCommands(a: AppCommandActions): Command[] {
     { id: 'templates', title: 'Templates…', run: a.openTemplates },
     { id: 'quizfunnel', title: 'Quiz / survey funnel…', run: a.openQuizFunnel },
     { id: 'qa', title: 'QA consistency check…', hint: 'compare MIPs', run: a.openQa },
+    { id: 'team', title: 'Team library (cloud)…', hint: 'publish / browse MIPs', icon: Upload, run: a.openTeam },
     { id: 'figma', title: 'Import from Figma…', run: a.openFigma },
     { id: 'home', title: 'Projects / Home…', icon: Smartphone, run: a.openHome },
   ]

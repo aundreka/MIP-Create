@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Project } from '../../runtime/scene'
 import type { AssetMap } from '../../runtime/types'
 import { loadDevices, saveDevices, type Device } from '../devices'
+import { getEditLocale } from '../locale'
 import { useEditorState } from '../store'
 import { Icon, LayoutGrid, Play, RotateCcw, SCENE_KIND_ICON, Smartphone, X } from '../icons'
 import { Checkbox } from '../ui'
@@ -26,7 +27,7 @@ function DeviceView(props: {
   const { project, assets, playKey, w, h, label, scale, framed, iframeRef } = props
   const ready = useRef(false)
   const post = (): void => {
-    iframeRef.current?.contentWindow?.postMessage({ type: 'pa:play', project, assets }, '*')
+    iframeRef.current?.contentWindow?.postMessage({ type: 'pa:play', project, assets, locale: getEditLocale() }, '*')
   }
   useEffect(() => {
     if (ready.current) post()

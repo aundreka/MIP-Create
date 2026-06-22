@@ -19,6 +19,7 @@ import { applyBarFill, createBarContent } from './elements/bar'
 import { createTextContent } from './elements/text'
 import { createCtaContent } from './elements/cta'
 import { createChoiceContent } from './elements/choice'
+import { localize } from './i18n'
 import { createEndsceneContent, updateEndsceneMedia } from './elements/endscene'
 import { computeDeadline, formatCountdown, needsTicker } from './elements/countdown'
 import { createGameHost, type GameHost } from './gameHost'
@@ -463,7 +464,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
         byId.set(nel.id, rec)
         if (nel.type === 'cta' || nel.type === 'choice') {
           if (!nel.assetId && rec.content) {
-            rec.content.textContent = nel.text?.value ?? (nel.type === 'cta' ? 'PLAY' : '')
+            rec.content.textContent = localize(nel.text) || (nel.type === 'cta' ? 'PLAY' : '')
             rec.content.style.color = nel.text?.color ?? '#fff'
           }
         } else if (nel.type === 'background' && rec.content) {
@@ -725,7 +726,7 @@ function layoutText(rec: Rec, e: Effective): void {
 
   // inner text styling (re-applied each layout so edits stay reactive).
   // Countdown elements show the live formatted time, not the static value.
-  inner.textContent = rec.el.type === 'countdown' ? formatCountdown(rec.el, rec.deadline ?? Date.now(), Date.now()) : t.value ?? ''
+  inner.textContent = rec.el.type === 'countdown' ? formatCountdown(rec.el, rec.deadline ?? Date.now(), Date.now()) : localize(t)
   inner.style.fontFamily = t.fontFamily ?? ''
   inner.style.fontWeight = String(t.fontWeight ?? 400)
   inner.style.color = t.color ?? '#fff'

@@ -6,6 +6,7 @@
 import type { SceneElement } from '../scene'
 import type { RuntimeCtx } from '../types'
 import { triggerCTA, notifyGameClose } from '../networks'
+import { localize } from '../i18n'
 
 export function createCtaContent(el: SceneElement, ctx: RuntimeCtx): HTMLButtonElement {
   const btn = document.createElement('button')
@@ -22,7 +23,7 @@ export function createCtaContent(el: SceneElement, ctx: RuntimeCtx): HTMLButtonE
     btn.appendChild(img)
   } else {
     // text label; visual styling (font/colour/fill/radius) applied at layout.
-    btn.textContent = el.text?.value ?? 'PLAY'
+    btn.textContent = localize(el.text) || 'PLAY'
   }
 
   btn.addEventListener('click', (ev) => {

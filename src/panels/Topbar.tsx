@@ -2,9 +2,11 @@
 // Save/Open. (Insert moved to the tool rail; z-order moved to draggable layers.)
 
 import { loadProject as bridgeLoad, platformLabel, saveProject } from '../bridge'
-import { getState, loadProject as storeLoad, markSaved, redo, setOrientation, undo, useEditorState } from '../store'
+import { getState, loadProject as storeLoad, markSaved, redo, refreshScene, setOrientation, undo, useEditorState } from '../store'
 import { Icon, Menu, Minus, Moon, Play, Plus, Redo2, Sun, Undo2, Volume2 } from '../icons'
 import { toggleTheme, useTheme } from '../theme'
+import { setEditLocale, useEditLocale } from '../locale'
+import { setActiveVariant, useActiveVariant } from '../variantMode'
 
 async function doSave(): Promise<void> {
   const s = getState()
@@ -17,9 +19,13 @@ async function doOpen(): Promise<void> {
   if (r) storeLoad(r.data.project, r.data.assets, r.path, r.data.trace)
 }
 
-export function Topbar(props: { zoom: number; onZoom: (z: number) => void; onFit: () => void; onPreview: () => void; onFigma: () => void; onSfx: () => void; onTemplates: () => void; onHome: () => void; onExport: () => void; onQuizFunnel: () => void; onQa: () => void }): JSX.Element {
+export function Topbar(props: { zoom: number; onZoom: (z: number) => void; onFit: () => void; onPreview: () => void; onFigma: () => void; onSfx: () => void; onTemplates: () => void; onHome: () => void; onExport: () => void; onQuizFunnel: () => void; onQa: () => void; onTeam: () => void }): JSX.Element {
   const { orientation, dirty, projectPath, canUndo, canRedo, scene } = useEditorState()
   const theme = useTheme()
+  const editLocale = useEditLocale()
+  const locales = scene.meta.locales ?? []
+  const activeVariant = useActiveVariant()
+  const variants = scene.meta.variants ?? []
   return (
     <div className="topbar">
       <button className="brand" onClick={props.onHome} title="Projects / home menu">
@@ -35,6 +41,37 @@ export function Topbar(props: { zoom: number; onZoom: (z: number) => void; onFit
           Landscape
         </button>
       </span>
+
+      {locales.length > 0 && (
+        <select
+          className="locale-pick"
+          value={editLocale ?? ''}
+          title="Editing / preview language (runtime auto-detects from the browser)"
+          onChange={(e) => setEditLocale(e.target.value || null)}
+        >
+          <option value="">{scene.meta.defaultLocale ? `Base (${scene.meta.defaultLocale})` : 'Base'}</option>
+          {locales.map((l) => (
+            <option key={l} value={l}>
+              {l}
+            </option>
+          ))}
+        </select>
+      )}
+      {variants.length > 0 && (
+        <select
+          className={'locale-pick' + (activeVariant ? ' editing' : '')}
+          value={activeVariant ?? ''}
+          title="Edit the base MIP or one of its variants"
+          onChange={(e) => { setActiveVariant(e.target.value || null); refreshScene() }}
+        >
+          <option value="">Base MIP</option>
+          {variants.map((v) => (
+            <option key={v.id} value={v.id}>
+              {v.name}
+            </option>
+          ))}
+        </select>
+      )}
 
       <span className="sep" />
       <button className="icon" title="Undo (Ctrl+Z)" disabled={!canUndo} onClick={undo}>
@@ -72,6 +109,9 @@ export function Topbar(props: { zoom: number; onZoom: (z: number) => void; onFit
       </button>
       <button onClick={props.onQa} title="Check style/SFX/animation consistency across this client's MIPs">
         QA
+      </button>
+      <button onClick={props.onTeam} title="Team library — publish / browse MIPs, monitor progress">
+        Team
       </button>
       <button onClick={props.onFigma}>Figma</button>
       <button onClick={props.onSfx} title="Sound (event SFX + background music)">
