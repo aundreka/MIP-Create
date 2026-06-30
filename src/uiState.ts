@@ -4,9 +4,14 @@
 
 const LS_KEY = 'pa:uistate'
 
+interface DockState {
+  w?: number
+  collapsed?: boolean
+}
 interface UIState {
   accordion: Record<string, boolean>
   groupCollapsed: Record<string, boolean>
+  dock: Record<string, DockState>
 }
 
 function load(): UIState {
@@ -14,12 +19,12 @@ function load(): UIState {
     const raw = localStorage.getItem(LS_KEY)
     if (raw) {
       const v = JSON.parse(raw) as Partial<UIState>
-      return { accordion: v.accordion ?? {}, groupCollapsed: v.groupCollapsed ?? {} }
+      return { accordion: v.accordion ?? {}, groupCollapsed: v.groupCollapsed ?? {}, dock: v.dock ?? {} }
     }
   } catch {
     /* ignore */
   }
-  return { accordion: {}, groupCollapsed: {} }
+  return { accordion: {}, groupCollapsed: {}, dock: {} }
 }
 
 const cache = load()
@@ -46,4 +51,26 @@ export function getGroupCollapsed(id: string): boolean {
 export function setGroupCollapsed(id: string, collapsed: boolean): void {
   cache.groupCollapsed[id] = collapsed
   save()
+}
+// Dock panel sizing/collapse (Navigator, Inspector), persisted per panel id.
+export function getDock(id: string): DockState {
+  return cache.dock[id] ?? {}
+}
+export function setDock(id: string, patch: DockState): void {
+  cache.dock[id] = { ...cache.dock[id], ...patch }
+  save()
+}
+
+/** Drop collapse state for groups that no longer exist, so a reused groupId can't
+ * inherit a stale collapsed/expanded flag. Returns true if anything was pruned. */
+export function pruneGroupCollapsed(liveIds: Set<string>): boolean {
+  let changed = false
+  for (const id of Object.keys(cache.groupCollapsed)) {
+    if (!liveIds.has(id)) {
+      delete cache.groupCollapsed[id]
+      changed = true
+    }
+  }
+  if (changed) save()
+  return changed
 }

@@ -16,7 +16,7 @@ export function AssetPicker(props: {
   value?: string
   onChange: (id: string | undefined) => void
   allowNone?: boolean
-  accept?: 'image' | 'video' | 'audio' | 'html'
+  accept?: 'image' | 'video' | 'audio' | 'html' | 'media'
 }): JSX.Element {
   const { assets } = useEditorState()
   const [open, setOpen] = useState(false)
@@ -24,7 +24,9 @@ export function AssetPicker(props: {
   const [pos, setPos] = useState<{ left: number; top: number }>({ left: 0, top: 0 })
   const btnRef = useRef<HTMLButtonElement>(null)
   const accept = props.accept ?? 'image'
-  const matches = (k?: string): boolean => (accept === 'image' ? k !== 'video' && k !== 'audio' : k === accept)
+  // 'media' = images OR videos (e.g. a container's inner content).
+  const matches = (k?: string): boolean =>
+    accept === 'media' ? k !== 'audio' && k !== 'html' : accept === 'image' ? k !== 'video' && k !== 'audio' : k === accept
   const entries = Object.entries(assets).filter(([, a]) => matches(a.kind))
   const current = props.value ? assets[props.value] : undefined
   const glyphFor = (id: string): LucideIcon | null => GLYPH[assets[id]?.kind ?? 'image'] ?? null
@@ -76,8 +78,16 @@ export function AssetPicker(props: {
     if (firstId) props.onChange(firstId)
     setOpen(false)
   }
+  const uploadVideo = async (): Promise<void> => {
+    const vid = await importVideo()
+    if (!vid) return
+    const id = vid.id || nextId('vid')
+    addAsset(id, { src: vid.src, w: vid.w, h: vid.h, kind: 'video' })
+    props.onChange(id)
+    setOpen(false)
+  }
   const noneLabel =
-    accept === 'audio' ? 'No audio yet.' : accept === 'video' ? 'No videos yet.' : accept === 'html' ? 'No games yet.' : 'No images yet.'
+    accept === 'audio' ? 'No audio yet.' : accept === 'video' ? 'No videos yet.' : accept === 'html' ? 'No games yet.' : accept === 'media' ? 'No images/videos yet.' : 'No images yet.'
   const uploadLabel =
     accept === 'audio' ? 'Upload audio…' : accept === 'video' ? 'Upload video…' : accept === 'html' ? 'Upload game .html…' : 'Upload images…'
 
@@ -123,6 +133,11 @@ export function AssetPicker(props: {
               <button className="wide" onClick={() => void upload()}>
                 <Icon icon={Upload} size={14} /> {uploadLabel}
               </button>
+              {accept === 'media' && (
+                <button className="wide" onClick={() => void uploadVideo()}>
+                  <Icon icon={Clapperboard} size={14} /> Upload video…
+                </button>
+              )}
               {accept === 'audio' && (
                 <button className="wide" onClick={() => { setLib(true); setOpen(false) }}>
                   <Icon icon={Music} size={14} /> Sound library…

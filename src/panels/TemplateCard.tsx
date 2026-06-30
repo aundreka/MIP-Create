@@ -6,15 +6,23 @@ import { useEffect, useRef, useState } from 'react'
 import type { ProjectData } from '../bridge'
 import type { Starter } from '../templates'
 import { SceneThumb } from '../preview/SceneThumb'
-import { addUsage, removeUsage, usagesFor, type Usage } from '../templateUsage'
+import { addUsage, brandsFor, removeUsage, usagesFor, type Usage } from '../templateUsage'
 import { Gamepad2, Icon, Plus, X } from '../icons'
 
-export function TemplateCard(props: { starter: Starter; data: ProjectData; onUse: () => void; onUsageChange?: () => void }): JSX.Element {
+export function TemplateCard(props: {
+  starter: Starter
+  data: ProjectData
+  onUse: () => void
+  onUsageChange?: () => void
+  activeBrand?: string | null
+  onBrand?: (brand: string) => void
+}): JSX.Element {
   const { starter, data } = props
   const ref = useRef<HTMLButtonElement>(null)
   const [show, setShow] = useState(false)
   const [size, setSize] = useState<{ w: number; h: number } | null>(null)
   const [usages, setUsages] = useState<Usage[]>(() => usagesFor(starter.id))
+  const [brands, setBrands] = useState<string[]>(() => brandsFor(starter.id))
   const [tagging, setTagging] = useState(false)
   const [client, setClient] = useState('')
   const [mip, setMip] = useState('')
@@ -48,6 +56,7 @@ export function TemplateCard(props: { starter: Starter; data: ProjectData; onUse
 
   const sync = (): void => {
     setUsages(usagesFor(starter.id))
+    setBrands(brandsFor(starter.id))
     props.onUsageChange?.()
   }
   const add = (): void => {
@@ -74,6 +83,20 @@ export function TemplateCard(props: { starter: Starter; data: ProjectData; onUse
         )}
       </button>
       <div className="tpl-name2">{starter.label}</div>
+      {brands.length > 0 && (
+        <div className="tpl-brands">
+          {brands.map((b) => (
+            <button
+              key={b}
+              className={'tpl-brand' + (props.activeBrand?.toLowerCase() === b.toLowerCase() ? ' on' : '')}
+              onClick={() => props.onBrand?.(b)}
+              title={`Filter by brand: ${b}`}
+            >
+              {b}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="tpl-uses">
         {usages.map((u) => (
           <span key={u.id} className="tpl-use" title="Remove">
@@ -84,15 +107,15 @@ export function TemplateCard(props: { starter: Starter; data: ProjectData; onUse
           </span>
         ))}
         {!tagging && (
-          <button className="tpl-tag" onClick={() => setTagging(true)} title="Log a client / MIP that used this template">
-            <Icon icon={Plus} size={11} /> tag
+          <button className="tpl-tag" onClick={() => setTagging(true)} title="Tag a brand / MIP that used this template">
+            <Icon icon={Plus} size={11} /> brand
           </button>
         )}
       </div>
       {tagging && (
         <div className="tpl-tagform">
-          <input value={client} placeholder="Client" autoFocus onChange={(e) => setClient(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} />
-          <input value={mip} placeholder="MIP" onChange={(e) => setMip(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} />
+          <input value={client} placeholder="Brand" autoFocus onChange={(e) => setClient(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} />
+          <input value={mip} placeholder="MIP (optional)" onChange={(e) => setMip(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} />
           <button className="primary" onClick={add}>Add</button>
         </div>
       )}

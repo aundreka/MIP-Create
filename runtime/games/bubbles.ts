@@ -109,5 +109,9 @@ export const BUBBLES_TEMPLATE: GameTemplate = {
   paramFields: [{ key: 'count', label: 'Bubbles', type: 'number', min: 3, max: 12, step: 1 }],
   assetSlots: [{ key: 'bubble', label: 'Bubble image (optional)' }],
   defaultParams: { count: 6, bubble: '' },
+  // Single tap near the card center (bubbles are scattered randomly across the field).
+  defaultHandguide: {
+    nodes: [{ x: 0.5, y: 0.5 }],
+  },
   create: createBubbles,
 }

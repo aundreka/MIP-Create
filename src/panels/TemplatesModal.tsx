@@ -7,7 +7,7 @@ import { downloadBlob } from '../export'
 import { loadProject, useEditorState } from '../store'
 import { buildTemplateZip, readTemplateZip, STARTERS } from '../templates'
 import { Icon, Save, Upload } from '../icons'
-import { Modal } from '../ui'
+import { confirmDestructive, Modal } from '../ui'
 
 export function TemplatesModal(props: { onClose: () => void }): JSX.Element {
   const { project, assets } = useEditorState()
@@ -18,6 +18,7 @@ export function TemplatesModal(props: { onClose: () => void }): JSX.Element {
   const startFrom = (id: string): void => {
     const s = STARTERS.find((x) => x.id === id)
     if (!s) return
+    if (!confirmDestructive('Start from this template? This replaces your current project and cannot be undone.')) return
     const data = s.build()
     loadProject(data.project, data.assets, null)
     props.onClose()
@@ -38,6 +39,7 @@ export function TemplatesModal(props: { onClose: () => void }): JSX.Element {
       setStatus('Not a valid .playable-template.zip')
       return
     }
+    if (!confirmDestructive('Load this template? This replaces your current project and cannot be undone.')) return
     loadProject(data.project, data.assets, null)
     props.onClose()
   }

@@ -5,9 +5,12 @@
 
 import { useSyncExternalStore } from 'react'
 import type { OrientationOverride, Project, ProjectMeta, Scene, SceneDef, SceneElement, Variant } from '../runtime/scene'
-import type { AssetEntry, AssetMap } from '../runtime/types'
+import type { AssetEntry, AssetMap, CompressProfile } from '../runtime/types'
 import { getActiveVariant } from './variantMode'
 import { applyVariantPatches } from './variants'
+import { migrateProject } from './migrate'
+import { GAME_TEMPLATES } from '../runtime/games/registry'
+import { sfxPreviewUrl } from './sfxLibrary'
 
 export type Orientation = 'portrait' | 'landscape'
 
@@ -87,7 +90,17 @@ function deriveScene(project: Project, activeSceneId: string): Scene {
     const v = project.meta.variants?.find((x) => x.id === vid)
     if (v) elements = applyVariantPatches(elements, v.patches)
   }
-  return { meta: { ...project.meta, bgMatchColor: sd?.bgColor ?? project.meta.bgMatchColor }, elements }
+  return {
+    meta: {
+      ...project.meta,
+      // undefined = not set, fall back to project default; '' = explicitly transparent
+      bgMatchColor: sd?.bgColor !== undefined ? sd.bgColor : project.meta.bgMatchColor,
+      bgMatchColor2: sd?.bgColor2 !== undefined ? sd.bgColor2 : project.meta.bgMatchColor2,
+    },
+    elements,
+    kind: sd?.kind,
+    overlay: sd?.overlay,
+  }
 }
 
 const project0 = starterProject()
@@ -134,7 +147,10 @@ function pushSnap(force: boolean): void {
 }
 
 function set(partial: Partial<EditorState>, recordHistory = true): void {
-  if (recordHistory && partial.project) pushSnap(false)
+  // Snapshot on project OR asset changes so adding/compressing an asset is undoable
+  // (snapshots share the immutable assets map by reference — cheap, and restore
+  // swaps the whole map back).
+  if (recordHistory && (partial.project || partial.assets)) pushSnap(false)
   state = { ...state, ...partial }
   state.scene = deriveScene(state.project, state.activeSceneId)
   state.canUndo = past.length > 0
@@ -263,6 +279,53 @@ export function patchGeometry(id: string, patch: OrientationOverride): void {
 export function addElement(el: SceneElement): void {
   set({ dirty: true, selectedIds: [el.id], project: { ...state.project, scenes: state.project.scenes.map((s) => (s.id === state.activeSceneId ? { ...s, elements: [...s.elements, el] } : s)) } })
 }
+// Built-in hand image (data-URI SVG) for auto-created hint handguides; shared by a
+// stable id so it's deduped and inlined once on export. Mirrors the runtime's hand.
+const HAND_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="46" height="56" viewBox="0 0 46 56">' +
+  '<g fill="#ffffff" stroke="#0b1220" stroke-width="1.5" stroke-linejoin="round">' +
+  '<path d="M16 3c2.8 0 5 2.2 5 5v16l3-1.5c2-1 4.6-.3 5.7 1.7l.2.4 6.2 3.2c2.6 1.3 3.9 4.3 3.1 7.1l-2.4 8.6c-1 3.6-4.3 6.1-8 6.1H22c-2.8 0-5.4-1.3-7.1-3.5L5.6 35.4c-1.5-2-1.1-4.8.9-6.3 1.7-1.3 4-1.2 5.6.1l2.9 2.4V8c0-2.8 2.2-5 5-5z"/>' +
+  '</g></svg>'
+const HAND_ASSET_ID = 'builtin_hand'
+const HAND_DATA_URI = 'data:image/svg+xml,' + encodeURIComponent(HAND_SVG)
+
+// Seed an editable handguide ("hint hand") for a game-mount: a hand image on a route
+// derived from the template's defaultHandguide (normalized to the game card), or a
+// centered tap if the template has none. The runtime suppresses the non-editable coded
+// hint whenever a handguide is present, so there's exactly one (editable) hand.
+export function addGameHint(gameId: string): void {
+  const scene = state.project.scenes.find((s) => s.id === state.activeSceneId)
+  const game = scene?.elements.find((e) => e.id === gameId)
+  if (!game || game.type !== 'game-mount') return
+  if (!state.assets[HAND_ASSET_ID]) addAsset(HAND_ASSET_ID, { src: HAND_DATA_URI, w: 46, h: 56 })
+  const tpl = GAME_TEMPLATES.find((t) => t.id === game.game?.templateId)
+  const gw = game.w ?? Math.round(state.project.meta.baseW * 0.9)
+  const gh = game.h ?? Math.round(state.project.meta.baseH * 0.5)
+  const left = game.x - gw / 2 // game-mount elements are center-anchored
+  const top = game.y - gh / 2
+  const norm = tpl?.defaultHandguide?.nodes ?? [{ x: 0.5, y: 0.5 }]
+  const pts = norm.map((n) => ({ x: Math.round(left + n.x * gw), y: Math.round(top + n.y * gh), pauseMs: n.pauseMs }))
+  const handW = Math.round(Math.max(60, Math.min(140, gw * 0.16)))
+  const hg: SceneElement = {
+    id: nextId('hint'),
+    type: 'handguide',
+    name: 'Hint hand',
+    x: pts[0].x,
+    y: pts[0].y,
+    w: handW,
+    h: Math.round(handW * (56 / 46)),
+    anchor: 'center',
+    zIndex: (game.zIndex ?? 0) + 1,
+    mode: 'fit',
+    assetId: HAND_ASSET_ID,
+    handguide:
+      pts.length > 1
+        ? { mode: 'slide', nodes: pts.slice(1), periodMs: tpl?.defaultHandguide?.periodMs ?? 1800 }
+        : { mode: 'tap', periodMs: 900 },
+  }
+  addElement(hg)
+}
+
 export function addElements(els: SceneElement[]): void {
   set({ dirty: true, selectedIds: els.map((e) => e.id), project: { ...state.project, scenes: state.project.scenes.map((s) => (s.id === state.activeSceneId ? { ...s, elements: [...s.elements, ...els] } : s)) } })
 }
@@ -296,6 +359,85 @@ export function duplicateSelected(): void {
   addElements(clones)
 }
 
+// ---- element clipboard (copy/paste & move across scenes) ------------------
+// Asset ids one element references (so a cross-scene paste survives even if the
+// source asset is later deleted). Mirrors export's pruneAssets walk.
+function elementAssetIds(el: SceneElement): string[] {
+  const ids: (string | undefined)[] = [el.assetId, el.container?.imageId, el.generate?.resultId]
+  if (el.sfx) for (const b of el.sfx) ids.push(b.assetId)
+  if (el.game?.params) for (const v of Object.values(el.game.params)) (Array.isArray(v) ? ids.push(...(v as string[])) : ids.push(v as string))
+  if (el.endscene) ids.push(el.endscene.portraitVideoId, el.endscene.landscapeVideoId, el.endscene.portraitImageId, el.endscene.landscapeImageId)
+  return ids.filter((x): x is string => typeof x === 'string')
+}
+// In-memory clipboard (NOT the OS clipboard; persists across scene switches).
+let elClip: { els: SceneElement[]; assets: AssetMap } | null = null
+export function hasElementClip(): boolean {
+  return !!elClip && elClip.els.length > 0
+}
+export function copySelected(): void {
+  const ids = new Set(state.selectedIds)
+  if (!ids.size) return
+  const els = activeSceneDef().elements.filter((e) => ids.has(e.id)).map((e) => structuredClone(e))
+  const assets: AssetMap = {}
+  for (const e of els) for (const aid of elementAssetIds(e)) if (state.assets[aid]) assets[aid] = state.assets[aid]
+  elClip = { els, assets }
+}
+/** Paste the clipboard into the active scene (offset, new ids, on top). */
+export function pasteElements(): void {
+  if (!elClip || !elClip.els.length) return
+  const missing: AssetMap = {}
+  for (const [aid, a] of Object.entries(elClip.assets)) if (!state.assets[aid]) missing[aid] = a
+  const maxZ = Math.max(0, ...activeSceneDef().elements.map((e) => e.zIndex))
+  const gmap = new Map<string, string>() // preserve grouping with fresh group ids
+  let bump = 1
+  const clones = elClip.els.map((e) => {
+    const c = structuredClone(e)
+    c.id = nextId(e.type)
+    c.x = e.x + 20
+    c.y = e.y + 20
+    c.zIndex = maxZ + bump++
+    if (c.groupId) {
+      if (!gmap.has(c.groupId)) gmap.set(c.groupId, nextId('grp'))
+      c.groupId = gmap.get(c.groupId)
+    }
+    return c
+  })
+  if (Object.keys(missing).length) set({ assets: { ...state.assets, ...missing } }, false)
+  addElements(clones) // sets selection + dirty + history
+}
+/** Move the current selection out of the active scene into another scene. */
+// Move the current selection into another scene. `place` (optional, design coords
+// keyed by element id) repositions each moved element — used by cross-scene drag so
+// elements land under the cursor in the target frame; the right-click "Move to scene"
+// menu omits it and keeps each element's existing position.
+export function moveSelectedToScene(sceneId: string, place?: Record<string, { x: number; y: number }>): void {
+  const ids = new Set(state.selectedIds)
+  if (!ids.size || sceneId === state.activeSceneId) return
+  const target = state.project.scenes.find((s) => s.id === sceneId)
+  if (!target) return
+  const moving = activeSceneDef().elements.filter((e) => ids.has(e.id))
+  if (!moving.length) return
+  const landscape = state.orientation === 'landscape'
+  const maxZ = Math.max(0, ...target.elements.map((e) => e.zIndex))
+  const placed = moving.map((e, i) => {
+    const c: SceneElement = { ...structuredClone(e), zIndex: maxZ + 1 + i }
+    const p = place?.[e.id]
+    // Write the drop position to the active orientation's coords (landscape keeps its
+    // own override so the portrait layout is untouched, and vice-versa).
+    if (p) {
+      if (landscape) c.landscape = { ...c.landscape, x: Math.round(p.x), y: Math.round(p.y) }
+      else { c.x = Math.round(p.x); c.y = Math.round(p.y) }
+    }
+    return c
+  })
+  const scenes = state.project.scenes.map((s) => {
+    if (s.id === state.activeSceneId) return { ...s, elements: s.elements.filter((e) => !ids.has(e.id)) }
+    if (s.id === sceneId) return { ...s, elements: [...s.elements, ...placed] }
+    return s
+  })
+  set({ dirty: true, project: { ...state.project, scenes }, activeSceneId: sceneId, selectedIds: placed.map((e) => e.id) })
+}
+
 function zRange(): { min: number; max: number } {
   const zs = activeSceneDef().elements.map((e) => e.zIndex)
   return { min: Math.min(0, ...zs), max: Math.max(0, ...zs) }
@@ -312,6 +454,7 @@ export function reorderLayers(frontToBack: string[]): void {
   mapActiveScene((sd) => ({ ...sd, elements: sd.elements.map((e) => ({ ...e, zIndex: z.get(e.id) ?? e.zIndex })) }))
 }
 export function toggleLock(id: string): void {
+  if (getActiveVariant()) return // lock is a base-only authoring aid (disabled in variant mode)
   mapEl(id, (e) => ({ ...e, locked: !e.locked }))
 }
 
@@ -353,25 +496,27 @@ function recompose(h: H, v: V): SceneElement['anchor'] {
 }
 export type AlignOp = 'left' | 'centerH' | 'right' | 'top' | 'middleV' | 'bottom'
 export function alignSelected(op: AlignOp): void {
-  const ids = new Set(state.selectedIds)
-  if (!ids.size) return
+  const ids = state.selectedIds
+  if (!ids.length) return
   const m = state.project.meta
-  mapActiveScene((sd) => ({
-    ...sd,
-    elements: sd.elements.map((e) => {
-      if (!ids.has(e.id)) return e
-      const [h, v] = A_DECOMP[e.anchor] ?? ['center', 'center']
-      let { x, y } = e
-      let anchor = e.anchor
-      if (op === 'left') ((x = 0), (anchor = recompose('left', v)))
-      else if (op === 'centerH') ((x = Math.round(m.baseW / 2)), (anchor = recompose('center', v)))
-      else if (op === 'right') ((x = m.baseW), (anchor = recompose('right', v)))
-      else if (op === 'top') ((y = 0), (anchor = recompose(h, 'top')))
-      else if (op === 'middleV') ((y = Math.round(m.baseH / 2)), (anchor = recompose(h, 'center')))
-      else ((y = m.baseH), (anchor = recompose(h, 'bottom')))
-      return { ...e, x, y, anchor }
-    }),
-  }))
+  // Route each write through patchElement so alignment respects variant edit-mode
+  // (writes a variant override) instead of silently editing the base element.
+  beginTransaction()
+  for (const id of ids) {
+    const e = state.scene.elements.find((x) => x.id === id)
+    if (!e) continue
+    const [h, v] = A_DECOMP[e.anchor] ?? ['center', 'center']
+    let { x, y } = e
+    let anchor = e.anchor
+    if (op === 'left') ((x = 0), (anchor = recompose('left', v)))
+    else if (op === 'centerH') ((x = Math.round(m.baseW / 2)), (anchor = recompose('center', v)))
+    else if (op === 'right') ((x = m.baseW), (anchor = recompose('right', v)))
+    else if (op === 'top') ((y = 0), (anchor = recompose(h, 'top')))
+    else if (op === 'middleV') ((y = Math.round(m.baseH / 2)), (anchor = recompose(h, 'center')))
+    else ((y = m.baseH), (anchor = recompose(h, 'bottom')))
+    patchElement(id, { x, y, anchor })
+  }
+  endTransaction()
 }
 
 // ---- copy / paste style ---------------------------------------------------
@@ -412,6 +557,7 @@ export function bulkPatch(patches: Record<string, Partial<SceneElement>>): void 
 
 export type ConvertTo = 'image' | 'bar' | 'rect' | 'cta' | 'background' | 'text' | 'handguide'
 export function convertElement(id: string, to: ConvertTo): void {
+  if (getActiveVariant()) return // changing element type is structural — disabled in variant mode
   mapEl(id, (e) => {
     switch (to) {
       case 'handguide':
@@ -422,8 +568,19 @@ export function convertElement(id: string, to: ConvertTo): void {
         return { ...e, type: 'bar', mode: 'extend', anchor: e.anchor === 'bottom' ? 'bottom' : 'top', bar: e.bar ?? (e.assetId ? {} : { color: '#1b2a4a' }) }
       case 'rect':
         return { ...e, type: 'bar', mode: 'fit', bar: e.bar ?? { color: '#3a7bd5' }, w: e.w ?? 600, h: e.h ?? 360 }
-      case 'cta':
-        return { ...e, type: 'cta', mode: 'fit', cta: e.cta ?? { pulse: 'medium' }, w: e.w ?? 560, h: e.h ?? 150, text: e.assetId ? e.text : e.text ?? { value: 'PLAY NOW', fontSizePx: 64, fontWeight: 800, color: '#ffffff' }, box: e.assetId ? e.box : e.box ?? { bgColor: '#16a34a', radiusPx: 75 } }
+      case 'cta': {
+        let ctaW = e.w
+        let ctaH = e.h
+        if ((ctaW == null || ctaH == null) && e.assetId) {
+          const a = state.assets[e.assetId]
+          if (a) {
+            const sc = e.scale ?? 1
+            ctaW = ctaW ?? Math.round(a.w * sc)
+            ctaH = ctaH ?? Math.round(a.h * sc)
+          }
+        }
+        return { ...e, type: 'cta', mode: 'fit', cta: e.cta ?? { pulse: 'medium' }, w: ctaW ?? 560, h: ctaH ?? 150, text: e.assetId ? e.text : e.text ?? { value: 'PLAY NOW', fontSizePx: 64, fontWeight: 800, color: '#ffffff' }, box: e.assetId ? e.box : e.box ?? { bgColor: '#16a34a', radiusPx: 75 } }
+      }
       case 'text':
         return { ...e, type: 'text', mode: 'fit', text: e.text ?? { value: 'Text', fontSizePx: 64, fontWeight: 700, color: '#ffffff', align: 'center' } }
       default:
@@ -460,10 +617,24 @@ export function resetVariantElement(vid: string, elementId: string): void {
   setVariants((state.project.meta.variants ?? []).map((v) => (v.id === vid ? { ...v, patches: v.patches.filter((p) => p.elementId !== elementId) } : v)))
 }
 export function setSceneBg(color: string | undefined): void {
+  if (getActiveVariant()) return // scene background is base-only (disabled in variant mode)
   mapActiveScene((sd) => ({ ...sd, bgColor: color }))
+}
+export function setSceneBg2(color: string | undefined): void {
+  if (getActiveVariant()) return
+  mapActiveScene((sd) => ({ ...sd, bgColor2: color }))
 }
 export function addAsset(id: string, entry: AssetEntry): void {
   set({ dirty: true, assets: { ...state.assets, [id]: entry } })
+}
+/** Set (or clear, with undefined) a video/audio asset's compression override. */
+export function setAssetCompress(id: string, compress: CompressProfile | undefined): void {
+  const a = state.assets[id]
+  if (!a) return
+  const next = { ...a } as AssetEntry
+  if (compress && Object.keys(compress).length) next.compress = compress
+  else delete next.compress
+  set({ dirty: true, assets: { ...state.assets, [id]: next } })
 }
 
 // ---- audio: project-level event→sound map + background music ---------------
@@ -490,6 +661,7 @@ export function setStartScene(id: string): void {
   set({ dirty: true, project: { ...state.project, startSceneId: id } })
 }
 export function patchSceneDef(id: string, patch: Partial<SceneDef>): void {
+  if (getActiveVariant()) return // scene name/advance/transition are base-only (disabled in variant mode)
   set({ dirty: true, project: { ...state.project, scenes: state.project.scenes.map((s) => (s.id === id ? { ...s, ...patch } : s)) } })
 }
 export function reorderScenes(ids: string[]): void {
@@ -512,34 +684,78 @@ function center(): { x: number; y: number } {
 function templateElements(kind: SceneDef['kind']): SceneElement[] {
   const c = center()
   const m = state.project.meta
-  if (kind === 'win') {
+  if (kind === 'overlay') {
     return [
-      { id: nextId('dim'), type: 'dim', name: 'Dim', x: c.x, y: c.y, anchor: 'center', zIndex: 50, mode: 'fit', dim: { color: '#0a1024', alpha: 0.72, blocksInput: false } },
-      { id: nextId('text'), type: 'text', name: 'Congrats', x: c.x, y: Math.round(m.baseH * 0.42), anchor: 'center', zIndex: 51, mode: 'fit', text: { value: 'You won!', fontSizePx: 130, fontWeight: 800, color: '#ffffff', align: 'center' } },
+      { id: nextId('text'), type: 'text', name: 'Congrats', x: c.x, y: Math.round(m.baseH * 0.42), anchor: 'center', zIndex: 51, mode: 'fit', text: { value: 'You won!', fontSizePx: 130, fontWeight: 800, color: '#ffffff', align: 'center' }, sfx: [{ event: 'sceneEnter', assetId: 'sfx_f_correctBright' }] },
     ]
   }
   if (kind === 'endscene') {
     return [
-      { id: nextId('end'), type: 'endscene', name: 'Endscene video', x: c.x, y: c.y, w: m.baseW, h: m.baseH, anchor: 'center', zIndex: 1, mode: 'extend', endscene: { objectFit: 'cover', bgColor: '#000000', loop: true, matchBgEdge: false, muteUntilInteraction: true } },
+      { id: nextId('end'), type: 'endscene', name: 'Endscene video', x: c.x, y: c.y, w: m.baseW, h: m.baseH, anchor: 'center', zIndex: 1, mode: 'extend', endscene: { objectFit: 'cover', bgColor: '#000000', loop: true, matchBgEdge: false, muteUntilInteraction: true }, sfx: [{ event: 'sceneEnter', assetId: 'sfx_f_winJingle' }] },
       { id: nextId('text'), type: 'text', name: 'Endscene title', x: c.x, y: Math.round(m.baseH * 0.3), anchor: 'center', zIndex: 11, mode: 'fit', text: { value: 'Get the app!', fontSizePx: 120, fontWeight: 800, color: '#ffffff', align: 'center' } },
       { id: nextId('cta'), type: 'cta', name: 'CTA button', x: c.x, y: Math.round(m.baseH * 0.6), anchor: 'center', zIndex: 20, mode: 'fit', w: 600, h: 160, cta: { pulse: 'medium' }, text: { value: 'PLAY NOW', fontSizePx: 66, fontWeight: 800, color: '#ffffff' }, box: { bgColor: '#16a34a', radiusPx: 80 } },
     ]
   }
   return []
 }
-export function addScene(kind: SceneDef['kind'] = 'custom'): void {
+export function addScene(kind: SceneDef['kind'] = 'overlay'): void {
   const id = nextId('scene')
-  const labels: Record<string, string> = { game: 'Game', win: 'Win', endscene: 'Endscene', custom: 'Scene' }
-  const advance: SceneDef['advance'] = kind === 'game' ? { on: 'gameWin' } : kind === 'win' ? { on: 'timer', delayMs: 1500 } : kind === 'endscene' ? { on: 'manual' } : { on: 'tap' }
+  const labels: Record<string, string> = { game: 'Game', overlay: 'Overlay', endscene: 'Endscene' }
+  const advance: SceneDef['advance'] = kind === 'game' ? { on: 'gameWin' } : kind === 'overlay' ? { on: 'timer', delayMs: 1500 } : kind === 'endscene' ? { on: 'manual' } : { on: 'tap' }
+  const overlay = kind === 'overlay' ? { opacity: 0.72, color: '#0a1024' } : undefined
   const sd: SceneDef = {
     id,
-    name: `${labels[kind ?? 'custom']} ${state.project.scenes.length + 1}`,
+    name: `${labels[kind ?? 'overlay'] ?? 'Scene'} ${state.project.scenes.length + 1}`,
     kind,
+    overlay,
     elements: templateElements(kind),
     advance,
     transition: { type: 'fade', durationMs: 350 },
   }
-  set({ dirty: true, activeSceneId: id, selectedIds: [], project: { ...state.project, scenes: [...state.project.scenes, sd] } })
+  const extraAssets: AssetMap = {}
+  if (kind === 'overlay' && !state.assets['sfx_f_correctBright'])
+    extraAssets['sfx_f_correctBright'] = { src: sfxPreviewUrl('f_correctBright'), w: 0, h: 0, kind: 'audio' }
+  if (kind === 'endscene' && !state.assets['sfx_f_winJingle'])
+    extraAssets['sfx_f_winJingle'] = { src: sfxPreviewUrl('f_winJingle'), w: 0, h: 0, kind: 'audio' }
+  const assets = Object.keys(extraAssets).length ? { ...state.assets, ...extraAssets } : state.assets
+  set({ dirty: true, activeSceneId: id, selectedIds: [], project: { ...state.project, scenes: [...state.project.scenes, sd] }, assets })
+}
+
+export function addGameScene(templateId: string): void {
+  const id = nextId('scene')
+  const c = center()
+  const m = state.project.meta
+  const tpl = GAME_TEMPLATES.find((t) => t.id === templateId)
+  const isScratch = templateId === 'scratch' || templateId === 'scratch_grid'
+  const gameEl: SceneElement = {
+    id: nextId('game'),
+    type: 'game-mount',
+    name: tpl?.label ?? 'Game',
+    x: c.x,
+    y: Math.round(m.baseH * 0.45),
+    w: Math.round(m.baseW * 0.9),
+    h: Math.round(m.baseH * 0.52),
+    anchor: 'center',
+    zIndex: 10,
+    mode: 'fit',
+    game: { templateId, params: {} },
+    sfx: isScratch ? [{ event: 'whileScratching', assetId: 'sfx_f_scratch' }, { event: 'onReveal', assetId: 'sfx_f_correctBright' }] : undefined,
+  }
+  const sd: SceneDef = {
+    id,
+    name: `Game ${state.project.scenes.length + 1}`,
+    kind: 'game',
+    elements: [gameEl],
+    advance: { on: 'gameWin' },
+    transition: { type: 'fade', durationMs: 350 },
+  }
+  const extraAssets: AssetMap = {}
+  if (isScratch) {
+    if (!state.assets['sfx_f_scratch']) extraAssets['sfx_f_scratch'] = { src: sfxPreviewUrl('f_scratch'), w: 0, h: 0, kind: 'audio' }
+    if (!state.assets['sfx_f_correctBright']) extraAssets['sfx_f_correctBright'] = { src: sfxPreviewUrl('f_correctBright'), w: 0, h: 0, kind: 'audio' }
+  }
+  const assets = Object.keys(extraAssets).length ? { ...state.assets, ...extraAssets } : state.assets
+  set({ dirty: true, activeSceneId: id, selectedIds: [], project: { ...state.project, scenes: [...state.project.scenes, sd] }, assets })
 }
 export function duplicateScene(id: string): void {
   const sd = state.project.scenes.find((s) => s.id === id)
@@ -574,12 +790,15 @@ export function addScenes(defs: SceneDef[], assets: AssetMap = {}): void {
 /** Append an imported frame as a NEW scene and merge its assets (Figma). */
 export function addImportedScene(name: string, bgColor: string | undefined, elements: SceneElement[], assets: AssetMap): void {
   const id = nextId('scene')
-  const sd: SceneDef = { id, name, kind: 'custom', bgColor, elements, advance: { on: 'tap' }, transition: { type: 'fade', durationMs: 350 } }
+  const sd: SceneDef = { id, name, kind: 'overlay', bgColor, elements, advance: { on: 'tap' }, transition: { type: 'fade', durationMs: 350 } }
   set({ dirty: true, activeSceneId: id, selectedIds: [], assets: { ...state.assets, ...assets }, project: { ...state.project, scenes: [...state.project.scenes, sd] } })
 }
 
 // ---- load / save ----------------------------------------------------------
-export function loadProject(project: Project, assets: AssetMap, path: string | null, trace?: TraceState): void {
+export function loadProject(raw: Project, assets: AssetMap, path: string | null, trace?: TraceState): void {
+  // Single chokepoint for every load path (file open, library, team import,
+  // version restore, boot) — upgrade old saves to the current schema here.
+  const project = migrateProject(raw)
   past.length = 0
   future.length = 0
   const activeSceneId = project.startSceneId && project.scenes.some((s) => s.id === project.startSceneId) ? project.startSceneId : project.scenes[0]?.id

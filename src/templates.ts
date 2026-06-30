@@ -6,9 +6,12 @@
 
 import JSZip from 'jszip'
 import type { Project, ProjectMeta, SceneDef, SceneElement } from '../runtime/scene'
-import type { AssetMap } from '../runtime/types'
+import type { AssetEntry, AssetMap } from '../runtime/types'
 import type { ProjectData } from './bridge'
 import { GAME_TEMPLATES } from '../runtime/games/registry'
+import { sfxPreviewUrl } from './sfxLibrary'
+
+const sfxAsset = (id: string): AssetEntry => ({ src: sfxPreviewUrl(id), w: 0, h: 0, kind: 'audio' })
 
 const VERSION = 1
 
@@ -69,11 +72,11 @@ const cta = (id: string, y: number, showOnWin?: boolean): SceneElement => ({
 const winScene = (): SceneDef => ({
   id: 'win',
   name: 'Win',
-  kind: 'win',
+  kind: 'overlay',
   advance: { on: 'timer', delayMs: 1400 },
   transition: { type: 'fade', durationMs: 300 },
   elements: [
-    { id: 'win_dim', type: 'dim', name: 'Dim', x: C, y: 960, anchor: 'center', zIndex: 50, mode: 'fit', dim: { color: '#0a1024', alpha: 0.72 } },
+    { id: 'win_dim', type: 'dim', name: 'Dim', x: C, y: 960, anchor: 'center', zIndex: 50, mode: 'fit', dim: { color: '#0a1024', alpha: 0.72 }, sfx: [{ event: 'sceneEnter', assetId: 'sfx_f_correctBright' }] },
     { id: 'win_txt', type: 'text', name: 'Congrats', x: C, y: 820, anchor: 'center', zIndex: 51, mode: 'fit', text: { value: 'You won!', fontSizePx: 130, fontWeight: 800, color: '#ffffff', align: 'center' }, animations: { entrance: { preset: 'pop', durationMs: 450, delayMs: 0, easing: 'ease-out', trigger: 'onMount' } } },
   ],
 })
@@ -84,7 +87,7 @@ const endScene = (): SceneDef => ({
   advance: { on: 'manual' },
   transition: { type: 'fade', durationMs: 350 },
   elements: [
-    { id: 'end_video', type: 'endscene', name: 'Endscene video', x: C, y: 960, w: 1080, h: 1920, anchor: 'center', zIndex: 1, mode: 'extend', endscene: { objectFit: 'cover', bgColor: '#000000', loop: true } },
+    { id: 'end_video', type: 'endscene', name: 'Endscene video', x: C, y: 960, w: 1080, h: 1920, anchor: 'center', zIndex: 1, mode: 'extend', endscene: { objectFit: 'cover', bgColor: '#000000', loop: true }, sfx: [{ event: 'sceneEnter', assetId: 'sfx_f_winJingle' }] },
     { id: 'end_title', type: 'text', name: 'Endscene title', x: C, y: 560, anchor: 'center', zIndex: 11, mode: 'fit', text: { value: 'Get the app!', fontSizePx: 120, fontWeight: 800, color: '#ffffff', align: 'center' } },
     cta('end_cta', 1150),
   ],
@@ -103,7 +106,10 @@ export const STARTERS: Starter[] = [
     label: 'Match → Win → Endscene',
     description: 'Header + match game, win overlay, then a video endscene with CTA.',
     build: () => ({
-      assets: {},
+      assets: {
+        sfx_f_correctBright: sfxAsset('f_correctBright'),
+        sfx_f_winJingle: sfxAsset('f_winJingle'),
+      },
       project: {
         meta: meta('New playable'),
         startSceneId: 'game',
@@ -131,7 +137,9 @@ export const STARTERS: Starter[] = [
     label: 'Spin & win → Endscene',
     description: 'Header + spin wheel; winning advances straight to the endscene CTA.',
     build: () => ({
-      assets: {},
+      assets: {
+        sfx_f_winJingle: sfxAsset('f_winJingle'),
+      },
       project: {
         meta: meta('Spin playable'),
         startSceneId: 'game',
@@ -163,28 +171,35 @@ export function gameTemplateStarters(): Starter[] {
     id: 'game:' + t.id,
     label: t.label,
     description: `Start a game → win → endscene flow with the ${t.label} mini-game.`,
-    build: (): ProjectData => ({
-      assets: {},
-      project: {
-        meta: meta(t.label),
-        startSceneId: 'game',
-        scenes: [
-          {
-            id: 'game',
-            name: t.label,
-            kind: 'game',
-            advance: { on: 'gameWin', delayMs: 400 },
-            transition: { type: 'fade', durationMs: 250 },
-            elements: [
-              ...headerBlock('hdr'),
-              { id: 'game_title', type: 'text', name: 'Prompt', x: C, y: 320, anchor: 'center', zIndex: 12, mode: 'fit', text: { value: 'Tap to play!', fontSizePx: 72, fontWeight: 800, color: '#ffffff', align: 'center' } },
-              { id: 'game_mount', type: 'game-mount', name: t.label, x: C, y: 1080, w: 980, h: 1100, anchor: 'center', zIndex: 5, mode: 'fit', game: { templateId: t.id, params: { ...t.defaultParams }, hintEnabled: true, hintIdleMs: 4000 } },
-            ],
-          },
-          winScene(),
-          endScene(),
-        ],
-      },
-    }),
+    build: (): ProjectData => {
+      const isScratch = t.id === 'scratch' || t.id === 'scratch_grid'
+      return {
+        assets: {
+          sfx_f_correctBright: sfxAsset('f_correctBright'),
+          sfx_f_winJingle: sfxAsset('f_winJingle'),
+          ...(isScratch ? { sfx_f_scratch: sfxAsset('f_scratch') } : {}),
+        },
+        project: {
+          meta: meta(t.label),
+          startSceneId: 'game',
+          scenes: [
+            {
+              id: 'game',
+              name: t.label,
+              kind: 'game',
+              advance: { on: 'gameWin', delayMs: 400 },
+              transition: { type: 'fade', durationMs: 250 },
+              elements: [
+                ...headerBlock('hdr'),
+                { id: 'game_title', type: 'text', name: 'Prompt', x: C, y: 320, anchor: 'center', zIndex: 12, mode: 'fit', text: { value: 'Tap to play!', fontSizePx: 72, fontWeight: 800, color: '#ffffff', align: 'center' } },
+                { id: 'game_mount', type: 'game-mount', name: t.label, x: C, y: 1080, w: 980, h: 1100, anchor: 'center', zIndex: 5, mode: 'fit', game: { templateId: t.id, params: { ...t.defaultParams }, hintEnabled: true, hintIdleMs: 4000 }, sfx: isScratch ? [{ event: 'whileScratching', assetId: 'sfx_f_scratch' }, { event: 'onReveal', assetId: 'sfx_f_correctBright' }] : undefined },
+              ],
+            },
+            ...(isScratch ? [] : [winScene()]),
+            endScene(),
+          ],
+        },
+      }
+    },
   }))
 }

@@ -144,5 +144,13 @@ export const SWIPE_TEMPLATE: GameTemplate = {
   paramFields: [{ key: 'count', label: 'Cards', type: 'number', min: 2, max: 8, step: 1 }],
   assetSlots: [{ key: 'images', label: 'Card image', list: true, countParam: 'count' }],
   defaultParams: { count: 4, images: [] },
+  // Slide left→right across the centered card (right swipe = like/fling).
+  defaultHandguide: {
+    nodes: [
+      { x: 0.35, y: 0.5 },
+      { x: 0.74, y: 0.5 },
+    ],
+    periodMs: 1700,
+  },
   create: createSwipe,
 }

@@ -2,27 +2,36 @@
 // to restack; the drop rewrites z-order. Click selects (Shift to multi-select).
 // Grouped elements (shared groupId) collapse under a folder header.
 
-import { useState } from 'react'
-import { patchElement, removeElement, reorderLayers, selectOnly, selectWithGroups, setSelection, toggleSelect, useEditorState } from '../store'
+import { useEffect, useState } from 'react'
+import { patchElement, removeElement, reorderLayers, selectOnly, selectWithGroups, setSelection, toggleLock, toggleSelect, useEditorState } from '../store'
 import type { SceneElement } from '../../runtime/scene'
 import { buildLayerTree } from '../layersTree'
-import { getGroupCollapsed, setGroupCollapsed } from '../uiState'
-import { ChevronRight, Eye, EyeOff, Folder, FolderOpen, GripVertical, Icon, LAYER_TYPE_ICON, LayoutGrid, X } from '../icons'
+import { getGroupCollapsed, pruneGroupCollapsed, setGroupCollapsed } from '../uiState'
+import { ChevronRight, Eye, EyeOff, Folder, FolderOpen, GripVertical, Icon, LAYER_TYPE_ICON, LayoutGrid, Lock, LockOpen, X } from '../icons'
 
 export function LayersPanel(): JSX.Element {
   const { scene, selectedIds } = useEditorState()
   const ordered = [...scene.elements].sort((a, b) => b.zIndex - a.zIndex) // front first
   const tree = buildLayerTree(ordered)
   const [dragId, setDragId] = useState<string | null>(null)
-  const [overId, setOverId] = useState<string | null>(null)
+  const [over, setOver] = useState<{ id: string; pos: 'before' | 'after' } | null>(null)
   const [, force] = useState(0)
 
-  const drop = (targetId: string): void => {
-    if (!dragId || dragId === targetId) return
-    const ids = ordered.map((e) => e.id)
-    const from = ids.indexOf(dragId)
-    const to = ids.indexOf(targetId)
-    ids.splice(to, 0, ids.splice(from, 1)[0])
+  // drop stale group-collapse flags so a reused groupId can't inherit them
+  const groupKey = tree.filter((n) => n.kind === 'group').map((n) => (n as { groupId: string }).groupId).join(',')
+  useEffect(() => {
+    pruneGroupCollapsed(new Set(groupKey ? groupKey.split(',') : []))
+  }, [groupKey])
+
+  // Insert the dragged row immediately before/after the target (deterministic,
+  // matches the drop indicator) and rewrite z-order.
+  const drop = (): void => {
+    if (!dragId || !over || dragId === over.id) return
+    const ids = ordered.map((e) => e.id).filter((id) => id !== dragId)
+    let ti = ids.indexOf(over.id)
+    if (ti < 0) return
+    if (over.pos === 'after') ti += 1
+    ids.splice(ti, 0, dragId)
     reorderLayers(ids)
   }
 
@@ -32,26 +41,28 @@ export function LayersPanel(): JSX.Element {
       className={
         'layer-row' +
         (selectedIds.includes(el.id) ? ' sel' : '') +
-        (overId === el.id ? ' over' : '') +
+        (over?.id === el.id ? (over.pos === 'before' ? ' drop-before' : ' drop-after') : '') +
         (el.hidden ? ' is-hidden' : '') +
+        (el.locked ? ' locked' : '') +
         (child ? ' child' : '')
       }
-      draggable
+      draggable={!el.locked}
       onDragStart={() => setDragId(el.id)}
       onDragOver={(e) => {
         e.preventDefault()
-        setOverId(el.id)
+        const r = e.currentTarget.getBoundingClientRect()
+        setOver({ id: el.id, pos: e.clientY < r.top + r.height / 2 ? 'before' : 'after' })
       }}
-      onDragLeave={() => setOverId((p) => (p === el.id ? null : p))}
+      onDragLeave={() => setOver((p) => (p?.id === el.id ? null : p))}
       onDrop={(e) => {
         e.preventDefault()
-        drop(el.id)
+        drop()
         setDragId(null)
-        setOverId(null)
+        setOver(null)
       }}
       onDragEnd={() => {
         setDragId(null)
-        setOverId(null)
+        setOver(null)
       }}
       onClick={(e) => (e.shiftKey ? toggleSelect(el.id) : selectOnly(el.id))}
     >
@@ -62,6 +73,16 @@ export function LayersPanel(): JSX.Element {
         <Icon icon={LAYER_TYPE_ICON[el.type] ?? LayoutGrid} size={14} />
       </span>
       <span className="layer-name">{el.name || el.id}</span>
+      <button
+        className={'layer-btn' + (el.locked ? ' on' : '')}
+        title={el.locked ? 'Unlock' : 'Lock'}
+        onClick={(e) => {
+          e.stopPropagation()
+          toggleLock(el.id)
+        }}
+      >
+        <Icon icon={el.locked ? Lock : LockOpen} size={14} />
+      </button>
       <button
         className="layer-btn"
         title={el.hidden ? 'Show' : 'Hide'}

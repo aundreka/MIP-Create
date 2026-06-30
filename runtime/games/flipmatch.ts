@@ -182,5 +182,13 @@ export const FLIPMATCH_TEMPLATE: GameTemplate = {
     { key: 'cover', label: 'Tile back image (optional)' },
   ],
   defaultParams: { pairs: 4, coverColor: '#2c3a5a', images: [], cover: '' },
+  // Tap one tile then its pair across the centered grid (flip this one, then that one).
+  defaultHandguide: {
+    nodes: [
+      { x: 0.32, y: 0.42, pauseMs: 300 },
+      { x: 0.68, y: 0.42 },
+    ],
+    periodMs: 1800,
+  },
   create: createFlipMatch,
 }

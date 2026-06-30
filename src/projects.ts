@@ -7,6 +7,7 @@ import type { Project, ProjectMeta } from '../runtime/scene'
 import type { AssetMap } from '../runtime/types'
 import type { ProjectData } from './bridge'
 import { blankProject, getState, loadProject, type TraceState } from './store'
+import { deleteProjectAssets, getAssetBytes, idbAvailable, putAssetBytes } from './assetStore'
 
 export interface ProjectRecord {
   id: string
@@ -20,6 +21,11 @@ const LAST_KEY = 'pa:lastProject'
 const LEGACY_KEY = 'pa:project'
 
 let currentId: string | null = null
+
+// Asset-byte keys (`${projectId}/${assetId}`) already flushed to IndexedDB this
+// session, so the debounced autosave doesn't re-write unchanged media every save.
+// Safe because an asset id's `src` is immutable once created (new media → new id).
+const flushed = new Set<string>()
 
 function now(): number {
   return Date.now()
@@ -71,12 +77,43 @@ export function loadProjectData(id: string): ProjectData | null {
   }
 }
 
-function writeData(id: string, data: ProjectData): void {
-  try {
-    localStorage.setItem(DATA_PREFIX + id, JSON.stringify(data))
-  } catch {
-    /* quota — large data URLs can overflow localStorage */
+// Persist a project. With IndexedDB, asset BYTES go to IDB and only metadata
+// (w/h/kind/compress, empty src) lands in localStorage — so media-heavy MIPs no
+// longer overflow the ~5MB cap. Without IDB, bytes stay inline (today's behavior).
+// localStorage is written synchronously; the returned promise resolves once the
+// IDB byte-write completes. Only assets WITH a src are written (so re-saving a
+// metadata-only bundle, e.g. a rename, never clobbers existing bytes).
+function writeData(id: string, data: ProjectData): Promise<void> {
+  let stored: ProjectData = data
+  const bytes: Record<string, string> = {}
+  if (idbAvailable()) {
+    const meta: AssetMap = {}
+    for (const [aid, a] of Object.entries(data.assets)) {
+      meta[aid] = { ...a, src: '' }
+      if (a.src && !flushed.has(id + '/' + aid)) bytes[aid] = a.src // only bytes not already in IDB
+    }
+    stored = { project: data.project, assets: meta, trace: data.trace }
   }
+  try {
+    localStorage.setItem(DATA_PREFIX + id, JSON.stringify(stored))
+  } catch {
+    /* quota — should be rare now that bytes live in IDB */
+  }
+  const ids = Object.keys(bytes)
+  return ids.length ? putAssetBytes(id, bytes).then(() => ids.forEach((aid) => flushed.add(id + '/' + aid))) : Promise.resolve()
+}
+
+// Fill in any asset `src` that lives in IndexedDB (empty src in the stored bundle).
+async function rehydrate(id: string, assets: AssetMap): Promise<AssetMap> {
+  const missing = Object.entries(assets)
+    .filter(([, a]) => !a.src)
+    .map(([aid]) => aid)
+  if (!missing.length) return assets
+  const bytes = await getAssetBytes(id, missing)
+  for (const aid of Object.keys(bytes)) flushed.add(id + '/' + aid) // confirmed present in IDB
+  const out: AssetMap = {}
+  for (const [aid, a] of Object.entries(assets)) out[aid] = a.src ? a : bytes[aid] != null ? { ...a, src: bytes[aid] } : a
+  return out
 }
 
 function upsertRecord(id: string, name: string): void {
@@ -85,33 +122,36 @@ function upsertRecord(id: string, name: string): void {
   writeIndex(list)
 }
 
-/** Persist the project currently open in the editor to its slot. */
-export function saveCurrent(): void {
-  if (!currentId) return
+/** Persist the project currently open in the editor to its slot. Resolves once the
+ * asset bytes are flushed (localStorage metadata is written synchronously). */
+export function saveCurrent(): Promise<void> {
+  if (!currentId) return Promise.resolve()
   const s = getState()
-  writeData(currentId, { project: s.project, assets: s.assets, trace: s.trace })
+  const done = writeData(currentId, { project: s.project, assets: s.assets, trace: s.trace })
   upsertRecord(currentId, s.project.meta.name || 'untitled')
+  return done
 }
 
 /** Open an existing project (persists the one being left first). */
-export function openProject(id: string): boolean {
+export async function openProject(id: string): Promise<boolean> {
   const d = loadProjectData(id)
   if (!d) return false
-  saveCurrent()
-  loadProject(d.project, d.assets, null, d.trace)
+  await saveCurrent()
+  const assets = await rehydrate(id, d.assets)
+  loadProject(d.project, assets, null, d.trace)
   setCurrent(id)
   return true
 }
 
 /** Create a new project from the given data (or a blank one) and switch to it. */
-export function createProject(data?: { project: Project; assets: AssetMap; trace?: TraceState }): string {
-  saveCurrent()
+export async function createProject(data?: { project: Project; assets: AssetMap; trace?: TraceState }): Promise<string> {
+  await saveCurrent()
   const d = data ?? blankProject()
   const id = newId()
-  writeData(id, { project: d.project, assets: d.assets, trace: d.trace })
-  upsertRecord(id, d.project.meta.name || 'untitled')
-  loadProject(d.project, d.assets, null, d.trace)
+  loadProject(d.project, d.assets, null, d.trace) // show it immediately
   setCurrent(id)
+  await writeData(id, { project: d.project, assets: d.assets, trace: d.trace })
+  upsertRecord(id, d.project.meta.name || 'untitled')
   return id
 }
 
@@ -121,22 +161,24 @@ export function createProject(data?: { project: Project; assets: AssetMap; trace
  * and open it. Overwrites the local slot if it already exists. Persists the
  * project being left first. Used by the Team panel's "Open".
  */
-export function importProjectData(id: string, data: ProjectData): void {
-  saveCurrent()
-  writeData(id, data)
-  upsertRecord(id, data.project.meta.name || 'untitled')
-  loadProject(data.project, data.assets, null, data.trace)
+export async function importProjectData(id: string, data: ProjectData): Promise<void> {
+  await saveCurrent()
+  loadProject(data.project, data.assets, null, data.trace) // data carries src (team pull)
   setCurrent(id)
+  await writeData(id, data)
+  upsertRecord(id, data.project.meta.name || 'untitled')
 }
 
-export function duplicateProject(id: string): string | null {
+export async function duplicateProject(id: string): Promise<string | null> {
   const d = loadProjectData(id)
   if (!d) return null
-  saveCurrent()
-  const copy: ProjectData = JSON.parse(JSON.stringify(d))
+  await saveCurrent()
+  // Copy the source's bytes under the new id (rehydrate then re-split via writeData).
+  const assets = await rehydrate(id, d.assets)
+  const copy: ProjectData = { project: JSON.parse(JSON.stringify(d.project)), assets, trace: d.trace }
   copy.project.meta = { ...copy.project.meta, name: (copy.project.meta.name || 'untitled') + ' copy' }
   const nid = newId()
-  writeData(nid, copy)
+  await writeData(nid, copy)
   upsertRecord(nid, copy.project.meta.name)
   return nid
 }
@@ -147,7 +189,7 @@ export function renameProject(id: string, name: string): void {
   const d = loadProjectData(id)
   if (d) {
     d.project.meta = { ...d.project.meta, name }
-    writeData(id, d)
+    void writeData(id, d) // metadata-only re-save; leaves IDB bytes intact
   }
 }
 
@@ -163,8 +205,16 @@ export function patchProjectMeta(id: string, patch: Partial<ProjectMeta>): boole
   const d = loadProjectData(id)
   if (!d) return false
   d.project.meta = { ...d.project.meta, ...patch }
-  writeData(id, d)
+  void writeData(id, d) // metadata-only re-save; leaves IDB bytes intact
   return true
+}
+
+/** Load a project with its asset bytes rehydrated from IDB — for thumbnail rendering. */
+export async function loadProjectPreview(id: string): Promise<ProjectData | null> {
+  const d = loadProjectData(id)
+  if (!d) return null
+  const assets = await rehydrate(id, d.assets)
+  return { project: d.project, assets, trace: d.trace }
 }
 
 export function deleteProject(id: string): void {
@@ -174,10 +224,12 @@ export function deleteProject(id: string): void {
   } catch {
     /* */
   }
+  void deleteProjectAssets(id) // drop the project's bytes from IndexedDB
+  for (const k of [...flushed]) if (k.startsWith(id + '/')) flushed.delete(k)
 }
 
 /** One-time migration of the old single-project autosave into the library. */
-function migrateLegacy(): void {
+async function migrateLegacy(): Promise<void> {
   if (readIndex().length) return
   const raw = localStorage.getItem(LEGACY_KEY)
   if (!raw) return
@@ -185,7 +237,7 @@ function migrateLegacy(): void {
     const d = JSON.parse(raw) as ProjectData
     if (d?.project?.scenes) {
       const id = newId()
-      writeData(id, d)
+      await writeData(id, d) // await so the bytes are in IDB before boot rehydrates
       upsertRecord(id, d.project.meta.name || 'untitled')
       localStorage.removeItem(LEGACY_KEY)
     }
@@ -198,8 +250,8 @@ function migrateLegacy(): void {
  * Resolve which project to open on boot: the last-open one, else the most recent,
  * else create a fresh blank project. Loads it into the store and returns its id.
  */
-export function bootProjects(): string {
-  migrateLegacy()
+export async function bootProjects(): Promise<string> {
+  await migrateLegacy()
 
   // Self-heal: drop index records whose data slot is missing/corrupt (e.g. a
   // write that silently hit the localStorage quota). Otherwise an orphan record
@@ -223,7 +275,8 @@ export function bootProjects(): string {
   for (const id of candidates) {
     const d = loadProjectData(id)
     if (d) {
-      loadProject(d.project, d.assets, null, d.trace)
+      const assets = await rehydrate(id, d.assets)
+      loadProject(d.project, assets, null, d.trace)
       setCurrent(id)
       return id
     }

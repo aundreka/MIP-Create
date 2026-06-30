@@ -4,7 +4,7 @@
 
 import { importAudio } from '../bridge'
 import { addAsset, nextId } from '../store'
-import { ensureLibrarySfx, sfxDataUrl, sfxItems } from '../sfxLibrary'
+import { ensureLibrarySfx, sfxItems, sfxPreviewUrl } from '../sfxLibrary'
 import { Icon, Play, Upload } from '../icons'
 import { Modal } from '../ui'
 
@@ -12,7 +12,7 @@ export function SfxLibrary(props: { onPick: (assetId: string) => void; onClose: 
   const items = sfxItems()
   const groups = [...new Set(items.map((i) => i.group))]
   const audition = (id: string): void => {
-    const el = new Audio(sfxDataUrl(id))
+    const el = new Audio(sfxPreviewUrl(id))
     el.volume = 0.9
     void el.play().catch(() => {})
   }
@@ -44,8 +44,10 @@ export function SfxLibrary(props: { onPick: (assetId: string) => void; onClose: 
                   <button
                     className="sfxlib-use"
                     onClick={() => {
-                      props.onPick(ensureLibrarySfx(i.id))
-                      props.onClose()
+                      void ensureLibrarySfx(i.id).then((aid) => {
+                        props.onPick(aid)
+                        props.onClose()
+                      })
                     }}
                   >
                     Use

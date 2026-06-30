@@ -19,15 +19,27 @@ function installLifecycleStubs(): void {
 
 function viewport(): { w: number; h: number } {
   const vv = window.visualViewport
-  const w = window.innerWidth || vv?.width || document.documentElement.clientWidth || 1
-  const h = window.innerHeight || vv?.height || document.documentElement.clientHeight || 1
+  // Prefer visualViewport dimensions: on Chrome Android (which ignores user-scalable=no)
+  // position:fixed;inset:0 tracks the *visual* viewport, so innerWidth/Height (layout
+  // viewport) would give wrong metrics after a pinch-zoom. On desktop and iOS they match.
+  if (vv) return { w: Math.max(1, Math.round(vv.width)), h: Math.max(1, Math.round(vv.height)) }
+  const w = window.innerWidth || document.documentElement.clientWidth || 1
+  const h = window.innerHeight || document.documentElement.clientHeight || 1
   return { w: Math.max(1, Math.round(w)), h: Math.max(1, Math.round(h)) }
 }
 
 export async function boot(project: Project, assets: AssetMap, opts: { mount?: HTMLElement } = {}): Promise<SceneManager> {
   installLifecycleStubs()
   setDesign(project.meta.baseW || 1080, project.meta.baseH || 1920)
-  if (project.meta.clickUrl) setStoreUrl(project.meta.clickUrl)
+  const _ctaMode = project.meta.clickUrlMode ?? 'store'
+  if (_ctaMode === 'none') {
+    setStoreUrl({ ios: '', android: '' })
+  } else if (_ctaMode === 'single' && project.meta.clickUrl) {
+    const _single = project.meta.clickUrl.ios
+    setStoreUrl({ ios: _single, android: _single })
+  } else if (project.meta.clickUrl) {
+    setStoreUrl(project.meta.clickUrl)
+  }
   // pick the playable's language from the browser (falls back to the base copy)
   setActiveLocale(resolveLocale(project.meta.locales))
 

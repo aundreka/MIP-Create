@@ -22,7 +22,7 @@ export interface FrameMetrics {
 }
 
 export type ParentToFrame =
-  | { type: 'pa:render'; scene: Scene; assets: AssetMap; interactive?: boolean; locale?: string | null } // single scene (editor canvas)
+  | { type: 'pa:render'; scene: Scene; assets?: AssetMap | null; interactive?: boolean; locale?: string | null } // single scene (editor canvas); assets omitted when unchanged
   | { type: 'pa:play'; project: Project; assets: AssetMap; locale?: string | null } // full flow (preview)
   | { type: 'pa:setHidden'; id: string; hidden: boolean }
 

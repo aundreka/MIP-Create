@@ -193,5 +193,9 @@ export const CONVEYOR_TEMPLATE: GameTemplate = {
   ],
   assetSlots: [{ key: 'itemImages', label: 'Product image (1st = wanted)', list: true, countParam: 'types' }],
   defaultParams: { need: 5, types: 3, speed: 0.4, spawnMs: 800, itemImages: [] },
+  // Tap an item riding the belt (belt sits at ~0.55 height across the card).
+  defaultHandguide: {
+    nodes: [{ x: 0.5, y: 0.55 }],
+  },
   create: createConveyor,
 }

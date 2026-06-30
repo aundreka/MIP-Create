@@ -24,13 +24,15 @@ import {
 import { currentProjectId, importProjectData, saveCurrent } from '../projects'
 import { getState } from '../store'
 import { downloadBlob } from '../export'
-import { Modal, Select } from '../ui'
+import { Select } from '../ui'
 import { Icon, RotateCcw, Trash2, Upload } from '../icons'
 
 const STATUSES: MipStatus[] = ['draft', 'in_review', 'approved', 'shipped']
 const errText = (e: unknown): string => String((e as Error)?.message ?? e)
 
-export function TeamPanel(props: { onClose: () => void }): JSX.Element {
+// The team library body, rendered as a tab inside the Home screen. `onOpened`
+// fires after pulling a MIP into the local library (Home closes → editor opens).
+export function TeamLibrary(props: { onOpened: () => void }): JSX.Element {
   const [session, setSession] = useState<Session | null>(null)
   const [ready, setReady] = useState(false)
   const [email, setEmail] = useState('')
@@ -103,8 +105,8 @@ export function TeamPanel(props: { onClose: () => void }): JSX.Element {
   const doOpen = (row: MipRow): void =>
     wrap(async () => {
       const data = await pull(row.id, row.data_path)
-      importProjectData(row.id, data)
-      props.onClose()
+      await importProjectData(row.id, data)
+      props.onOpened()
     })()
 
   const doDownload = (row: MipRow): void =>
@@ -125,7 +127,7 @@ export function TeamPanel(props: { onClose: () => void }): JSX.Element {
   }, [mips])
 
   return (
-    <Modal title="Team · shared MIP library" onClose={props.onClose} size="lg" className="team-modal">
+    <div className="team-library">
       {!isCloudConfigured() ? (
         <div className="hint pad">
           Cloud isn’t configured. Add <b>VITE_SUPABASE_URL</b> and <b>VITE_SUPABASE_ANON_KEY</b> to <b>.env.local</b> and restart the dev server.
@@ -213,10 +215,10 @@ export function TeamPanel(props: { onClose: () => void }): JSX.Element {
           )}
           <div className="hint pad">
             Each person owns the MIPs they publish; everyone can browse and download. PMs/admins can move status and reassign owners.
-            Consistency across a client’s MIPs is checked by <b>QA</b> (Topbar → QA).
+            Consistency across a client’s MIPs is checked in the <b>QA &amp; reports</b> panel (≡ menu) and at export.
           </div>
         </>
       )}
-    </Modal>
+    </div>
   )
 }

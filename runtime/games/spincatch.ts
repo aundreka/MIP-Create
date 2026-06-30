@@ -160,5 +160,9 @@ export const SPINCATCH_TEMPLATE: GameTemplate = {
     { key: 'centerImage', label: 'Center image (optional)' },
   ],
   defaultParams: { catches: 3, speed: 200, objectImage: '', centerImage: '' },
+  // Tap the orbiting object on the ring (a point right of the centred hub).
+  defaultHandguide: {
+    nodes: [{ x: 0.78, y: 0.5 }],
+  },
   create: createSpinCatch,
 }

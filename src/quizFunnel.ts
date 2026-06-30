@@ -204,7 +204,7 @@ function questionScene(q: ParsedQuestion, index: number, total: number, st: Funn
   return {
     id: nextId('scene'),
     name: `Q${index + 1}`,
-    kind: 'custom',
+    kind: 'overlay',
     bgColor: st.bg,
     elements: els,
     advance: { on: 'manual' },
@@ -218,7 +218,7 @@ function introScene(st: FunnelStyle, dims: Dims): SceneDef {
   return {
     id: nextId('scene'),
     name: 'Intro',
-    kind: 'custom',
+    kind: 'overlay',
     bgColor: st.bg,
     elements: [
       { id: nextId('text'), type: 'text', name: 'Brand', x: cx, y: Math.round(baseH * 0.34), anchor: 'center', zIndex: 10, mode: 'fit', text: { value: st.brand, fontSizePx: 96, fontWeight: 800, color: st.accent, align: 'center' } },

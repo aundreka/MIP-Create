@@ -147,5 +147,9 @@ export const WHACK_TEMPLATE: GameTemplate = {
     { key: 'holeImage', label: 'Hole image' },
   ],
   defaultParams: { holes: 6, hits: 5, popMs: 1100, gapMs: 700, moleImage: '', holeImage: '' },
+  // Tap a mole as it pops up (top-row centre hole of the 3-wide grid).
+  defaultHandguide: {
+    nodes: [{ x: 0.5, y: 0.38 }],
+  },
   create: createWhack,
 }

@@ -9,6 +9,9 @@ contextBridge.exposeInMainWorld('editorAPI', {
   loadProject: () => ipcRenderer.invoke('project:load'),
   fetchDataUrl: (url) => ipcRenderer.invoke('net:fetch', url),
   transcodeMedia: (dataUrl, kind, opts) => ipcRenderer.invoke('media:transcode', dataUrl, kind, opts),
+  readRuntimeSrc: () => ipcRenderer.invoke('runtime:read'),
+  compressHtml: (html) => ipcRenderer.invoke('html:compress', html),
   applovinOpen: (url) => ipcRenderer.invoke('applovin:open', url),
+  applovinProbe: (payload) => ipcRenderer.invoke('applovin:probe', payload),
   applovinUpload: (payload) => ipcRenderer.invoke('applovin:upload', payload),
 })

@@ -10,18 +10,23 @@ import type { ProjectMeta, Scene, SceneDef, SceneElement } from '../../runtime/s
 import type { AssetMap } from '../../runtime/types'
 import { ContextMenu, type MenuItem } from '../panels/ContextMenu'
 import { getFramePos, setFramePos } from '../canvasLayout'
+import { resizeBox } from './geometry'
 import { isSceneHidden, useCanvasView } from '../canvasView'
 import { endPathDraw, pathDrawTarget, usePathDraw } from '../drawMode'
 import { useEditLocale } from '../locale'
 import {
   beginTransaction,
   bulkPatch,
+  copySelected,
   copyStyle,
   duplicateSelected,
   endTransaction,
   getState,
   groupSelected,
+  hasElementClip,
   hasStyleClip,
+  moveSelectedToScene,
+  pasteElements,
   patchElement,
   patchGeometry,
   pasteStyle,
@@ -82,13 +87,20 @@ function CanvasFrame(props: {
   renderKey: number
   locale: string | null
   onLayout: (id: string, rects: FrameRect[], metrics: FrameMetrics) => void
+  iframeRef?: (el: HTMLIFrameElement | null) => void
 }): JSX.Element {
-  const { sceneId, def, meta, assets, renderKey, locale, onLayout } = props
+  const { sceneId, def, meta, assets, renderKey, locale, onLayout, iframeRef } = props
   const ref = useRef<HTMLIFrameElement>(null)
   const ready = useRef(false)
+  // Track the last assets reference sent — only include assets in the message when
+  // they actually change. Structured-cloning the full asset map (all image data URIs)
+  // on every pointer-move event blocks the main thread and kills live drag updates.
+  const lastSentAssets = useRef<AssetMap | null>(null)
   const post = useCallback(() => {
-    const scene: Scene = { meta: { ...meta, bgMatchColor: def.bgColor ?? meta.bgMatchColor }, elements: def.elements }
-    ref.current?.contentWindow?.postMessage({ type: 'pa:render', scene, assets, interactive: false, locale }, '*')
+    const scene: Scene = { meta: { ...meta, bgMatchColor: def.bgColor !== undefined ? def.bgColor : meta.bgMatchColor }, elements: def.elements, kind: def.kind, overlay: def.overlay }
+    const changed = lastSentAssets.current !== assets
+    lastSentAssets.current = assets
+    ref.current?.contentWindow?.postMessage({ type: 'pa:render', scene, assets: changed ? assets : undefined, interactive: false, locale }, '*')
   }, [def, meta, assets, locale])
   useEffect(() => {
     if (ready.current) post()
@@ -108,7 +120,18 @@ function CanvasFrame(props: {
     window.addEventListener('message', onMsg)
     return () => window.removeEventListener('message', onMsg)
   }, [post, sceneId, onLayout])
-  return <iframe ref={ref} className="canvas-frame" src="./runtime-frame.html" title={sceneId} onLoad={post} />
+  return (
+    <iframe
+      ref={(el) => {
+        (ref as React.MutableRefObject<HTMLIFrameElement | null>).current = el
+        iframeRef?.(el)
+      }}
+      className="canvas-frame"
+      src="./runtime-frame.html"
+      title={sceneId}
+      onLoad={post}
+    />
+  )
 }
 
 interface Props {
@@ -121,7 +144,7 @@ interface Props {
 
 type Drag =
   | { mode: 'move'; start: { px: number; py: number }; base: Record<string, { x: number; y: number }>; bbox: { x: number; y: number; w: number; h: number } }
-  | { mode: 'resize'; id: string; h: Handle; start: { px: number; py: number }; kind: 'wh' | 'scale' | 'font'; sw: number; sh: number; sScale: number; sFont: number; nativeW: number }
+  | { mode: 'resize'; id: string; h: Handle; start: { px: number; py: number }; kind: 'wh' | 'scale' | 'font'; sw: number; sh: number; sScale: number; sFont: number; nativeW: number; sx: number; sy: number; anchor: SceneElement['anchor']; cx: number; cy: number; sDist: number }
   | { mode: 'group-scale'; start: { px: number; py: number }; cx: number; cy: number; sDist: number; members: { id: string; x: number; y: number; w?: number; h?: number; scale?: number; font?: number }[] }
   | { mode: 'marquee'; start: { px: number; py: number } }
   | { mode: 'pan'; start: { x: number; y: number }; pan0: { x: number; y: number } }
@@ -139,6 +162,11 @@ export function EditorCanvas(props: Props): JSX.Element {
 
   const areaRef = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLDivElement>(null)
+  // Direct iframe ref for drag updates — bypasses the useEffect chain so position
+  // changes reach the iframe in the same event handler, not one paint cycle later.
+  const activeIframeRef = useRef<HTMLIFrameElement | null>(null)
+  const editLocaleRef = useRef(editLocale)
+  editLocaleRef.current = editLocale
 
   const [box, setBox] = useState({ w: 506, h: 900 })
   const [renderKey, setRenderKey] = useState(0)
@@ -149,6 +177,15 @@ export function EditorCanvas(props: Props): JSX.Element {
   const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
   const [editing, setEditing] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  // During a move-drag, the scene frame the cursor is hovering (other than the active
+  // one) — dropping there relocates the selection into that scene.
+  const [dropTarget, setDropTarget] = useState<string | null>(null)
+  // Reveal-image editor (scratch): which game-mount's reveal is being positioned, the
+  // live transform during a drag, and the in-flight gesture.
+  const [revealEdit, setRevealEdit] = useState<string | null>(null)
+  const [revealLive, setRevealLive] = useState<{ scale: number; x: number; y: number } | null>(null)
+  const revealDrag = useRef<{ mode: 'move' | 'scale'; sx: number; sy: number; startX: number; startY: number; startScale: number; rectW: number; rectH: number; ccx: number; ccy: number; startDist: number; last: { scale: number; x: number; y: number } | null } | null>(null)
+  const curRevealRef = useRef<{ scale: number; x: number; y: number }>({ scale: 1, x: 0, y: 0 })
   const [posTick, setPosTick] = useState(0)
   const [panning, setPanning] = useState(false)
   const pathDraw = usePathDraw()
@@ -169,10 +206,55 @@ export function EditorCanvas(props: Props): JSX.Element {
   const liveRef = useRef({ scene, selectedIds, landscape, rects, zoom, pan, activeSceneId })
   liveRef.current = { scene, selectedIds, landscape, rects, zoom, pan, activeSceneId }
 
+  // Sends the current scene state directly to the active iframe without going through
+  // the React render / useEffect cycle. Called after every drag mutation so the canvas
+  // updates in the same event handler, not after the next paint.
+  const sendToActiveFrame = useCallback(() => {
+    const iw = activeIframeRef.current?.contentWindow
+    if (!iw) return
+    const st = getState()
+    const sd = st.project.scenes.find((s) => s.id === st.activeSceneId)
+    if (!sd) return
+    const scene: Scene = {
+      meta: { ...st.project.meta, bgMatchColor: sd.bgColor !== undefined ? sd.bgColor : st.project.meta.bgMatchColor },
+      elements: sd.elements,
+      kind: sd.kind,
+      overlay: sd.overlay,
+    }
+    // Assets are not included here — the iframe caches them from the last full render.
+    iw.postMessage({ type: 'pa:render', scene, interactive: false, locale: editLocaleRef.current }, '*')
+  }, [])
+
   // active scene's metrics drive the overlay math
   useEffect(() => {
     metricsRef.current = metricsByScene.current[activeSceneId] ?? metricsRef.current
   }, [activeSceneId, rectsByScene])
+
+  // Exit the inline text editor if its element was deleted or we switched scenes
+  // (element ids are project-unique), so `editing` can't linger and desync.
+  useEffect(() => {
+    if (editing && !scene.elements.some((e) => e.id === editing)) setEditing(null)
+  }, [editing, scene])
+
+  // Leave reveal-edit if the element is gone (delete / scene switch), or on Escape.
+  useEffect(() => {
+    if (revealEdit && !scene.elements.some((e) => e.id === revealEdit)) {
+      setRevealEdit(null)
+      setRevealLive(null)
+    }
+  }, [revealEdit, scene])
+  useEffect(() => {
+    if (!revealEdit) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        revealDrag.current = null
+        setRevealEdit(null)
+        setRevealLive(null)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [revealEdit])
 
   const handleLayout = useCallback((id: string, r: FrameRect[], m: FrameMetrics): void => {
     metricsByScene.current[id] = m
@@ -245,6 +327,24 @@ export function EditorCanvas(props: Props): JSX.Element {
   }
   const designDelta = (dpx: number, dpy: number) => ({ dx: dpx / metricsRef.current.s, dy: dpy / metricsRef.current.s })
 
+  // Which visible frame (other than the active one) a client point lands on. The move
+  // overlay holds pointer capture, so the cursor can roam over other frames mid-drag;
+  // a frame's stage fills box.w × box.h at its world position (the label sits above it).
+  const frameUnderClient = (clientX: number, clientY: number): string | null => {
+    const area = areaRef.current
+    if (!area) return null
+    const r = area.getBoundingClientRect()
+    const { zoom: z, pan: pn, activeSceneId: act } = liveRef.current
+    const wx = (clientX - r.left - pn.x) / z
+    const wy = (clientY - r.top - pn.y) / z
+    for (const sd of visibleScenes) {
+      if (sd.id === act) continue
+      const p = positions[sd.id]
+      if (p && wx >= p.x && wx <= p.x + box.w && wy >= p.y && wy <= p.y + box.h) return sd.id
+    }
+    return null
+  }
+
   const selectableOnCanvas = (r: FrameRect): boolean => {
     if (r.type === 'background' || r.type === 'dim') return false
     const el = liveRef.current.scene.elements.find((e) => e.id === r.id)
@@ -302,6 +402,13 @@ export function EditorCanvas(props: Props): JSX.Element {
 
   const onOverlayPointerDown = (e: React.PointerEvent): void => {
     if (editing) return
+    if (revealEdit) {
+      // A pointer-down reaching the overlay = clicked outside the reveal box (the box
+      // stops its own events) → exit reveal-edit mode.
+      setRevealEdit(null)
+      setRevealLive(null)
+      return
+    }
     const { px, py } = toIntrinsic(e.clientX, e.clientY)
     if (pathDrawTarget()) {
       // each click drops a waypoint; double-click / Enter finishes (handled below)
@@ -381,8 +488,10 @@ export function EditorCanvas(props: Props): JSX.Element {
       kind = 'scale'
       sScale = g.scale
     }
+    const cx = rect.x + rect.w / 2 // intrinsic center → distance-based scale/font
+    const cy = rect.y + rect.h / 2
     beginTransaction()
-    drag.current = { mode: 'resize', id, h, start: { px, py }, kind, sw, sh, sScale, sFont, nativeW }
+    drag.current = { mode: 'resize', id, h, start: { px, py }, kind, sw, sh, sScale, sFont, nativeW, sx: g.x, sy: g.y, anchor: el.anchor, cx, cy, sDist: Math.hypot(px - cx, py - cy) || 1 }
   }
 
   const onPointerMove = (e: React.PointerEvent): void => {
@@ -405,20 +514,26 @@ export function EditorCanvas(props: Props): JSX.Element {
       for (const id of Object.keys(d.base)) patches[id] = { x: Math.round(d.base[id].x + dd.dx), y: Math.round(d.base[id].y + dd.dy) }
       if (liveRef.current.landscape) for (const id of Object.keys(patches)) patchGeometry(id, patches[id])
       else bulkPatch(patches)
+      sendToActiveFrame()
+      // Highlight another frame when the cursor is over it — dropping moves there.
+      setDropTarget(frameUnderClient(e.clientX, e.clientY))
     } else if (d.mode === 'resize') {
-      const dd = designDelta(px - d.start.px, py - d.start.py)
       if (d.kind === 'wh') {
-        const nw = d.h.hx !== 0 ? Math.max(8, Math.round(d.sw + d.h.hx * dd.dx * 2)) : Math.round(d.sw)
-        const nh = d.h.hy !== 0 ? Math.max(8, Math.round(d.sh + d.h.hy * dd.dy * 2)) : Math.round(d.sh)
-        patchGeometry(d.id, { w: nw, h: nh })
+        // Move only the grabbed edge(s); keep the opposite edge fixed regardless of
+        // the element's anchor (previously grew symmetrically about center / doubled).
+        const dd = designDelta(px - d.start.px, py - d.start.py)
+        patchGeometry(d.id, resizeBox({ anchor: d.anchor, x: d.sx, y: d.sy, w: d.sw, h: d.sh }, d.h.hx, d.h.hy, dd.dx, dd.dy))
       } else if (d.kind === 'font') {
-        const ratio = Math.max(0.2, (d.sw + d.h.hx * dd.dx * 2) / Math.max(1, d.sw))
+        // Scale by how far the pointer moved relative to the element center, so
+        // every handle (incl. vertical edges) resizes intuitively.
+        const f = Math.max(0.2, Math.hypot(px - d.cx, py - d.cy) / d.sDist)
         const el = liveRef.current.scene.elements.find((x) => x.id === d.id)
-        if (el?.text) patchElement(d.id, { text: { ...el.text, fontSizePx: Math.max(8, Math.round(d.sFont * ratio)) } })
+        if (el?.text) patchElement(d.id, { text: { ...el.text, fontSizePx: Math.max(8, Math.round(d.sFont * f)) } })
       } else {
-        const ns = Math.max(0.05, +(d.sScale + (d.h.hx * dd.dx * 2) / Math.max(1, d.nativeW)).toFixed(3))
-        patchGeometry(d.id, { scale: ns })
+        const f = Math.max(0.05, Math.hypot(px - d.cx, py - d.cy) / d.sDist)
+        patchGeometry(d.id, { scale: +(d.sScale * f).toFixed(3) })
       }
+      sendToActiveFrame()
     } else if (d.mode === 'group-scale') {
       const f = Math.max(0.1, Math.hypot(px - (d.cx * metricsRef.current.s + metricsRef.current.offX), py - (d.cy * metricsRef.current.s + metricsRef.current.offY)) / d.sDist)
       const patches: Record<string, Partial<SceneElement>> = {}
@@ -434,6 +549,7 @@ export function EditorCanvas(props: Props): JSX.Element {
         patches[m.id] = p
       }
       bulkPatch(patches)
+      sendToActiveFrame()
     } else if (d.mode === 'marquee') {
       setMarquee({ x: Math.min(d.start.px, px), y: Math.min(d.start.py, py), w: Math.abs(px - d.start.px), h: Math.abs(py - d.start.py) })
     }
@@ -469,9 +585,38 @@ export function EditorCanvas(props: Props): JSX.Element {
   const commitPathRef = useRef<() => void>(() => {})
   commitPathRef.current = commitPath
 
-  const endInteraction = (): void => {
+  const endInteraction = (e?: React.PointerEvent): void => {
+    // Release the pointer capture taken on pointerdown so an interrupted/cancelled
+    // gesture can't leak capture and swallow later events.
+    if (e && overlayRef.current?.hasPointerCapture?.(e.pointerId)) overlayRef.current.releasePointerCapture(e.pointerId)
     const d = drag.current
     if (!d) return
+    // Cross-scene drop: a move-drag released over another frame relocates the selection
+    // into that scene at the drop point. The two frames share a coordinate system, so
+    // correcting by their world offset (in design units) keeps each element under the
+    // cursor. Done while the transaction is still open → the whole gesture is one undo.
+    const dropId = e && e.type !== 'pointercancel' && d.mode === 'move' ? frameUnderClient(e.clientX, e.clientY) : null
+    if (d.mode === 'move' && dropId) {
+      const s = metricsRef.current.s || 1
+      const posA = positions[liveRef.current.activeSceneId]
+      const posB = positions[dropId]
+      if (posA && posB) {
+        const ddx = (posA.x - posB.x) / s
+        const ddy = (posA.y - posB.y) / s
+        const place: Record<string, { x: number; y: number }> = {}
+        for (const id of Object.keys(d.base)) {
+          const el = liveRef.current.scene.elements.find((x) => x.id === id)
+          if (el) { const g = effGeom(el, liveRef.current.landscape); place[id] = { x: g.x + ddx, y: g.y + ddy } }
+        }
+        moveSelectedToScene(dropId, place)
+      }
+      endTransaction()
+      drag.current = null
+      setMarquee(null)
+      setGuides({ x: [], y: [] })
+      setDropTarget(null)
+      return
+    }
     if (d.mode === 'marquee' && marquee) {
       const hit = liveRef.current.rects
         .filter(selectableOnCanvas)
@@ -483,6 +628,7 @@ export function EditorCanvas(props: Props): JSX.Element {
     drag.current = null
     setMarquee(null)
     setGuides({ x: [], y: [] })
+    setDropTarget(null)
   }
 
   const onDoubleClick = (e: React.MouseEvent): void => {
@@ -492,7 +638,39 @@ export function EditorCanvas(props: Props): JSX.Element {
     }
     const { px, py } = toIntrinsic(e.clientX, e.clientY)
     const hit = hitTest(px, py)
-    if (hit && hit.type === 'text') setEditing(hit.id)
+    if (!hit) return
+    if (hit.type === 'text') {
+      setEditing(hit.id)
+      return
+    }
+    // Double-click a scratch card that has a prize image → edit the reveal transform.
+    const el = liveRef.current.scene.elements.find((x) => x.id === hit.id)
+    const g = el?.game
+    if (el && el.type === 'game-mount' && g && g.templateId === 'scratch' && g.params?.prize) {
+      if (g.params?.fit !== 'fit') patchElement(el.id, { game: { ...g, params: { ...(g.params ?? {}), fit: 'fit' } } })
+      setRevealLive(null)
+      setRevealEdit(hit.id)
+    }
+    // Double-click a scratch grid cell → select it in the inspector
+    if (el && el.type === 'game-mount' && g && g.templateId === 'scratch_grid') {
+      const cols = Math.max(1, Math.min(4, Number(g.params?.cols ?? 2)))
+      const rows = Math.max(1, Math.min(4, Number(g.params?.rows ?? 2)))
+      const gap = Math.max(0, Number(g.params?.gap ?? 10))
+      const colGap = Math.max(0, Number(g.params?.colGap ?? gap))
+      const rowGap = Math.max(0, Number(g.params?.rowGap ?? gap))
+      const ew = el.w ?? 980
+      const eh = el.h ?? 1100
+      // el.x/y is the center (anchor=center); convert to top-left edge
+      const ex = el.x - ew / 2
+      const ey = el.y - eh / 2
+      const lx = px - ex
+      const ly = py - ey
+      const cellW = (ew - gap * 2 - colGap * (cols - 1)) / cols
+      const cellH = (eh - gap * 2 - rowGap * (rows - 1)) / rows
+      const col = Math.max(0, Math.min(cols - 1, Math.floor((lx - gap) / (cellW + colGap))))
+      const row = Math.max(0, Math.min(rows - 1, Math.floor((ly - gap) / (cellH + rowGap))))
+      window.dispatchEvent(new CustomEvent('pa:grid-cell-select', { detail: { elementId: el.id, cellIdx: row * cols + col } }))
+    }
   }
 
   const onContextMenu = (e: React.MouseEvent): void => {
@@ -515,6 +693,9 @@ export function EditorCanvas(props: Props): JSX.Element {
   const onFrameLabelMove = (e: React.PointerEvent): void => {
     const d = frameDrag.current
     if (!d) return
+    // Ignore sub-threshold jitter so a click on the label doesn't persist a
+    // 1px frame move (it would also be saved to localStorage).
+    if (!d.moved && Math.abs(e.clientX - d.sx) <= 3 && Math.abs(e.clientY - d.sy) <= 3) return
     const z = liveRef.current.zoom
     d.moved = true
     setFramePos(d.id, { x: Math.round(d.bx + (e.clientX - d.sx) / z), y: Math.round(d.by + (e.clientY - d.sy) / z) })
@@ -593,6 +774,10 @@ export function EditorCanvas(props: Props): JSX.Element {
   // ---- keyboard -------------------------------------------------------------
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      // Never hijack keys while typing in a field (incl. the inline-text editor),
+      // so a space doesn't arm pan and Esc/Enter/Delete don't act on the canvas.
+      const tag = (document.activeElement?.tagName ?? '').toLowerCase()
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') return
       if (pathDrawTarget()) {
         if (e.key === 'Escape') {
           endPathDraw()
@@ -607,11 +792,12 @@ export function EditorCanvas(props: Props): JSX.Element {
         }
       }
       if (e.code === 'Space') spaceRef.current = true
-      const tag = (document.activeElement?.tagName ?? '').toLowerCase()
-      if (tag === 'input' || tag === 'textarea' || tag === 'select') return
       const mod = e.ctrlKey || e.metaKey
       if (mod && e.key.toLowerCase() === 'z') return (e.preventDefault(), e.shiftKey ? redo() : undo())
       if (mod && e.key.toLowerCase() === 'd') return (e.preventDefault(), duplicateSelected())
+      if (mod && e.key.toLowerCase() === 'c') return (e.preventDefault(), copySelected())
+      if (mod && e.key.toLowerCase() === 'x') return (e.preventDefault(), copySelected(), removeSelected())
+      // Ctrl+V is handled by the window 'paste' listener (App.tsx) so OS images win.
       if (mod && e.key.toLowerCase() === 'g') return (e.preventDefault(), e.shiftKey ? ungroupSelected() : groupSelected())
       const ids = liveRef.current.selectedIds
       if (!ids.length) {
@@ -669,13 +855,73 @@ export function EditorCanvas(props: Props): JSX.Element {
   const editEl = editing ? scene.elements.find((e) => e.id === editing) ?? null : null
   const editRect = editing ? rects.find((r) => r.id === editing) ?? null : null
 
+  const revealEl = revealEdit ? scene.elements.find((e) => e.id === revealEdit) ?? null : null
+  const revealRect = revealEdit ? rects.find((r) => r.id === revealEdit) ?? null : null
+  const revealParams: Record<string, unknown> = revealEl?.game?.params ?? {}
+  const revealSrc = revealParams.prize ? assets[String(revealParams.prize)]?.src : undefined
+  const curReveal = revealLive ?? {
+    scale: typeof revealParams.revealScale === 'number' ? revealParams.revealScale : 1,
+    x: typeof revealParams.revealX === 'number' ? revealParams.revealX : 0,
+    y: typeof revealParams.revealY === 'number' ? revealParams.revealY : 0,
+  }
+  curRevealRef.current = curReveal
+  const onRevealBodyDown = (e: React.PointerEvent): void => {
+    e.stopPropagation()
+    if (!revealRect) return
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    const cur = curRevealRef.current
+    revealDrag.current = { mode: 'move', sx: e.clientX, sy: e.clientY, startX: cur.x, startY: cur.y, startScale: cur.scale, rectW: revealRect.w, rectH: revealRect.h, ccx: 0, ccy: 0, startDist: 1, last: null }
+  }
+  const onRevealHandleDown = (e: React.PointerEvent): void => {
+    e.stopPropagation()
+    if (!revealRect) return
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    const o = overlayRef.current!.getBoundingClientRect()
+    const z = liveRef.current.zoom
+    const ccx = o.left + (revealRect.x + revealRect.w / 2) * z
+    const ccy = o.top + (revealRect.y + revealRect.h / 2) * z
+    const cur = curRevealRef.current
+    revealDrag.current = { mode: 'scale', sx: e.clientX, sy: e.clientY, startX: cur.x, startY: cur.y, startScale: cur.scale, rectW: revealRect.w, rectH: revealRect.h, ccx, ccy, startDist: Math.hypot(e.clientX - ccx, e.clientY - ccy) || 1, last: null }
+  }
+  const onRevealMove = (e: React.PointerEvent): void => {
+    const d = revealDrag.current
+    if (!d) return
+    e.stopPropagation()
+    const z = liveRef.current.zoom
+    const next =
+      d.mode === 'move'
+        ? { scale: d.startScale, x: d.startX + ((e.clientX - d.sx) / z / d.rectW) * 100, y: d.startY + ((e.clientY - d.sy) / z / d.rectH) * 100 }
+        : { scale: Math.max(0.05, d.startScale * (Math.hypot(e.clientX - d.ccx, e.clientY - d.ccy) / d.startDist)), x: d.startX, y: d.startY }
+    d.last = next
+    setRevealLive(next)
+  }
+  const onRevealUp = (e: React.PointerEvent): void => {
+    e.stopPropagation()
+    const d = revealDrag.current
+    revealDrag.current = null
+    const g = revealEl?.game
+    if (d?.last && revealEl && g) {
+      patchElement(revealEl.id, { game: { ...g, params: { ...(g.params ?? {}), revealScale: d.last.scale, revealX: d.last.x, revealY: d.last.y } } })
+    }
+  }
+
   const menuItems = (): MenuItem[] => {
     const multi = selectedIds.length > 1
     const locked = single?.locked
+    const otherScenes = project.scenes.filter((s) => s.id !== activeSceneId)
     return [
+      { label: 'Copy', onClick: copySelected, disabled: !selectedIds.length },
+      { label: 'Paste', onClick: pasteElements, disabled: !hasElementClip() },
       { label: 'Duplicate', onClick: duplicateSelected, disabled: !selectedIds.length },
       { label: 'Delete', onClick: removeSelected, disabled: !selectedIds.length },
       { sep: true, label: '' },
+      ...(selectedIds.length && otherScenes.length
+        ? [
+            { label: `Move to scene  (${selectedIds.length})`, disabled: true } as MenuItem,
+            ...otherScenes.map((s) => ({ label: `   → ${s.name}`, onClick: () => moveSelectedToScene(s.id) }) as MenuItem),
+            { sep: true, label: '' } as MenuItem,
+          ]
+        : []),
       { label: 'Copy style', onClick: copyStyle, disabled: !single },
       { label: 'Paste style', onClick: pasteStyle, disabled: !hasStyleClip() || !selectedIds.length },
       { sep: true, label: '' },
@@ -710,7 +956,7 @@ export function EditorCanvas(props: Props): JSX.Element {
           const pos = positions[sd.id] ?? { x: 0, y: 0 }
           const active = sd.id === activeSceneId
           return (
-            <div key={sd.id} className={'frame' + (active ? ' active' : '')} style={{ left: pos.x, top: pos.y, width: box.w, height: box.h }}>
+            <div key={sd.id} className={'frame' + (active ? ' active' : '') + (dropTarget === sd.id ? ' drop-target' : '')} style={{ left: pos.x, top: pos.y, width: box.w, height: box.h }}>
               <div
                 className="frame-label"
                 onPointerDown={(e) => onFrameLabelDown(e, sd.id)}
@@ -721,7 +967,7 @@ export function EditorCanvas(props: Props): JSX.Element {
                 {sd.name}
               </div>
               <div className="stage-wrap">
-                <CanvasFrame sceneId={sd.id} def={sd} meta={project.meta} assets={assets} renderKey={renderKey} locale={editLocale} onLayout={handleLayout} />
+                <CanvasFrame sceneId={sd.id} def={sd} meta={project.meta} assets={assets} renderKey={renderKey} locale={editLocale} onLayout={handleLayout} iframeRef={active ? (el) => { activeIframeRef.current = el } : undefined} />
                 {active && traceSrc && <img className="trace-backdrop" src={traceSrc} alt="" style={{ opacity: trace.opacity }} />}
               </div>
               {active ? (
@@ -736,11 +982,27 @@ export function EditorCanvas(props: Props): JSX.Element {
                   onDoubleClick={onDoubleClick}
                   onContextMenu={onContextMenu}
                 >
-                  {selectedIds.map((id) => {
-                    const r = rects.find((x) => x.id === id)
-                    return r ? <div key={id} className="sel-box" style={{ left: r.x, top: r.y, width: r.w, height: r.h }} /> : null
+                  {!revealEdit &&
+                    selectedIds.map((id) => {
+                      const r = rects.find((x) => x.id === id)
+                      return r ? <div key={id} className="sel-box" style={{ left: r.x, top: r.y, width: r.w, height: r.h }} /> : null
+                    })}
+                  {/* Scratch / reveal markers (editor-only; the coating runs in Preview/export). */}
+                  {rects.map((r) => {
+                    const e = sd.elements.find((x) => x.id === r.id)
+                    if (!e || (!e.scratch && !e.reveal)) return null
+                    return (
+                      <div
+                        key={'sr-' + r.id}
+                        className={'scratch-mark-wrap' + (e.scratch ? ' is-cover' : '') + (e.reveal ? ' is-reveal' : '')}
+                        style={{ left: r.x, top: r.y, width: r.w, height: r.h }}
+                      >
+                        {e.scratch && <span className="scratch-mark cover">scratch</span>}
+                        {e.reveal && <span className="scratch-mark reveal">$ reveal</span>}
+                      </div>
+                    )
                   })}
-                  {single && singleRect && singleHandles.map((h) => (
+                  {!revealEdit && single && singleRect && singleHandles.map((h) => (
                     <div
                       key={h.k}
                       className={'handle h-' + h.k}
@@ -748,7 +1010,7 @@ export function EditorCanvas(props: Props): JSX.Element {
                       onPointerDown={(e) => onHandlePointerDown(e, h, 'single')}
                     />
                   ))}
-                  {single && singleRect && (
+                  {!revealEdit && single && singleRect && (
                     <div
                       className="dim-badge"
                       style={{ left: singleRect.x + singleRect.w / 2, top: singleRect.y + singleRect.h, transform: `translate(-50%, 6px) scale(${1 / zoom})` }}
@@ -833,6 +1095,43 @@ export function EditorCanvas(props: Props): JSX.Element {
                         }
                       }}
                     />
+                  )}
+                  {revealEdit && revealRect && revealSrc && (
+                    <div className="reveal-edit" style={{ left: revealRect.x, top: revealRect.y, width: revealRect.w, height: revealRect.h }}>
+                      <div
+                        className="reveal-edit-clip"
+                        onPointerDown={onRevealBodyDown}
+                        onPointerMove={onRevealMove}
+                        onPointerUp={onRevealUp}
+                        onPointerCancel={onRevealUp}
+                      >
+                        <img
+                          src={revealSrc}
+                          alt=""
+                          draggable={false}
+                          style={{
+                            position: 'absolute',
+                            inset: 0,
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'contain',
+                            transformOrigin: 'center',
+                            transform: `translate(${curReveal.x}%, ${curReveal.y}%) scale(${curReveal.scale})`,
+                          }}
+                        />
+                      </div>
+                      {CORNERS.map((h) => (
+                        <div
+                          key={h.k}
+                          className={'handle h-' + h.k}
+                          style={{ left: ((h.hx + 1) / 2) * revealRect.w, top: ((h.hy + 1) / 2) * revealRect.h }}
+                          onPointerDown={onRevealHandleDown}
+                          onPointerMove={onRevealMove}
+                          onPointerUp={onRevealUp}
+                          onPointerCancel={onRevealUp}
+                        />
+                      ))}
+                    </div>
                   )}
                 </div>
               ) : (

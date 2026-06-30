@@ -178,5 +178,13 @@ export const MERGE_TEMPLATE: GameTemplate = {
     { key: 'goalImage', label: 'Final reward image' },
   ],
   defaultParams: { goalTier: 2, tierImages: [], goalImage: '' },
+  // Drag one tier-0 item onto its twin to combine (across the top row of the 2x2 grid).
+  defaultHandguide: {
+    nodes: [
+      { x: 0.33, y: 0.33 },
+      { x: 0.66, y: 0.33 },
+    ],
+    periodMs: 1700,
+  },
   create: createMerge,
 }

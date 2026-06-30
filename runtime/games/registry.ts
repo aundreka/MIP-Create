@@ -4,6 +4,7 @@
 import type { GameTemplate } from './types'
 import { MATCH_TEMPLATE } from './match'
 import { SCRATCH_TEMPLATE } from './scratch'
+import { SCRATCH_GRID_TEMPLATE } from './scratch_grid'
 import { SPIN_TEMPLATE } from './spin'
 import { PICK_TEMPLATE } from './pick'
 import { DRAG_TEMPLATE } from './drag'
@@ -22,6 +23,7 @@ import { SLOTS_TEMPLATE } from './slots'
 import { CONVEYOR_TEMPLATE } from './conveyor'
 import { VENDING_TEMPLATE } from './vending'
 import { WORD_TEMPLATE } from './word'
+import { SONGMIX_TEMPLATE } from './songmix'
 import { EMBED_TEMPLATE } from './embed'
 
 export const GAME_TEMPLATES: GameTemplate[] = [
@@ -30,6 +32,7 @@ export const GAME_TEMPLATES: GameTemplate[] = [
   SORT_TEMPLATE,
   MERGE_TEMPLATE,
   SCRATCH_TEMPLATE,
+  SCRATCH_GRID_TEMPLATE,
   SPIN_TEMPLATE,
   SPINCATCH_TEMPLATE,
   SLOTS_TEMPLATE,
@@ -45,6 +48,7 @@ export const GAME_TEMPLATES: GameTemplate[] = [
   RECIPE_TEMPLATE,
   BINGO_TEMPLATE,
   WORD_TEMPLATE,
+  SONGMIX_TEMPLATE,
   EMBED_TEMPLATE,
 ]
 

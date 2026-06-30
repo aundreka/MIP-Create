@@ -187,5 +187,13 @@ export const MATCH_TEMPLATE: GameTemplate = {
   paramFields: [{ key: 'count', label: 'Pairs', type: 'number', min: 2, max: 6, step: 1 }],
   assetSlots: [{ key: 'images', label: 'Item image', list: true, countParam: 'count' }],
   defaultParams: { count: 4, images: [] },
+  // Drag a token up from the bottom row (cy~0.8) to its matching slot in the top row (cy~0.2).
+  defaultHandguide: {
+    nodes: [
+      { x: 0.2, y: 0.8 },
+      { x: 0.4, y: 0.2 },
+    ],
+    periodMs: 1700,
+  },
   create: createMatch,
 }

@@ -11,7 +11,10 @@ export interface Pt {
 export interface HintMove {
   from: Pt
   to: Pt
-  kind?: 'slide' | 'tap'
+  kind?: 'slide' | 'tap' | 'scratch'
+  /** Optional hand-size multiplier (1 = natural). Lets a game shrink the hint hand so
+   * it fits inside small targets — e.g. a short cell in a 1-column scratch grid. */
+  scale?: number
 }
 
 export interface GameContext {
@@ -19,10 +22,15 @@ export interface GameContext {
   root: HTMLElement
   /** Resolve an asset id to its src (data URL / url). */
   assets: { src(id?: string): string }
-  /** Play an SFX event (no-op until Pass 4 wires audio). */
-  sfx: { play(event: string): void }
+  /** Play an SFX event; loopStart/loopStop drive a looping gesture sound (e.g. a
+   * scratching/dragging loop that runs while the pointer is held). */
+  sfx: { play(event: string): void; loopStart?(event: string): void; loopStop?(event: string): void }
   /** Deterministic RNG so boards + hints stay consistent. */
   rng: () => number
+  /** Navigate to a named scene (for games with multi-scene flows, e.g. scratch grid lose → return). */
+  navigate?(sceneId: string): void
+  /** Stable ID of this game-mount element — use as a state key for cross-scene persistence. */
+  elementId?: string
 }
 
 export interface GameModule {
@@ -33,6 +41,10 @@ export interface GameModule {
   /** Next correct move in screen px, or null if none (host points at the CTA). */
   getHint(): HintMove | null
   onComplete(cb: () => void): void
+  /** Optional: fires immediately when the win condition is met, before any reveal
+   * transition. Use this for SFX that should play at the moment of winning rather
+   * than after a fade/animation completes. */
+  onWin?(cb: () => void): void
   destroy(): void
 }
 
@@ -65,6 +77,10 @@ export interface GameTemplate {
   paramFields: ParamField[]
   assetSlots?: AssetSlot[]
   defaultParams: Record<string, unknown>
+  /** Optional default hint route (points normalized 0..1 of the game card) used to
+   * seed an editable handguide when the game is added. The first point is the start;
+   * the rest are slide waypoints. Omit for a simple centered tap hint. */
+  defaultHandguide?: { nodes: { x: number; y: number; pauseMs?: number }[]; periodMs?: number }
   create(): GameModule
 }
 

@@ -1,19 +1,78 @@
-// Endscene element: a full-bleed <video> (with an <img> fallback) shown at the
-// end of the ad. Portrait/landscape sources are chosen by orientation at layout
-// time (so a device rotation swaps the clip); object-fit cover|contain controls
-// fill, and in 'contain' the letterbox gaps are filled with the configured
-// colour(s). With a SPLIT fill the two bars are filled independently — top/bottom
-// in portrait, left/right in landscape — so a clip whose edges differ in colour
-// matches accurately on both sides. `matchBgEdge` samples the clip's edges to set
-// those fills automatically. Tap anywhere → CTA.
+// Endscene element: a full-bleed card shown at the end of the ad.
 //
-// The clip is muted + looped + autoplay (muted autoplay needs no gesture), so it
-// previews live in the editor too. Unmuting on first interaction lands with the
-// SFX/audio-unlock work in the next pass.
+// VIDEO mode (default): a <video> (with an <img> fallback). Portrait/landscape
+// sources are chosen at layout time so a device rotation swaps the clip;
+// object-fit cover|contain controls fill, and in 'contain' the letterbox gaps
+// are filled with the configured colour(s). `matchBgEdge` samples the clip's
+// edges to set fills automatically. Tap anywhere → CTA.
+//
+// HTML mode: an <iframe srcdoc> loaded from an HTML asset. A shim is injected
+// that intercepts the standard ad CTA signals (gameEnd, mraid.open, etc.) and
+// posts them back to the host, which then fires triggerCTA() — so CTA buttons
+// inside the HTML work without needing a tap-overlay. Orientation swaps the
+// srcdoc when a landscape asset is configured.
 
 import type { SceneElement } from '../scene'
 import type { RuntimeCtx } from '../types'
 import { triggerCTA, notifyGameClose } from '../networks'
+
+// Injected at the top of the HTML <head> (before any user scripts) so that
+// standard ad CTA signals inside the iframe bubble up to the host.
+const HTML_SHIM = `(function(){
+function cta(){try{parent.postMessage({__paEnd:'cta'},'*')}catch(e){}}
+var noop=function(){};
+try{
+  window.gameEnd=cta;window.gameClose=cta;window.install=cta;window.openAppStore=cta;
+  window.open=function(){cta();return null};
+  window.ExitApi={exit:cta};
+  window.FbPlayableAd={onCTAClick:cta,onPause:noop,onResume:noop};
+  window.playableSDK={openAppStore:cta,gameReady:noop,gameStart:noop,gameEnd:cta};
+  window.mraid={isViewable:function(){return true},getState:function(){return 'default'},getPlacementType:function(){return 'interstitial'},addEventListener:noop,removeEventListener:noop,open:function(){cta()},close:noop,useCustomClose:noop,expand:noop,getVersion:function(){return '3.0'},supports:function(){return false},getScreenSize:function(){return {width:innerWidth,height:innerHeight}}};
+  window.Luna={Unity:{Playable:{openStoreUrl:cta,install:cta,InstallFullGame:cta}}};
+}catch(e){}
+})();`
+
+function decodeHtmlAsset(src: string): string {
+  if (!src) return ''
+  const b64 = /^data:text\/html;base64,(.*)$/s.exec(src)
+  if (b64) {
+    try { return decodeURIComponent(escape(atob(b64[1]))) } catch { try { return atob(b64[1]) } catch { return '' } }
+  }
+  const plain = /^data:text\/html(?:;charset=[^,]*)?,(.*)$/s.exec(src)
+  if (plain) { try { return decodeURIComponent(plain[1]) } catch { return plain[1] } }
+  return src
+}
+
+function withShim(html: string): string {
+  const tag = `<script>${HTML_SHIM}</script>`
+  if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, (m) => m + tag)
+  if (/<html[^>]*>/i.test(html)) return html.replace(/<html[^>]*>/i, (m) => m + tag)
+  return tag + html
+}
+
+// Inject a CSS block that overrides the iframe's body background with the
+// configured portrait/landscape gradient colors. Called only when at least one
+// color is set; safe to apply to any HTML end card.
+function withBgOverride(html: string, top: string, bottom: string, left: string, right: string): string {
+  const t = top || ''
+  const b = bottom || t
+  const l = left || t
+  const r = right || b
+  if (!t && !l) return html
+  const pGrad = t && b && b !== t
+    ? `linear-gradient(180deg,${t} 50%,${b} 50%)`
+    : (t || b)
+  const lGrad = l && r && r !== l
+    ? `linear-gradient(90deg,${l} 50%,${r} 50%)`
+    : (l || r)
+  const css =
+    `<style>` +
+    (pGrad ? `body,html{margin:0;padding:0}body{background:${pGrad}!important}` : '') +
+    (lGrad ? `@media(orientation:landscape){body{background:${lGrad}!important}}` : '') +
+    `</style>`
+  if (/<\/head>/i.test(html)) return html.replace(/<\/head>/i, css + '</head>')
+  return html + css
+}
 
 const PH_STYLE =
   'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;' +
@@ -25,6 +84,58 @@ export function createEndsceneContent(el: SceneElement, ctx: RuntimeCtx): HTMLEl
   const wrap = document.createElement('div')
   wrap.className = 'pa-endscene'
   wrap.style.cssText = 'position:relative;width:100%;height:100%;overflow:hidden;'
+
+  const ph = document.createElement('div')
+  ph.className = 'pa-endscene-ph'
+  ph.style.cssText = PH_STYLE
+
+  if (cfg?.mode === 'html') {
+    // HTML mode: iframe srcdoc loaded from an HTML asset. The shim converts
+    // in-HTML CTA signals into a postMessage that fires triggerCTA() here.
+    wrap.dataset.mode = 'html'
+    if (cfg.htmlBgTop)    wrap.dataset.bgHtmlTop  = cfg.htmlBgTop
+    if (cfg.htmlBgBottom) wrap.dataset.bgHtmlBot  = cfg.htmlBgBottom
+    if (cfg.htmlBgLeft)   wrap.dataset.bgHtmlLeft = cfg.htmlBgLeft
+    if (cfg.htmlBgRight)  wrap.dataset.bgHtmlRight = cfg.htmlBgRight
+
+    const ph_p = ctx.src(cfg.htmlId)
+    const ph_l = ctx.src(cfg.htmlLandscapeId) || ph_p
+
+    const iframe = document.createElement('iframe')
+    iframe.className = 'pa-endscene-iframe'
+    iframe.setAttribute('scrolling', 'no')
+    iframe.allow = 'autoplay; fullscreen'
+    iframe.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:0;display:none;background:#000;'
+    iframe.dataset.p = ph_p
+    iframe.dataset.l = ph_l
+
+    ph.textContent = 'HTML Endscene — pick an HTML asset'
+    wrap.appendChild(iframe)
+    wrap.appendChild(ph)
+
+    const onMsg = (e: MessageEvent): void => {
+      const d = e.data
+      if (d && d.__paEnd === 'cta') {
+        ctx.emit('sfx', 'ctaClick')
+        notifyGameClose()
+        triggerCTA()
+      }
+    }
+    window.addEventListener('message', onMsg)
+    // Clean up when the wrap is removed from the DOM
+    const obs = new MutationObserver(() => {
+      if (!wrap.isConnected) {
+        window.removeEventListener('message', onMsg)
+        obs.disconnect()
+      }
+    })
+    obs.observe(document, { childList: true, subtree: true })
+
+    return wrap
+  }
+
+  // VIDEO mode (default)
+  wrap.dataset.mode = 'video'
 
   // Stash the per-orientation fill config on the node so the (orientation-aware)
   // layout pass can rebuild the letterbox fill without a closure. Sampled edge
@@ -68,10 +179,7 @@ export function createEndsceneContent(el: SceneElement, ctx: RuntimeCtx): HTMLEl
   img.dataset.p = pi
   img.dataset.l = li
 
-  const ph = document.createElement('div')
-  ph.className = 'pa-endscene-ph'
-  ph.style.cssText = PH_STYLE
-  ph.textContent = '🎬  Endscene — pick a video (or image) in the inspector'
+  ph.textContent = 'Sample Endscene'
 
   wrap.appendChild(video)
   wrap.appendChild(img)
@@ -177,9 +285,38 @@ function sampleEdges(src: CanvasImageSource): { top: string; bottom: string; lef
 // the stage layout pass so a device rotation re-chooses clip + fill without a
 // DOM rebuild.
 export function updateEndsceneMedia(wrap: HTMLElement, landscape: boolean): void {
+  const ph = wrap.querySelector('.pa-endscene-ph') as HTMLElement | null
+
+  // HTML mode
+  if (wrap.dataset.mode === 'html') {
+    const iframe = wrap.querySelector('.pa-endscene-iframe') as HTMLIFrameElement | null
+    if (!iframe) return
+    const rawSrc = (landscape ? iframe.dataset.l : iframe.dataset.p) || ''
+    if (rawSrc) {
+      const bgTop   = wrap.dataset.bgHtmlTop   || ''
+      const bgBot   = wrap.dataset.bgHtmlBot   || ''
+      const bgLeft  = wrap.dataset.bgHtmlLeft  || ''
+      const bgRight = wrap.dataset.bgHtmlRight || ''
+      // Include bg colors in the cache key so a color change forces a srcdoc refresh
+      const cacheKey = `${rawSrc}|${bgTop}|${bgBot}|${bgLeft}|${bgRight}`
+      if (iframe.dataset.cur !== cacheKey) {
+        iframe.dataset.cur = cacheKey
+        let html = withShim(decodeHtmlAsset(rawSrc))
+        html = withBgOverride(html, bgTop, bgBot, bgLeft, bgRight)
+        iframe.srcdoc = html
+      }
+      iframe.style.display = 'block'
+      if (ph) ph.style.display = 'none'
+    } else {
+      iframe.style.display = 'none'
+      if (ph) ph.style.display = 'flex'
+    }
+    return
+  }
+
+  // Video mode
   const video = wrap.querySelector('.pa-endscene-video') as HTMLVideoElement | null
   const img = wrap.querySelector('.pa-endscene-img') as HTMLImageElement | null
-  const ph = wrap.querySelector('.pa-endscene-ph') as HTMLElement | null
   if (!video || !img) return
 
   wrap.dataset.land = landscape ? '1' : ''

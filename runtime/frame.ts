@@ -15,6 +15,7 @@ import type { FrameRect, ParentToFrame } from './frame-protocol'
 let stage: StageHandle | null = null // single-scene (pa:render)
 let manager: SceneManager | null = null // project flow (pa:play)
 let scene: Scene | null = null
+let cachedAssets: AssetMap = {} // last received assets — skipped in pa:render when unchanged
 
 function size(): { w: number; h: number } {
   return { w: Math.max(1, window.innerWidth), h: Math.max(1, window.innerHeight) }
@@ -83,8 +84,9 @@ window.addEventListener('message', (e: MessageEvent) => {
   const d = e.data as ParentToFrame
   if (!d || typeof d !== 'object') return
   if (d.type === 'pa:render') {
+    if (d.assets != null) cachedAssets = d.assets
     setActiveLocale(d.locale ?? null)
-    render(d.scene, d.assets || {}, d.interactive ?? false)
+    render(d.scene, cachedAssets, d.interactive ?? false)
   } else if (d.type === 'pa:play') {
     setActiveLocale(d.locale ?? null)
     play(d.project, d.assets || {})

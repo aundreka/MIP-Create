@@ -149,5 +149,13 @@ export const SLOTS_TEMPLATE: GameTemplate = {
     { key: 'winSymbol', label: 'Winning symbol index', type: 'number', min: 0, max: 8, step: 1 },
   ],
   defaultParams: { symbols: '', winSymbol: 0 },
+  // Short downward press on the centered SPIN button below the reels.
+  defaultHandguide: {
+    nodes: [
+      { x: 0.5, y: 0.62 },
+      { x: 0.5, y: 0.68 },
+    ],
+    periodMs: 1500,
+  },
   create: createSlots,
 }

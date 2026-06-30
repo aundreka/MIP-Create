@@ -5,6 +5,7 @@
 // the playable normally.
 
 import { addAsset, getState } from './store'
+import { remoteToDataUrl } from './net'
 
 const SR = 22050
 
@@ -42,6 +43,59 @@ const DEFS: Record<string, Def> = {
   lose: { label: 'Lose', group: 'Negative', dur: 0.5, segs: [{ t: 'tone', dur: 0.16, freq: 440, wave: 'tri', gain: 0.45, decay: 9 }, { t: 'tone', at: 0.15, dur: 0.16, freq: 330, wave: 'tri', gain: 0.45, decay: 9 }, { t: 'tone', at: 0.3, dur: 0.2, freq: 220, wave: 'tri', gain: 0.45, decay: 7 }] },
   buzz: { label: 'Buzz', group: 'Negative', dur: 0.22, segs: [{ t: 'tone', dur: 0.22, freq: 110, wave: 'square', gain: 0.4, decay: 5 }] },
 }
+
+// --- Recorded SFX -----------------------------------------------------------
+// Real sounds harvested (content-deduped) from the shipped playables in this
+// workspace. Bundled as files and resolved to URLs via ?url so they stay OUT of
+// the JS bundle and load lazily: preview streams the file directly, and "Use"
+// inlines it to a data URL so the project stays self-contained like the synth
+// clips and uploads. Ids are namespaced `f_*` to never collide with DEFS.
+const fileUrls = import.meta.glob('./assets/sfx/*.{wav,mp3}', { query: '?url', import: 'default', eager: true }) as Record<string, string>
+
+interface FileDef { label: string; group: string; file: string }
+const FILE_DEFS: Record<string, FileDef> = {
+  // Clicks & taps
+  f_click: { label: 'Click', group: 'Clicks & taps', file: 'click.wav' },
+  f_clickSoft: { label: 'Click (soft)', group: 'Clicks & taps', file: 'click-soft.wav' },
+  f_pop: { label: 'Pop', group: 'Clicks & taps', file: 'pop.mp3' },
+  f_popUp: { label: 'Pop up', group: 'Clicks & taps', file: 'pop-up.mp3' },
+  f_pull: { label: 'Pull', group: 'Clicks & taps', file: 'pull.mp3' },
+  f_cta: { label: 'CTA tap', group: 'Clicks & taps', file: 'cta.mp3' },
+  f_flip: { label: 'Flip', group: 'Clicks & taps', file: 'flip.mp3' },
+  // Transitions
+  f_cartoonSlide: { label: 'Cartoon slide', group: 'Transitions', file: 'cartoon-slide.wav' },
+  f_popSlide: { label: 'Pop slide', group: 'Transitions', file: 'pop-slide.wav' },
+  f_transition1: { label: 'Transition 1', group: 'Transitions', file: 'transition-1.mp3' },
+  f_transition2: { label: 'Transition 2', group: 'Transitions', file: 'transition-2.wav' },
+  f_transition3: { label: 'Transition 3', group: 'Transitions', file: 'transition-3.mp3' },
+  // Game FX
+  f_reveal: { label: 'Reveal', group: 'Game FX', file: 'reveal.wav' },
+  f_scratch: { label: 'Scratch', group: 'Game FX', file: 'scratch.wav' },
+  f_printing: { label: 'Printing', group: 'Game FX', file: 'printing.mp3' },
+  f_drumroll: { label: 'Drum roll', group: 'Game FX', file: 'drumroll.mp3' },
+  // Rewards & wins
+  f_correct: { label: 'Correct', group: 'Rewards & wins', file: 'correct.mp3' },
+  f_correctChime: { label: 'Correct (chime)', group: 'Rewards & wins', file: 'correct-2.wav' },
+  f_correctBright: { label: 'Correct (bright)', group: 'Rewards & wins', file: 'correct-bright.mp3' },
+  f_complete: { label: 'Complete', group: 'Rewards & wins', file: 'complete.mp3' },
+  f_win: { label: 'Win', group: 'Rewards & wins', file: 'win.mp3' },
+  f_winJingle: { label: 'Win (jingle)', group: 'Rewards & wins', file: 'win-2.mp3' },
+  f_winBig: { label: 'Win (big)', group: 'Rewards & wins', file: 'win-big.wav' },
+  f_confetti: { label: 'Confetti', group: 'Rewards & wins', file: 'confetti.mp3' },
+  f_confettiPop: { label: 'Confetti (pop)', group: 'Rewards & wins', file: 'confetti-2.mp3' },
+  // Negatives
+  f_wrong: { label: 'Wrong', group: 'Negatives', file: 'wrong.mp3' },
+  f_wrongBuzz: { label: 'Wrong (buzz)', group: 'Negatives', file: 'wrong-2.wav' },
+  f_wrongAnswer: { label: 'Wrong answer', group: 'Negatives', file: 'wrong-answer.mp3' },
+  // Endcards
+  f_endcard: { label: 'Endcard', group: 'Endcards', file: 'endcard.mp3' },
+  f_endscene: { label: 'End scene', group: 'Endcards', file: 'endscene.mp3' },
+  f_endscene2: { label: 'End scene 2', group: 'Endcards', file: 'endscene-2.mp3' },
+  f_endscreen: { label: 'End screen', group: 'Endcards', file: 'endscreen.wav' },
+}
+
+const fileUrl = (id: string): string => fileUrls['./assets/sfx/' + FILE_DEFS[id].file] ?? ''
+const fileDataUrlCache: Record<string, string> = {}
 
 export interface SfxItem { id: string; label: string; group: string }
 
@@ -131,13 +185,30 @@ export function sfxDataUrl(id: string): string {
 }
 
 export function sfxItems(): SfxItem[] {
-  return Object.entries(DEFS).map(([id, d]) => ({ id, label: d.label, group: d.group }))
+  const synth = Object.entries(DEFS).map(([id, d]) => ({ id, label: d.label, group: d.group }))
+  const files = Object.entries(FILE_DEFS).map(([id, d]) => ({ id, label: d.label, group: d.group }))
+  return [...synth, ...files]
+}
+
+/** Source to feed `new Audio()` for a one-shot preview: a synthesized data URL,
+ * or the bundled file URL for recorded clips (streamed, not converted). */
+export function sfxPreviewUrl(id: string): string {
+  return id in FILE_DEFS ? fileUrl(id) : sfxDataUrl(id)
 }
 
 /** Add a built-in sound to the shared asset library (idempotent) and return its
- * asset id, so it can be bound to events or element triggers like any asset. */
-export function ensureLibrarySfx(id: string): string {
+ * asset id, so it can be bound to events or element triggers like any asset.
+ * Recorded clips are inlined to a data URL (cached) so the project stays
+ * self-contained; falls back to the file URL if conversion fails (export retries). */
+export async function ensureLibrarySfx(id: string): Promise<string> {
   const assetId = 'sfx_' + id
-  if (!getState().assets[assetId]) addAsset(assetId, { src: sfxDataUrl(id), w: 0, h: 0, kind: 'audio' })
+  if (getState().assets[assetId]) return assetId
+  let src: string
+  if (id in FILE_DEFS) {
+    src = fileDataUrlCache[id] ?? (fileDataUrlCache[id] = (await remoteToDataUrl(fileUrl(id))) ?? fileUrl(id))
+  } else {
+    src = sfxDataUrl(id)
+  }
+  addAsset(assetId, { src, w: 0, h: 0, kind: 'audio' })
   return assetId
 }

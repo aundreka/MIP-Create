@@ -31,6 +31,7 @@ export type ElementType =
   | 'dim'
   | 'game-mount'
   | 'endscene'
+  | 'unboxing'
 
 export type ObjectFit = 'contain' | 'cover'
 
@@ -79,9 +80,39 @@ export interface ElementAnimations {
 }
 
 export interface SfxBinding {
+  // 'tap' | 'sceneEnter' for any element. For scratch/reveal elements also:
+  // 'whileScratching' (looped while the cover is being scratched) and
+  // 'onReveal' (one-shot when a reveal target is uncovered).
   event: string
   assetId: string
   volume?: number
+}
+
+// ---- scratch-to-reveal -----------------------------------------------------
+// `scratch` turns ANY element into a scratch COVER: at runtime a canvas coating
+// is painted over its box and erased by the pointer. Elements layered behind it
+// (lower zIndex, within its bounds) that carry `reveal` fire as they're uncovered;
+// the cover may also carry its own `reveal` (single-card case). Editor-only fields
+// are inert until Preview/export, like games.
+export interface ScratchConfig {
+  threshold?: number // fraction of a target's area cleared to count as revealed (default 0.55)
+  coverColor?: string // solid cover when no coverAssetId (default gold '#d9b25b')
+  coverAssetId?: string // optional foil / cover image
+  brushFactor?: number // brush radius vs min(box) (default 0.09, matches the scratch game)
+  advanceOnAllRevealed?: boolean // emit 'game-complete' once every target is revealed (default true)
+}
+
+// `reveal` marks an element as a reveal TARGET. When its area under a cover is
+// cleared past threshold it pops a money label and accumulates into a tally text.
+export interface RevealConfig {
+  amount?: number // money added on reveal (e.g. 7.99). If unset, random in [randMin,randMax]
+  randMin?: number // optional runtime-random amount (deterministic via seeded rng)
+  randMax?: number
+  currency?: string // default '$'
+  color?: string // popup colour; red for the finale
+  big?: boolean // finale styling (larger popup); author marks the last app
+  popup?: boolean // show the floating amount at the element (default true)
+  tallyId?: string // id of a text element to accumulate the running total into
 }
 
 // ---- type-specific config blocks ----
@@ -106,11 +137,17 @@ export interface TextConfig {
 export type CtaPulsePreset = 'calm' | 'medium' | 'strong' | 'custom'
 export interface CtaConfig {
   pulse: CtaPulsePreset
+  pulseScale?: number      // peak scale factor (e.g. 1.06 = 6% bigger); default from preset
+  pulseMinScale?: number   // base/min scale factor (e.g. 0.96 = squish); default 1.0
+  pulseDurationMs?: number // full cycle duration ms; default from preset
   customPulse?: KeyframeStep[]
   clickUrlOverride?: string
 }
 
 export interface EndsceneConfig {
+  /** 'video' (default) shows a video/image card; 'html' embeds an HTML asset in an iframe. */
+  mode?: 'video' | 'html'
+  // --- video mode ---
   portraitVideoId?: string
   landscapeVideoId?: string
   portraitImageId?: string
@@ -130,6 +167,18 @@ export interface EndsceneConfig {
   loop?: boolean
   muteUntilInteraction?: boolean
   ctaElementId?: string
+  // --- html mode ---
+  htmlId?: string          // portrait HTML asset
+  htmlLandscapeId?: string // landscape HTML asset (falls back to portrait)
+  // Background color override injected as CSS into the iframe so custom gradients
+  // can be applied without modifying the HTML asset itself.
+  //   Portrait:  htmlBgTop  = top (or solid fill); htmlBgBottom = bottom (split)
+  //   Landscape: htmlBgLeft = left (or solid fill); htmlBgRight  = right  (split)
+  // Landscape falls back to portrait values when unset.
+  htmlBgTop?: string
+  htmlBgBottom?: string
+  htmlBgLeft?: string
+  htmlBgRight?: string
 }
 
 // A background "box" behind text / CTA content: fill colour, corner radius,
@@ -181,12 +230,18 @@ export interface HandguideNode {
 // game) and slides/taps toward it. `toX/toY` is the legacy single-waypoint form,
 // still honored when `nodes` is empty.
 export interface HandguideConfig {
-  mode: 'smart' | 'tap' | 'slide'
+  mode: 'smart' | 'tap' | 'slide' | 'scratch'
   toX?: number
   toY?: number
   nodes?: HandguideNode[]
   periodMs?: number
   easing?: 'linear' | 'ease' | 'ease-in' | 'ease-out' | 'ease-in-out'
+  // Idle visibility (interactive runs only): hide on the player's tap, then reappear
+  // after `idleMs` of no interaction, repeating. Defaults: hideOnInteract=true,
+  // idleMs=4000, showInitially=true.
+  idleMs?: number
+  hideOnInteract?: boolean
+  showInitially?: boolean
 }
 
 // A quiz/survey answer element (or, with advance=true, a "Continue"/next button).
@@ -203,6 +258,96 @@ export interface ChoiceConfig {
   correctColor?: string
   wrongColor?: string
   advanceDelayMs?: number
+}
+
+// Turn an asset into a container: its shape (alpha) masks an inner image, which
+// fills per `fit` with optional inner padding. Works for any shape (heart, star…).
+export interface ContainerConfig {
+  imageId?: string
+  fit: 'contain' | 'cover' | 'fill'
+  padPx?: number
+}
+
+// Drag-and-drop slots. A `drag` element is a draggable item; a `slot` element is a
+// drop target. Items + slots that share a `group` interact; an item snaps into a
+// same-group slot on drop and can be dragged back out. Optional `key` lets a slot
+// accept only a matching item (a "correct slot" puzzle). When every slot in a group
+// is filled the runtime fires game completion (advances a gameWin scene).
+export interface DragConfig {
+  group?: string
+  key?: string
+}
+export interface SlotConfig {
+  group?: string
+  key?: string
+}
+
+// Tap-to-select that fills display slots, with a generate step. A `pick` element is
+// a tappable thumbnail; tapping it selects (single per group) and the group's `fill`
+// slots show the chosen asset. A `generate` element (the result area) runs a circular
+// progress when triggered (tapped, or a swipe) — gated until every `needs` group is
+// picked — then reveals `resultId` (an image or video).
+export interface PickConfig {
+  group: string
+}
+export interface FillConfig {
+  group: string
+  index?: number // which pick of the group this slot shows (default = scene order)
+}
+export interface GenerateConfig {
+  needs?: string[]
+  durationMs?: number
+  resultId?: string
+  accent?: string
+}
+
+// Per-piece placement + animation end state.
+// x/y = center of piece as % of element dimensions. w = width as % of element width.
+export interface UnboxPiece {
+  assetId?: string
+  x?: number          // center X % (default 50)
+  y?: number          // center Y % (default 50)
+  w?: number          // width % of element width (default 100)
+  rotation?: number   // initial rotation degrees (default 0)
+  // Animation end state (used for the lid)
+  endX?: number; endY?: number
+  endRotation?: number; endScale?: number; endOpacity?: number
+  durationMs?: number; delayMs?: number
+}
+
+// Mystery-box grid: shows N identical closed boxes composed of back+front+lid.
+// Tap 1 → selected box flies to center (closed). Tap 2 → lid flies off, product rises.
+// Layer order: back (z1) < product (z2) < front (z3) < lid (z4).
+export interface UnboxingConfig {
+  cols?: number; rows?: number; colGap?: number; rowGap?: number
+  // Static container background
+  bgAssetId?: string; bgScale?: number; bgX?: number; bgY?: number
+  // Box pieces — define the closed state shown in each grid cell
+  back?: UnboxPiece    // back face (static)
+  front?: UnboxPiece   // front face (static, always in front of product)
+  top?: UnboxPiece     // lid (flies off on reveal tap)
+  // Product revealed inside (rises from below on reveal tap)
+  winAssetId?: string; loseAssetId?: string
+  productStartX?: number // product start center X % (default same as productX)
+  productStartY?: number // product start center Y % (default 120 = below element)
+  productX?: number      // product end center X % (default 50)
+  productY?: number      // product end center Y % (default 28)
+  productW?: number      // product width % (default 65)
+  // Lose product overrides (fall back to win product values when unset)
+  loseProductX?: number; loseProductY?: number; loseProductW?: number
+  loseProductStartX?: number; loseProductStartY?: number
+  productDurationMs?: number; productDelayMs?: number
+  randomize?: boolean; winChance?: number
+  cells?: Array<'win' | 'lose'>  // explicit per-cell outcome; overrides randomize when set
+  // On reveal: swap another scene image element to a new asset
+  revealSyncElementId?: string  // ID of a scene image element to update on reveal
+  revealSyncAssetId?: string    // asset to swap it to
+  // Timing
+  selectMs?: number    // fly-to-center ms (default 450)
+  centerSize?: number  // centered box width as % of element width (default 65)
+  centerX?: number     // centered box position X offset in design-px (default 0 = centered)
+  centerY?: number     // centered box position Y offset in design-px (default 0 = centered)
+  tapHintMs?: number   // brief lock after centering to prevent accidental double-tap (default 300)
 }
 
 export interface GameMountConfig {
@@ -260,14 +405,19 @@ export interface SceneElement {
 
   hidden?: boolean
   locked?: boolean // not selectable/movable on the editor canvas
+  overlayImmune?: boolean // always rendered above in-game overlays (e.g. scratch-grid lose/win)
   groupId?: string // elements sharing a groupId select/move/scale together
   showOnWin?: boolean // revealed when the mounted game completes (endcard seed)
   rotation?: number
   opacity?: number
+  blur?: number // uniform layer blur radius in design px (CSS filter: blur)
 
   landscape?: OrientationOverride
   animations?: ElementAnimations
   sfx?: SfxBinding[]
+
+  scratch?: ScratchConfig // this element is a scratch cover (canvas coating at runtime)
+  reveal?: RevealConfig // this element pops money + adds to a tally when uncovered
 
   text?: TextConfig
   cta?: CtaConfig
@@ -280,15 +430,24 @@ export interface SceneElement {
   background?: BackgroundConfig
   bar?: BarConfig
   handguide?: HandguideConfig
+  container?: ContainerConfig
+  drag?: DragConfig
+  slot?: SlotConfig
+  pick?: PickConfig
+  fill?: FillConfig
+  generate?: GenerateConfig
+  unboxing?: UnboxingConfig
 }
 
 export interface ProjectMeta {
-  schemaVersion: 1
+  schemaVersion: number // bumped when the saved shape changes; see src/migrate.ts
   name: string
   clickUrl: { ios: string; android: string }
+  clickUrlMode?: 'store' | 'single' | 'none'
   baseW: number
   baseH: number
   bgMatchColor?: string
+  bgMatchColor2?: string // gradient end: bottom (portrait) or right (landscape)
   networks?: string[]
   iterations?: string[]
   // First-class identity for cross-MIP QA (and, later, the shared team library).
@@ -303,6 +462,7 @@ export interface ProjectMeta {
   // browser language, falling back to the base. e.g. ['es','fr','de'].
   locales?: string[]
   defaultLocale?: string // label for the base copy (informational), e.g. 'en'
+  cursor?: 'default' | 'none' | 'pointer' | 'crosshair'
   // Export-time variants — slightly different mechanics/win-conditions of the same
   // MIP. Each is a set of element patches applied on top of the base; export emits
   // one playable per variant. Editor-only field (stripped from the rendered scene).
@@ -327,6 +487,8 @@ export interface Variant {
 export interface Scene {
   meta: ProjectMeta
   elements: SceneElement[]
+  kind?: SceneKind
+  overlay?: SceneOverlay
   sfx?: SfxBinding[]
   bgm?: { assetId: string; volume: number }
 }
@@ -344,13 +506,21 @@ export interface Transition {
   durationMs: number
 }
 
-export type SceneKind = 'game' | 'win' | 'endscene' | 'custom'
+export type SceneKind = 'game' | 'overlay' | 'endscene'
+
+export interface SceneOverlay {
+  opacity?: number  // 0-1 dim strength
+  color?: string    // hex, default '#000000'
+  blurPx?: number   // backdrop-filter blur radius in px (blurs content behind the dim)
+}
 
 export interface SceneDef {
   id: string
   name: string
   kind?: SceneKind
-  bgColor?: string // per-scene background (overrides project meta.bgMatchColor)
+  bgColor?: string  // per-scene gradient start: top (portrait) / left (landscape)
+  bgColor2?: string // per-scene gradient end: bottom (portrait) / right (landscape)
+  overlay?: SceneOverlay // built-in full-screen dim/blur overlay (win/lose scenes)
   elements: SceneElement[]
   advance: AdvanceRule
   transition?: Transition // how THIS scene ENTERS

@@ -41,7 +41,7 @@ export function formatCountdown(el: SceneElement, deadline: number, now: number)
   const s = Math.floor(total / 1000) % 60
   let dateStr = ''
   try {
-    dateStr = new Date(deadline).toLocaleDateString(undefined, DATE_OPTS[el.countdown?.dateStyle ?? 'short'] ?? DATE_OPTS.short)
+    dateStr = new Date(deadline).toLocaleDateString('en-US', DATE_OPTS[el.countdown?.dateStyle ?? 'short'] ?? DATE_OPTS.short)
   } catch {
     dateStr = ''
   }

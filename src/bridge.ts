@@ -45,6 +45,26 @@ export interface ApplovinUploadOpts {
   addButtonText?: string
   uploadButtonText?: string
 }
+export interface ApplovinProbe {
+  ok: boolean
+  url?: string
+  title?: string
+  fileInputs?: number
+  textInputs?: number
+  addButton?: boolean
+  uploadButton?: boolean
+  error?: string
+}
+
+/** ffmpeg knobs passed to the desktop transcode pipeline. */
+export interface TranscodeOpts {
+  maxWidth?: number // target max width px (scale); never upscales
+  crf?: number // x264 CRF 0–51
+  maxrate?: string // peak bitrate cap, e.g. '536k'
+  bufsize?: string // rate-control buffer, e.g. '1000k'
+  audioKbps?: number // audio bitrate kbps
+  durationS?: number // trim to N seconds
+}
 
 interface NativeAPI {
   saveProject(json: string, currentPath: string | null): Promise<{ ok: boolean; path?: string; error?: string }>
@@ -52,9 +72,12 @@ interface NativeAPI {
   transcodeMedia?(
     dataUrl: string,
     kind: 'video' | 'audio',
-    opts?: { maxWidth?: number; crf?: number; audioKbps?: number },
+    opts?: TranscodeOpts,
   ): Promise<{ ok: boolean; dataUrl?: string; bytes?: number; reencoded?: boolean; error?: string }>
+  readRuntimeSrc?(): Promise<{ ok: boolean; src?: string; error?: string }>
+  compressHtml?(html: string): Promise<{ ok: boolean; html?: string; bytes?: number; error?: string }>
   applovinOpen?(url: string): Promise<{ ok: boolean; error?: string }>
+  applovinProbe?(opts: { url?: string; addButtonText?: string; uploadButtonText?: string }): Promise<ApplovinProbe>
   applovinUpload?(opts: ApplovinUploadOpts): Promise<{ ok: boolean; files?: number; submitted?: boolean; error?: string }>
 }
 
@@ -72,6 +95,13 @@ export async function applovinOpen(url: string): Promise<boolean> {
   return !!r.ok
 }
 
+/** Probe the open AppLovin page (non-destructive): how many file/text inputs and
+ * whether the Add/Upload buttons are found, so selectors can be verified. */
+export async function applovinProbe(opts: { url?: string; addButtonText?: string; uploadButtonText?: string }): Promise<ApplovinProbe> {
+  if (!native?.applovinProbe) return { ok: false, error: 'desktop app only' }
+  return native.applovinProbe(opts)
+}
+
 /** Auto-fill the AppLovin batch upload form with the given playables. Desktop
  * only. Returns a status message. */
 export async function applovinUpload(opts: ApplovinUploadOpts): Promise<{ ok: boolean; files?: number; submitted?: boolean; error?: string }> {
@@ -79,12 +109,25 @@ export async function applovinUpload(opts: ApplovinUploadOpts): Promise<{ ok: bo
   return native.applovinUpload(opts)
 }
 
+/** Post-compress a fully assembled playable HTML string using the
+ * scripts/compress-playable.py pipeline (desktop only; requires Python).
+ * Returns the compressed HTML or null if Python is unavailable / script fails. */
+export async function compressHtmlScript(html: string): Promise<string | null> {
+  if (!native?.compressHtml) return null
+  try {
+    const r = await native.compressHtml(html)
+    return r.ok && r.html && r.html.length > 100 ? r.html : null
+  } catch {
+    return null
+  }
+}
+
 /** Re-encode a video/audio data URL via the Electron ffmpeg pipeline (desktop
  * only). Returns the (smaller) re-encoded data URL, or null in the browser. */
 export async function transcodeMedia(
   dataUrl: string,
   kind: 'video' | 'audio',
-  opts?: { maxWidth?: number; crf?: number; audioKbps?: number },
+  opts?: TranscodeOpts,
 ): Promise<string | null> {
   if (!native?.transcodeMedia) return null
   try {
@@ -160,7 +203,7 @@ function pickFilesMulti(accept: string): Promise<File[]> {
   })
 }
 
-function readImageFile(file: File): Promise<{ id: string; name: string; src: string; w: number; h: number } | null> {
+export function readImageFile(file: File): Promise<{ id: string; name: string; src: string; w: number; h: number } | null> {
   return new Promise((resolve) => {
     const reader = new FileReader()
     reader.onload = () => {
@@ -272,6 +315,39 @@ export function importHtml(): Promise<{ id: string; name: string; src: string; w
       }
       reader.onerror = () => resolve(null)
       reader.readAsText(file)
+    })
+  })
+}
+
+/** Read a user-picked font file into an AssetEntry (data URL; no dimensions).
+ * The asset id becomes the CSS font-family name used in TextConfig.fontFamily. */
+export function importFont(): Promise<{ id: string; name: string; src: string; w: number; h: number; kind: 'font' } | null> {
+  return new Promise((resolve) => {
+    void pickFiles('.ttf,.otf,.woff,.woff2').then((file) => {
+      if (!file) return resolve(null)
+      const reader = new FileReader()
+      reader.onload = () => {
+        const src = String(reader.result ?? '')
+        // Reject anything that isn't font data — the accept filter is advisory
+        // and users can bypass it, producing a broken @font-face export.
+        const mime = src.slice(5, src.indexOf(';'))
+        const ok = mime.startsWith('font/') || mime === 'application/x-font-ttf' ||
+          mime === 'application/octet-stream' || mime === ''
+        if (!ok) {
+          alert(`"${file.name}" doesn't look like a font file (detected: ${mime || 'unknown'}). Please pick a .ttf, .otf, .woff, or .woff2 file.`)
+          return resolve(null)
+        }
+        resolve({
+          id: file.name.replace(/\.[^.]+$/, '').replace(/[^a-z0-9_-]+/gi, '_'),
+          name: file.name,
+          src,
+          w: 0,
+          h: 0,
+          kind: 'font',
+        })
+      }
+      reader.onerror = () => resolve(null)
+      reader.readAsDataURL(file)
     })
   })
 }

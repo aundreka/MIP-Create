@@ -201,5 +201,13 @@ export const SORT_TEMPLATE: GameTemplate = {
     { key: 'itemImages', label: 'Item image', list: true, countParam: 'bins' },
   ],
   defaultParams: { bins: 3, perBin: 2, binImages: [], itemImages: [] },
+  // Drag an item up from the pile (y~0.68) into its matching bin in the top row (y~0.2).
+  defaultHandguide: {
+    nodes: [
+      { x: 0.25, y: 0.68 },
+      { x: 0.25, y: 0.2 },
+    ],
+    periodMs: 1700,
+  },
   create: createSort,
 }

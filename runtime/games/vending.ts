@@ -137,5 +137,9 @@ export const VENDING_TEMPLATE: GameTemplate = {
   ],
   assetSlots: [{ key: 'productImages', label: 'Product image', list: true, countParam: 'count' }],
   defaultParams: { count: 6, target: 0, productImages: [] },
+  // Tap a product slot in the grid (grid starts at ~0.34 height, first slot upper-left).
+  defaultHandguide: {
+    nodes: [{ x: 0.32, y: 0.44 }],
+  },
   create: createVending,
 }

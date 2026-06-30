@@ -125,5 +125,13 @@ export const DRAG_TEMPLATE: GameTemplate = {
     { key: 'target', label: 'Target image' },
   ],
   defaultParams: { object: '', target: '' },
+  // Drag the object up from its start (center, y~0.8) to the target zone (center, y~0.24).
+  defaultHandguide: {
+    nodes: [
+      { x: 0.5, y: 0.8 },
+      { x: 0.5, y: 0.24 },
+    ],
+    periodMs: 1700,
+  },
   create: createDrag,
 }

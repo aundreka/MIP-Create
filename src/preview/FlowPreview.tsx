@@ -10,7 +10,7 @@ import type { AssetMap } from '../../runtime/types'
 import { ChevronRight, Icon, LayoutGrid, Play, RotateCcw, SCENE_KIND_ICON, Star, X } from '../icons'
 
 function toScene(project: Project, def: SceneDef): Scene {
-  return { meta: { ...project.meta, bgMatchColor: def.bgColor ?? project.meta.bgMatchColor }, elements: def.elements }
+  return { meta: { ...project.meta, bgMatchColor: def.bgColor !== undefined ? def.bgColor : project.meta.bgMatchColor }, elements: def.elements, kind: def.kind, overlay: def.overlay }
 }
 
 function advanceLabel(project: Project, def: SceneDef): string {

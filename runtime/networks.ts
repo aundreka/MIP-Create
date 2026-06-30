@@ -42,8 +42,18 @@ export const notifyGameClose = (): void => callStub('gameClose')
 // ---------------------------------------------------------------------------
 // CTA fallback chain (AGENTS.md priority order).
 // ---------------------------------------------------------------------------
+let _lastCta = 0
 export function triggerCTA(): void {
+  // Cooldown so a whole-scene endcard tap + the CTA button tap (or rapid
+  // double-taps) can't fire the store open twice.
+  const t = performance.now()
+  if (t - _lastCta < 800) return
+  _lastCta = t
   const url = storeUrl()
+  // 'about:blank' means "no real destination" — normalise to '' so MRAID fires an
+  // empty click signal (network still registers the tap) but no navigation happens.
+  // A truly-empty url (clickUrlMode:'none') keeps '' and skips MRAID entirely.
+  const dest = url === 'about:blank' ? '' : url
 
   // 1. GoogleAds
   try {
@@ -57,7 +67,7 @@ export function triggerCTA(): void {
   try {
     const p = W.Luna?.Unity?.Playable
     if (p) {
-      if (typeof p.openStoreUrl === 'function') return void p.openStoreUrl(url)
+      if (typeof p.openStoreUrl === 'function') return void p.openStoreUrl(dest)
       if (typeof p.install === 'function') return void p.install()
       if (typeof p.InstallFullGame === 'function') return void p.InstallFullGame()
     }
@@ -86,20 +96,26 @@ export function triggerCTA(): void {
   try {
     if (W.__TIKTOK__) {
       if (typeof W.openAppStore === 'function') return void W.openAppStore()
-      return void window.open(url, '_blank')
+      if (url) return void window.open(url, '_blank')
+      return
     }
   } catch { /* */ }
   // 10. MRAID (Applovin / Ironsource / Unity fallback)
+  // Always fires when MRAID is present — even with no URL (dest=''). The SDK uses
+  // its own configured store URL when given an empty string, so the redirect still
+  // happens for mode:'none' / about:blank ads inside a MRAID container.
   try {
     if (typeof W.mraid?.open === 'function') {
       const state = typeof W.mraid.getState === 'function' ? W.mraid.getState() : 'ready'
-      if (state !== 'loading') return void W.mraid.open(url)
+      if (state !== 'loading') return void W.mraid.open(dest)
     }
   } catch { /* */ }
-  // 11. Fallback
-  try {
-    window.open(url, '_blank')
-  } catch { /* */ }
+  // 11. Fallback — skipped only when truly no URL (mode:'none'); about:blank opens a blank tab
+  if (url) {
+    try {
+      window.open(url, '_blank')
+    } catch { /* */ }
+  }
 }
 
 // ---------------------------------------------------------------------------

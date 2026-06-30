@@ -20,8 +20,20 @@ export interface GameHostOptions {
   assets: AssetMap
   interactive: boolean
   hintIdleMs: number
+  /** Show the built-in coded hint hand. False when an editable handguide element
+   * provides the hint instead, so the two don't both appear. Defaults to true. */
+  hint?: boolean
   sfx: (event: string) => void
+  sfxLoopStart?: (event: string) => void
+  sfxLoopStop?: (event: string) => void
+  /** Fires immediately when the game's win condition is met, before any reveal
+   * transition. Use for sounds that must play at the win moment. */
+  onWin?: () => void
   onComplete: () => void
+  /** Navigate to another scene by ID (for games that drive multi-scene flows). */
+  navigate?: (sceneId: string) => void
+  /** Stable element ID passed through to GameContext. */
+  elementId?: string
 }
 
 export function createGameHost(opts: GameHostOptions): GameHost | null {
@@ -33,8 +45,10 @@ export function createGameHost(opts: GameHostOptions): GameHost | null {
     {
       root: opts.slot,
       assets: { src: (id) => (id && opts.assets[id] ? opts.assets[id].src : '') },
-      sfx: { play: opts.sfx },
+      sfx: { play: opts.sfx, loopStart: opts.sfxLoopStart, loopStop: opts.sfxLoopStop },
       rng: mulberry32(123456),
+      navigate: opts.navigate,
+      elementId: opts.elementId,
     },
     { ...tpl.defaultParams, ...opts.params },
   )
@@ -46,21 +60,38 @@ export function createGameHost(opts: GameHostOptions): GameHost | null {
   if (opts.interactive) {
     mod.start()
     opts.sfx('gameStart')
-    hand = createHand(opts.handLayer)
-    const schedule = (): void => {
-      window.clearTimeout(idle)
-      idle = window.setTimeout(() => {
-        if (destroyed) return
-        const move = mod.getHint()
-        if (move) hand!.show(move.from, move.to, move.kind ?? 'slide')
-      }, opts.hintIdleMs)
-    }
-    const activity = (): void => {
-      hand?.hide()
+    if (opts.hint !== false) {
+      hand = createHand(opts.handLayer)
+      let inputActive = false
+      const schedule = (): void => {
+        window.clearTimeout(idle)
+        idle = window.setTimeout(() => {
+          if (destroyed || inputActive) return
+          const move = mod.getHint()
+          if (move) hand!.show(move.from, move.to, move.kind ?? 'slide', move.scale)
+        }, opts.hintIdleMs)
+      }
+      const onStart = (): void => {
+        inputActive = true
+        hand?.hide()
+        schedule()
+      }
+      const onEnd = (): void => {
+        inputActive = false
+        schedule()
+      }
+      // Use capture so these fire even when the game canvas has setPointerCapture.
+      // Both pointer and touch events covered — touch events are the primary path
+      // in MRAID environments where synthesized pointer events may be suppressed.
+      opts.slot.addEventListener('pointerdown', onStart, true)
+      opts.slot.addEventListener('pointerup', onEnd, true)
+      opts.slot.addEventListener('pointercancel', onEnd, true)
+      opts.slot.addEventListener('touchstart', onStart, { capture: true, passive: true })
+      opts.slot.addEventListener('touchend', onEnd, { capture: true, passive: true })
+      opts.slot.addEventListener('touchcancel', onEnd, { capture: true, passive: true })
       schedule()
     }
-    opts.slot.addEventListener('pointerdown', activity, true)
-    schedule()
+    if (opts.onWin) mod.onWin?.(opts.onWin)
     mod.onComplete(() => {
       hand?.hide()
       window.clearTimeout(idle)

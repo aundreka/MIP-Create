@@ -8,7 +8,7 @@ import type { Project, Scene, SceneDef } from '../../runtime/scene'
 import type { AssetMap } from '../../runtime/types'
 
 function toScene(project: Project, def: SceneDef): Scene {
-  return { meta: { ...project.meta, bgMatchColor: def.bgColor ?? project.meta.bgMatchColor }, elements: def.elements }
+  return { meta: { ...project.meta, bgMatchColor: def.bgColor !== undefined ? def.bgColor : project.meta.bgMatchColor }, elements: def.elements, overlay: def.overlay }
 }
 
 export function SceneThumb(props: { project: Project; def: SceneDef; assets: AssetMap; h: number; w?: number; cover?: boolean }): JSX.Element {

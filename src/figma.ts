@@ -42,18 +42,41 @@ function solidFill(fills: any[]): string | undefined {
   return f ? colorCss({ ...f.color, a: f.opacity ?? f.color.a ?? 1 }) : undefined
 }
 
-async function api<T>(path: string, token: string): Promise<T> {
-  // Figma rate-limits (429); back off (honoring Retry-After) and retry a few times.
+export interface ImportProgress {
+  phase: string
+  done?: number
+  total?: number
+}
+export type OnProgress = (p: ImportProgress) => void
+
+function humanDuration(secs: number): string {
+  if (secs < 120) return `${Math.round(secs)}s`
+  if (secs < 7200) return `${Math.round(secs / 60)}m`
+  if (secs < 172800) return `${Math.round(secs / 3600)}h`
+  return `${Math.round(secs / 86400)}d`
+}
+
+async function api<T>(path: string, token: string, onProgress?: OnProgress): Promise<T> {
+  // Figma rate-limits (429). Retry a few times on SHORT cooldowns; but when the API
+  // render quota is exhausted Figma returns a multi-hour/day Retry-After — never
+  // wait on that, fail fast with a clear message instead of hanging "for days".
   for (let attempt = 0; ; attempt++) {
     const res = await fetch(API + path, { headers: { 'X-Figma-Token': token } })
     if (res.ok) return res.json() as Promise<T>
-    if (res.status === 429 && attempt < 3) {
-      const wait = (Number(res.headers.get('Retry-After')) || (attempt + 1) * 3) * 1000
-      await new Promise((r) => setTimeout(r, wait))
-      continue
+    if (res.status === 429) {
+      const ra = Number(res.headers.get('Retry-After'))
+      const secs = Number.isFinite(ra) && ra > 0 ? ra : (attempt + 1) * 5
+      if (attempt < 3 && secs <= 90) {
+        onProgress?.({ phase: `Figma rate limit — retrying in ${Math.round(secs)}s… (${attempt + 1}/3)` })
+        await new Promise((r) => setTimeout(r, secs * 1000))
+        continue
+      }
+      throw new Error(
+        `Figma rate limit / render quota exceeded (Figma asks to wait ~${humanDuration(secs)}). ` +
+          `Wait it out, use a different access token, or re-run with “skip image rendering” (image export is what burns the quota).`,
+      )
     }
-    const hint = res.status === 403 ? ' (check your token)' : res.status === 429 ? ' (rate limited; wait a minute and try again)' : ''
-    throw new Error(`Figma API ${res.status}${hint}`)
+    throw new Error(`Figma API ${res.status}${res.status === 403 ? ' (check your token)' : ''}`)
   }
 }
 
@@ -85,15 +108,18 @@ export interface ImportResult {
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-export async function importFigma(url: string, token: string, opts?: { flatten?: boolean }): Promise<ImportResult> {
+export async function importFigma(url: string, token: string, opts?: { flatten?: boolean; skipImages?: boolean; onProgress?: OnProgress }): Promise<ImportResult> {
   const flatten = opts?.flatten ?? false
+  const onP = opts?.onProgress
   const parsed = parseFigmaUrl(url)
   if (!parsed) throw new Error('Could not read the Figma URL. Open a frame, copy its link (must contain node-id).')
   const { key, nodeId } = parsed
 
+  onP?.({ phase: 'Reading frame…' })
   const nodeRes = await api<{ nodes: Record<string, { document: any }> }>(
     `/files/${key}/nodes?ids=${encodeURIComponent(nodeId)}`,
     token,
+    onP,
   )
   const frame = nodeRes.nodes[nodeId]?.document
   if (!frame || !frame.absoluteBoundingBox) throw new Error('That node is not a frame. Select a frame/component and copy its link.')
@@ -104,13 +130,16 @@ export async function importFigma(url: string, token: string, opts?: { flatten?:
   const children: any[] = (frame.children ?? []).filter((c: any) => c.visible !== false && c.absoluteBoundingBox)
 
   // render children to PNGs (one request). Normally every non-text child; when
-  // flattening, every child (text included) becomes an image.
-  const exportIds = children.filter((c) => flatten || c.type !== 'TEXT').map((c) => c.id)
+  // flattening, every child (text included) becomes an image. skipImages avoids the
+  // (quota-heavy) /images render entirely — text/layout only.
+  const exportIds = opts?.skipImages ? [] : children.filter((c) => flatten || c.type !== 'TEXT').map((c) => c.id)
   let imgUrls: Record<string, string | null> = {}
   if (exportIds.length) {
+    onP?.({ phase: 'Rendering images in Figma…' })
     const imgRes = await api<{ images: Record<string, string | null> }>(
       `/images/${key}?ids=${exportIds.map(encodeURIComponent).join(',')}&format=png&scale=2`,
       token,
+      onP,
     )
     imgUrls = imgRes.images ?? {}
   }
@@ -118,9 +147,12 @@ export async function importFigma(url: string, token: string, opts?: { flatten?:
   // Download every rendered PNG in parallel first (the slow part used to be doing
   // these one-at-a-time inside the build loop). Keyed by node id.
   const dataUrls: Record<string, string> = {}
+  let dl = 0
+  if (exportIds.length) onP?.({ phase: 'Downloading images…', done: 0, total: exportIds.length })
   await mapPool(exportIds, 6, async (cid) => {
     const url = imgUrls[cid]
     if (url) dataUrls[cid] = await toDataUrl(url)
+    onP?.({ phase: 'Downloading images…', done: ++dl, total: exportIds.length })
   })
 
   const assets: AssetMap = {}
@@ -215,12 +247,14 @@ export interface FunnelImportResult {
   assets: AssetMap
 }
 
-export async function importFigmaFunnel(url: string, token: string): Promise<FunnelImportResult> {
+export async function importFigmaFunnel(url: string, token: string, opts?: { skipImages?: boolean; onProgress?: OnProgress }): Promise<FunnelImportResult> {
+  const onP = opts?.onProgress
   const parsed = parseFigmaUrl(url)
   if (!parsed) throw new Error('Could not read the Figma URL. Open the parent frame, copy its link (must contain node-id).')
   const { key, nodeId } = parsed
 
-  const nodeRes = await api<{ nodes: Record<string, { document: any }> }>(`/files/${key}/nodes?ids=${encodeURIComponent(nodeId)}`, token)
+  onP?.({ phase: 'Reading frames…' })
+  const nodeRes = await api<{ nodes: Record<string, { document: any }> }>(`/files/${key}/nodes?ids=${encodeURIComponent(nodeId)}`, token, onP)
   const parent = nodeRes.nodes[nodeId]?.document
   if (!parent) throw new Error('That node was not found in the file.')
   const frames: any[] = (parent.children ?? []).filter((c: any) => c.visible !== false && c.absoluteBoundingBox)
@@ -298,7 +332,7 @@ export async function importFigmaFunnel(url: string, token: string): Promise<Fun
         bbArea(n) < bbArea(f) * 0.72,
     )
     imgCands.sort((a, b) => bbArea(b) - bbArea(a))
-    const imgNode = imgCands[0]
+    const imgNode = opts?.skipImages ? undefined : imgCands[0]
     if (imgNode) imageIds.push(imgNode.id)
 
     pre.push({
@@ -314,14 +348,19 @@ export async function importFigmaFunnel(url: string, token: string): Promise<Fun
   // export the chosen image nodes (one request), then inline in parallel
   let imgUrls: Record<string, string | null> = {}
   if (imageIds.length) {
-    const res = await api<{ images: Record<string, string | null> }>(`/images/${key}?ids=${imageIds.map(encodeURIComponent).join(',')}&format=png&scale=2`, token)
+    onP?.({ phase: 'Rendering images in Figma…' })
+    const res = await api<{ images: Record<string, string | null> }>(`/images/${key}?ids=${imageIds.map(encodeURIComponent).join(',')}&format=png&scale=2`, token, onP)
     imgUrls = res.images ?? {}
   }
   const dataMap: Record<string, string> = {}
+  let dl = 0
+  if (imageIds.length) onP?.({ phase: 'Downloading images…', done: 0, total: imageIds.length })
   await mapPool(imageIds, 6, async (id) => {
     const u = imgUrls[id]
     if (u) dataMap[id] = await toDataUrl(u)
+    onP?.({ phase: 'Downloading images…', done: ++dl, total: imageIds.length })
   })
+  onP?.({ phase: 'Building scenes…' })
 
   const assets: AssetMap = {}
   const questions = pre.map((p, i) => {

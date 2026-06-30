@@ -164,5 +164,9 @@ export const WORD_TEMPLATE: GameTemplate = {
   paramFields: [{ key: 'word', label: 'Word to spell', type: 'text' }],
   assetSlots: [{ key: 'product', label: 'Reward image (optional)' }],
   defaultParams: { word: 'PLAY', product: '' },
+  // Tap a letter tile in the tray (tiles sit at ~0.74+ height; first tile left of center).
+  defaultHandguide: {
+    nodes: [{ x: 0.32, y: 0.8 }],
+  },
   create: createWord,
 }

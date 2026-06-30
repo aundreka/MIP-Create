@@ -165,5 +165,9 @@ export const RECIPE_TEMPLATE: GameTemplate = {
     { key: 'product', label: 'Product image' },
   ],
   defaultParams: { count: 3, ingredients: [], product: '' },
+  // Tap an ingredient in the bottom tray (first slot of the 3-item row at y~0.82).
+  defaultHandguide: {
+    nodes: [{ x: 0.25, y: 0.82 }],
+  },
   create: createRecipe,
 }

@@ -189,5 +189,13 @@ export const CATCH_TEMPLATE: GameTemplate = {
     { key: 'itemImage', label: 'Falling item image' },
   ],
   defaultParams: { catches: 5, speed: 0.55, spawnMs: 900, basketImage: '', itemImage: '' },
+  // Slide the basket left-right along the bottom to line up with falling items.
+  defaultHandguide: {
+    nodes: [
+      { x: 0.3, y: 0.85 },
+      { x: 0.7, y: 0.85 },
+    ],
+    periodMs: 1700,
+  },
   create: createCatch,
 }

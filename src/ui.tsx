@@ -4,8 +4,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { addToPalette, loadPalette } from './brandkit'
-import { Check, ChevronDown, ChevronRight, Icon, X } from './icons'
-import { getAccordion, setAccordion } from './uiState'
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Icon, X } from './icons'
+import { getAccordion, getDock, setAccordion, setDock } from './uiState'
+
+// ---- confirmDestructive: gate an unrecoverable action behind a confirm -------
+// Used before project-replacing loads (loadProject clears undo history) and other
+// destructive actions. Centralized so we can later swap to a styled dialog.
+export function confirmDestructive(message: string): boolean {
+  return typeof window !== 'undefined' && typeof window.confirm === 'function' ? window.confirm(message) : true
+}
 
 // ---- NumField: label is draggable to scrub the value (Figma-style) ----------
 export function NumField(props: {
@@ -15,9 +22,13 @@ export function NumField(props: {
   step?: number
   min?: number
   max?: number
+  suffix?: string
 }): JSX.Element {
   const step = props.step ?? 1
   const start = useRef<{ x: number; v: number } | null>(null)
+  // Local buffer lets the field hold a transient empty/partial value while typing
+  // (e.g. clearing "120" to type "85") without snapping to 0 on every keystroke.
+  const [buf, setBuf] = useState<string | null>(null)
   const clamp = (v: number): number => {
     if (props.min != null) v = Math.max(props.min, v)
     if (props.max != null) v = Math.min(props.max, v)
@@ -40,7 +51,20 @@ export function NumField(props: {
       >
         {props.label}
       </span>
-      <input type="number" value={props.value ?? 0} step={step} onChange={(e) => props.onChange(clamp(Number(e.target.value)))} />
+      <div className={'num-input' + (props.suffix ? ' has-unit' : '')}>
+        <input
+          type="number"
+          value={buf ?? String(props.value ?? 0)}
+          step={step}
+          onChange={(e) => {
+            setBuf(e.target.value)
+            const n = Number(e.target.value)
+            if (e.target.value.trim() !== '' && Number.isFinite(n)) props.onChange(clamp(n))
+          }}
+          onBlur={() => setBuf(null)}
+        />
+        {props.suffix && <i className="num-unit">{props.suffix}</i>}
+      </div>
     </label>
   )
 }
@@ -78,7 +102,14 @@ export function Toggle(props: { label: string; checked: boolean; onChange: (v: b
   return (
     <label className="field toggle-field">
       <span>{props.label}</span>
-      <button className={'toggle' + (props.checked ? ' on' : '')} onClick={() => props.onChange(!props.checked)} type="button">
+      <button
+        className={'toggle' + (props.checked ? ' on' : '')}
+        onClick={() => props.onChange(!props.checked)}
+        type="button"
+        role="switch"
+        aria-checked={props.checked}
+        aria-label={props.label}
+      >
         <i />
       </button>
     </label>
@@ -98,51 +129,86 @@ async function eyedrop(): Promise<string | null> {
 }
 
 export function Swatches(props: { label: string; value?: string; onChange: (c: string | undefined) => void; allowNone?: boolean }): JSX.Element {
+  const [open, setOpen] = useState(false)
   const [palette, setPalette] = useState<string[]>(() => loadPalette())
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null)
+  const dotRef = useRef<HTMLButtonElement>(null)
+  const popRef = useRef<HTMLDivElement>(null)
   const hasEyedropper = typeof (window as unknown as { EyeDropper?: unknown }).EyeDropper !== 'undefined'
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent): void => {
+      if (!popRef.current?.contains(e.target as Node) && !dotRef.current?.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  const handleToggle = (): void => {
+    if (open) { setOpen(false); return }
+    if (dotRef.current) {
+      const r = dotRef.current.getBoundingClientRect()
+      setPos({ top: r.bottom + 6, right: window.innerWidth - r.right })
+    }
+    setOpen(true)
+  }
+
   return (
-    <div className="field">
+    <div className="field swatch-field">
       <span>{props.label}</span>
-      <div className="swatches">
+      <div className="swatch-row">
         {props.allowNone && (
-          <button className={'swatch none' + (props.value ? '' : ' sel')} title="None" onClick={() => props.onChange(undefined)} />
+          <button
+            className={'swatch-dot none' + (!props.value ? ' sel' : '')}
+            title="None"
+            onClick={() => { props.onChange(undefined); setOpen(false) }}
+          />
         )}
-        {palette.map((c) => (
-          <button
-            key={c}
-            className={'swatch' + (props.value?.toLowerCase() === c.toLowerCase() ? ' sel' : '')}
-            style={{ background: c }}
-            title={c}
-            onClick={() => props.onChange(c)}
-          />
-        ))}
-        <label className="swatch custom" title="Custom color">
-          +
-          <input
-            type="color"
-            value={props.value ?? '#ffffff'}
-            onChange={(e) => {
-              props.onChange(e.target.value)
-              setPalette(addToPalette(e.target.value))
-            }}
-          />
-        </label>
+        <button
+          ref={dotRef}
+          className={'swatch-dot' + (open ? ' open' : '')}
+          style={{ background: props.value ?? 'transparent' }}
+          onClick={handleToggle}
+          title={props.value ?? 'Pick color'}
+        />
         {hasEyedropper && (
-          <button
-            className="swatch eyedrop"
-            title="Pick from screen"
-            onClick={async () => {
-              const c = await eyedrop()
-              if (c) {
-                props.onChange(c)
-                setPalette(addToPalette(c))
-              }
-            }}
-          >
-            ⦿
-          </button>
+          <button className="swatch-drop" title="Pick from screen" onClick={async () => {
+            const c = await eyedrop()
+            if (c) { props.onChange(c); setPalette(addToPalette(c)) }
+          }}>⦿</button>
         )}
       </div>
+      {open && pos && createPortal(
+        <div ref={popRef} className="swatch-popup" style={{ top: pos.top, right: pos.right }}>
+          <div className="swatches">
+            {palette.map((c) => (
+              <button
+                key={c}
+                className={'swatch' + (props.value?.toLowerCase() === c.toLowerCase() ? ' sel' : '')}
+                style={{ background: c }}
+                title={c}
+                onClick={() => { props.onChange(c); setOpen(false) }}
+              />
+            ))}
+            <label className="swatch custom" title="Custom color">
+              +
+              <input
+                type="color"
+                value={props.value ?? '#ffffff'}
+                onChange={(e) => { props.onChange(e.target.value); setPalette(addToPalette(e.target.value)) }}
+              />
+            </label>
+            {hasEyedropper && (
+              <button className="swatch eyedrop" title="Pick from screen" onClick={async () => {
+                const c = await eyedrop()
+                if (c) { props.onChange(c); setPalette(addToPalette(c)); setOpen(false) }
+              }}>⦿</button>
+            )}
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   )
 }
@@ -173,7 +239,7 @@ export function Select<T extends string>(props: {
 }): JSX.Element {
   const control = (
     <span className={'select-wrap' + (props.className ? ' ' + props.className : '')}>
-      <select value={props.value} title={props.title} onChange={(e) => props.onChange(e.target.value as T)}>
+      <select value={props.value} title={props.title} aria-label={props.title ?? props.label} onChange={(e) => props.onChange(e.target.value as T)}>
         {props.options.map((o) => (
           <option key={o.value} value={o.value} disabled={o.disabled}>
             {o.label}
@@ -233,7 +299,9 @@ export function Accordion(props: { id: string; title: React.ReactNode; defaultOp
         <Icon icon={ChevronRight} size={14} className="acc-chevron" />
         <span>{props.title}</span>
       </button>
-      {open && <div className="acc-body">{props.children}</div>}
+      <div className="acc-body">
+        <div className="acc-inner">{props.children}</div>
+      </div>
     </div>
   )
 }
@@ -277,6 +345,90 @@ export function Modal(props: {
           </button>
         </div>
         <div className="modal-body">{props.children}</div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+// ---- Row: labelled field row (shared by Inspector + drawers) ----------------
+export function Row(props: { label: string; children: React.ReactNode }): JSX.Element {
+  return (
+    <label className="field">
+      <span>{props.label}</span>
+      {props.children}
+    </label>
+  )
+}
+
+// ---- DockPanel (resizable + collapsible side panel; size persisted) ---------
+export function DockPanel(props: { id: string; side: 'left' | 'right'; defaultWidth: number; min?: number; max?: number; children: React.ReactNode }): JSX.Element {
+  const init = getDock(props.id)
+  const [w, setW] = useState(init.w ?? props.defaultWidth)
+  const [collapsed, setCollapsed] = useState(!!init.collapsed)
+  const drag = useRef<{ x: number; w: number } | null>(null)
+  const min = props.min ?? 180
+  const max = props.max ?? 560
+  const onDown = (e: React.PointerEvent): void => {
+    drag.current = { x: e.clientX, w }
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+  }
+  const onMove = (e: React.PointerEvent): void => {
+    if (!drag.current) return
+    const dx = (e.clientX - drag.current.x) * (props.side === 'left' ? 1 : -1)
+    setW(Math.max(min, Math.min(max, drag.current.w + dx)))
+  }
+  const onUp = (e: React.PointerEvent): void => {
+    if (!drag.current) return
+    ;(e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId)
+    drag.current = null
+    setDock(props.id, { w })
+  }
+  const toggle = (): void => setCollapsed((c) => { const n = !c; setDock(props.id, { collapsed: n }); return n })
+  // chevron points the way the click moves the panel (collapse vs expand)
+  const tabIcon = (props.side === 'left') === collapsed ? ChevronRight : ChevronLeft
+  const tab = (
+    <button className="dock-tab" title={collapsed ? 'Expand panel' : 'Collapse panel'} onPointerDown={(e) => e.stopPropagation()} onClick={toggle}>
+      <Icon icon={tabIcon} size={13} />
+    </button>
+  )
+  if (collapsed) return <div className={'dock dock-' + props.side + ' collapsed'}>{tab}</div>
+  const handle = (
+    <div className="dock-resize" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} title="Drag to resize">
+      {tab}
+    </div>
+  )
+  return (
+    <div className={'dock dock-' + props.side} style={{ width: w }}>
+      {props.side === 'right' && handle}
+      <div className="dock-inner">{props.children}</div>
+      {props.side === 'left' && handle}
+    </div>
+  )
+}
+
+// ---- Drawer (right slide-over; canvas stays visible) ------------------------
+export function Drawer(props: { title: React.ReactNode; onClose: () => void; width?: number; children: React.ReactNode }): JSX.Element {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') props.onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    ref.current?.querySelector<HTMLElement>('input, select, textarea, button:not(.drawer-close)')?.focus()
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  return createPortal(
+    <div className="drawer-backdrop" onClick={props.onClose}>
+      <div className="drawer" ref={ref} style={{ width: props.width ?? 360 }} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        <div className="drawer-head">
+          <strong>{props.title}</strong>
+          <button className="icon drawer-close" onClick={props.onClose} title="Close (Esc)" aria-label="Close">
+            <Icon icon={X} size={16} />
+          </button>
+        </div>
+        <div className="drawer-body">{props.children}</div>
       </div>
     </div>,
     document.body,

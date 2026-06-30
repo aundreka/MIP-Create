@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      # Prettier is available via `npm run format` / `format:check`. It is not yet
+      # a blocking gate (the repo hasn't had a one-time `npm run format` pass);
+      # add a "Format check" step here after that lands.
+
+      # Runtime must be built before tests/export (they inline runtime-dist).
+      # PA_BUILD stamps the bundle with the commit for traceable playables.
+      - name: Build runtime
+        run: npm run build:runtime
+        env:
+          PA_BUILD: ${{ github.sha }}
+
+      - name: Test
+        run: npm test
+
+      - name: Build editor
+        run: npm run build
+        env:
+          PA_BUILD: ${{ github.sha }}
+
+      - name: Install Chrome for smoke test
+        uses: browser-actions/setup-chrome@v1
+        id: chrome
+
+      - name: Smoke (headless render of a real export)
+        run: npm run smoke
+        env:
+          PUPPETEER_EXECUTABLE_PATH: ${{ steps.chrome.outputs.chrome-path }}

@@ -10,13 +10,8 @@ import { initTheme } from './theme'
 // wrong palette.
 initTheme()
 
-// Open the last project (or create one), from the localStorage project library.
-bootProjects()
-
-// Optional deep-link: #sel=<elementId> preselects an element (handy for testing
-// and for jumping straight to an element).
+// Optional deep-link: #sel=<elementId> preselects an element (applied after boot).
 const selMatch = /(?:^|[#&])sel=([^&]+)/.exec(location.hash)
-if (selMatch) selectOnly(decodeURIComponent(selMatch[1]))
 
 // Debounced autosave to the current project's slot.
 let t: number | undefined
@@ -47,10 +42,15 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { err: Error | nu
   }
 }
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <ErrorBoundary>
-      <App />
-    </ErrorBoundary>
-  </StrictMode>,
-)
+// Open the last project (or create one) from the library — rehydrating its assets
+// from IndexedDB — THEN render, so the editor paints the right project on frame 1.
+void bootProjects().finally(() => {
+  if (selMatch) selectOnly(decodeURIComponent(selMatch[1]))
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
+    </StrictMode>,
+  )
+})

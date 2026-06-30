@@ -141,5 +141,12 @@ export const BINGO_TEMPLATE: GameTemplate = {
     { key: 'markImage', label: 'Daub / mark image (optional)' },
   ],
   defaultParams: { size: 3, cellImage: '', markImage: '' },
+  // Tap cells to daub a line (centre then a corner of the centred 3x3 grid).
+  defaultHandguide: {
+    nodes: [
+      { x: 0.5, y: 0.5 },
+      { x: 0.2, y: 0.2, pauseMs: 300 },
+    ],
+  },
   create: createBingo,
 }

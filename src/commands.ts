@@ -23,13 +23,14 @@ import {
   RectangleHorizontal,
   Redo2,
   Smartphone,
+  Star,
   Sun,
   Trash2,
+  Settings,
   Trophy,
   Type,
   Undo2,
   Upload,
-  Volume2,
 } from './icons'
 import {
   addElement,
@@ -63,12 +64,13 @@ export interface AppCommandActions {
   openPreview: () => void
   openExport: () => void
   openFigma: () => void
-  openSfx: () => void
+  openProjectSettings: () => void
   openTemplates: () => void
   openHome: () => void
   openQuizFunnel: () => void
   openQa: () => void
   openTeam: () => void
+  openGenerateMip: () => void
 }
 
 export function buildCommands(a: AppCommandActions): Command[] {
@@ -96,17 +98,17 @@ export function buildCommands(a: AppCommandActions): Command[] {
     { id: 'add-bar', title: 'Add header / footer bar', icon: RectangleHorizontal, run: () => addElement(makeBar()) },
     { id: 'add-game', title: 'Add mini-game', icon: Gamepad2, run: () => addElement(makeGame()) },
     { id: 'scene-game', title: 'Add game scene', icon: Gamepad2, run: () => addScene('game') },
-    { id: 'scene-win', title: 'Add win scene', icon: Trophy, run: () => addScene('win') },
+    { id: 'scene-overlay', title: 'Add overlay scene', icon: Trophy, run: () => addScene('overlay') },
     { id: 'scene-end', title: 'Add endscene', icon: Clapperboard, run: () => addScene('endscene') },
-    { id: 'scene-blank', title: 'Add blank scene', icon: Plus, run: () => addScene('custom') },
     { id: 'orient-portrait', title: 'Orientation: Portrait', run: () => setOrientation('portrait') },
     { id: 'orient-landscape', title: 'Orientation: Landscape', run: () => setOrientation('landscape') },
     { id: 'theme', title: 'Toggle light / dark theme', icon: Sun, run: () => toggleTheme() },
     { id: 'preview', title: 'Preview the ad', icon: Play, run: a.openPreview },
     { id: 'export', title: 'Export playable…', icon: Upload, run: a.openExport },
-    { id: 'sfx', title: 'Sound…', icon: Volume2, run: a.openSfx },
+    { id: 'settings', title: 'Project settings…', icon: Settings, run: a.openProjectSettings },
     { id: 'templates', title: 'Templates…', run: a.openTemplates },
     { id: 'quizfunnel', title: 'Quiz / survey funnel…', run: a.openQuizFunnel },
+    { id: 'genmip', title: 'Generate MIP…', hint: 'logo + product → scaffold', icon: Star, run: a.openGenerateMip },
     { id: 'qa', title: 'QA consistency check…', hint: 'compare MIPs', run: a.openQa },
     { id: 'team', title: 'Team library (cloud)…', hint: 'publish / browse MIPs', icon: Upload, run: a.openTeam },
     { id: 'figma', title: 'Import from Figma…', run: a.openFigma },

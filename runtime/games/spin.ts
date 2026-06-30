@@ -162,5 +162,9 @@ export const SPIN_TEMPLATE: GameTemplate = {
     { key: 'centerImage', label: 'Center button image (optional)' },
   ],
   defaultParams: { segments: 6, winIndex: 0, turns: 4, prizes: '', wheelImage: '', centerImage: '' },
+  // Single tap on the centred SPIN button (wheel + button are centered at the card middle).
+  defaultHandguide: {
+    nodes: [{ x: 0.5, y: 0.5 }],
+  },
   create: createSpin,
 }

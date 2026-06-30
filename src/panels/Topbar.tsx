@@ -1,9 +1,12 @@
-// Top bar — minimal: project name, orientation toggle, undo/redo, zoom, Preview,
-// Save/Open. (Insert moved to the tool rail; z-order moved to draggable layers.)
+// Top bar — edit-mode context + primary actions only. App-level actions (Home,
+// file I/O, save-as-template, Profile, theme) live in the ≡ App menu on the brand
+// button. Create methods live on Home's Create gallery; insert is on the tool rail.
 
+import { useRef, useState } from 'react'
 import { loadProject as bridgeLoad, platformLabel, saveProject } from '../bridge'
 import { getState, loadProject as storeLoad, markSaved, redo, refreshScene, setOrientation, undo, useEditorState } from '../store'
-import { Icon, Menu, Minus, Moon, Play, Plus, Redo2, Sun, Undo2, Volume2 } from '../icons'
+import { ContextMenu, type MenuItem } from './ContextMenu'
+import { ChevronDown, Icon, Menu, Minus, Play, Plus, Redo2, Undo2 } from '../icons'
 import { toggleTheme, useTheme } from '../theme'
 import { setEditLocale, useEditLocale } from '../locale'
 import { setActiveVariant, useActiveVariant } from '../variantMode'
@@ -19,17 +22,48 @@ async function doOpen(): Promise<void> {
   if (r) storeLoad(r.data.project, r.data.assets, r.path, r.data.trace)
 }
 
-export function Topbar(props: { zoom: number; onZoom: (z: number) => void; onFit: () => void; onPreview: () => void; onFigma: () => void; onSfx: () => void; onTemplates: () => void; onHome: () => void; onExport: () => void; onQuizFunnel: () => void; onQa: () => void; onTeam: () => void }): JSX.Element {
+export function Topbar(props: {
+  zoom: number
+  onZoom: (z: number) => void
+  onFit: () => void
+  onPreview: () => void
+  onSaveTemplate: () => void
+  onHome: () => void
+  onProfile: () => void
+  onProjectSettings: () => void
+  onExport: () => void
+  onQa: () => void
+}): JSX.Element {
   const { orientation, dirty, projectPath, canUndo, canRedo, scene } = useEditorState()
   const theme = useTheme()
   const editLocale = useEditLocale()
   const locales = scene.meta.locales ?? []
   const activeVariant = useActiveVariant()
   const variants = scene.meta.variants ?? []
+
+  const appBtn = useRef<HTMLButtonElement>(null)
+  const [appMenu, setAppMenu] = useState<{ x: number; y: number } | null>(null)
+  const openApp = (): void => {
+    const r = appBtn.current?.getBoundingClientRect()
+    if (r) setAppMenu({ x: r.left, y: r.bottom + 4 })
+  }
+  const appItems: MenuItem[] = [
+    { label: 'Home / Projects…', onClick: props.onHome },
+    { sep: true, label: '' },
+    { label: 'Save…', onClick: () => void doSave() },
+    { label: 'Open…', onClick: () => void doOpen() },
+    { label: 'Save as template…', onClick: props.onSaveTemplate },
+    { sep: true, label: '' },
+    { label: 'Project settings…', onClick: props.onProjectSettings },
+    { label: 'QA & reports…', onClick: props.onQa },
+    { label: 'Profile…', onClick: props.onProfile },
+    { label: theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme', onClick: () => toggleTheme() },
+  ]
+
   return (
     <div className="topbar">
-      <button className="brand" onClick={props.onHome} title="Projects / home menu">
-        <Icon icon={Menu} size={16} /> {scene.meta.name || 'untitled'}
+      <button className="brand" ref={appBtn} onClick={openApp} title="Menu — Home, file, profile, theme">
+        <Icon icon={Menu} size={16} /> {scene.meta.name || 'untitled'} <Icon icon={ChevronDown} size={12} />
       </button>
       {dirty && <span className="dot" title="Unsaved changes" />}
 
@@ -95,34 +129,15 @@ export function Topbar(props: { zoom: number; onZoom: (z: number) => void; onFit
       </span>
 
       <span className="spacer" />
-      <button className="icon" title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} onClick={() => toggleTheme()}>
-        <Icon icon={theme === 'dark' ? Sun : Moon} />
-      </button>
       <button onClick={props.onPreview} title="Preview the ad">
         <Icon icon={Play} size={14} /> Preview
       </button>
-      <button onClick={props.onTemplates} title="Start from / save a reusable template">
-        Templates
-      </button>
-      <button onClick={props.onQuizFunnel} title="Generate a quiz / survey funnel from pasted questions">
-        Quiz funnel
-      </button>
-      <button onClick={props.onQa} title="Check style/SFX/animation consistency across this client's MIPs">
-        QA
-      </button>
-      <button onClick={props.onTeam} title="Team library — publish / browse MIPs, monitor progress">
-        Team
-      </button>
-      <button onClick={props.onFigma}>Figma</button>
-      <button onClick={props.onSfx} title="Sound (event SFX + background music)">
-        <Icon icon={Volume2} size={14} /> Sound
-      </button>
-      <button onClick={() => void doSave()}>Save</button>
-      <button onClick={() => void doOpen()}>Open</button>
       <button className="primary" onClick={props.onExport}>
         Export
       </button>
       <span className="hint">{platformLabel}{projectPath ? ' · ' + projectPath.split(/[\\/]/).pop() : ''}</span>
+
+      {appMenu && <ContextMenu x={appMenu.x} y={appMenu.y} items={appItems} onClose={() => setAppMenu(null)} />}
     </div>
   )
 }

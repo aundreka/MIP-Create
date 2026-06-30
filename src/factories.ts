@@ -201,6 +201,29 @@ export function makeEndsceneVideo(): SceneElement {
   }
 }
 
+export function makeUnboxing(): SceneElement {
+  const m = meta()
+  return {
+    id: nextId('unbox'),
+    type: 'unboxing',
+    name: 'Mystery Box',
+    x: cx(),
+    y: cy(),
+    w: Math.round(m.baseW * 0.9),
+    h: Math.round(m.baseH * 0.55),
+    anchor: 'center',
+    zIndex: topZ(),
+    mode: 'fit',
+    unboxing: {
+      cols: 2, rows: 2, colGap: 24, rowGap: 24,
+      back:  { x: 50, y: 55, w: 85 },
+      front: { x: 50, y: 67, w: 85 },
+      top:   { x: 50, y: 22, w: 85, endX: 60, endY: -35, endRotation: -35, endOpacity: 0, durationMs: 700 },
+      productX: 50, productY: 28, productW: 60, productDurationMs: 900, productDelayMs: 160,
+    },
+  }
+}
+
 export function makeBackground(assetId: string, name: string): SceneElement {
   return {
     id: nextId('bg'),

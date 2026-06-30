@@ -144,5 +144,13 @@ export const SLIDER_TEMPLATE: GameTemplate = {
     { key: 'after', label: 'After image' },
   ],
   defaultParams: { orientation: 'horizontal', threshold: 0.82, before: '', after: '' },
+  // Slide the divider handle from mid-card toward the left edge (drag to reveal).
+  defaultHandguide: {
+    nodes: [
+      { x: 0.5, y: 0.5 },
+      { x: 0.12, y: 0.5 },
+    ],
+    periodMs: 1700,
+  },
   create: createSlider,
 }

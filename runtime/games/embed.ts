@@ -140,5 +140,9 @@ export const EMBED_TEMPLATE: GameTemplate = {
   ],
   assetSlots: [{ key: 'html', label: 'Game HTML file', accept: 'html' }],
   defaultParams: { complete: 'auto', timerMs: 8000, html: '' },
+  // Generic centered "tap to play" hint (external iframe game the editor can't parameterize).
+  defaultHandguide: {
+    nodes: [{ x: 0.5, y: 0.5 }],
+  },
   create: createEmbed,
 }

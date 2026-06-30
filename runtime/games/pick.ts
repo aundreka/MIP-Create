@@ -135,5 +135,9 @@ export const PICK_TEMPLATE: GameTemplate = {
     { key: 'prize', label: 'Prize image' },
   ],
   defaultParams: { count: 3, anyWins: 1, winIndex: 0, boxClosed: '', boxOpen: '', prize: '' },
+  // Single tap on the centred box row (boxes are centered horizontally at vertical mid, y~0.5).
+  defaultHandguide: {
+    nodes: [{ x: 0.5, y: 0.5 }],
+  },
   create: createPick,
 }
