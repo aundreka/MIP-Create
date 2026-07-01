@@ -3,16 +3,22 @@
 // pa:proj:<id>. The "current" project id is remembered (pa:lastProject) so a
 // reload reopens it. Switching always persists the project being left first.
 
-import type { Project, ProjectMeta } from '../runtime/scene'
+import type { Project, ProjectMeta, SceneElement } from '../runtime/scene'
 import type { AssetMap } from '../runtime/types'
 import type { ProjectData } from './bridge'
-import { blankProject, getState, loadProject, type TraceState } from './store'
+import { blankProject, flushSharedToRegistry, getState, loadProject, type TraceState } from './store'
 import { deleteProjectAssets, getAssetBytes, idbAvailable, putAssetBytes } from './assetStore'
+import { readShared, sharedElementAssets } from './projectGroups'
+import { syncMipName } from './mipName'
 
 export interface ProjectRecord {
   id: string
   name: string
   updatedAt: number
+  // Denormalized project-group membership (see src/projectGroups.ts) so Home and
+  // the top-bar switcher can group MIPs without loading each project's data.
+  projectId?: string
+  projectName?: string
 }
 
 const INDEX_KEY = 'pa:projects'
@@ -116,19 +122,67 @@ async function rehydrate(id: string, assets: AssetMap): Promise<AssetMap> {
   return out
 }
 
-function upsertRecord(id: string, name: string): void {
+function upsertRecord(id: string, name: string, meta?: ProjectMeta): void {
   const list = readIndex().filter((r) => r.id !== id)
-  list.push({ id, name, updatedAt: now() })
+  const rec: ProjectRecord = { id, name, updatedAt: now() }
+  if (meta?.projectId) rec.projectId = meta.projectId
+  if (meta?.projectName) rec.projectName = meta.projectName
+  list.push(rec)
   writeIndex(list)
+}
+
+/** MIPs that belong to a given project group (most-recent first). */
+export function projectsInGroup(groupId: string): ProjectRecord[] {
+  return listProjects().filter((r) => r.projectId === groupId)
+}
+
+/**
+ * Reconcile a MIP's project-shared ("Sync to project") elements against the group
+ * registry before it loads: refresh every existing synced element from the shared
+ * definition, materialize any that are missing (scope 'all' → one per scene; scope
+ * 'scene' → one on the start scene), and merge in the referenced assets. Mutates
+ * `project`/`assets` in place. No-op for MIPs not in a project group.
+ */
+async function reconcileShared(project: Project, assets: AssetMap): Promise<void> {
+  const gid = project.meta.projectId
+  if (!gid) return
+  const shared = readShared(gid)
+  const keys = Object.keys(shared)
+  if (!keys.length) return
+  for (const key of keys) {
+    const entry = shared[key]
+    const canon = entry.el
+    const sa = await sharedElementAssets(gid, entry)
+    for (const [aid, a] of Object.entries(sa)) if (!assets[aid]?.src) assets[aid] = a
+    let found = false
+    for (const sd of project.scenes) {
+      sd.elements = sd.elements.map((e) => {
+        if (e.sync?.key !== key) return e
+        found = true
+        return { ...canon, id: e.id, sync: { key, scope: entry.scope } } as SceneElement
+      })
+    }
+    if (entry.scope === 'all') {
+      for (const sd of project.scenes) {
+        if (sd.elements.some((e) => e.sync?.key === key)) continue
+        sd.elements.push({ ...canon, id: `sync_${key}_${sd.id}`, sync: { key, scope: 'all' } } as SceneElement)
+        found = true
+      }
+    } else if (!found) {
+      const sd = project.scenes.find((s) => s.id === project.startSceneId) ?? project.scenes[0]
+      if (sd) sd.elements.push({ ...canon, id: `sync_${key}_${sd.id}`, sync: { key, scope: 'scene' } } as SceneElement)
+    }
+  }
 }
 
 /** Persist the project currently open in the editor to its slot. Resolves once the
  * asset bytes are flushed (localStorage metadata is written synchronously). */
 export function saveCurrent(): Promise<void> {
   if (!currentId) return Promise.resolve()
+  flushSharedToRegistry() // backstop: mirror any synced elements to the group registry
   const s = getState()
   const done = writeData(currentId, { project: s.project, assets: s.assets, trace: s.trace })
-  upsertRecord(currentId, s.project.meta.name || 'untitled')
+  upsertRecord(currentId, s.project.meta.name || 'untitled', s.project.meta)
   return done
 }
 
@@ -138,6 +192,7 @@ export async function openProject(id: string): Promise<boolean> {
   if (!d) return false
   await saveCurrent()
   const assets = await rehydrate(id, d.assets)
+  await reconcileShared(d.project, assets)
   loadProject(d.project, assets, null, d.trace)
   setCurrent(id)
   return true
@@ -151,7 +206,7 @@ export async function createProject(data?: { project: Project; assets: AssetMap;
   loadProject(d.project, d.assets, null, d.trace) // show it immediately
   setCurrent(id)
   await writeData(id, { project: d.project, assets: d.assets, trace: d.trace })
-  upsertRecord(id, d.project.meta.name || 'untitled')
+  upsertRecord(id, d.project.meta.name || 'untitled', d.project.meta)
   return id
 }
 
@@ -166,7 +221,7 @@ export async function importProjectData(id: string, data: ProjectData): Promise<
   loadProject(data.project, data.assets, null, data.trace) // data carries src (team pull)
   setCurrent(id)
   await writeData(id, data)
-  upsertRecord(id, data.project.meta.name || 'untitled')
+  upsertRecord(id, data.project.meta.name || 'untitled', data.project.meta)
 }
 
 export async function duplicateProject(id: string): Promise<string | null> {
@@ -179,7 +234,7 @@ export async function duplicateProject(id: string): Promise<string | null> {
   copy.project.meta = { ...copy.project.meta, name: (copy.project.meta.name || 'untitled') + ' copy' }
   const nid = newId()
   await writeData(nid, copy)
-  upsertRecord(nid, copy.project.meta.name)
+  upsertRecord(nid, copy.project.meta.name, copy.project.meta)
   return nid
 }
 
@@ -204,8 +259,11 @@ export function renameProject(id: string, name: string): void {
 export function patchProjectMeta(id: string, patch: Partial<ProjectMeta>): boolean {
   const d = loadProjectData(id)
   if (!d) return false
-  d.project.meta = { ...d.project.meta, ...patch }
+  d.project.meta = syncMipName({ ...d.project.meta, ...patch })
   void writeData(id, d) // metadata-only re-save; leaves IDB bytes intact
+  // Keep the library index label in step with the canonical MIP name. Only the
+  // name is touched (not updatedAt), so assigning client/MIP doesn't reorder Home.
+  writeIndex(readIndex().map((r) => (r.id === id ? { ...r, name: d.project.meta.name } : r)))
   return true
 }
 
@@ -238,7 +296,7 @@ async function migrateLegacy(): Promise<void> {
     if (d?.project?.scenes) {
       const id = newId()
       await writeData(id, d) // await so the bytes are in IDB before boot rehydrates
-      upsertRecord(id, d.project.meta.name || 'untitled')
+      upsertRecord(id, d.project.meta.name || 'untitled', d.project.meta)
       localStorage.removeItem(LEGACY_KEY)
     }
   } catch {
@@ -276,6 +334,7 @@ export async function bootProjects(): Promise<string> {
     const d = loadProjectData(id)
     if (d) {
       const assets = await rehydrate(id, d.assets)
+      await reconcileShared(d.project, assets)
       loadProject(d.project, assets, null, d.trace)
       setCurrent(id)
       return id

@@ -133,7 +133,7 @@ export function FigmaImport(props: { onClose: () => void }): JSX.Element {
         <Checkbox checked={flatten} onChange={setFlatten} label="Flatten everything to images (no editable text)" />
       </label>
       <label className="field">
-        <Checkbox checked={skipImages} onChange={setSkipImages} label="Skip image rendering — text / layout only (avoids Figma rate limits)" />
+        <Checkbox checked={skipImages} onChange={setSkipImages} label="Skip image rendering: text / layout only (avoids Figma rate limits)" />
       </label>
       <div className="grid2">
         <button className="primary" disabled={busy || !token.trim() || !url.trim()} onClick={() => void run('scene')}>
@@ -199,7 +199,7 @@ export function FigmaImport(props: { onClose: () => void }): JSX.Element {
                     ))}
                   </div>
                 ) : (
-                  <div className="fig-q-opts">No options — will be an info/intro slide.</div>
+                  <div className="fig-q-opts">No options; will be an info/intro slide.</div>
                 )}
               </div>
             ))}

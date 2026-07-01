@@ -33,7 +33,7 @@ export function createPick(): GameModule {
     if (opened) {
       const img = win ? prizeImg || openImg : openImg
       b.el.style.background = img ? `center/contain no-repeat url("${img}")` : win ? '#16a34a' : '#33405e'
-      b.el.textContent = img ? '' : win ? '🎁' : '—'
+      b.el.textContent = img ? '' : win ? '🎁' : '-'
     } else {
       b.el.style.background = closedImg ? `center/contain no-repeat url("${closedImg}")` : '#b9892f'
       b.el.textContent = closedImg ? '' : '?'

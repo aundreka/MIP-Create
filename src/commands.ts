@@ -70,6 +70,7 @@ export interface AppCommandActions {
   openQuizFunnel: () => void
   openQa: () => void
   openTeam: () => void
+  openShare: () => void
   openGenerateMip: () => void
 }
 
@@ -111,6 +112,7 @@ export function buildCommands(a: AppCommandActions): Command[] {
     { id: 'genmip', title: 'Generate MIP…', hint: 'logo + product → scaffold', icon: Star, run: a.openGenerateMip },
     { id: 'qa', title: 'QA consistency check…', hint: 'compare MIPs', run: a.openQa },
     { id: 'team', title: 'Team library (cloud)…', hint: 'publish / browse MIPs', icon: Upload, run: a.openTeam },
+    { id: 'share', title: 'Share / import a MIP by code…', hint: 'send or receive a project', icon: Upload, run: a.openShare },
     { id: 'figma', title: 'Import from Figma…', run: a.openFigma },
     { id: 'home', title: 'Projects / Home…', icon: Smartphone, run: a.openHome },
   ]

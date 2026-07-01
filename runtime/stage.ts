@@ -453,6 +453,10 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
   }
 
   const recs: Rec[] = []
+  // Hooks run after every layoutAll pass (initial mount + each resize). Interactive mechanics
+  // that position content in raw pixels (e.g. drag-and-drop snapping) register here so their
+  // offsets are recomputed against the new viewport instead of drifting when the screen resizes.
+  const postLayout: (() => void)[] = []
   const byId = new Map<string, Rec>()
   let sfxWired = false // element tap/scene-enter sounds attached once
   let choicesWired = false // quiz/survey choice taps attached once
@@ -557,6 +561,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     layoutAll() {
       for (const rec of recs) layoutRec(rec)
       for (const rec of recs) if (rec.host) rec.host.relayout()
+      for (const fn of postLayout) fn() // re-anchor imperatively-positioned mechanics (drag, …)
     },
     startGames(interactive) {
       for (const rec of recs) {
@@ -677,6 +682,18 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
               itemSlot.set(it, null)
             }
             for (const s of slots) slotItem.set(s, null)
+          })
+          // On resize: layoutRec has already re-placed every item/slot OUTER at its new FIT
+          // position, so re-read each item's home and re-snap any item resting in a slot to the
+          // slot's new center. Without this the cached home + pixel offset drift on resize.
+          postLayout.push(() => {
+            for (const it of items) {
+              const h = ctr(it)
+              home.set(it, h)
+              const s = itemSlot.get(it)
+              if (s) { const c = ctr(s); setOff(it, c.x - h.x, c.y - h.y, false) }
+              else setOff(it, 0, 0, false)
+            }
           })
           for (const it of items) {
             it.outer.style.cursor = 'grab'
@@ -1095,7 +1112,13 @@ function layoutRec(rec: Rec): void {
   const e = effective(rec.el)
   const outer = rec.outer
 
-  outer.style.zIndex = String(e.zIndex)
+  // While an overlay is up, the scene-overlay handler re-parents immune elements
+  // (CTA / overlayImmune bar / date) into pa-stage and lifts them to z:10000 ABOVE the
+  // dim. A relayout (resize) must NOT reset them to their scene z — that drops them
+  // BEHIND the dim (z:9000) and they vanish. Detect the floated state (outside any
+  // pa-root, inside pa-stage) and preserve the overlay z; restoreImmune resets it later.
+  const floatedImmune = !outer.closest('.pa-root') && !!outer.closest('.pa-stage')
+  outer.style.zIndex = floatedImmune ? '10000' : String(e.zIndex)
   // CTA is always immune; other elements opt in via overlayImmune
   outer.classList.toggle('pa-el--immune', rec.el.type === 'cta' || !!rec.el.overlayImmune)
   outer.style.opacity = e.opacity != null ? String(e.opacity) : ''
@@ -1117,7 +1140,7 @@ function layoutRec(rec: Rec): void {
 
   switch (rec.el.type) {
     case 'background':
-      layoutBackground(outer)
+      layoutBackground(rec)
       return
     case 'dim':
       layoutDim(rec)
@@ -1257,7 +1280,19 @@ function layoutAsset(rec: Rec, e: Effective, mode: 'fit' | 'extend'): void {
       // bleed area is bar-colored rather than transparent. Without this, the 6px halo around
       // the bar content div has no background and the body bg bleeds through compositor edges.
       outer.style.background = barBgColor
-      if (isBarDiv) (rec.content as HTMLDivElement).style.backgroundColor = barBgColor
+      if (isBarDiv) {
+        const barDiv = rec.content as HTMLDivElement
+        barDiv.style.backgroundColor = barBgColor
+        // Image bars: keep the art at its PROPORTIONAL design height (h px), bottom-anchored
+        // to the bar's design rect, instead of letting background-size:100% 100% stretch it
+        // up through the whole top-extended outer. Without this the header art grows and
+        // distorts as the viewport aspect (the offY letterbox) changes — the extension above
+        // just shows the bar color. (applyBarFill resets to 100% 100% on edits; re-pin here.)
+        if (barDiv.style.backgroundImage && barDiv.style.backgroundImage !== 'none') {
+          barDiv.style.backgroundSize = `100% ${Math.max(1, Math.round(h))}px`
+          barDiv.style.backgroundPosition = 'center bottom'
+        }
+      }
       // Match body/html background to bar color so any compositor edge artifact (which
       // composites the GPU layer against the body bg) shows bar color — invisible against
       // the bar itself. Only apply in the game scene (pa-root directly in pa-stage), not
@@ -1427,7 +1462,8 @@ function styleCta(btn: HTMLElement, el: SceneElement, s: number): void {
 
 // Background always covers the full viewport. Edge gaps on AppLovin are covered
 // by the pa-bleed element (outside pa-root) rather than overshooting here.
-function layoutBackground(outer: HTMLDivElement): void {
+function layoutBackground(rec: Rec): void {
+  const outer = rec.outer
   outer.style.position = ''
   outer.style.left = '0'
   outer.style.top = '0'
@@ -1436,6 +1472,16 @@ function layoutBackground(outer: HTMLDivElement): void {
   outer.style.width = '100%'
   outer.style.height = '100%'
   outer.style.transform = 'none'
+  // The <img> fills this full-screen box; object-fit crops it. In PORTRAIT the user
+  // picks which part of the cover-crop stays visible (focusX/focusY). LANDSCAPE always
+  // centers, so the image simply crops to cover the wider screen. Re-applied every
+  // layout pass, so an orientation flip swaps the behaviour with no rebuild.
+  const img = rec.content
+  if (img) {
+    const bg = rec.el.background
+    img.style.objectFit = bg?.objectFit ?? 'cover'
+    img.style.objectPosition = isLandscape() ? '50% 50%' : `${bg?.focusX ?? 50}% ${bg?.focusY ?? 50}%`
+  }
 }
 
 // Endscene: 'extend' fills the whole viewport (the usual full-bleed endscene

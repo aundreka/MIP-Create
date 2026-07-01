@@ -74,7 +74,7 @@ export function TeamLibrary(props: { onOpened: () => void }): JSX.Element {
 
   const myId = session?.user?.id
   const isPm = role === 'pm' || role === 'admin'
-  const emailOf = (id: string | null): string => (id ? profiles.find((p) => p.id === id)?.email ?? id.slice(0, 8) : '—')
+  const emailOf = (id: string | null): string => (id ? profiles.find((p) => p.id === id)?.email ?? id.slice(0, 8) : '-')
 
   const wrap = (fn: () => Promise<void>): (() => void) => () => {
     setBusy(true)

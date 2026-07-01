@@ -207,6 +207,7 @@ export interface CountdownConfig {
   dynamicDays?: number
   format: string
   dateStyle?: 'short' | 'long' | 'numeric' // how {date} renders
+  capitalize?: boolean // upper-case the first letter of every word in the rendered text
 }
 
 export interface DimConfig {
@@ -350,6 +351,17 @@ export interface UnboxingConfig {
   tapHintMs?: number   // brief lock after centering to prevent accidental double-tap (default 300)
 }
 
+// "Sync to project": marks an element as shared across every MIP in the project
+// group (see src/projectGroups.ts). All elements carrying the same `key` mirror one
+// canonical definition — editing any of them updates all of them (position, size,
+// text, asset, style — everything). `scope` decides placement: 'scene' = one copy
+// per MIP; 'all' = one copy on every scene (a persistent overlay). Synced elements
+// are ordinary SceneElements, so the runtime/export need no special handling.
+export interface SyncConfig {
+  key: string
+  scope: 'scene' | 'all'
+}
+
 export interface GameMountConfig {
   templateId: string
   params: Record<string, unknown>
@@ -361,6 +373,12 @@ export interface GameMountConfig {
 
 export interface BackgroundConfig {
   objectFit?: ObjectFit
+  // Cover-crop focal point for PORTRAIT, as % of the image (0-100; default 50 = center).
+  // Picks which part of the image stays visible when 'cover' crops it to fill the
+  // frame. Landscape ignores these and always centers, so the image just covers the
+  // whole (wider) screen.
+  focusX?: number
+  focusY?: number
 }
 
 // Header/footer bar (or, in 'fit' mode, a rectangle). Fill with a solid colour
@@ -412,6 +430,8 @@ export interface SceneElement {
   opacity?: number
   blur?: number // uniform layer blur radius in design px (CSS filter: blur)
 
+  sync?: SyncConfig // shared across all MIPs in the project group (editor-only marker)
+
   landscape?: OrientationOverride
   animations?: ElementAnimations
   sfx?: SfxBinding[]
@@ -457,6 +477,17 @@ export interface ProjectMeta {
   client?: string
   mip?: string
   mipVersion?: string
+  // Fixed per-MIP date label (YYYY-MM-DD), set once when the MIP first gets a
+  // client/MIP id and editable in Project settings. Part of the canonical MIP
+  // name "<client> <mip> <mipDate>" that also drives the export filename
+  // (see src/mipName.ts).
+  mipDate?: string
+  // Project grouping: several MIPs (each a `Project` in the code) belong to one
+  // real-world "project" (brand + date + theme, e.g. "Bioma 2026-07 Scratch").
+  // `projectId` is the stable group id (see src/projectGroups.ts); `projectName`
+  // is denormalized for display. Optional/additive — unassigned MIPs lack them.
+  projectId?: string
+  projectName?: string
   // Localization: extra language codes this playable carries (the base copy lives
   // in each TextConfig.value). At runtime the playable picks one from the
   // browser language, falling back to the base. e.g. ['es','fr','de'].

@@ -109,7 +109,7 @@ export function createEndsceneContent(el: SceneElement, ctx: RuntimeCtx): HTMLEl
     iframe.dataset.p = ph_p
     iframe.dataset.l = ph_l
 
-    ph.textContent = 'HTML Endscene — pick an HTML asset'
+    ph.textContent = 'HTML Endscene: pick an HTML asset'
     wrap.appendChild(iframe)
     wrap.appendChild(ph)
 

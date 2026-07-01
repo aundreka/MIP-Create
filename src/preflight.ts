@@ -43,20 +43,20 @@ export function preflightNetwork(net: Network, html: string, bytes: number, proj
   else if (bytes > max * 0.9) findings.push({ level: 'warn', message: `${fmtBytes(bytes)} is within 10% of the ${fmtBytes(max)} limit.` })
 
   const ext = html.match(RESOURCE_URL) ?? []
-  if (ext.length) findings.push({ level: 'error', message: `${ext.length} external resource reference(s) — playables must inline everything (no http(s) in src/href/url()/fetch).` })
+  if (ext.length) findings.push({ level: 'error', message: `${ext.length} external resource reference(s); playables must inline everything (no http(s) in src/href/url()/fetch).` })
 
   const ctaMode = project.meta.clickUrlMode ?? 'store'
   const click = project.meta.clickUrl
   if (ctaMode !== 'none') {
     if (!click || (!click.ios && !click.android)) findings.push({ level: 'error', message: 'No store click URL set (Project settings).' })
-    else if (PLACEHOLDER.test(click.ios ?? '') || PLACEHOLDER.test(click.android ?? '')) findings.push({ level: 'warn', message: 'Store click URL is still the placeholder — set the real App Store / Play URLs.' })
+    else if (PLACEHOLDER.test(click.ios ?? '') || PLACEHOLDER.test(click.android ?? '')) findings.push({ level: 'warn', message: 'Store click URL is still the placeholder. Set the real App Store / Play URLs.' })
   }
 
   const hasCta = project.scenes.some((s) => s.elements.some((e) => e.type === 'cta' || e.type === 'endscene'))
-  if (!hasCta) findings.push({ level: 'warn', message: 'No CTA or endscene element — players have no obvious click-to-store.' })
+  if (!hasCta) findings.push({ level: 'warn', message: 'No CTA or endscene element; players have no obvious click-to-store.' })
 
   const interactive = project.scenes.some((s) => s.advance?.on === 'tap' || s.elements.some((e) => e.type === 'game-mount' || e.type === 'cta' || e.type === 'choice'))
-  if (!interactive) findings.push({ level: 'warn', message: 'No interaction (game, CTA, choice or tap-to-advance) — many networks reject static playables.' })
+  if (!interactive) findings.push({ level: 'warn', message: 'No interaction (game, CTA, choice or tap-to-advance); many networks reject static playables.' })
 
   if (net.injectMraid && !/mraid\.js/.test(html)) findings.push({ level: 'error', message: 'MRAID network but mraid.js is not present in the output.' })
 

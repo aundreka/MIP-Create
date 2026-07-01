@@ -217,7 +217,7 @@ export function ScenesStrip(props: { onPreviewScene: (id: string) => void; verti
         </button>
       )}
       <span className="scenes-add">
-        <button onClick={openGamePicker} title="Add a game scene — pick a mechanic">
+        <button onClick={openGamePicker} title="Add a game scene: pick a mechanic">
           + Game ▾
         </button>
         <button onClick={() => addScene('overlay')} title="Add an overlay scene (win/lose result)">

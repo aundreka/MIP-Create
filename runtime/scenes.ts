@@ -87,6 +87,11 @@ export function playProject(
   // metrics it was mounted with and drifts (e.g. the badge shrinks + slides toward a corner when
   // AppLovin's WebView settles from its initial size to true landscape AFTER the overlay is up).
   const overlayStages = new Set<StageHandle>()
+  // Static cover divs sit behind each floated immune bar (AppLovin edge-artifact guard). They
+  // capture the bar's geometry at overlay-open, so relayout() must re-sync them to the bar on
+  // resize — otherwise the bar re-lays out but its backing rectangle keeps the mount-time size
+  // and the header background appears mis-sized.
+  const overlayCovers = new Set<{ cover: HTMLElement; el: HTMLElement }>()
 
   const toScene = (def: SceneDef): Scene => ({
     meta: { ...project.meta, bgMatchColor: def.bgColor ?? project.meta.bgMatchColor },
@@ -215,14 +220,10 @@ export function playProject(
       if (target?.kind === 'overlay' && current) {
         // Float an overlay-kind target over the running scene so its dim/blur shows the
         // game through (mounting it as a full scene would paint the dim over a blank
-        // background — i.e. solid black). Then redirect onward to the overlay's own next
-        // scene, swapping the underlying scene out beneath the still-opaque overlay so
-        // the game never flashes back into view.
-        emit('scene-overlay', {
-          sceneId: id,
-          redirect: true,
-          onDone: () => { const afterId = nextId(target); if (afterId) transitionTo(afterId) },
-        })
+        // background — i.e. solid black). `redirectTo` carries the overlay's own next
+        // scene (e.g. the end scene); from here the overlay scene's OWN advance duration
+        // is the single control of when it cover-fades onward — no other timer competes.
+        emit('scene-overlay', { sceneId: id, redirectTo: nextId(target) ?? undefined })
       } else {
         transitionTo(id)
       }
@@ -231,11 +232,16 @@ export function playProject(
     // Overlay a project scene on top of the current game scene without a transition.
     // The game stays mounted; the overlay appears above it and dismisses itself when
     // its own advance condition fires (tap, timer, etc.).
-    on('scene-overlay', ({ sceneId, onDone, redirect }: { sceneId: string; onDone?: () => void; redirect?: boolean }) => {
+    on('scene-overlay', ({ sceneId, onDone, redirectTo }: { sceneId: string; onDone?: () => void; redirectTo?: string }) => {
       if (!current) return
       overlayShownThisScene = true
       const def = project.scenes.find((s) => s.id === sceneId)
       if (!def) { onDone?.(); return }
+      // Redirect overlays (e.g. scratch win → end scene) leave the game for good. Suspend
+      // the underlying game scene's still-armed advance NOW so ONLY this overlay scene's
+      // own advance duration decides when we move on — otherwise the game's live timer/
+      // tap trigger could fire first and redirect early, fighting the overlay's timing.
+      if (redirectTo) clearTriggers()
 
       const gameRoot = current.stage.root
       const stageContainer = gameRoot.parentElement ?? gameRoot
@@ -271,7 +277,7 @@ export function playProject(
       // overlayDiv below it, picking up the overlay's background color (beige) as a 1px strip.
       // The cover has the same position/size/background as the immune bar; the bar's compositor
       // edge anti-aliases against the cover (dark navy) instead of the overlay's beige.
-      const coverEls: HTMLElement[] = []
+      const coverPairs: { cover: HTMLElement; el: HTMLElement }[] = []
       immuneEls.forEach((el) => {
         if (el.style.position !== 'fixed') return
         const cover = document.createElement('div')
@@ -281,7 +287,9 @@ export function playProject(
           `background:${el.style.background};z-index:9500;pointer-events:none;` +
           `transform:translateZ(0);`
         stageContainer.appendChild(cover)
-        coverEls.push(cover)
+        const pair = { cover, el }
+        coverPairs.push(pair)
+        overlayCovers.add(pair) // relayout() re-syncs it to the bar on resize
       })
 
       const overlayDiv = document.createElement('div')
@@ -307,25 +315,44 @@ export function playProject(
         overlayStages.delete(overStage)
         overStage.destroy()
         overlayDiv.remove()
-        coverEls.forEach((cover) => cover.remove())
+        coverPairs.forEach((p) => { overlayCovers.delete(p); p.cover.remove() })
+      }
+      // Redirect path (e.g. scratch win overlay → end scene). Mount the destination scene
+      // ABOVE the overlay (and the floated immune bar) and fade IT in so it covers the
+      // whole win composite in one clean cross-dissolve, then tear the game + overlay down
+      // behind it once it's fully opaque. (The old path faded the overlay OUT while the end
+      // scene cross-faded over the GAME beneath it — the game peeked through and the
+      // incoming scene looked dimmed by the lingering dim.)
+      const coverRedirect = (toId: string): void => {
+        const next = project.scenes.find((s) => s.id === toId)
+        if (!next || !current || transitioning) { removeOverlayDom(); restoreImmune(); return }
+        transitioning = true
+        const old = current
+        const stage = mountScene(next)
+        current = { def: next, stage }
+        const t = next.transition
+        const dur = t && t.type === 'fade' && t.durationMs > 0 ? t.durationMs : 380
+        // z above the overlay (9000) and the floated immune bar (10000) so the incoming
+        // scene covers everything as it fades in; reset to the normal scene layer after.
+        stage.root.style.zIndex = '10001'
+        stage.root.style.opacity = '0'
+        stage.root.style.transition = `opacity ${dur}ms ease`
+        requestAnimationFrame(() => requestAnimationFrame(() => { stage.root.style.opacity = '1' }))
+        window.setTimeout(() => {
+          removeOverlayDom()
+          restoreImmune()      // immune bar returns to the old game root, torn down with it
+          old.stage.destroy()
+          stage.root.style.transition = ''
+          stage.root.style.opacity = ''
+          stage.root.style.zIndex = '2'
+          transitioning = false
+        }, dur + 40)
+        armAdvance(next)
       }
       const dismiss = (): void => {
         if (dismissed) return
         dismissed = true
-        if (redirect && onDone) {
-          // Redirect path (e.g. a win scene → end scene). Restore the immune bar into the
-          // current scene so it's torn down with it, mount the next scene underneath, and
-          // fade the overlay out AT THE SAME TIME so the two cross-dissolve. The win
-          // overlay is a semi-transparent dim — waiting before fading would let the end
-          // scene show THROUGH it first ("end scene appears before the overlay fades").
-          // Fading concurrently reads as a single win-scene → end-scene transition.
-          restoreImmune()
-          onDone()
-          overlayDiv.style.transition = 'opacity 320ms ease'
-          overlayDiv.style.opacity = '0'
-          window.setTimeout(removeOverlayDom, 340)
-          return
-        }
+        if (redirectTo) { coverRedirect(redirectTo); return }
         if (onDone) {
           overlayDiv.style.transition = 'opacity 200ms ease'
           overlayDiv.style.opacity = '0'
@@ -358,14 +385,24 @@ export function playProject(
 
   return {
     relayout() {
-      current?.stage.layoutAll()
+      current?.stage.layoutAll() // re-lays out the floated immune bars (they live in current.stage)
       for (const ov of overlayStages) ov.layoutAll() // keep floating win/lose overlays responsive
+      // Re-sync each immune-bar cover to its (now re-laid-out) bar so the header backing tracks
+      // the viewport on resize instead of keeping its mount-time size.
+      for (const { cover, el } of overlayCovers) {
+        cover.style.top = el.style.top
+        cover.style.left = el.style.left
+        cover.style.width = el.style.width
+        cover.style.height = el.style.height
+        cover.style.background = el.style.background
+      }
     },
     destroy() {
       clearTriggers()
       if (unsubGoto) { unsubGoto(); unsubGoto = null }
       for (const ov of overlayStages) ov.destroy()
       overlayStages.clear()
+      overlayCovers.clear() // cover divs are torn down with the container below
       sfx?.destroy()
       current?.stage.destroy()
       container.remove()

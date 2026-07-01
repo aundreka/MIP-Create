@@ -69,7 +69,7 @@ void boot(project as unknown as Project, assets as unknown as AssetMap, {
 `
 
 function readme(name: string): string {
-  return `# ${name} — playable source
+  return `# ${name}: playable source
 
 Editable Vite + TypeScript export of a playable ad. Use this to customize gameplay
 beyond what the visual editor exposes.
@@ -84,14 +84,14 @@ npm run build    # production build into dist/
 
 ## Where things live
 
-- \`src/project.json\` — the scenes, elements and layout you authored in the editor.
-- \`src/assets.json\` — every image / video / audio / sound, inlined as data URLs.
-- \`src/main.ts\` — the entry point; boots the runtime with the project + assets.
-- \`src/runtime/\` — the full DOM/CSS runtime (no external dependencies).
-  - \`src/runtime/games/\` — **the game templates. Edit these to change gameplay
+- \`src/project.json\`: the scenes, elements and layout you authored in the editor.
+- \`src/assets.json\`: every image / video / audio / sound, inlined as data URLs.
+- \`src/main.ts\`: the entry point; boots the runtime with the project + assets.
+- \`src/runtime/\`: the full DOM/CSS runtime (no external dependencies).
+  - \`src/runtime/games/\`: **the game templates. Edit these to change gameplay
     mechanics, win conditions, difficulty, spawn logic, etc.**
-  - \`src/runtime/stage.ts\` / \`scenes.ts\` — element rendering + scene flow.
-  - \`src/runtime/sfx.ts\` — sound playback (event + per-element sounds).
+  - \`src/runtime/stage.ts\` / \`scenes.ts\`: element rendering + scene flow.
+  - \`src/runtime/sfx.ts\`: sound playback (event + per-element sounds).
 
 ## Notes
 

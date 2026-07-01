@@ -30,6 +30,32 @@ interface CellState {
   hintTo: { x: number; y: number }
 }
 
+// ---- staggered per-cell entrance -------------------------------------------
+// Each cell springs in from the right (+ fades), one at a time. The curve samples
+// an underdamped spring (Framer-style stiffness 120 / damping 14 → damping ratio
+// ζ≈0.64, a single soft overshoot) so it reads smooth rather than a mechanical
+// slide. Sampled once into WAAPI keyframes; the per-cell `delay` does the stagger.
+const CELL_ENTER_DUR_MS = 700
+const CELL_ENTER_STAGGER_MS = 150 // delay = index * 0.15s
+function buildCellEntranceKeyframes(fromPct: number): Keyframe[] {
+  const wn = Math.sqrt(120)                  // natural frequency √(k/m), m=1
+  const zeta = 14 / (2 * Math.sqrt(120))     // damping ratio c / 2√(km) ≈ 0.64
+  const wd = wn * Math.sqrt(1 - zeta * zeta) // damped frequency
+  const settleS = 0.7
+  const N = 24
+  const kf: Keyframe[] = []
+  for (let i = 0; i < N; i++) {
+    const f = i / N
+    const t = f * settleS
+    // normalized spring position 0→1 (overshoots slightly past 1, then settles)
+    const p = 1 - Math.exp(-zeta * wn * t) * (Math.cos(wd * t) + (zeta * wn / wd) * Math.sin(wd * t))
+    kf.push({ offset: f, transform: `translateX(${((1 - p) * fromPct).toFixed(2)}%)`, opacity: Math.max(0, Math.min(1, p)) })
+  }
+  kf.push({ offset: 1, transform: 'translateX(0)', opacity: 1 })
+  return kf
+}
+const CELL_ENTER_KF = buildCellEntranceKeyframes(28) // start 28% to the right (≈ the 100px on a ~385px card)
+
 export function createScratchGrid(): GameModule {
   let ctx: GameContext
   let cells: CellState[] = []
@@ -417,9 +443,15 @@ export function createScratchGrid(): GameModule {
       const winTextImageSrc = ctx.assets.src(str(params.winTextImage, ''))
       const loseTextImageSrc = ctx.assets.src(str(params.loseTextImage, ''))
 
+      // Shared reveal content applied to every cell (win AND lose), sitting between the
+      // per-cell override and the win/lose-specific fallback.
+      const sharedBgSrc = ctx.assets.src(str(params.sharedBg as unknown, ''))
+      const sharedTextSrc = ctx.assets.src(str(params.sharedText as unknown, ''))
+
       // Per-cell overrides: cell0..cell3 images and cell0Label..cell3Label text
       const cellImageSrc = (i: number): string =>
         ctx.assets.src(str(params['cell' + i] as unknown, '')) ||
+        sharedBgSrc ||
         (isWinCell[i] ? winImageSrc : loseImageSrc)
       const cellLabel = (i: number): string =>
         str(params['cell' + i + 'Label'] as unknown, '') ||
@@ -428,6 +460,7 @@ export function createScratchGrid(): GameModule {
       // Swap only this to A/B test different offers without touching the layout.
       const cellTextImgSrc = (i: number): string =>
         ctx.assets.src(str(params['cell' + i + 'text'] as unknown, '')) ||
+        sharedTextSrc ||
         (isWinCell[i] ? winTextImageSrc : loseTextImageSrc)
       const globalTextScale = Math.max(10, Math.min(100, num(params.textScale as unknown, 80)))
       const cellTextScale = (i: number): number => {
@@ -612,6 +645,16 @@ export function createScratchGrid(): GameModule {
         if (!cell.won) fillCellCover(cell)
       }
       for (const cell of cells) setupCell(cell)
+      // Staggered spring entrance: cells slide/fade in from the right, one at a time
+      // (row-major order). `fill:'backwards'` holds each cell hidden through its delay
+      // so the reveal is truly one-at-a-time, then releases to the natural state. The
+      // stagger compresses for large grids so the last cell doesn't lag several seconds.
+      if (typeof cells[0]?.el.animate === 'function') {
+        const stagger = Math.min(CELL_ENTER_STAGGER_MS, 1600 / Math.max(1, cells.length - 1))
+        cells.forEach((cell, i) => {
+          cell.el.animate(CELL_ENTER_KF, { duration: CELL_ENTER_DUR_MS, delay: i * stagger, easing: 'linear', fill: 'backwards' })
+        })
+      }
     },
 
     relayout: sizeAll,
@@ -685,6 +728,8 @@ export const SCRATCH_GRID_TEMPLATE: GameTemplate = {
   ],
   assetSlots: [
     { key: 'cover', label: 'Cover image (shared fallback)' },
+    { key: 'sharedBg', label: 'Shared background reveal (all cells)' },
+    { key: 'sharedText', label: 'Shared text overlay (all cells)' },
     { key: 'cell0cover', label: 'Cell 1 cover image' },
     { key: 'cell1cover', label: 'Cell 2 cover image' },
     { key: 'cell2cover', label: 'Cell 3 cover image' },
@@ -727,6 +772,7 @@ export const SCRATCH_GRID_TEMPLATE: GameTemplate = {
     threshold: 0.5,
     imageFit: 'cover',
     cover: '',
+    sharedBg: '', sharedText: '',
     cell0cover: '', cell1cover: '', cell2cover: '', cell3cover: '',
     cell0: '', cell1: '', cell2: '', cell3: '',
     cell0text: '', cell1text: '', cell2text: '', cell3text: '',

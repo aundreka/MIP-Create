@@ -22,6 +22,7 @@ import { preflightNetwork, type PreflightResult } from '../preflight'
 import { lintEngagement, type EngagementFinding } from '../qa/engagement'
 import { setAssetCompress, useEditorState } from '../store'
 import { applyVariant, stripVariants } from '../variants'
+import { mipName } from '../mipName'
 import { applovinOpen, applovinProbe, applovinUpload, canApplovin, compressHtmlScript, type ApplovinFile } from '../bridge'
 import { Modal, NumField, Slider, Toggle } from '../ui'
 import { AlertTriangle, Check, Icon } from '../icons'
@@ -175,7 +176,9 @@ export function ExportModal(props: { onClose: () => void }): JSX.Element {
     for (const o of outputs) downloadBlob(o.filename, await o.make())
   }
 
-  const baseName = project.meta.name || 'playable'
+  // The exported file is named after the canonical MIP name (Client + MIP + Date),
+  // regardless of any manual rename. Variant files append "_<variant>" below.
+  const baseName = mipName(project.meta)
   const doExportAll = async (): Promise<void> => {
     if (!confirmIfBlocked()) return
     setBusy(true)
@@ -204,7 +207,7 @@ export function ExportModal(props: { onClose: () => void }): JSX.Element {
     const { outputs: baseOuts } = buildOutputs(namedBase, proc, [al], runtimeSrc)
     const baseO = baseOuts[0]
     if (!baseO || baseO.over) {
-      if (baseO?.over) alert(`${baseName} is ${fmtBytes(baseO.bytes)}, over the 5MB limit — skipped.`)
+      if (baseO?.over) alert(`${baseName} is ${fmtBytes(baseO.bytes)}, over the 5MB limit; skipped.`)
     } else {
       out.push({ name: baseO.filename, text: await (await baseO.make()).text(), iteration: project.meta.mip || baseName })
     }
@@ -215,7 +218,7 @@ export function ExportModal(props: { onClose: () => void }): JSX.Element {
       const { outputs } = buildOutputs(named, a, [al], runtimeSrc)
       const o = outputs[0]
       if (!o || o.over) {
-        if (o?.over) alert(`${name} is ${fmtBytes(o.bytes)}, over the 5MB limit — skipped.`)
+        if (o?.over) alert(`${name} is ${fmtBytes(o.bytes)}, over the 5MB limit; skipped.`)
         return
       }
       out.push({ name: o.filename, text: await (await o.make()).text(), iteration })
@@ -236,7 +239,7 @@ export function ExportModal(props: { onClose: () => void }): JSX.Element {
       }
       setAlStatus('Filling the upload form…')
       const r = await applovinUpload({ url: alUrl, files, submit: alSubmit, ...alSelectors })
-      setAlStatus(r.ok ? `Filled ${r.files} file(s)${r.submitted ? ' and submitted.' : ' — review the window and click Upload.'}` : 'Error: ' + r.error)
+      setAlStatus(r.ok ? `Filled ${r.files} file(s)${r.submitted ? ' and submitted.' : '. Review the window and click Upload.'}` : 'Error: ' + r.error)
     } catch (e) {
       setAlStatus('Error: ' + (e as Error).message)
     } finally {
@@ -343,7 +346,7 @@ export function ExportModal(props: { onClose: () => void }): JSX.Element {
       {optimize && (hasVideo || hasAudio) && (
         <div className="hint pad">
           Re-encoded on export with ffmpeg (desktop). Lower CRF = sharper but bigger; Max bitrate caps peaks (e.g. <b>536k</b>);
-          Trim cuts length. These are the defaults — give any clip its own recipe below.
+          Trim cuts length. These are the defaults; give any clip its own recipe below.
         </div>
       )}
 
@@ -501,7 +504,7 @@ export function ExportModal(props: { onClose: () => void }): JSX.Element {
       </button>
       <div className="hint pad">
         A runnable Vite + TypeScript repo with the full runtime source, your project and assets. Devs run <b>npm install</b> then{' '}
-        <b>npm run dev</b> and edit <b>src/runtime/games/</b> to customize gameplay mechanics. Optional — not needed for ad delivery.
+        <b>npm run dev</b> and edit <b>src/runtime/games/</b> to customize gameplay mechanics. Optional; not needed for ad delivery.
       </div>
 
       {canApplovin && (
@@ -542,7 +545,7 @@ export function ExportModal(props: { onClose: () => void }): JSX.Element {
           )}
           <div className="hint pad">
             First click <b>Open / log in</b>, sign in and open the <b>Upload File</b> page. Use <b>Detect form</b> to confirm the
-            page matches (file inputs + buttons) — adjust the selectors if not. Then <b>Auto-fill</b> drops your base + selected
+            page matches (file inputs + buttons); adjust the selectors if not. Then <b>Auto-fill</b> drops your base + selected
             variants into the batch form (one row each; Iteration Name = variant). Review and click Upload, or enable auto-submit.
             Uploads the AppLovin (MRAID) build of each.
           </div>

@@ -3,9 +3,10 @@
 // size changes. Two modes: "contain" (default, height-driven, letterboxed) and
 // "cover" (given a width, fills the box and crops — anchored to the top).
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import type { Project, Scene, SceneDef } from '../../runtime/scene'
 import type { AssetMap } from '../../runtime/types'
+import { sceneAssets } from '../export'
 
 function toScene(project: Project, def: SceneDef): Scene {
   return { meta: { ...project.meta, bgMatchColor: def.bgColor !== undefined ? def.bgColor : project.meta.bgMatchColor }, elements: def.elements, overlay: def.overlay }
@@ -18,8 +19,11 @@ export function SceneThumb(props: { project: Project; def: SceneDef; assets: Ass
   const aspect = (project.meta.baseW || 1080) / (project.meta.baseH || 1920)
   const IH = 600
   const IW = Math.round(IH * aspect)
+  // Only the assets this one scene uses — a thumbnail must not decode every
+  // image/video in the whole project (multiplied across every card = OOM).
+  const thumbAssets = useMemo(() => sceneAssets(def, assets), [def, assets])
   const post = (): void => {
-    ref.current?.contentWindow?.postMessage({ type: 'pa:render', scene: toScene(project, def), assets, interactive: false }, '*')
+    ref.current?.contentWindow?.postMessage({ type: 'pa:render', scene: toScene(project, def), assets: thumbAssets, interactive: false }, '*')
   }
   useEffect(() => {
     if (ready.current) post()

@@ -14,6 +14,7 @@ import { resizeBox } from './geometry'
 import { isSceneHidden, useCanvasView } from '../canvasView'
 import { endPathDraw, pathDrawTarget, usePathDraw } from '../drawMode'
 import { useEditLocale } from '../locale'
+import { sceneAssetIds } from '../export'
 import {
   beginTransaction,
   bulkPatch,
@@ -96,12 +97,23 @@ function CanvasFrame(props: {
   // they actually change. Structured-cloning the full asset map (all image data URIs)
   // on every pointer-move event blocks the main thread and kills live drag updates.
   const lastSentAssets = useRef<AssetMap | null>(null)
+  // Give this frame only the assets ITS OWN scene references, not the whole shared
+  // library — otherwise every scene iframe caches a full decoded copy of every
+  // image/video (the main out-of-memory cause). The key keeps the memo identity
+  // stable across position edits so `changed` stays false and we don't re-clone the
+  // map on each structural render (which would stall live drags).
+  const assetKey = useMemo(() => sceneAssetIds(def, assets).sort().join('|'), [def, assets])
+  const frameAssets = useMemo(() => {
+    const out: AssetMap = {}
+    for (const id of assetKey ? assetKey.split('|') : []) if (assets[id]) out[id] = assets[id]
+    return out
+  }, [assetKey, assets])
   const post = useCallback(() => {
     const scene: Scene = { meta: { ...meta, bgMatchColor: def.bgColor !== undefined ? def.bgColor : meta.bgMatchColor }, elements: def.elements, kind: def.kind, overlay: def.overlay }
-    const changed = lastSentAssets.current !== assets
-    lastSentAssets.current = assets
-    ref.current?.contentWindow?.postMessage({ type: 'pa:render', scene, assets: changed ? assets : undefined, interactive: false, locale }, '*')
-  }, [def, meta, assets, locale])
+    const changed = lastSentAssets.current !== frameAssets
+    lastSentAssets.current = frameAssets
+    ref.current?.contentWindow?.postMessage({ type: 'pa:render', scene, assets: changed ? frameAssets : undefined, interactive: false, locale }, '*')
+  }, [def, meta, frameAssets, locale])
   useEffect(() => {
     if (ready.current) post()
   }, [post, renderKey])

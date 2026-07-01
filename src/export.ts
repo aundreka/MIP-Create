@@ -5,7 +5,7 @@
 // variants (mraid/exitapi injection, zip where required).
 
 import JSZip from 'jszip'
-import type { Project } from '../runtime/scene'
+import type { Project, SceneDef } from '../runtime/scene'
 import type { AssetMap, CompressProfile } from '../runtime/types'
 import { remoteToDataUrl } from './net'
 import { transcodeMedia, type TranscodeOpts } from './bridge'
@@ -59,6 +59,46 @@ export async function fetchRuntimeSrc(): Promise<string> {
 
 export const MAX_BYTES = 5 * 1024 * 1024
 
+// Collect the asset ids a single scene references into `used`. `audio` includes
+// per-element sound bindings (needed for a real export); the editor's static
+// frames/thumbnails pass false since a non-interactive render never plays audio.
+function addSceneAssets(scene: SceneDef, assets: AssetMap, used: Set<string>, audio: boolean): void {
+  const add = (v: unknown): void => {
+    if (typeof v === 'string' && assets[v]) used.add(v)
+  }
+  for (const el of scene.elements) {
+    add(el.assetId)
+    if (el.text?.fontFamily) add(el.text.fontFamily)
+    if (el.container?.imageId) add(el.container.imageId)
+    if (el.generate?.resultId) add(el.generate.resultId)
+    if (el.game?.params) for (const v of Object.values(el.game.params)) (Array.isArray(v) ? v.forEach(add) : add(v))
+    if (el.unboxing) {
+      const u = el.unboxing
+      add(u.bgAssetId)
+      add(u.back?.assetId); add(u.front?.assetId); add(u.top?.assetId)
+      add(u.winAssetId); add(u.loseAssetId)
+      add(u.revealSyncAssetId)
+    }
+    if (el.endscene) {
+      const esc = el.endscene
+      // Only include assets relevant to the active mode — the other mode's
+      // assets may still be set from a previous mode switch and would bloat
+      // the export with several MB of unused video data.
+      if (esc.mode !== 'html') {
+        add(esc.portraitVideoId)
+        add(esc.landscapeVideoId)
+        add(esc.portraitImageId)
+        add(esc.landscapeImageId)
+      }
+      if (esc.mode !== 'video') {
+        add(esc.htmlId)
+        add(esc.htmlLandscapeId)
+      }
+    }
+    if (audio && el.sfx) for (const b of el.sfx) add(b.assetId)
+  }
+}
+
 // Only inline assets actually referenced (element.assetId + game param asset ids)
 // so the shared library never bloats the export.
 export function pruneAssets(project: Project, assets: AssetMap): AssetMap {
@@ -66,42 +106,28 @@ export function pruneAssets(project: Project, assets: AssetMap): AssetMap {
   const add = (v: unknown): void => {
     if (typeof v === 'string' && assets[v]) used.add(v)
   }
-  for (const scene of project.scenes)
-    for (const el of scene.elements) {
-      add(el.assetId)
-      if (el.text?.fontFamily) add(el.text.fontFamily)
-      if (el.container?.imageId) add(el.container.imageId)
-      if (el.generate?.resultId) add(el.generate.resultId)
-      if (el.sfx) for (const b of el.sfx) add(b.assetId)
-      if (el.game?.params) for (const v of Object.values(el.game.params)) (Array.isArray(v) ? v.forEach(add) : add(v))
-      if (el.unboxing) {
-        const u = el.unboxing
-        add(u.bgAssetId)
-        add(u.back?.assetId); add(u.front?.assetId); add(u.top?.assetId)
-        add(u.winAssetId); add(u.loseAssetId)
-        add(u.revealSyncAssetId)
-      }
-      if (el.endscene) {
-        const esc = el.endscene
-        // Only include assets relevant to the active mode — the other mode's
-        // assets may still be set from a previous mode switch and would bloat
-        // the export with several MB of unused video data.
-        if (esc.mode !== 'html') {
-          add(esc.portraitVideoId)
-          add(esc.landscapeVideoId)
-          add(esc.portraitImageId)
-          add(esc.landscapeImageId)
-        }
-        if (esc.mode !== 'video') {
-          add(esc.htmlId)
-          add(esc.htmlLandscapeId)
-        }
-      }
-    }
+  for (const scene of project.scenes) addSceneAssets(scene, assets, used, true)
   for (const b of project.sfx ?? []) add(b.assetId)
   if (project.bgm) add(project.bgm.assetId)
   const out: AssetMap = {}
   for (const id of used) out[id] = assets[id]
+  return out
+}
+
+// The (visual-only) asset ids one scene references. The editor renders every scene
+// in its own iframe (canvas frames + thumbnails); sending each iframe just its own
+// scene's assets — instead of the whole library — keeps N iframes from each holding
+// a full decoded copy of every image/video, the main out-of-memory cause.
+export function sceneAssetIds(scene: SceneDef, assets: AssetMap): string[] {
+  const used = new Set<string>()
+  addSceneAssets(scene, assets, used, false)
+  return [...used]
+}
+
+/** The subset of `assets` a single scene references (visual only). */
+export function sceneAssets(scene: SceneDef, assets: AssetMap): AssetMap {
+  const out: AssetMap = {}
+  for (const id of sceneAssetIds(scene, assets)) out[id] = assets[id]
   return out
 }
 

@@ -92,7 +92,7 @@ export function createEmbed(): GameModule {
       if (!html) {
         const ph = document.createElement('div')
         ph.style.cssText = PLACEHOLDER
-        ph.textContent = '🧩  Embedded playable — pick a built game HTML in the inspector'
+        ph.textContent = '🧩  Embedded playable: pick a built game HTML in the inspector'
         ctx.root.appendChild(ph)
         return
       }

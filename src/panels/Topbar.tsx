@@ -4,9 +4,10 @@
 
 import { useRef, useState } from 'react'
 import { loadProject as bridgeLoad, platformLabel, saveProject } from '../bridge'
-import { getState, loadProject as storeLoad, markSaved, redo, refreshScene, setOrientation, undo, useEditorState } from '../store'
+import { getState, joinProjectGroup, loadProject as storeLoad, markSaved, redo, refreshScene, setOrientation, undo, useEditorState } from '../store'
+import { createProject, currentProjectId, openProject, projectsInGroup, saveCurrent } from '../projects'
 import { ContextMenu, type MenuItem } from './ContextMenu'
-import { ChevronDown, Icon, Menu, Minus, Play, Plus, Redo2, Undo2 } from '../icons'
+import { ChevronDown, FolderOpen, Icon, Menu, Minus, Play, Plus, Redo2, Undo2 } from '../icons'
 import { toggleTheme, useTheme } from '../theme'
 import { setEditLocale, useEditLocale } from '../locale'
 import { setActiveVariant, useActiveVariant } from '../variantMode'
@@ -33,6 +34,7 @@ export function Topbar(props: {
   onProjectSettings: () => void
   onExport: () => void
   onQa: () => void
+  onShare: () => void
 }): JSX.Element {
   const { orientation, dirty, projectPath, canUndo, canRedo, scene } = useEditorState()
   const theme = useTheme()
@@ -47,6 +49,34 @@ export function Topbar(props: {
     const r = appBtn.current?.getBoundingClientRect()
     if (r) setAppMenu({ x: r.left, y: r.bottom + 4 })
   }
+
+  // ---- project switcher: hop between MIPs of the same project group ----------
+  const projBtn = useRef<HTMLButtonElement>(null)
+  const [projMenu, setProjMenu] = useState<{ x: number; y: number } | null>(null)
+  const projectId = scene.meta.projectId
+  const projectName = scene.meta.projectName
+  const curId = currentProjectId()
+  const openProjMenu = (): void => {
+    const r = projBtn.current?.getBoundingClientRect()
+    if (r) setProjMenu({ x: r.left, y: r.bottom + 4 })
+  }
+  const newMipInProject = async (): Promise<void> => {
+    if (!projectId || !projectName) return
+    const id = await createProject() // blank MIP, switches to it (persists the current one first)
+    joinProjectGroup(projectId, projectName)
+    await saveCurrent() // persist membership so the switcher lists it
+    await openProject(id) // reconcile the project's shared elements into the new MIP
+  }
+  const projItems: MenuItem[] = projectId
+    ? [
+        ...projectsInGroup(projectId).map((r) => ({
+          label: (r.id === curId ? '● ' : '○ ') + r.name,
+          onClick: () => { if (r.id !== curId) void openProject(r.id) },
+        })),
+        { sep: true, label: '' },
+        { label: '+ New MIP in this project', onClick: () => void newMipInProject() },
+      ]
+    : []
   const appItems: MenuItem[] = [
     { label: 'Home / Projects…', onClick: props.onHome },
     { sep: true, label: '' },
@@ -55,6 +85,7 @@ export function Topbar(props: {
     { label: 'Save as template…', onClick: props.onSaveTemplate },
     { sep: true, label: '' },
     { label: 'Project settings…', onClick: props.onProjectSettings },
+    { label: 'Share / import by code…', onClick: props.onShare },
     { label: 'QA & reports…', onClick: props.onQa },
     { label: 'Profile…', onClick: props.onProfile },
     { label: theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme', onClick: () => toggleTheme() },
@@ -62,9 +93,14 @@ export function Topbar(props: {
 
   return (
     <div className="topbar">
-      <button className="brand" ref={appBtn} onClick={openApp} title="Menu — Home, file, profile, theme">
+      <button className="brand" ref={appBtn} onClick={openApp} title="Menu: Home, file, profile, theme">
         <Icon icon={Menu} size={16} /> {scene.meta.name || 'untitled'} <Icon icon={ChevronDown} size={12} />
       </button>
+      {projectId && (
+        <button className="proj-switch" ref={projBtn} onClick={openProjMenu} title={`Switch MIPs in “${projectName}”`}>
+          <Icon icon={FolderOpen} size={13} /> {projectName} <Icon icon={ChevronDown} size={11} />
+        </button>
+      )}
       {dirty && <span className="dot" title="Unsaved changes" />}
 
       <span className="seg">
@@ -138,6 +174,7 @@ export function Topbar(props: {
       <span className="hint">{platformLabel}{projectPath ? ' · ' + projectPath.split(/[\\/]/).pop() : ''}</span>
 
       {appMenu && <ContextMenu x={appMenu.x} y={appMenu.y} items={appItems} onClose={() => setAppMenu(null)} />}
+      {projMenu && <ContextMenu x={projMenu.x} y={projMenu.y} items={projItems} onClose={() => setProjMenu(null)} />}
     </div>
   )
 }

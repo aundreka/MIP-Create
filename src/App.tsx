@@ -19,11 +19,13 @@ import { makeBackground, makeImage } from './factories'
 const CommandPalette = lazy(() => import('./panels/CommandPalette').then((m) => ({ default: m.CommandPalette })))
 const ExportModal = lazy(() => import('./panels/ExportModal').then((m) => ({ default: m.ExportModal })))
 const FigmaImport = lazy(() => import('./panels/FigmaImport').then((m) => ({ default: m.FigmaImport })))
+const ImportBuilt = lazy(() => import('./panels/ImportBuilt').then((m) => ({ default: m.ImportBuilt })))
 const ProjectSettings = lazy(() => import('./panels/ProjectSettings').then((m) => ({ default: m.ProjectSettings })))
 const TemplatesModal = lazy(() => import('./panels/TemplatesModal').then((m) => ({ default: m.TemplatesModal })))
 const QuizFunnel = lazy(() => import('./panels/QuizFunnel').then((m) => ({ default: m.QuizFunnel })))
 const GenerateMip = lazy(() => import('./panels/GenerateMip').then((m) => ({ default: m.GenerateMip })))
 const HomeScreen = lazy(() => import('./panels/HomeScreen').then((m) => ({ default: m.HomeScreen })))
+const ShareModal = lazy(() => import('./panels/ShareModal').then((m) => ({ default: m.ShareModal })))
 const ProfilePanel = lazy(() => import('./panels/ProfilePanel').then((m) => ({ default: m.ProfilePanel })))
 const QaPanel = lazy(() => import('./panels/QaPanel').then((m) => ({ default: m.QaPanel })))
 const PreviewOverlay = lazy(() => import('./preview/PreviewOverlay').then((m) => ({ default: m.PreviewOverlay })))
@@ -37,6 +39,7 @@ export function App(): JSX.Element {
   const [preview, setPreview] = useState(() => location.hash.toLowerCase().includes('preview'))
   const [previewScene, setPreviewScene] = useState<string | null>(null)
   const [figma, setFigma] = useState(() => location.hash.toLowerCase().includes('figma'))
+  const [importBuilt, setImportBuilt] = useState(false)
   const [settings, setSettings] = useState(() => location.hash.toLowerCase().includes('settings'))
   const [templates, setTemplates] = useState(() => location.hash.toLowerCase().includes('templates'))
   const [quiz, setQuiz] = useState(() => location.hash.toLowerCase().includes('quiz'))
@@ -49,6 +52,10 @@ export function App(): JSX.Element {
   const [profile, setProfile] = useState(() => location.hash.toLowerCase().includes('profile'))
   const [exportOpen, setExportOpen] = useState(() => location.hash.toLowerCase().includes('export'))
   const [qa, setQa] = useState(() => location.hash.toLowerCase().includes('qa'))
+  // Share / import by code. A '#share=<code>' deep link opens the modal with the
+  // code prefilled so a recipient can import straight from a pasted link.
+  const shareCode = useMemo(() => /share=([a-z0-9]+)/i.exec(location.hash)?.[1] ?? '', [])
+  const [share, setShare] = useState(() => location.hash.toLowerCase().includes('share='))
   const [cmdK, setCmdK] = useState(false)
 
   // Deep-link from a QA finding to the offending project/scene/element.
@@ -70,6 +77,7 @@ export function App(): JSX.Element {
         openQuizFunnel: () => setQuiz(true),
         openQa: () => setQa(true),
         openTeam: () => { setHomeTab('team'); setHome(true) },
+        openShare: () => setShare(true),
         openGenerateMip: () => setGenMip(true),
       }),
     [],
@@ -147,7 +155,7 @@ export function App(): JSX.Element {
         // Home route — the editor is unmounted behind it (its state lives in the
         // module-level store, so nothing is lost). Opening a project enters the editor.
         <Suspense fallback={null}>
-          <HomeScreen onClose={() => setHome(false)} initialTab={homeTab} onProfile={() => setProfile(true)} onGenerate={() => { setHome(false); setGenMip(true) }} onQuizFunnel={() => { setHome(false); setQuiz(true) }} />
+          <HomeScreen onClose={() => setHome(false)} initialTab={homeTab} onProfile={() => setProfile(true)} onGenerate={() => { setHome(false); setGenMip(true) }} onQuizFunnel={() => { setHome(false); setQuiz(true) }} onImportBuilt={() => { setHome(false); setImportBuilt(true) }} onShare={() => setShare(true)} />
         </Suspense>
       ) : (
         <>
@@ -162,6 +170,7 @@ export function App(): JSX.Element {
             onProjectSettings={() => setSettings(true)}
             onExport={() => setExportOpen(true)}
             onQa={() => setQa(true)}
+            onShare={() => setShare(true)}
           />
           <div className="body">
             <ToolRail onFigma={() => setFigma(true)} />
@@ -182,6 +191,7 @@ export function App(): JSX.Element {
       <Suspense fallback={null}>
         {preview && <PreviewOverlay onClose={() => setPreview(false)} initialScene={previewScene} />}
         {figma && <FigmaImport onClose={() => setFigma(false)} />}
+        {importBuilt && <ImportBuilt onClose={() => setImportBuilt(false)} />}
         {settings && <ProjectSettings onClose={() => setSettings(false)} />}
         {templates && <TemplatesModal onClose={() => setTemplates(false)} />}
         {quiz && <QuizFunnel onClose={() => setQuiz(false)} />}
@@ -189,6 +199,7 @@ export function App(): JSX.Element {
         {profile && <ProfilePanel onClose={() => setProfile(false)} />}
         {exportOpen && <ExportModal onClose={() => setExportOpen(false)} />}
         {qa && <QaPanel onClose={() => setQa(false)} onNavigate={qaNavigate} />}
+        {share && <ShareModal initialCode={shareCode} onClose={() => setShare(false)} onImported={() => { setShare(false); setHome(false) }} />}
         {cmdK && <CommandPalette commands={commands} onClose={() => setCmdK(false)} />}
       </Suspense>
     </div>

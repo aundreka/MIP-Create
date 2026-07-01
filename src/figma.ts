@@ -67,7 +67,7 @@ async function api<T>(path: string, token: string, onProgress?: OnProgress): Pro
       const ra = Number(res.headers.get('Retry-After'))
       const secs = Number.isFinite(ra) && ra > 0 ? ra : (attempt + 1) * 5
       if (attempt < 3 && secs <= 90) {
-        onProgress?.({ phase: `Figma rate limit — retrying in ${Math.round(secs)}s… (${attempt + 1}/3)` })
+        onProgress?.({ phase: `Figma rate limit, retrying in ${Math.round(secs)}s… (${attempt + 1}/3)` })
         await new Promise((r) => setTimeout(r, secs * 1000))
         continue
       }

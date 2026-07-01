@@ -289,6 +289,21 @@ export async function loadProject(): Promise<{ data: ProjectData; path: string |
   }
 }
 
+/** Pick a built playable (.html or .zip) for round-trip import (see importBuilt.ts). */
+export function pickBuiltFile(): Promise<File | null> {
+  return pickFiles('.html,.htm,.zip,text/html,application/zip')
+}
+
+/** Encode raw HTML markup as a data:text/html;base64 URL (an AssetEntry src).
+ * Shared by the embedded-game importer and the built-playable importer. */
+export function htmlToDataUrl(text: string): string {
+  try {
+    return 'data:text/html;base64,' + btoa(unescape(encodeURIComponent(text)))
+  } catch {
+    return 'data:text/html,' + encodeURIComponent(text)
+  }
+}
+
 /** Read a user-picked single-file playable (.html) into an AssetEntry (a
  * data:text/html;base64 URL). Used by the embedded-game template. */
 export function importHtml(): Promise<{ id: string; name: string; src: string; w: number; h: number; kind: 'html' } | null> {
@@ -298,12 +313,7 @@ export function importHtml(): Promise<{ id: string; name: string; src: string; w
       const reader = new FileReader()
       reader.onload = () => {
         const text = String(reader.result ?? '')
-        let src: string
-        try {
-          src = 'data:text/html;base64,' + btoa(unescape(encodeURIComponent(text)))
-        } catch {
-          src = 'data:text/html,' + encodeURIComponent(text)
-        }
+        const src = htmlToDataUrl(text)
         resolve({
           id: file.name.replace(/\.[^.]+$/, '').replace(/[^a-z0-9_-]+/gi, '_'),
           name: file.name,

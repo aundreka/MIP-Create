@@ -103,7 +103,7 @@ export function GenerateMip(props: { onClose: () => void }): JSX.Element {
       </div>
 
       <div className="quiz-gen-foot">
-        <span className="hint">Scaffolds a game scene + coded end card. Everything is editable after — this only sets up structure, not the creative idea.</span>
+        <span className="hint">Scaffolds a game scene + coded end card. Everything is editable after; this only sets up structure, not the creative idea.</span>
         <button className="primary" disabled={busy} onClick={generate}>{busy ? 'Generating…' : 'Generate MIP'}</button>
       </div>
     </Modal>

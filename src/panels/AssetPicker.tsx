@@ -2,7 +2,7 @@
 // asset (placed images, Figma imports, prior uploads), upload a new one, or
 // clear. Used for game asset slots and for image/bar/background element fills.
 
-import { useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { importAudio, importHtml, importImages, importVideo } from '../bridge'
 import { addAsset, nextId, useEditorState } from '../store'
@@ -23,6 +23,7 @@ export function AssetPicker(props: {
   const [lib, setLib] = useState(false)
   const [pos, setPos] = useState<{ left: number; top: number }>({ left: 0, top: 0 })
   const btnRef = useRef<HTMLButtonElement>(null)
+  const popRef = useRef<HTMLDivElement>(null)
   const accept = props.accept ?? 'image'
   // 'media' = images OR videos (e.g. a container's inner content).
   const matches = (k?: string): boolean =>
@@ -36,6 +37,26 @@ export function AssetPicker(props: {
     if (r) setPos({ left: Math.min(r.left, window.innerWidth - 260), top: r.bottom + 4 })
     setOpen((o) => !o)
   }
+  // Once the popup is in the DOM we know its real height, so clamp it into the
+  // viewport: flip it above the button when there isn't room below (the picker
+  // often sits near the bottom of a long Inspector), then keep it fully on-screen.
+  useLayoutEffect(() => {
+    if (!open) return
+    const btn = btnRef.current
+    const pop = popRef.current
+    if (!btn || !pop) return
+    const r = btn.getBoundingClientRect()
+    const m = 8
+    const ph = pop.offsetHeight
+    const pw = pop.offsetWidth
+    let top = r.bottom + 4
+    if (top + ph > window.innerHeight - m) {
+      const above = r.top - 4 - ph
+      top = above >= m ? above : Math.max(m, window.innerHeight - m - ph)
+    }
+    const left = Math.max(m, Math.min(r.left, window.innerWidth - pw - m))
+    setPos((p) => (p.top === top && p.left === left ? p : { top, left }))
+  }, [open])
   const upload = async (): Promise<void> => {
     if (accept === 'video') {
       const vid = await importVideo()
@@ -107,7 +128,7 @@ export function AssetPicker(props: {
         createPortal(
           <>
             <div className="pop-backdrop" onClick={() => setOpen(false)} />
-            <div className="asset-pop" style={{ left: pos.left, top: pos.top }}>
+            <div ref={popRef} className="asset-pop" style={{ left: pos.left, top: pos.top }}>
               <div className="asset-grid">
                 {props.allowNone && (
                   <button className="asset-cell none" title="None" onClick={() => { props.onChange(undefined); setOpen(false) }}>

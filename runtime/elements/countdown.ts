@@ -45,7 +45,7 @@ export function formatCountdown(el: SceneElement, deadline: number, now: number)
   } catch {
     dateStr = ''
   }
-  return fmt
+  const out = fmt
     .replace(/\{date\}/g, dateStr)
     .replace(/\{dd\}/g, pad(d))
     .replace(/\{hh\}/g, pad(h))
@@ -55,4 +55,6 @@ export function formatCountdown(el: SceneElement, deadline: number, now: number)
     .replace(/\{h\}/g, String(h))
     .replace(/\{m\}/g, String(m))
     .replace(/\{s\}/g, String(s))
+  // Capitalize the first letter of every word (e.g. "Order by" -> "Order By").
+  return el.countdown?.capitalize ? out.replace(/\b\p{L}/gu, (c) => c.toUpperCase()) : out
 }

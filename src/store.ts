@@ -11,6 +11,8 @@ import { applyVariantPatches } from './variants'
 import { migrateProject } from './migrate'
 import { GAME_TEMPLATES } from '../runtime/games/registry'
 import { sfxPreviewUrl } from './sfxLibrary'
+import { deleteSharedElement, ensureGroupByName, putSharedElement } from './projectGroups'
+import { syncMipName } from './mipName'
 
 export type Orientation = 'portrait' | 'landscape'
 
@@ -262,6 +264,11 @@ function mergeVariantPatch(vid: string, id: string, patch: Partial<SceneElement>
 export function patchElement(id: string, patch: Partial<SceneElement>): void {
   const vid = getActiveVariant()
   if (vid) return mergeVariantPatch(vid, id, patch)
+  const el = activeSceneDef().elements.find((e) => e.id === id)
+  // A synced element mirrors one shared definition — apply the edit to every copy
+  // across all scenes and update the group registry. (`sync`-changing patches route
+  // through the dedicated sync fns, so they skip this and edit the element directly.)
+  if (el?.sync && !('sync' in patch)) return patchSynced(el.sync.key, patch)
   mapEl(id, (e) => ({ ...e, ...patch }))
 }
 export function patchLandscape(id: string, patch: OrientationOverride): void {
@@ -269,6 +276,13 @@ export function patchLandscape(id: string, patch: OrientationOverride): void {
   if (vid) {
     const cur = state.scene.elements.find((e) => e.id === id) // merged (base + variant)
     return mergeVariantPatch(vid, id, { landscape: { ...(cur?.landscape ?? {}), ...patch } })
+  }
+  const el = activeSceneDef().elements.find((e) => e.id === id)
+  if (el?.sync) {
+    const key = el.sync.key
+    const scenes = state.project.scenes.map((sd) => ({ ...sd, elements: sd.elements.map((e) => (e.sync?.key === key ? { ...e, landscape: { ...(e.landscape ?? {}), ...patch } } : e)) }))
+    set({ dirty: true, project: { ...state.project, scenes } })
+    return pushSharedForKey(key)
   }
   mapEl(id, (e) => ({ ...e, landscape: { ...(e.landscape ?? {}), ...patch } }))
 }
@@ -552,7 +566,120 @@ export function bulkPatch(patches: Record<string, Partial<SceneElement>>): void 
     for (const [id, p] of Object.entries(patches)) mergeVariantPatch(vid, id, p)
     return
   }
-  mapActiveScene((sd) => ({ ...sd, elements: sd.elements.map((e) => (patches[e.id] ? { ...e, ...patches[e.id] } : e)) }))
+  // Fan a patch on a synced element out to its copies on other scenes too.
+  const byKey = new Map<string, Partial<SceneElement>>()
+  for (const e of activeSceneDef().elements) if (patches[e.id] && e.sync) byKey.set(e.sync.key, patches[e.id])
+  if (!byKey.size) return mapActiveScene((sd) => ({ ...sd, elements: sd.elements.map((e) => (patches[e.id] ? { ...e, ...patches[e.id] } : e)) }))
+  const scenes = state.project.scenes.map((sd) => ({
+    ...sd,
+    elements: sd.elements.map((e) => (patches[e.id] ? { ...e, ...patches[e.id] } : e.sync && byKey.has(e.sync.key) ? { ...e, ...byKey.get(e.sync.key)! } : e)),
+  }))
+  set({ dirty: true, project: { ...state.project, scenes } })
+  for (const key of byKey.keys()) pushSharedForKey(key)
+}
+
+// ---- "Sync to project" — an element shared across every MIP in the group ------
+// A synced element carries a `sync.key`; all elements with the same key (across
+// scenes and across MIPs) mirror one canonical definition in the group registry
+// (src/projectGroups.ts). Editing any copy propagates to the others in the open MIP
+// and writes the registry; opening another MIP reconciles its copies (projects.ts).
+
+// Write the current props of a synced key to the group registry (async IDB flush).
+function pushSharedForKey(key: string): void {
+  const gid = state.project.meta.projectId
+  if (!gid) return
+  for (const sd of state.project.scenes) {
+    const e = sd.elements.find((x) => x.sync?.key === key)
+    if (e) return void putSharedElement(gid, e, state.assets)
+  }
+}
+
+// Apply a patch to every copy of a synced key across all scenes, then push.
+function patchSynced(key: string, patch: Partial<SceneElement>): void {
+  const scenes = state.project.scenes.map((sd) => ({ ...sd, elements: sd.elements.map((e) => (e.sync?.key === key ? { ...e, ...patch } : e)) }))
+  set({ dirty: true, project: { ...state.project, scenes } })
+  pushSharedForKey(key)
+}
+
+/** Push every synced element in the open MIP to the group registry (save backstop). */
+export function flushSharedToRegistry(): void {
+  if (!state.project.meta.projectId) return
+  const keys = new Set<string>()
+  for (const sd of state.project.scenes) for (const e of sd.elements) if (e.sync) keys.add(e.sync.key)
+  for (const key of keys) pushSharedForKey(key)
+}
+
+/** Is the element (or any selected one) syncable — i.e. this MIP is in a project? */
+export function projectGroupId(): string | undefined {
+  return state.project.meta.projectId
+}
+
+/** Toggle project-sync on an element. On → assigns a shared key (scope 'scene').
+ * Off → stops sharing (see unsyncElement). No-op in variant mode. */
+export function toggleSyncToProject(id: string): void {
+  if (getActiveVariant()) return
+  const el = activeSceneDef().elements.find((e) => e.id === id)
+  if (!el) return
+  if (el.sync) return unsyncElement(id)
+  if (!state.project.meta.projectId) {
+    alert('Assign this MIP to a project first. Open Project settings and set the “Project” field.')
+    return
+  }
+  const key = nextId('sync')
+  mapEl(id, (e) => ({ ...e, sync: { key, scope: 'scene' } }))
+  pushSharedForKey(key)
+}
+
+/** Change where a synced element shows: 'scene' (one copy per MIP) or 'all'
+ * (a copy on every scene — a persistent overlay). */
+export function setSyncScope(id: string, scope: 'scene' | 'all'): void {
+  const el = activeSceneDef().elements.find((e) => e.id === id)
+  if (!el?.sync) return
+  const key = el.sync.key
+  let scenes = state.project.scenes.map((sd) => ({ ...sd, elements: sd.elements.map((e) => (e.sync?.key === key ? { ...e, sync: { key, scope } } : e)) }))
+  if (scope === 'all') {
+    const canon = { ...el } as Partial<SceneElement>
+    delete canon.id
+    scenes = scenes.map((sd) =>
+      sd.elements.some((e) => e.sync?.key === key)
+        ? sd
+        : { ...sd, elements: [...sd.elements, { ...canon, id: `sync_${key}_${sd.id}`, sync: { key, scope: 'all' } } as SceneElement] },
+    )
+  } else {
+    let kept = false
+    scenes = scenes.map((sd) => ({
+      ...sd,
+      elements: sd.elements.filter((e) => {
+        if (e.sync?.key !== key) return true
+        if (kept) return false
+        kept = true
+        return true
+      }),
+    }))
+  }
+  const selectedIds = state.selectedIds.filter((sid) => scenes.some((sd) => sd.elements.some((e) => e.id === sid)))
+  set({ dirty: true, selectedIds, project: { ...state.project, scenes } })
+  pushSharedForKey(key)
+}
+
+/** Stop sharing: remove the shared element from the group registry and drop the
+ * sync marker from its copies in this MIP (they remain as ordinary elements). */
+export function unsyncElement(id: string): void {
+  const el = activeSceneDef().elements.find((e) => e.id === id)
+  if (!el?.sync) return
+  const key = el.sync.key
+  const gid = state.project.meta.projectId
+  const scenes = state.project.scenes.map((sd) => ({
+    ...sd,
+    elements: sd.elements.map((e) => {
+      if (e.sync?.key !== key) return e
+      const c = { ...e }
+      delete c.sync
+      return c
+    }),
+  }))
+  set({ dirty: true, project: { ...state.project, scenes } })
+  if (gid) deleteSharedElement(gid, key)
 }
 
 export type ConvertTo = 'image' | 'bar' | 'rect' | 'cta' | 'background' | 'text' | 'handguide'
@@ -591,7 +718,27 @@ export function convertElement(id: string, to: ConvertTo): void {
 
 // ---- project / scene meta -------------------------------------------------
 export function patchMeta(patch: Partial<ProjectMeta>): void {
-  set({ dirty: true, project: { ...state.project, meta: { ...state.project.meta, ...patch } } })
+  // Keep meta.name canonical ("<Client> <MIP> <Date>") after every edit so the
+  // topbar, Home, team library, JSON download and export filename all agree.
+  const meta = syncMipName({ ...state.project.meta, ...patch })
+  set({ dirty: true, project: { ...state.project, meta } })
+}
+
+/**
+ * Assign this MIP to a project group by name — typing an existing project name
+ * joins that project; a new name starts a new one. An empty name detaches the MIP.
+ * Stores the stable group id + display name on the meta so Home/switcher can group.
+ */
+export function assignProjectGroup(name: string): void {
+  const trimmed = name.trim()
+  if (!trimmed) return patchMeta({ projectId: undefined, projectName: undefined })
+  const g = ensureGroupByName(trimmed)
+  patchMeta({ projectId: g.id, projectName: g.name })
+}
+
+/** Join an existing group by id (used by "New MIP in this project"). */
+export function joinProjectGroup(projectId: string, projectName: string): void {
+  patchMeta({ projectId, projectName })
 }
 
 // ---- variants (export-time overrides of the same MIP) ---------------------

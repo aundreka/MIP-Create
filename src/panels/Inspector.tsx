@@ -2,7 +2,7 @@
 // single-element editor with a visual Background-box section.
 
 import { useState, useEffect } from 'react'
-import type { Anchor, AdvanceOn, AnimPresetId, AnimSpec, AnimTrigger, BoxStyle, CountdownConfig, CtaPulsePreset, EndsceneConfig, HandguideConfig, HandguideNode, KeyframeStep, LayoutMode, ObjectFit, SceneElement, SceneKind, SceneOverlay, SfxBinding, ShadowPreset, TextConfig, TransitionType, UnboxingConfig } from '../../runtime/scene'
+import type { Anchor, AdvanceOn, AnimPresetId, AnimSpec, AnimTrigger, BackgroundConfig, BoxStyle, CountdownConfig, CtaPulsePreset, EndsceneConfig, HandguideConfig, HandguideNode, KeyframeStep, LayoutMode, ObjectFit, SceneElement, SceneKind, SceneOverlay, SfxBinding, ShadowPreset, TextConfig, TransitionType, UnboxingConfig } from '../../runtime/scene'
 import { GAME_TEMPLATES } from '../../runtime/games/registry'
 import type { ParamField } from '../../runtime/games/types'
 import { importFont } from '../bridge'
@@ -23,9 +23,11 @@ import {
   removeSelected,
   setSceneBg,
   setSceneBg2,
+  setSyncScope,
   setTrace,
   singleSelected,
   toggleLock,
+  toggleSyncToProject,
   ungroupSelected,
   useEditorState,
   type AlignOp,
@@ -273,7 +275,7 @@ function UnboxingInspector({ el }: { el: SceneElement }): JSX.Element {
               ]}
             />
             {randomMode && (
-              <Slider label={`Win chance — ${cfg.winChance ?? 50}%`} value={cfg.winChance ?? 50} min={0} max={100} step={5} onChange={(n) => set({ winChance: n })} />
+              <Slider label={`Win chance: ${cfg.winChance ?? 50}%`} value={cfg.winChance ?? 50} min={0} max={100} step={5} onChange={(n) => set({ winChance: n })} />
             )}
             {assignMode && cells && (
               <>
@@ -359,7 +361,18 @@ function StyleButtons(): JSX.Element {
 }
 
 // ---- animation sub-panel ---------------------------------------------------
-const EASINGS = ['ease', 'ease-out', 'ease-in', 'ease-in-out', 'linear']
+// value = the CSS timing function; label = friendly name. "spring" overshoots and
+// settles (a slight bounce) — pair it with fade/loop presets that don't already
+// bake in an overshoot, since the slide/pop entrances have their own settle.
+const EASINGS: { value: string; label: string }[] = [
+  { value: 'ease-out', label: 'ease out' },
+  { value: 'ease-in', label: 'ease in' },
+  { value: 'ease-in-out', label: 'ease in-out' },
+  { value: 'cubic-bezier(.34,1.56,.64,1)', label: 'spring (bounce)' },
+  { value: 'cubic-bezier(.22,1,.36,1)', label: 'smooth' },
+  { value: 'ease', label: 'ease' },
+  { value: 'linear', label: 'linear' },
+]
 const ENTRANCE_PRESETS: AnimPresetId[] = ['fade', 'slide-up', 'slide-down', 'slide-left', 'slide-right', 'pop', 'bounce', 'spin']
 const LOOP_PRESETS: AnimPresetId[] = ['pulse', 'float', 'bounce', 'shake', 'wave', 'shine', 'glow', 'spin']
 const EXIT_PRESETS: AnimPresetId[] = ['fade-out', 'scale-out']
@@ -403,7 +416,7 @@ function AnimRow(props: {
             <NumField label="Delay" value={spec.delayMs} step={50} onChange={(n) => patch({ delayMs: n })} />
           </div>
           <Row label="Easing">
-            <Select value={spec.easing} onChange={(v) => patch({ easing: v })} options={EASINGS.map((x) => ({ value: x, label: x }))} />
+            <Select value={spec.easing} onChange={(v) => patch({ easing: v })} options={EASINGS} />
           </Row>
           {props.trigger && (
             <Row label="Plays">
@@ -479,11 +492,13 @@ function ScratchGridCells({ params, setParam, elementId }: ScratchGridCellsProps
         />
       </Row>
 
-      <div className="group-title2">Scratch surface — double-click a cell on the canvas to select it</div>
+      <div className="group-title2">Scratch surface: double-click a cell on the canvas to select it</div>
       <AssetPicker label="Shared cover (fallback)" value={(params.cover as string) || undefined} allowNone onChange={(aid) => setParam('cover', aid ?? '')} />
+      <AssetPicker label="Shared background (all cells)" value={(params.sharedBg as string) || undefined} allowNone onChange={(aid) => setParam('sharedBg', aid ?? '')} />
+      <AssetPicker label="Shared text / product overlay (all cells)" value={(params.sharedText as string) || undefined} allowNone onChange={(aid) => setParam('sharedText', aid ?? '')} />
 
       <div className="group-title2">{cellName(safeCell)}</div>
-      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 4, padding: '6px 0 8px', marginBottom: 2 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, minmax(0, 48px))`, justifyContent: 'start', gap: 4, padding: '6px 0 8px', marginBottom: 2 }}>
         {Array.from({ length: total }, (_, i) => {
           const pat = String(params.pattern ?? 'LWWL')
           const isW = (pat[i] ?? 'L').toUpperCase() === 'W'
@@ -492,7 +507,7 @@ function ScratchGridCells({ params, setParam, elementId }: ScratchGridCellsProps
               key={i}
               className={safeCell === i ? 'on' : ''}
               onClick={() => setActiveCell(i)}
-              title={`${cellName(i)} — ${isW ? 'WIN' : 'LOSE'}`}
+              title={`${cellName(i)}: ${isW ? 'WIN' : 'LOSE'}`}
               style={{ aspectRatio: '1', minHeight: 32, fontSize: 11, fontWeight: 700, borderRadius: 4, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2 }}
             >
               <span>{i + 1}</span>
@@ -513,7 +528,7 @@ function ScratchGridCells({ params, setParam, elementId }: ScratchGridCellsProps
             <Select
               value={isW ? 'W' : 'L'}
               onChange={(v) => setWinLose(v === 'W')}
-              options={[{ value: 'W', label: 'Win — advances to win scene' }, { value: 'L', label: 'Lose — navigates to lose scene' }]}
+              options={[{ value: 'W', label: 'Win: advances to win scene' }, { value: 'L', label: 'Lose: navigates to lose scene' }]}
             />
           </Row>
         )
@@ -575,13 +590,13 @@ function ScratchGridCells({ params, setParam, elementId }: ScratchGridCellsProps
 
       <div className="group-title2">Lose &amp; win scenes</div>
       <div className="hint pad">
-        Lose: the chosen scene pops up over the game, then dismisses on its own Advance and play resumes. Win: redirects to the chosen scene without flashing back to the game (a normal scene replaces it; an overlay-type scene dims it), and that scene’s own Advance continues to the end scene. If no scene is set, falls back to a plain image overlay. The win scene here is the default — each win cell can override it above.
+        Lose: the chosen scene pops up over the game, then dismisses on its own Advance and play resumes. Win: redirects to the chosen scene without flashing back to the game (a normal scene replaces it; an overlay-type scene dims it), and that scene’s own Advance continues to the end scene. If no scene is set, falls back to a plain image overlay. The win scene here is the default; each win cell can override it above.
       </div>
       <Row label="Lose overlay scene">
         <Select
           value={String(params.loseSceneId ?? '')}
           onChange={(v) => setParam('loseSceneId', v)}
-          options={[{ value: '', label: '(none — use image below)' }, ...project.scenes.map((s) => ({ value: s.id, label: s.name || s.id }))]}
+          options={[{ value: '', label: '(none, use image below)' }, ...project.scenes.map((s) => ({ value: s.id, label: s.name || s.id }))]}
         />
       </Row>
       <AssetPicker label="Lose overlay image (fallback)" value={(params.loseOverlayImage as string) || undefined} allowNone onChange={(aid) => setParam('loseOverlayImage', aid ?? '')} />
@@ -590,7 +605,7 @@ function ScratchGridCells({ params, setParam, elementId }: ScratchGridCellsProps
         <Select
           value={String(params.winSceneId ?? '')}
           onChange={(v) => setParam('winSceneId', v)}
-          options={[{ value: '', label: '(none — use image below)' }, ...project.scenes.map((s) => ({ value: s.id, label: s.name || s.id }))]}
+          options={[{ value: '', label: '(none, use image below)' }, ...project.scenes.map((s) => ({ value: s.id, label: s.name || s.id }))]}
         />
       </Row>
       <AssetPicker label="Default win overlay image" value={(params.winOverlayImage as string) || undefined} allowNone onChange={(aid) => setParam('winOverlayImage', aid ?? '')} />
@@ -653,7 +668,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
         <div className="panel-title">Scene: {sd.name}</div>
         {activeVariant ? (
           <div className="hint pad">
-            Scene settings (name, type, background, advance, transition) are <b>base-only</b> — they can"t differ per variant. Click <b>Done</b> above to exit variant mode and edit them.
+            Scene settings (name, type, background, advance, transition) are <b>base-only</b>; they can"t differ per variant. Click <b>Done</b> above to exit variant mode and edit them.
           </div>
         ) : (
         <>
@@ -679,7 +694,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
           <div className="hint pad">
             Endscene = MRAID <b>end card</b>: in Preview/export the whole scene is tap-to-install and signals the network the ad
             ended. Add a <b>video endscene</b> element for a video card, or just build it like any scene (product + pulsing CTA) for
-            a <b>coded</b> end card — both get the MRAID wrap.
+            a <b>coded</b> end card; both get the MRAID wrap.
           </div>
         )}
 
@@ -691,7 +706,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               <div className="group-title">Dim / blur overlay</div>
               <div className="hint pad" style={{ marginBottom: 4 }}>
                 Full-screen overlay rendered behind all scene elements. Uses an oversized div so edges are
-                always off-screen — no edge artifacts on AppLovin.
+                always off-screen; no edge artifacts on AppLovin.
               </div>
               <Slider label="Dim opacity" value={(ov.opacity ?? 0) * 100} min={0} max={100} step={5} suffix="%" onChange={(n) => setOv({ opacity: n / 100 || undefined })} />
               <ColorField label="Color" value={ov.color ?? '#000000'} onChange={(c) => setOv({ color: c ?? '#000000' })} />
@@ -758,8 +773,6 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
         <Toggle label="Show backdrop" checked={state.trace.visible} onChange={(v) => setTrace({ visible: v })} />
         <Slider label="Opacity" value={Math.round(state.trace.opacity * 100)} min={5} max={100} suffix="%" onChange={(n) => setTrace({ opacity: n / 100 })} />
         <div className="hint pad">A mockup overlaid faintly on the canvas to trace/align against. Never rendered at runtime or exported.</div>
-
-        <div className="hint pad">Select an element to edit it. Use the Scenes strip to add/reorder scenes.</div>
       </div>
     )
   }
@@ -813,6 +826,33 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
       <Toggle label="Show on game win" checked={!!el.showOnWin} onChange={(v) => patchElement(id, { showOnWin: v })} />
       {el.type !== 'cta' && (
         <Toggle label="Above overlays" checked={!!el.overlayImmune} onChange={(v) => patchElement(id, { overlayImmune: v || undefined })} />
+      )}
+
+      {!activeVariant && (
+        <>
+          <Toggle
+            label={state.project.meta.projectName ? `Sync to “${state.project.meta.projectName}”` : 'Sync to project'}
+            checked={!!el.sync}
+            onChange={() => toggleSyncToProject(id)}
+          />
+          {el.sync && (
+            <Row label="Appears on">
+              <Select
+                value={el.sync.scope}
+                onChange={(v) => setSyncScope(id, v as 'scene' | 'all')}
+                options={[
+                  { value: 'scene', label: 'One scene' },
+                  { value: 'all', label: 'Every scene (overlay)' },
+                ]}
+              />
+            </Row>
+          )}
+          {el.sync && (
+            <div className="hint pad">
+              Shared across all MIPs in this project; edits here (position, size, text, style, everything) apply to every MIP.
+            </div>
+          )}
+        </>
       )}
 
       {!activeVariant && el.type !== 'game-mount' && el.type !== 'endscene' &&
@@ -925,7 +965,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               <>
               {tpl.paramFields.map(renderField)}
               {tpl.id === 'scratch' && params.fit === 'fit' && (
-                <div className="hint pad">Double-click the card on the canvas to position &amp; scale the reveal image — drag to move, corner handles to resize.</div>
+                <div className="hint pad">Double-click the card on the canvas to position &amp; scale the reveal image: drag to move, corner handles to resize.</div>
               )}
               {(tpl.assetSlots ?? []).map((slot) => {
                 if (slot.list) {
@@ -965,7 +1005,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               </>
               )}
               {activeSceneDef()?.elements.some((e) => e.type === 'handguide') ? (
-                <div className="hint pad">Editable hint hand added — drag it on the canvas, edit its route with its path tool, or swap its image via the handguide"s own Source. (The auto hint hand is off while a handguide exists.)</div>
+                <div className="hint pad">Editable hint hand added: drag it on the canvas, edit its route with its path tool, or swap its image via the handguide"s own Source. (The auto hint hand is off while a handguide exists.)</div>
               ) : (
                 <button className="wide" onClick={() => addGameHint(id)}>
                   Add hint hand (editable)
@@ -1001,7 +1041,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 />
               </Row>
               <Slider label="Inside padding" value={el.container.padPx ?? 0} min={0} max={200} onChange={(n) => patchElement(id, { container: { ...el.container!, padPx: n } })} />
-              <div className="hint pad">The shape"s transparency masks the image — works on any shape (heart, star, etc.). The inside image is clipped to the shape.</div>
+              <div className="hint pad">The shape"s transparency masks the image; works on any shape (heart, star, etc.). The inside image is clipped to the shape.</div>
             </>
           )}
 
@@ -1070,7 +1110,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               Fully freeform: invent <b>any categories</b> (type any name) and place <b>as many thumbnails per category</b> as you
               like. <b>How many picks a category holds = how many Fill slots</b> you give it (1 slot = single-choice, 3 slots = pick
               3). Slots fill in scene order, or set Slot #. <b>Generate</b> lists the categories it needs; tap it or <b>swipe up</b>
-              → circular % → result. Style/position every element yourself — nothing is grouped or laid out for you.
+              → circular % → result. Style/position every element yourself; nothing is grouped or laid out for you.
             </div>
           )}
           </Accordion>
@@ -1254,6 +1294,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                   />
                 </Row>
               )}
+              <Toggle label="Capitalize text" checked={!!cfg.capitalize} onChange={(v) => setCd({ capitalize: v || undefined })} />
               <div className="hint pad">
                 <b>Timer</b> tokens (live): <b>{'{hh}:{mm}:{ss}'}</b> / <b>{'{d} {h} {m} {s}'}</b>. <b>Date</b> label (no ticking):{' '}
                 <b>{'{date}'}</b>, e.g. "Order by {'{date}'}". "Dynamic" recomputes from today whenever the ad runs.
@@ -1368,23 +1409,37 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
         )
       })()}
 
-      {el.type === 'background' && (
-        <>
-          <Accordion id="inspector.background" title="Background">
-          <AssetPicker label="Image" value={el.assetId} onChange={(aid) => patchElement(id, { assetId: aid })} />
-          <Row label="Fit">
-            <Select
-              value={el.background?.objectFit ?? 'cover'}
-              onChange={(v) => patchElement(id, { background: { objectFit: v as 'cover' | 'contain' } })}
-              options={[
-                { value: 'cover', label: 'cover' },
-                { value: 'contain', label: 'contain' },
-              ]}
-            />
-          </Row>
-          </Accordion>
-        </>
-      )}
+      {el.type === 'background' &&
+        (() => {
+          const bg: BackgroundConfig = el.background ?? {}
+          const setBg = (patch: Partial<BackgroundConfig>): void => patchElement(id, { background: { ...bg, ...patch } })
+          const fit = bg.objectFit ?? 'cover'
+          return (
+            <Accordion id="inspector.background" title="Background">
+              <AssetPicker label="Image" value={el.assetId} onChange={(aid) => patchElement(id, { assetId: aid })} />
+              <Row label="Fit">
+                <Select
+                  value={fit}
+                  onChange={(v) => setBg({ objectFit: v as ObjectFit })}
+                  options={[
+                    { value: 'cover', label: 'cover (fill, may crop)' },
+                    { value: 'contain', label: 'contain (fit, no crop)' },
+                  ]}
+                />
+              </Row>
+              {fit === 'cover' && (
+                <>
+                  <Slider label="Crop X (portrait)" value={Math.round(bg.focusX ?? 50)} min={0} max={100} suffix="%" onChange={(n) => setBg({ focusX: n })} />
+                  <Slider label="Crop Y (portrait)" value={Math.round(bg.focusY ?? 50)} min={0} max={100} suffix="%" onChange={(n) => setBg({ focusY: n })} />
+                  <div className="hint pad">
+                    In <b>portrait</b>, these pick which part of the image stays visible when it's cropped to fill (0% = left/top, 100% =
+                    right/bottom). <b>Landscape</b> always centers and crops to cover the whole screen.
+                  </div>
+                </>
+              )}
+            </Accordion>
+          )
+        })()}
 
       {el.type === 'endscene' &&
         (() => {
@@ -1548,7 +1603,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
           trigger
           spec={el.animations?.entrance}
           presets={ENTRANCE_PRESETS}
-          defaultSpec={{ preset: 'fade', durationMs: 450, delayMs: 0, easing: 'ease-out', trigger: 'onMount' }}
+          defaultSpec={{ preset: 'fade', durationMs: 520, delayMs: 0, easing: 'ease-out', trigger: 'onMount' }}
           onChange={(s) => patchElement(id, { animations: { ...(el.animations ?? {}), entrance: s } })}
         />
         <AnimRow

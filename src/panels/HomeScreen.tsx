@@ -10,7 +10,7 @@ import { gameTemplateStarters, STARTERS, type Starter } from '../templates'
 import { SceneThumb } from '../preview/SceneThumb'
 import { allBrands, brandsFor, usagesFor } from '../templateUsage'
 import { TemplateCard } from './TemplateCard'
-import { Copy, Diamond, Icon, LayoutGrid, ListChecks, Pencil, Plus, Search, Star, User, X } from '../icons'
+import { Copy, Diamond, FolderOpen, Icon, LayoutGrid, ListChecks, Pencil, Plus, Search, Star, Upload, User, X } from '../icons'
 
 // Team library loads lazily (keeps Supabase out of the Home chunk until the tab opens).
 const TeamLibrary = lazy(() => import('./TeamPanel').then((m) => ({ default: m.TeamLibrary })))
@@ -26,9 +26,16 @@ function ProjectThumb({ id }: { id: string }): JSX.Element {
   useEffect(() => {
     const el = ref.current
     if (!el) return
+    // Keep observing (don't disconnect on first hit): mount the preview iframe only
+    // while the card is on screen and release it — and the rehydrated asset bytes —
+    // when it scrolls away, so a long library doesn't accumulate live iframes (OOM).
     const io = new IntersectionObserver(
-      (es) => { if (es.some((e) => e.isIntersecting)) { setVisible(true); io.disconnect() } },
-      { rootMargin: '80px' },
+      (es) => {
+        const on = es.some((e) => e.isIntersecting)
+        setVisible(on)
+        if (!on) setData(null)
+      },
+      { rootMargin: '120px' },
     )
     io.observe(el)
     return () => io.disconnect()
@@ -45,7 +52,9 @@ function ProjectThumb({ id }: { id: string }): JSX.Element {
 
   useEffect(() => {
     if (!visible) return
-    void loadProjectPreview(id).then(setData)
+    let alive = true
+    void loadProjectPreview(id).then((d) => { if (alive) setData(d) })
+    return () => { alive = false }
   }, [visible, id])
 
   // Pick the most visually rich scene: prefer endscene or win, fall back to first
@@ -68,7 +77,7 @@ function when(ts: number): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 }
 
-export function HomeScreen(props: { onClose: () => void; onProfile: () => void; onGenerate?: () => void; onQuizFunnel?: () => void; initialTab?: 'projects' | 'team' }): JSX.Element {
+export function HomeScreen(props: { onClose: () => void; onProfile: () => void; onGenerate?: () => void; onQuizFunnel?: () => void; onImportBuilt?: () => void; onShare?: () => void; initialTab?: 'projects' | 'team' }): JSX.Element {
   const [tick, force] = useState(0)
   const refresh = (): void => force((n) => n + 1)
   const [editId, setEditId] = useState<string | null>(null)
@@ -120,6 +129,18 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
     )
   })
 
+  // Bucket the library by project group (ungrouped MIPs last), preserving the
+  // most-recent-first order within each bucket.
+  const grouped: { id: string; name: string; items: typeof projects }[] = []
+  const groupIndex = new Map<string, number>()
+  const ungrouped: typeof projects = []
+  for (const p of projects) {
+    if (!p.projectId) { ungrouped.push(p); continue }
+    let i = groupIndex.get(p.projectId)
+    if (i === undefined) { i = grouped.length; groupIndex.set(p.projectId, i); grouped.push({ id: p.projectId, name: p.projectName || 'Untitled project', items: [] }) }
+    grouped[i].items.push(p)
+  }
+
   const open = async (id: string): Promise<void> => {
     if (id === curId || (await openProject(id))) props.onClose()
   }
@@ -131,6 +152,57 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
     await createProject(s.build())
     props.onClose()
   }
+
+  const renderCard = (p: (typeof projects)[number]): JSX.Element => (
+    <div key={p.id} className={'proj-card' + (p.id === curId ? ' current' : '')}>
+      <button className="proj-open" onClick={() => open(p.id)} title="Open">
+        <ProjectThumb id={p.id} />
+      </button>
+      <div className="proj-meta">
+        {editId === p.id ? (
+          <input
+            autoFocus
+            defaultValue={p.name}
+            onBlur={(e) => {
+              renameProject(p.id, e.target.value.trim() || p.name)
+              setEditId(null)
+              refresh()
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+              if (e.key === 'Escape') (e.stopPropagation(), setEditId(null))
+            }}
+          />
+        ) : (
+          <span className="proj-name" onDoubleClick={() => setEditId(p.id)} title="Double-click to rename">
+            {p.name} {p.id === curId && <em className="proj-cur">• current</em>}
+          </span>
+        )}
+        <span className="proj-date">{when(p.updatedAt)}</span>
+      </div>
+      <div className="proj-actions">
+        <button title="Rename" onClick={() => setEditId(p.id)}>
+          <Icon icon={Pencil} size={13} />
+        </button>
+        <button title="Duplicate" onClick={() => void duplicateProject(p.id).then(() => refresh())}>
+          <Icon icon={Copy} size={13} />
+        </button>
+        <button
+          className="danger"
+          title="Delete"
+          disabled={projects.length <= 1}
+          onClick={() => {
+            if (confirm(`Delete "${p.name}"? This can't be undone.`)) {
+              deleteProject(p.id)
+              refresh()
+            }
+          }}
+        >
+          <Icon icon={X} size={13} />
+        </button>
+      </div>
+    </div>
+  )
 
   return (
     <div className="home-overlay">
@@ -178,62 +250,39 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
                   <span>Generate MIP</span>
                 </button>
               )}
+              {props.onImportBuilt && (
+                <button className="new-card" onClick={() => props.onImportBuilt!()} title="Recover an editable project from a built .html or .zip (or embed a third-party playable)">
+                  <span className="plus">
+                    <Icon icon={Upload} size={22} />
+                  </span>
+                  <span>Import built playable</span>
+                </button>
+              )}
+              {props.onShare && (
+                <button className="new-card" onClick={() => props.onShare!()} title="Import a MIP someone shared with you via a code / link (or share yours)">
+                  <span className="plus">
+                    <Icon icon={Copy} size={22} />
+                  </span>
+                  <span>Share / import by code</span>
+                </button>
+              )}
             </div>
 
             <div className="group-title">Your playables ({projects.length})</div>
-          <div className="home-grid">
-            {projects.map((p) => (
-              <div key={p.id} className={'proj-card' + (p.id === curId ? ' current' : '')}>
-                <button className="proj-open" onClick={() => open(p.id)} title="Open">
-                  <ProjectThumb id={p.id} />
-                </button>
-                <div className="proj-meta">
-                  {editId === p.id ? (
-                    <input
-                      autoFocus
-                      defaultValue={p.name}
-                      onBlur={(e) => {
-                        renameProject(p.id, e.target.value.trim() || p.name)
-                        setEditId(null)
-                        refresh()
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-                        // stop Escape from also bubbling to the window handler that closes Home
-                        if (e.key === 'Escape') (e.stopPropagation(), setEditId(null))
-                      }}
-                    />
-                  ) : (
-                    <span className="proj-name" onDoubleClick={() => setEditId(p.id)} title="Double-click to rename">
-                      {p.name} {p.id === curId && <em className="proj-cur">• current</em>}
-                    </span>
-                  )}
-                  <span className="proj-date">{when(p.updatedAt)}</span>
-                </div>
-                <div className="proj-actions">
-                  <button title="Rename" onClick={() => setEditId(p.id)}>
-                    <Icon icon={Pencil} size={13} />
-                  </button>
-                  <button title="Duplicate" onClick={() => void duplicateProject(p.id).then(() => refresh())}>
-                    <Icon icon={Copy} size={13} />
-                  </button>
-                  <button
-                    className="danger"
-                    title="Delete"
-                    disabled={projects.length <= 1}
-                    onClick={() => {
-                      if (confirm(`Delete "${p.name}"? This can't be undone.`)) {
-                        deleteProject(p.id)
-                        refresh()
-                      }
-                    }}
-                  >
-                    <Icon icon={X} size={13} />
-                  </button>
-                </div>
+          {grouped.map((g) => (
+            <div key={g.id} className="proj-group">
+              <div className="proj-group-head">
+                <Icon icon={FolderOpen} size={14} /> {g.name} <span className="proj-group-count">{g.items.length}</span>
               </div>
-            ))}
-          </div>
+              <div className="home-grid">{g.items.map(renderCard)}</div>
+            </div>
+          ))}
+          {ungrouped.length > 0 && (
+            <div className="proj-group">
+              {grouped.length > 0 && <div className="proj-group-head muted">Ungrouped</div>}
+              <div className="home-grid">{ungrouped.map(renderCard)}</div>
+            </div>
+          )}
           </div>
 
           <aside className="home-side">

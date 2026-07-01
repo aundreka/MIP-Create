@@ -3,8 +3,12 @@
 // formerly the "Sound" modal), Languages (locales), and Variants. Opened from the
 // ≡ App menu and from the no-selection Inspector.
 
-import { addVariant, patchMeta, removeVariant, renameVariant, refreshScene, setBgm, setSfxBinding, useEditorState } from '../store'
+import { useEffect } from 'react'
+import { addVariant, assignProjectGroup, patchMeta, removeVariant, renameVariant, refreshScene, setBgm, setSfxBinding, useEditorState } from '../store'
 import { setActiveVariant } from '../variantMode'
+import { listGroups } from '../projectGroups'
+import { projectsInGroup } from '../projects'
+import { mipName, todayLabel } from '../mipName'
 import { ColorField, Drawer, NumField, Row, Select, Slider } from '../ui'
 import { Check, Icon, Play, X } from '../icons'
 import { AssetPicker } from './AssetPicker'
@@ -32,6 +36,15 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
   const bgm = project.bgm
   const bindingFor = (event: string): string | undefined => project.sfx?.find((b) => b.event === event)?.assetId
 
+  // Give the MIP a fixed date the first time it has a Client/MIP identity, so its
+  // canonical name (and the export filename) carry one. Stays editable below.
+  useEffect(() => {
+    if ((m.mipDate ?? '').trim() === '' && ((m.client ?? '').trim() !== '' || (m.mip ?? '').trim() !== '')) {
+      patchMeta({ mipDate: todayLabel() })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const test = (assetId?: string): void => {
     if (!assetId) return
     const a = assets[assetId]
@@ -50,9 +63,25 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
   return (
     <Drawer title="Project settings" onClose={props.onClose} width={380}>
       <div className="group-title">Project</div>
-      <Row label="Name">
-        <input value={m.name} onChange={(e) => patchMeta({ name: e.target.value })} />
+      <Row label="Project">
+        <input
+          list="pa-project-names"
+          value={m.projectName ?? ''}
+          placeholder="e.g. Bioma 2026-07 Scratch"
+          onChange={(e) => assignProjectGroup(e.target.value)}
+        />
+        <datalist id="pa-project-names">
+          {listGroups().map((g) => (
+            <option key={g.id} value={g.name} />
+          ))}
+        </datalist>
       </Row>
+      {m.projectId && (
+        <div className="hint pad">
+          {projectsInGroup(m.projectId).length} MIP{projectsInGroup(m.projectId).length === 1 ? '' : 's'} in this project. Elements
+          toggled “Sync to project” stay identical across all of them.
+        </div>
+      )}
       <div className="grid2">
         <Row label="Client">
           <input value={m.client ?? ''} placeholder="e.g. Bioma" onChange={(e) => patchMeta({ client: e.target.value })} />
@@ -61,6 +90,13 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
           <input value={m.mip ?? ''} placeholder="e.g. MIP3" onChange={(e) => patchMeta({ mip: e.target.value })} />
         </Row>
       </div>
+      <Row label="Date">
+        <input type="date" value={m.mipDate ?? ''} onChange={(e) => patchMeta({ mipDate: e.target.value })} />
+      </Row>
+      <Row label="MIP name">
+        <input value={mipName(m)} readOnly title="Auto-named from Client + MIP + Date" />
+      </Row>
+      <div className="hint pad">Auto-named <b>Client + MIP + Date</b>. This is also the exported file name.</div>
       <div className="grid2">
         <NumField label="Base W" value={m.baseW} suffix="px" onChange={(n) => patchMeta({ baseW: n })} />
         <NumField label="Base H" value={m.baseH} suffix="px" onChange={(n) => patchMeta({ baseH: n })} />
@@ -112,7 +148,7 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
       <div className="group-title">Audio</div>
       <div className="sfx-row">
         <AssetPicker accept="audio" allowNone value={bgm?.assetId} onChange={(id) => setBgm(id, bgm?.volume)} />
-        <span className="sfx-name">{bgm?.assetId ? (assets[bgm.assetId]?.src ? bgm.assetId : '(missing)') : 'Background music — none'}</span>
+        <span className="sfx-name">{bgm?.assetId ? (assets[bgm.assetId]?.src ? bgm.assetId : '(missing)') : 'Background music: none'}</span>
         <button className="sfx-test" title="Test" disabled={!bgm?.assetId} onClick={() => test(bgm?.assetId)}>
           <Icon icon={Play} size={13} />
         </button>

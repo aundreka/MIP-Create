@@ -114,8 +114,8 @@ export function diffProjects(a: Project, b: Project): DiffLine[] {
   const mb = b.meta
   if (ma.name !== mb.name) out.push({ scope: 'meta', kind: 'change', text: `Name: “${ma.name}” → “${mb.name}”` })
   if (ma.baseW !== mb.baseW || ma.baseH !== mb.baseH) out.push({ scope: 'meta', kind: 'change', text: `Canvas: ${ma.baseW}×${ma.baseH} → ${mb.baseW}×${mb.baseH}` })
-  if ((ma.client ?? '') !== (mb.client ?? '')) out.push({ scope: 'meta', kind: 'change', text: `Client: “${ma.client ?? '—'}” → “${mb.client ?? '—'}”` })
-  if ((ma.mip ?? '') !== (mb.mip ?? '')) out.push({ scope: 'meta', kind: 'change', text: `MIP: “${ma.mip ?? '—'}” → “${mb.mip ?? '—'}”` })
+  if ((ma.client ?? '') !== (mb.client ?? '')) out.push({ scope: 'meta', kind: 'change', text: `Client: “${ma.client ?? '-'}” → “${mb.client ?? '-'}”` })
+  if ((ma.mip ?? '') !== (mb.mip ?? '')) out.push({ scope: 'meta', kind: 'change', text: `MIP: “${ma.mip ?? '-'}” → “${mb.mip ?? '-'}”` })
   if ((ma.locales ?? []).join(',') !== (mb.locales ?? []).join(',')) out.push({ scope: 'meta', kind: 'change', text: `Languages: [${(ma.locales ?? []).join(', ')}] → [${(mb.locales ?? []).join(', ')}]` })
   if ((ma.variants?.length ?? 0) !== (mb.variants?.length ?? 0)) out.push({ scope: 'meta', kind: 'change', text: `Variants: ${ma.variants?.length ?? 0} → ${mb.variants?.length ?? 0}` })
   if (J(a.sfx) !== J(b.sfx) || J(a.bgm) !== J(b.bgm)) out.push({ scope: 'meta', kind: 'change', text: 'Sound (events / music) changed' })

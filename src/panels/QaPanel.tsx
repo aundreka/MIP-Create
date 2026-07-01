@@ -115,14 +115,14 @@ export function QaPanel(props: { onClose: () => void; onNavigate: (projectId: st
       {tab === 'history' ? (
         <>
           <div className="ver-save">
-            <input className="text-input" value={verLabel} placeholder="Version label (e.g. v2 — bigger CTA)" onChange={(e) => setVerLabel(e.target.value)} />
+            <input className="text-input" value={verLabel} placeholder="Version label (e.g. v2, bigger CTA)" onChange={(e) => setVerLabel(e.target.value)} />
             <input className="text-input" value={verNote} placeholder="Note (optional)" onChange={(e) => setVerNote(e.target.value)} />
             <button className="primary" disabled={!openId} onClick={doSaveVersion}>Save version</button>
           </div>
           {!openId ? (
             <div className="hint pad">Save this project to your library first to start versioning it.</div>
           ) : versions.length === 0 ? (
-            <div className="hint pad">No versions yet. Click “Save version” to snapshot the current design — then iterate and compare.</div>
+            <div className="hint pad">No versions yet. Click “Save version” to snapshot the current design, then iterate and compare.</div>
           ) : (
             <div className="ver-list">
               {versions.map((v) => (
@@ -143,7 +143,7 @@ export function QaPanel(props: { onClose: () => void; onNavigate: (projectId: st
             <>
               <div className="group-title">Changes since “{diffVersion.label}” → now</div>
               {diff.length === 0 ? (
-                <div className="qa-allgood"><Icon icon={Check} size={16} /> Identical — no design changes since this version.</div>
+                <div className="qa-allgood"><Icon icon={Check} size={16} /> Identical: no design changes since this version.</div>
               ) : (
                 <div className="ver-diff">
                   {diff.map((d, i) => (
@@ -157,7 +157,7 @@ export function QaPanel(props: { onClose: () => void; onNavigate: (projectId: st
             </>
           )}
           <div className="hint pad">
-            Versions snapshot the <b>design</b> (scenes, elements, settings) — assets are shared, so snapshots stay small.
+            Versions snapshot the <b>design</b> (scenes, elements, settings); assets are shared, so snapshots stay small.
             Click a version to see what changed since then; Restore swaps the current design back to it.
           </div>
         </>
@@ -203,11 +203,11 @@ export function QaPanel(props: { onClose: () => void; onNavigate: (projectId: st
                     <tr key={r.creative + i} className={i === 0 ? 'lead-top' : ''}>
                       <td>{i + 1}</td>
                       <td className="lead-name">{r.creative}</td>
-                      <td className="hint">{r.matchedMip ?? '—'}</td>
-                      <td>{r.network ?? '—'}</td>
-                      <td>{r.ipm ?? '—'}</td>
-                      <td>{r.ctr ?? '—'}</td>
-                      <td>{r.installs ?? '—'}</td>
+                      <td className="hint">{r.matchedMip ?? '-'}</td>
+                      <td>{r.network ?? '-'}</td>
+                      <td>{r.ipm ?? '-'}</td>
+                      <td>{r.ctr ?? '-'}</td>
+                      <td>{r.installs ?? '-'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -266,7 +266,7 @@ export function QaPanel(props: { onClose: () => void; onNavigate: (projectId: st
           </div>
 
           {client === UNASSIGNED ? (
-            <div className="hint pad">These MIPs have no Client set, so they can't be compared. Assign each one to a client below — then pick that client above to see the report.</div>
+            <div className="hint pad">These MIPs have no Client set, so they can't be compared. Assign each one to a client below, then pick that client above to see the report.</div>
           ) : selProfiles.length < 2 ? (
             <div className="hint pad">Only {selProfiles.length} MIP under “{client}”. Add at least one more MIP to the same client to compare them.</div>
           ) : findings.length === 0 ? (

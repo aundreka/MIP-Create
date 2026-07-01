@@ -43,60 +43,73 @@ export const notifyGameClose = (): void => callStub('gameClose')
 // CTA fallback chain (AGENTS.md priority order).
 // ---------------------------------------------------------------------------
 let _lastCta = 0
+// Clear the CTA cooldown. Called whenever the page is re-shown/refocused — i.e. the
+// user has RETURNED from wherever the last CTA sent them (store, new tab, MRAID
+// expand). The 800ms guard below only exists to collapse a SINGLE gesture's double-fire
+// (whole-card pointerdown + CTA-button click); once the user has left and come back,
+// their next tap is a fresh, deliberate interaction that must redirect on the FIRST
+// click. Without this reset that return tap lands inside the lingering 800ms window and
+// gets swallowed, so the endcard "needs two clicks" to redirect the second time around.
+export function resetCtaCooldown(): void { _lastCta = 0 }
 export function triggerCTA(): void {
-  // Cooldown so a whole-scene endcard tap + the CTA button tap (or rapid
-  // double-taps) can't fire the store open twice.
+  // Cooldown so a whole-scene endcard tap + the CTA button tap (or rapid double-taps)
+  // can't fire the store open twice. CRITICAL: arm it only AFTER a redirect ACTUALLY
+  // fires (via done() / the fallback below). If we armed it up-front, a tap that no-ops —
+  // e.g. a popup-blocked about:blank, or a missing SDK — would still block the user's next
+  // deliberate tap for 800ms, so the endcard would "need 2+ clicks" to redirect.
   const t = performance.now()
   if (t - _lastCta < 800) return
-  _lastCta = t
   const url = storeUrl()
   // 'about:blank' means "no real destination" — normalise to '' so MRAID fires an
   // empty click signal (network still registers the tap) but no navigation happens.
   // A truly-empty url (clickUrlMode:'none') keeps '' and skips MRAID entirely.
   const dest = url === 'about:blank' ? '' : url
+  // Run the redirect, then arm the cooldown — if the action throws it's caught below and
+  // the next handler/path still gets a chance (and the cooldown stays disarmed).
+  const done = (fn: () => void): void => { fn(); _lastCta = t }
 
   // 1. GoogleAds
   try {
-    if (typeof W.ExitApi?.exit === 'function') return void W.ExitApi.exit()
+    if (typeof W.ExitApi?.exit === 'function') return done(() => W.ExitApi.exit())
   } catch { /* */ }
   // 2. Facebook / Moloco
   try {
-    if (typeof W.FbPlayableAd?.onCTAClick === 'function') return void W.FbPlayableAd.onCTAClick()
+    if (typeof W.FbPlayableAd?.onCTAClick === 'function') return done(() => W.FbPlayableAd.onCTAClick())
   } catch { /* */ }
   // 3. Unity (Luna)
   try {
     const p = W.Luna?.Unity?.Playable
     if (p) {
-      if (typeof p.openStoreUrl === 'function') return void p.openStoreUrl(dest)
-      if (typeof p.install === 'function') return void p.install()
-      if (typeof p.InstallFullGame === 'function') return void p.InstallFullGame()
+      if (typeof p.openStoreUrl === 'function') return done(() => p.openStoreUrl(dest))
+      if (typeof p.install === 'function') return done(() => p.install())
+      if (typeof p.InstallFullGame === 'function') return done(() => p.InstallFullGame())
     }
   } catch { /* */ }
   // 4. Runtime playableSDK
   try {
-    if (typeof W.playableSDK?.openAppStore === 'function') return void W.playableSDK.openAppStore()
+    if (typeof W.playableSDK?.openAppStore === 'function') return done(() => W.playableSDK.openAppStore())
   } catch { /* */ }
   // 5. Mintegral
   try {
-    if (typeof W.install === 'function') return void W.install()
+    if (typeof W.install === 'function') return done(() => W.install())
   } catch { /* */ }
   // 6. Runtime openAppStore
   try {
-    if (typeof W.openAppStore === 'function') return void W.openAppStore()
+    if (typeof W.openAppStore === 'function') return done(() => W.openAppStore())
   } catch { /* */ }
   // 7. Moloco clickTag fallback
   try {
-    if (typeof W.clickTag === 'string' && W.clickTag) return void window.open(W.clickTag, '_blank')
+    if (typeof W.clickTag === 'string' && W.clickTag) return done(() => window.open(W.clickTag, '_blank'))
   } catch { /* */ }
   // 8. Vungle
   try {
-    if (W.__VUNGLE__ && window.parent) return void window.parent.postMessage('download', '*')
+    if (W.__VUNGLE__ && window.parent) return done(() => window.parent.postMessage('download', '*'))
   } catch { /* */ }
   // 9. TikTok
   try {
     if (W.__TIKTOK__) {
-      if (typeof W.openAppStore === 'function') return void W.openAppStore()
-      if (url) return void window.open(url, '_blank')
+      if (typeof W.openAppStore === 'function') return done(() => W.openAppStore())
+      if (url) return done(() => window.open(url, '_blank'))
       return
     }
   } catch { /* */ }
@@ -107,14 +120,28 @@ export function triggerCTA(): void {
   try {
     if (typeof W.mraid?.open === 'function') {
       const state = typeof W.mraid.getState === 'function' ? W.mraid.getState() : 'ready'
-      if (state !== 'loading') return void W.mraid.open(dest)
+      if (state !== 'loading') return done(() => W.mraid.open(dest))
     }
   } catch { /* */ }
-  // 11. Fallback — skipped only when truly no URL (mode:'none'); about:blank opens a blank tab
+  // 11. Fallback — standalone HTML (no network SDK present). Try a new tab first; if the
+  // browser blocks the popup (common when the exported file is opened directly / served
+  // from plain hosting) window.open returns null, so navigate the CURRENT tab instead.
+  // Without this the popup-block swallows the first tap(s) and the redirect only fires after
+  // several presses. The cooldown is armed only when something actually opens/navigates.
+  // Skipped only when truly no URL (mode:'none').
   if (url) {
+    let opened: Window | null = null
     try {
-      window.open(url, '_blank')
+      opened = window.open(url, '_blank')
     } catch { /* */ }
+    if (opened) { _lastCta = t; return }
+    // about:blank has no meaningful same-tab destination — only redirect in place for a real URL.
+    if (url !== 'about:blank') {
+      try {
+        window.location.href = url
+        _lastCta = t
+      } catch { /* */ }
+    }
   }
 }
 
@@ -218,7 +245,11 @@ export function initMraid(timeoutMs = 2000, detectTimeoutMs = 500): Promise<void
 // ---------------------------------------------------------------------------
 export function bindLifecycle(): void {
   const pause = (): void => emit('ad-pause')
-  const resume = (): void => emit('ad-resume')
+  // Re-show/refocus = the user came back from a CTA destination. Drop the CTA cooldown so
+  // their next tap redirects on the first click (otherwise the second redirect "needs two
+  // clicks" — see resetCtaCooldown). Safe: a single gesture's double-fire is collapsed
+  // synchronously before any focus/visibility change, so this never re-opens a live tap.
+  const resume = (): void => { resetCtaCooldown(); emit('ad-resume') }
   const mute = (m: boolean): void => emit('ad-mute', m)
 
   // Apply any MRAID state cached before binding.
