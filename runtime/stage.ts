@@ -258,7 +258,6 @@ interface Effective {
   hidden: boolean
   rotation: number
   opacity?: number
-  pin?: 'top' | 'bottom'
 }
 
 export interface StageHandle {
@@ -1101,7 +1100,6 @@ function effective(el: SceneElement): Effective {
     hidden: (o?.hidden ?? el.hidden) ?? false,
     rotation: el.rotation ?? 0,
     opacity: el.opacity,
-    pin: el.pin,
   }
 }
 
@@ -1250,7 +1248,11 @@ function layoutAsset(rec: Rec, e: Effective, mode: 'fit' | 'extend'): void {
     // Resolve --pa-bg to a literal hex at layout time so the value survives any DOM
     // reparenting (e.g. immune elements moved to stageContainer during overlay).
     const paBg = (rec.outer.closest<HTMLElement>('.pa-root')?.style.getPropertyValue('--pa-bg') ?? '') || '#000000'
-    const barBgColor = rec.el.bar?.color ?? paBg
+    // Image bars: prefer the sampled top-edge color of the art (data-pa-edge, see
+    // sampleTopEdge in elements/bar.ts) so the extend-to-screen-top band blends
+    // seamlessly with the image instead of showing the scene background as a gap.
+    const edgeColor = rec.content instanceof HTMLElement ? rec.content.dataset.paEdge : undefined
+    const barBgColor = rec.el.bar?.color ?? edgeColor ?? paBg
     const isBarDiv = (rec.el.type === 'bar' || rec.el.type === 'image') && !rec.el.blur
       && rec.content instanceof HTMLDivElement
     // BLEED: for top-pinned/letterbox bars, switch to position:fixed so the bar can
@@ -1260,7 +1262,9 @@ function layoutAsset(rec: Rec, e: Effective, mode: 'fit' | 'extend'): void {
     const BLEED = 6
     // Minimum visible height for pin:'top' bars — keeps the header usable on compressed
     // viewports (height-limited desktop) where the bar would otherwise be only ~18px.
-    // Must stay in sync with PIN_TOP_MIN_CENTER in layoutText (= PIN_TOP_MIN_VIS / 2).
+    // NOTE: this floor can make the bar taller than its design proportion and overlap
+    // content designed right below it; bars designed above the fold (y<0, anchor:top)
+    // auto-extend WITHOUT the floor, so they usually don't need an explicit pin.
     const PIN_TOP_MIN_VIS = 60
     if (pin === 'top' || autoTop) {
       outer.style.position = 'fixed'
@@ -1412,35 +1416,18 @@ function layoutText(rec: Rec, e: Effective): void {
   // 2. overlay gap — position:fixed escapes pa-root's stacking context. Absolute stays
   //    inside pa-root's clip. pa-root is position:absolute;inset:0, so top:Xpx absolute
   //    == top:Xpx from viewport top — same visual result as fixed, no side-effects.
-  if (e.pin === 'top') {
-    // Place the text at the proportional center of the bar's visible area. The averaging
-    // formula splits between the letterboxed position (sy) and the no-letterbox position
-    // (e.y*s), which naturally tracks the center of the visible bar at any viewport height.
-    // No fixed pixel minimum: the halfH+2 check below prevents top-clip for any element size.
-    const rawTopPx = (sy(e.y) + e.y * s) / 2
-    let topPx = rawTopPx
-    const [tx, ty] = ANCHOR[e.anchor]
-    outer.style.position = 'absolute'
-    outer.style.left = round(sx(e.x)) + 'px'
-    outer.style.top = topPx + 'px'
-    outer.style.width = ''
-    outer.style.height = ''
-    outer.style.transform = `translate(${tx}%,${ty}%)` + (e.rotation ? ` rotate(${e.rotation}deg)` : '')
-    if (ty < 0) {
-      const halfH = outer.offsetHeight / 2
-      if (topPx < halfH + 2) {
-        topPx = halfH + 2
-        outer.style.top = topPx + 'px'
-      }
-    }
-    return
-  }
+  // Text/countdown is plain FIT content: positioned with sy(e.y) exactly like
+  // images, so it scales and keeps its designed position relative to everything
+  // else at every viewport size. (el.pin is bar-only; a leftover pin value on a
+  // text element from older scenes is deliberately ignored.)
+  // Unlike fixed assets, text elements need to shrink-wrap their content —
+  // don't set width/height so the nested inline-block chain sizes correctly.
+  const [tx, ty] = ANCHOR[e.anchor]
   outer.style.position = ''
   outer.style.left = round(sx(e.x)) + 'px'
   outer.style.top = round(sy(e.y)) + 'px'
   outer.style.width = ''
   outer.style.height = ''
-  const [tx, ty] = ANCHOR[e.anchor]
   outer.style.transform = `translate(${tx}%,${ty}%)` + (e.rotation ? ` rotate(${e.rotation}deg)` : '')
 }
 

@@ -8,6 +8,7 @@ import { emit, on } from './emitter'
 import { buildScene, type StageHandle } from './stage'
 import { notifyGameClose, notifyGameEnd, triggerCTA } from './networks'
 import { createSfxManager, type SfxManager } from './sfx'
+import { mountHeader } from './header'
 import type { Project, Scene, SceneDef, Transition } from './scene'
 import type { AssetMap } from './types'
 
@@ -69,6 +70,8 @@ export function playProject(
   // Falls back to overflow:hidden on WebViews that predate overflow:clip support.
   container.style.cssText = 'position:fixed;inset:0;overflow:hidden;overflow:clip;'
   opts.mount.appendChild(container)
+
+  const header = mountHeader(container, project.meta.header ?? {})
 
   const sfx: SfxManager | null = opts.interactive ? createSfxManager(project, assets, container) : null
 
@@ -385,6 +388,7 @@ export function playProject(
 
   return {
     relayout() {
+      header.relayout()
       current?.stage.layoutAll() // re-lays out the floated immune bars (they live in current.stage)
       for (const ov of overlayStages) ov.layoutAll() // keep floating win/lose overlays responsive
       // Re-sync each immune-bar cover to its (now re-laid-out) bar so the header backing tracks
@@ -404,6 +408,7 @@ export function playProject(
       overlayStages.clear()
       overlayCovers.clear() // cover divs are torn down with the container below
       sfx?.destroy()
+      header.destroy()
       current?.stage.destroy()
       container.remove()
     },

@@ -145,6 +145,17 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
       </Row>
       <div className="hint pad">Client + MIP group this playable for the QA consistency check.</div>
 
+      <div className="group-title">Header</div>
+      <div className="grid2">
+        <NumField label="Height" value={m.header?.heightPx ?? 120} suffix="px" onChange={(n) => patchMeta({ header: { ...m.header, heightPx: n } })} />
+        <NumField label="Font size" value={m.header?.fontSizePx ?? 64} suffix="px" onChange={(n) => patchMeta({ header: { ...m.header, fontSizePx: n } })} />
+      </div>
+      <div className="grid2">
+        <ColorField label="Background" value={m.header?.bgColor || ''} onChange={(c) => patchMeta({ header: { ...m.header, bgColor: c ?? undefined } })} />
+        <ColorField label="Text colour" value={m.header?.color || '#ffffff'} onChange={(c) => patchMeta({ header: { ...m.header, color: c ?? '#ffffff' } })} />
+      </div>
+      <div className="hint pad">Shows the current date at the top of the playable. Leave background empty for no background.</div>
+
       <div className="group-title">Audio</div>
       <div className="sfx-row">
         <AssetPicker accept="audio" allowNone value={bgm?.assetId} onChange={(id) => setBgm(id, bgm?.volume)} />

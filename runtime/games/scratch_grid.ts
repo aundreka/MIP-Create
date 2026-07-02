@@ -30,6 +30,57 @@ interface CellState {
   hintTo: { x: number; y: number }
 }
 
+// ---- threshold-driven reveal assets ----------------------------------------
+// A dynamic (any-length) list of decorative/informational images that show or
+// hide based on overall grid progress = (cells won) / (total cells). Each entry
+// is visible while progress is within [showAt, hideAt). To make something
+// "disappear" at a point, set hideAt. To make it "reappear" later, add a second
+// entry (same src) with a later showAt. Configured via the `revealAssets` param
+// as a JSON array, e.g.:
+// [{ "src":"myAssetKey", "showAt":0.25, "hideAt":0.75, "x":10, "y":5, "width":30, "height":20 }]
+interface RevealAssetCfg {
+  src: string
+  showAt: number // 0..1 fraction of cells revealed at which the asset becomes visible
+  hideAt: number // 0..1 fraction at which it hides again (omit/1 = stays visible once shown)
+  x: number // percent, left position within the game root
+  y: number // percent, top position within the game root
+  width: number // percent width
+  height: number // percent height
+}
+interface RevealAssetState extends RevealAssetCfg {
+  el: HTMLImageElement
+  visible: boolean
+}
+
+const parseRevealAssets = (raw: string): RevealAssetCfg[] => {
+  if (!raw) return []
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return []
+  }
+  if (!Array.isArray(parsed)) return []
+  const out: RevealAssetCfg[] = []
+  for (const it of parsed) {
+    if (!it || typeof it !== 'object') continue
+    const rec = it as Record<string, unknown>
+    const src = str(rec.src, '')
+    if (!src) continue
+    out.push({
+      src,
+      showAt: Math.max(0, Math.min(1, num(rec.showAt, 0))),
+      // > 1 sentinel = "no upper bound" (never hides once shown)
+      hideAt: rec.hideAt != null && rec.hideAt !== '' ? Math.max(0, Math.min(1, num(rec.hideAt, 1))) : 1.0001,
+      x: num(rec.x, 0),
+      y: num(rec.y, 0),
+      width: num(rec.width, 100),
+      height: num(rec.height, 100),
+    })
+  }
+  return out
+}
+
 // ---- staggered per-cell entrance -------------------------------------------
 // Each cell springs in from the right (+ fades), one at a time. The curve samples
 // an underdamped spring (Framer-style stiffness 120 / damping 14 → damping ratio
@@ -84,6 +135,27 @@ export function createScratchGrid(): GameModule {
   let baseColGap = 0
   let baseRowGap = 0
   let dprCleanup: (() => void) | null = null
+  let revealAssetsState: RevealAssetState[] = []
+
+  // Fraction of cells revealed (won) out of the total — the shared progress metric
+  // that drives revealAssetsState visibility.
+  const gridProgress = (): number => {
+    if (cells.length === 0) return 0
+    let won = 0
+    for (const c of cells) if (c.won) won++
+    return won / cells.length
+  }
+
+  const updateRevealAssets = (): void => {
+    const p = gridProgress()
+    for (const ra of revealAssetsState) {
+      const shouldShow = p >= ra.showAt && p < ra.hideAt
+      if (shouldShow !== ra.visible) {
+        ra.visible = shouldShow
+        ra.el.style.opacity = shouldShow ? '1' : '0'
+      }
+    }
+  }
 
   const fillCellCover = (cell: CellState): void => {
     const { canvas, c2d } = cell
@@ -271,6 +343,7 @@ export function createScratchGrid(): GameModule {
     if (cell.won) return
     cell.won = true
     cell.el.dataset.won = '1'
+    updateRevealAssets()
     lockAllCells() // stops loop + blocks all canvases immediately
     cell.canvas.style.transition = 'opacity 400ms ease'
     requestAnimationFrame(() => { cell.canvas.style.opacity = '0' })
@@ -602,6 +675,19 @@ export function createScratchGrid(): GameModule {
         cells.push(cellState)
       }
 
+      revealAssetsState = parseRevealAssets(str(params.revealAssets as unknown, '[]')).map((cfg) => {
+        const img = document.createElement('img')
+        img.draggable = false
+        img.style.cssText =
+          `position:absolute;left:${cfg.x}%;top:${cfg.y}%;width:${cfg.width}%;height:${cfg.height}%;` +
+          'object-fit:contain;pointer-events:none;opacity:0;transition:opacity 300ms ease;z-index:400;'
+        const resolved = ctx.assets.src(cfg.src)
+        if (resolved) img.src = resolved
+        ctx.root.appendChild(img)
+        return { ...cfg, el: img, visible: false }
+      })
+      updateRevealAssets() // set initial visibility (covers any showAt: 0 entries)
+
       ro = new ResizeObserver(sizeAll)
       ro.observe(ctx.root)
       sizeAll()
@@ -695,6 +781,7 @@ export function createScratchGrid(): GameModule {
       ctx.root.innerHTML = ''
       cells = []
       gridEl = null
+      revealAssetsState = []
     },
   }
 }
@@ -725,6 +812,11 @@ export const SCRATCH_GRID_TEMPLATE: GameTemplate = {
     { key: 'loseOverlayDurationMs', label: 'Lose overlay duration (ms)', type: 'number', min: 200, max: 5000, step: 100 },
     { key: 'winOverlayDurationMs', label: 'Win overlay duration (ms)', type: 'number', min: 200, max: 5000, step: 100 },
     { key: 'threshold', label: 'Reveal at (fraction scratched)', type: 'number', min: 0.2, max: 0.9, step: 0.05 },
+    {
+      key: 'revealAssets',
+      label: 'Threshold assets (JSON list: src/showAt/hideAt/x/y/width/height)',
+      type: 'text',
+    },
   ],
   assetSlots: [
     { key: 'cover', label: 'Cover image (shared fallback)' },
@@ -784,6 +876,7 @@ export const SCRATCH_GRID_TEMPLATE: GameTemplate = {
     textScale: 80,
     winImage: '', loseImage: '',
     winTextImage: '', loseTextImage: '',
+    revealAssets: '[]',
   },
   defaultHandguide: {
     nodes: [

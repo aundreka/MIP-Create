@@ -1299,16 +1299,6 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 <b>Timer</b> tokens (live): <b>{'{hh}:{mm}:{ss}'}</b> / <b>{'{d} {h} {m} {s}'}</b>. <b>Date</b> label (no ticking):{' '}
                 <b>{'{date}'}</b>, e.g. "Order by {'{date}'}". "Dynamic" recomputes from today whenever the ad runs.
               </div>
-              <Row label="Pin to edge">
-                <Select
-                  value={el.pin ?? 'none'}
-                  onChange={(v) => patchElement(id, { pin: v === 'none' ? undefined : (v as 'top' | 'bottom') })}
-                  options={[
-                    { value: 'none', label: 'none' },
-                    { value: 'top', label: 'top (tracks pinned header bar)' },
-                  ]}
-                />
-              </Row>
             </Accordion>
           )
         })()}

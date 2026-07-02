@@ -459,6 +459,15 @@ export interface SceneElement {
   unboxing?: UnboxingConfig
 }
 
+export interface HeaderConfig {
+  bgColor?: string
+  color?: string
+  heightPx?: number
+  fontSizePx?: number
+  fontWeight?: number
+  fontFamily?: string
+}
+
 export interface ProjectMeta {
   schemaVersion: number // bumped when the saved shape changes; see src/migrate.ts
   name: string
@@ -470,6 +479,7 @@ export interface ProjectMeta {
   bgMatchColor2?: string // gradient end: bottom (portrait) or right (landscape)
   networks?: string[]
   iterations?: string[]
+  header?: HeaderConfig
   // First-class identity for cross-MIP QA (and, later, the shared team library).
   // A "MIP" is one playable variant; many MIPs belong to one client and are
   // checked for style/SFX/animation consistency against each other. Optional and

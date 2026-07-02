@@ -2,7 +2,8 @@
 //
 // FIT elements live in a design space of DESIGN_W x DESIGN_H (default 1080x1920,
 // the mockup composition) and are FIT (contain) into the viewport so content
-// keeps identical proportions and stays fully visible at any size — centered,
+// keeps identical proportions and stays fully visible at any size — centered
+// horizontally, TOP-ANCHORED vertically (spare height goes to the bottom),
 // never cropped.
 //
 // EXTEND elements (header/footer bars) do NOT fit-letterbox: they cover the full
@@ -34,7 +35,14 @@ export function computeMetrics(vw: number, vh: number): void {
   _vh = vh
   _s = Math.min(vw / DESIGN_W, vh / DESIGN_H)
   _offX = (vw - DESIGN_W * _s) / 2
-  _offY = (vh - DESIGN_H * _s) / 2
+  // TOP-ANCHORED vertically (offY = 0): the design is glued to the top of the
+  // screen and any extra vertical space (viewport taller than the design aspect)
+  // accumulates at the BOTTOM only. Vertical centering ((vh - DESIGN_H*s) / 2)
+  // made the whole composition ride down on tall screens, which reads as
+  // "everything moved" next to the header band that is anchored to the physical
+  // top of the screen — headers, dates and content must hold a constant scaled
+  // distance from the top at every viewport aspect.
+  _offY = 0
 }
 
 // ---- FIT helpers: content (centered, letterboxed) -------------------------
