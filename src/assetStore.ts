@@ -82,6 +82,53 @@ export async function getAssetBytes(projectId: string, assetIds: string[]): Prom
   })
 }
 
+/** Dump EVERY stored asset blob as { '<projectId>/<assetId>': dataUrl }, for a
+ * full local backup. Empty when IndexedDB is unavailable (bytes then live inline
+ * in the project JSON and are captured by the localStorage side of the backup). */
+export async function dumpAllAssetBytes(): Promise<Record<string, string>> {
+  const db = await openDb()
+  if (!db) return {}
+  return new Promise((resolve) => {
+    const out: Record<string, string> = {}
+    try {
+      const t = db.transaction(STORE, 'readonly')
+      const cur = t.objectStore(STORE).openCursor()
+      cur.onsuccess = () => {
+        const c = cur.result
+        if (c) {
+          if (typeof c.value === 'string') out[String(c.key)] = c.value
+          c.continue()
+        }
+      }
+      t.oncomplete = () => resolve(out)
+      t.onerror = () => resolve(out)
+      t.onabort = () => resolve(out)
+    } catch {
+      resolve(out)
+    }
+  })
+}
+
+/** Write raw '<projectId>/<assetId>' -> dataUrl entries straight back (restore). */
+export async function restoreAssetBytes(entries: Record<string, string>): Promise<boolean> {
+  const keys = Object.keys(entries)
+  if (!keys.length) return true
+  const db = await openDb()
+  if (!db) return false
+  return new Promise((resolve) => {
+    try {
+      const t = db.transaction(STORE, 'readwrite')
+      const s = t.objectStore(STORE)
+      for (const k of keys) s.put(entries[k], k)
+      t.oncomplete = () => resolve(true)
+      t.onerror = () => resolve(false)
+      t.onabort = () => resolve(false)
+    } catch {
+      resolve(false)
+    }
+  })
+}
+
 /** Copy all of one project's asset bytes under a new project id (for duplicate). */
 export async function copyProjectAssets(fromId: string, toId: string, assetIds: string[]): Promise<void> {
   const bytes = await getAssetBytes(fromId, assetIds)

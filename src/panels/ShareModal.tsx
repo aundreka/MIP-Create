@@ -1,15 +1,15 @@
 // Share / import a MIP by code — hand another user an editable copy (scenes, assets,
 // positions, styling, animations, sfx). "Send" uploads the current MIP and shows a
 // short code + link; "Receive" imports a code as a brand-new local project. Cloud-
-// backed (Supabase Storage) and sign-in gated, like the Team library. A share is a
-// one-shot snapshot — later edits here don't update someone else's imported copy.
+// backed (Supabase Storage) but NO sign-in required — anyone with the code can open
+// it. A share is a one-shot snapshot — later edits here don't update someone else's
+// imported copy.
 
-import { useEffect, useState } from 'react'
-import type { Session } from '@supabase/supabase-js'
+import { useState } from 'react'
 import type { Project } from '../../runtime/scene'
 import { Modal, Row } from '../ui'
 import { Copy, Icon } from '../icons'
-import { getSession, isCloudConfigured, onAuthChange, signInWithEmail } from '../cloud/supabase'
+import { isCloudConfigured } from '../cloud/supabase'
 import { createShare, fetchShare, shareLink } from '../cloud/shareStore'
 import { getState } from '../store'
 import { createProject, saveCurrent } from '../projects'
@@ -17,28 +17,12 @@ import { createProject, saveCurrent } from '../projects'
 const errText = (e: unknown): string => String((e as Error)?.message ?? e)
 
 export function ShareModal(props: { initialCode?: string; onClose: () => void; onImported: () => void }): JSX.Element {
-  const [ready, setReady] = useState(false)
-  const [session, setSession] = useState<Session | null>(null)
-  const [email, setEmail] = useState('')
-  const [sent, setSent] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
   const [code, setCode] = useState<string | null>(null) // freshly-created share code
   const [importCode, setImportCode] = useState(props.initialCode ?? '')
   const [copied, setCopied] = useState<'code' | 'link' | null>(null)
-
-  useEffect(() => {
-    if (!isCloudConfigured()) {
-      setReady(true)
-      return
-    }
-    void getSession().then((s) => {
-      setSession(s)
-      setReady(true)
-    })
-    return onAuthChange((s) => setSession(s))
-  }, [])
 
   const wrap = (fn: () => Promise<void>): (() => void) => () => {
     setBusy(true)
@@ -47,12 +31,6 @@ export function ShareModal(props: { initialCode?: string; onClose: () => void; o
       .catch((e) => setErr(errText(e)))
       .finally(() => setBusy(false))
   }
-
-  const doSignIn = wrap(async () => {
-    const { error } = await signInWithEmail(email)
-    if (error) throw new Error(error)
-    setSent(true)
-  })
 
   const mipName = getState().project.meta.name || 'untitled'
 
@@ -92,18 +70,6 @@ export function ShareModal(props: { initialCode?: string; onClose: () => void; o
         <div className="hint pad">
           Cloud sharing isn’t configured. Add <b>VITE_SUPABASE_URL</b> and <b>VITE_SUPABASE_ANON_KEY</b> to <b>.env.local</b> and restart.
         </div>
-      ) : !ready ? (
-        <div className="hint pad">Connecting…</div>
-      ) : !session ? (
-        <div className="team-signin">
-          <div className="group-title">Sign in to share</div>
-          <input type="email" placeholder="you@studio.com" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <button className="primary wide" disabled={busy || !email.trim()} onClick={doSignIn}>
-            {busy ? 'Sending…' : 'Send magic link'}
-          </button>
-          {sent && <div className="hint pad">Check your email for the sign-in link, then return here.</div>}
-          {err && <div className="warn-line">{err}</div>}
-        </div>
       ) : (
         <>
           <div className="group-title">Send: share “{mipName}”</div>
@@ -118,7 +84,7 @@ export function ShareModal(props: { initialCode?: string; onClose: () => void; o
                   <Icon icon={Copy} size={13} /> {copied === 'link' ? 'Copied!' : 'Copy link'}
                 </button>
               </div>
-              <div className="hint pad">Anyone on the team can import this via the code or link. It’s a snapshot; later edits here won’t update their copy.</div>
+              <div className="hint pad">Anyone with the code or link can import this — no sign-in needed. It’s a snapshot; later edits here won’t update their copy.</div>
               <button className="wide" onClick={() => setCode(null)}>
                 Create another
               </button>
@@ -139,7 +105,7 @@ export function ShareModal(props: { initialCode?: string; onClose: () => void; o
           <button className="wide" disabled={busy || !importCode.trim()} onClick={doImport}>
             {busy ? 'Importing…' : 'Import as new project'}
           </button>
-          {err && !code && <div className="warn-line">{err}</div>}
+          {err && <div className="warn-line">{err}</div>}
         </>
       )}
     </Modal>

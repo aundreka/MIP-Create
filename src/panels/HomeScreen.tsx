@@ -10,7 +10,9 @@ import { gameTemplateStarters, STARTERS, type Starter } from '../templates'
 import { SceneThumb } from '../preview/SceneThumb'
 import { allBrands, brandsFor, usagesFor } from '../templateUsage'
 import { TemplateCard } from './TemplateCard'
-import { Copy, Diamond, FolderOpen, Icon, LayoutGrid, ListChecks, Pencil, Plus, Search, Star, Upload, User, X } from '../icons'
+import { exportAllData, backupFilename, importAllData, readBackupInfo } from '../backup'
+import { downloadBlob } from '../export'
+import { ArrowDownToLine, ArrowUpToLine, Copy, Diamond, FolderOpen, Icon, LayoutGrid, ListChecks, Pencil, Plus, Search, Star, Upload, User, X } from '../icons'
 
 // Team library loads lazily (keeps Supabase out of the Home chunk until the tab opens).
 const TeamLibrary = lazy(() => import('./TeamPanel').then((m) => ({ default: m.TeamLibrary })))
@@ -116,6 +118,38 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
     if (brand && !brands.some((b) => b.name.toLowerCase() === brand.toLowerCase())) setBrand(null)
   }, [brand, brands])
 
+  // Full local backup / restore — no account needed. Download bundles every project,
+  // MIP, media file, project group, version and setting into one file; restore merges
+  // a backup back into this library, then reloads so the store re-boots from storage.
+  const backupInputRef = useRef<HTMLInputElement>(null)
+  const doBackup = async (): Promise<void> => {
+    await saveCurrent()
+    downloadBlob(backupFilename(), await exportAllData())
+  }
+  const doRestore = async (file: File): Promise<void> => {
+    let text: string
+    try {
+      text = await file.text()
+    } catch {
+      alert('Could not read that file.')
+      return
+    }
+    let info: { projects: number }
+    try {
+      info = readBackupInfo(text)
+    } catch (e) {
+      alert(String((e as Error)?.message ?? e))
+      return
+    }
+    if (!confirm(`Restore ${info.projects} project${info.projects === 1 ? '' : 's'} from this backup? Your existing projects are kept; any with the same id are overwritten. The editor will reload.`)) return
+    try {
+      await importAllData(text)
+      location.reload()
+    } catch (e) {
+      alert('Import failed: ' + String((e as Error)?.message ?? e))
+    }
+  }
+
   const ql = query.trim().toLowerCase()
   const filtered = gameCards.filter((c) => {
     // brand chip filter (many-to-many: keep templates tagged with this brand)
@@ -216,6 +250,23 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
             <button className={view === 'team' ? 'on' : ''} onClick={() => setView('team')}>Team library</button>
           </span>
           <span className="spacer" />
+          <button onClick={() => void doBackup()} title="Download all your data — every project, MIP, media file & setting — as one backup file">
+            <Icon icon={ArrowDownToLine} size={14} /> Download all
+          </button>
+          <button onClick={() => backupInputRef.current?.click()} title="Restore projects from a backup file">
+            <Icon icon={ArrowUpToLine} size={14} /> Restore
+          </button>
+          <input
+            ref={backupInputRef}
+            type="file"
+            accept="application/json,.json"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              e.currentTarget.value = ''
+              if (f) void doRestore(f)
+            }}
+          />
           <button onClick={props.onProfile}>
             <Icon icon={User} size={14} /> Profile
           </button>

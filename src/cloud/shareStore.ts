@@ -1,8 +1,10 @@
 // Share links — hand an editable copy of a MIP to another user via a short code /
 // link. The whole bundle (scenes + assets-with-bytes + trace = ProjectData) is
-// uploaded to the private `shares` Storage bucket at '<code>.json'; any signed-in
-// teammate can open it by code and gets their own editable copy. Decoupled from the
-// team library (`project` rows) — a share is a one-shot snapshot, not a live sync.
+// uploaded to the `shares` Storage bucket at '<code>.json'; anyone with the code can
+// open it and gets their own editable copy. No sign-in required (the bucket allows
+// the anon role — see the share_links_anon migration; codes are unguessable random
+// strings). Decoupled from the team library (`project` rows) — a share is a one-shot
+// snapshot, not a live sync.
 
 import type { ProjectData } from '../bridge'
 import { supa } from './supabase'
@@ -29,11 +31,9 @@ export function shareLink(code: string): string {
   return location.origin + location.pathname + '#share=' + code
 }
 
-/** Upload the given ProjectData as a new share; returns its code. Requires sign-in. */
+/** Upload the given ProjectData as a new share; returns its code. No sign-in needed. */
 export async function createShare(data: ProjectData): Promise<string> {
   const sb = supa()
-  const { data: u } = await sb.auth.getUser()
-  if (!u.user?.id) throw new Error('Sign in to create a share link.')
   const code = genCode()
   const blob = new Blob([JSON.stringify(data)], { type: 'application/json' })
   const { error } = await sb.storage.from(BUCKET).upload(code + '.json', blob, { upsert: false, contentType: 'application/json' })
@@ -41,7 +41,7 @@ export async function createShare(data: ProjectData): Promise<string> {
   return code
 }
 
-/** Download a shared ProjectData bundle by code (or share link). Requires sign-in. */
+/** Download a shared ProjectData bundle by code (or share link). No sign-in needed. */
 export async function fetchShare(codeOrLink: string): Promise<ProjectData> {
   const code = sanitizeCode(codeOrLink)
   if (!code) throw new Error('Enter a share code.')
