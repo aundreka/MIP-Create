@@ -466,6 +466,17 @@ export interface HeaderConfig {
   fontSizePx?: number
   fontWeight?: number
   fontFamily?: string
+  // Distance from the physical top of the band to the date text. When set, the
+  // text is top-anchored inside the band; when omitted the text is vertically
+  // centred (the original behaviour).
+  topPaddingPx?: number
+  // Horizontal alignment of the date text within the band. Default 'center'.
+  align?: 'left' | 'center' | 'right'
+  // Extra letter spacing (tracking) in px. Default 0.
+  letterSpacingPx?: number
+  // Literal text wrapped around the formatted date, e.g. prefix "DAY " → "DAY JULY 3, 2026".
+  prefix?: string
+  suffix?: string
 }
 
 export interface ProjectMeta {

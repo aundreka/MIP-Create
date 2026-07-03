@@ -1704,6 +1704,30 @@ button.icon {
   to   { opacity: 1; transform: none; }
 }
 
+/* ---- date-header popover (Topbar) ---- */
+.header-pop {
+  position: fixed;
+  z-index: 9999;
+  width: 320px;
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--sh-3);
+  animation: swatch-popup-in 120ms var(--ease);
+}
+.header-pop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.header-pop-body {
+  padding: 10px 12px 12px;
+}
+
 /* ---- command palette (Cmd/Ctrl+K) ---- */
 .cmdk-overlay {
   align-items: flex-start;

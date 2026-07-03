@@ -71,7 +71,9 @@ export function playProject(
   container.style.cssText = 'position:fixed;inset:0;overflow:hidden;overflow:clip;'
   opts.mount.appendChild(container)
 
-  const header = mountHeader(container, project.meta.header ?? {})
+  // The pinned date header is opt-in: only mount it when the project explicitly
+  // configures `meta.header`. Projects without it export with no date band.
+  const header = project.meta.header ? mountHeader(container, project.meta.header) : null
 
   const sfx: SfxManager | null = opts.interactive ? createSfxManager(project, assets, container) : null
 
@@ -388,7 +390,7 @@ export function playProject(
 
   return {
     relayout() {
-      header.relayout()
+      header?.relayout()
       current?.stage.layoutAll() // re-lays out the floated immune bars (they live in current.stage)
       for (const ov of overlayStages) ov.layoutAll() // keep floating win/lose overlays responsive
       // Re-sync each immune-bar cover to its (now re-laid-out) bar so the header backing tracks
@@ -408,7 +410,7 @@ export function playProject(
       overlayStages.clear()
       overlayCovers.clear() // cover divs are torn down with the container below
       sfx?.destroy()
-      header.destroy()
+      header?.destroy()
       current?.stage.destroy()
       container.remove()
     },

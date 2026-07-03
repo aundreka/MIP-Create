@@ -7,7 +7,8 @@ import { loadProject as bridgeLoad, platformLabel, saveProject } from '../bridge
 import { getState, joinProjectGroup, loadProject as storeLoad, markSaved, redo, refreshScene, setOrientation, undo, useEditorState } from '../store'
 import { createProject, currentProjectId, openProject, projectsInGroup, saveCurrent } from '../projects'
 import { ContextMenu, type MenuItem } from './ContextMenu'
-import { ChevronDown, FolderOpen, Icon, Menu, Minus, Play, Plus, Redo2, Undo2 } from '../icons'
+import { HeaderPopover } from './HeaderPopover'
+import { CalendarDays, ChevronDown, FolderOpen, Icon, Menu, Minus, Play, Plus, Redo2, Undo2 } from '../icons'
 import { toggleTheme, useTheme } from '../theme'
 import { setEditLocale, useEditLocale } from '../locale'
 import { setActiveVariant, useActiveVariant } from '../variantMode'
@@ -42,6 +43,13 @@ export function Topbar(props: {
   const locales = scene.meta.locales ?? []
   const activeVariant = useActiveVariant()
   const variants = scene.meta.variants ?? []
+
+  // ---- date-header popover: quick-access date band customization -------------
+  const headerBtn = useRef<HTMLButtonElement>(null)
+  const [headerPop, setHeaderPop] = useState<DOMRect | null>(null)
+  const toggleHeaderPop = (): void => {
+    setHeaderPop((cur) => (cur ? null : (headerBtn.current?.getBoundingClientRect() ?? null)))
+  }
 
   const appBtn = useRef<HTMLButtonElement>(null)
   const [appMenu, setAppMenu] = useState<{ x: number; y: number } | null>(null)
@@ -165,6 +173,15 @@ export function Topbar(props: {
       </span>
 
       <span className="spacer" />
+      <button
+        ref={headerBtn}
+        className={'icon' + (scene.meta.header ? ' on' : '')}
+        title="Date header"
+        aria-pressed={!!scene.meta.header}
+        onClick={toggleHeaderPop}
+      >
+        <Icon icon={CalendarDays} size={15} />
+      </button>
       <button onClick={props.onPreview} title="Preview the ad">
         <Icon icon={Play} size={14} /> Preview
       </button>
@@ -175,6 +192,7 @@ export function Topbar(props: {
 
       {appMenu && <ContextMenu x={appMenu.x} y={appMenu.y} items={appItems} onClose={() => setAppMenu(null)} />}
       {projMenu && <ContextMenu x={projMenu.x} y={projMenu.y} items={projItems} onClose={() => setProjMenu(null)} />}
+      {headerPop && <HeaderPopover anchor={headerPop} onClose={() => setHeaderPop(null)} />}
     </div>
   )
 }
