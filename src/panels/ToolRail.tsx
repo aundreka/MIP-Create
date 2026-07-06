@@ -3,7 +3,7 @@
 // so they're easy to tell apart at a glance.
 
 import { importImage, importImages } from '../bridge'
-import { makeBackground, makeBar, makeChoice, makeCountdownTimer, makeCta, makeDynamicDate, makeEndcardBlock, makeEndsceneVideo, makeGame, makeHeaderBlock, makeImage, makeRect, makeText, makeUnboxing } from '../factories'
+import { makeBackground, makeBar, makeButton, makeChoice, makeCountdownTimer, makeCta, makeDynamicDate, makeEndcardBlock, makeEndsceneVideo, makeGame, makeHeaderBlock, makeImage, makeRect, makeText, makeUnboxing } from '../factories'
 import { addAsset, addElement, addElements, addGameHint, clearSelection, getState, nextId } from '../store'
 import { Tooltip } from '../ui'
 import {
@@ -22,6 +22,7 @@ import {
   MousePointerClick,
   PanelTop,
   Square,
+  SquareMousePointer,
   Timer,
   Type,
   Wallpaper,
@@ -72,6 +73,7 @@ export function ToolRail(props: { onFigma: () => void }): JSX.Element {
       <Tool title="Bar / banner" icon={PanelTop} onClick={() => addElement(makeBar())} />
       <Tool title="Rectangle" icon={Square} onClick={() => addElement(makeRect())} />
       <Tool title="Button / CTA" icon={MousePointerClick} onClick={() => addElement(makeCta())} />
+      <Tool title="Button (go to screen)" icon={SquareMousePointer} onClick={() => addElement(makeButton())} />
       <Tool title="Answer choice (quiz/survey)" icon={ListChecks} onClick={() => addElement(makeChoice())} />
 
       <div className="rail-sep" />

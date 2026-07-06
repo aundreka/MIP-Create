@@ -127,7 +127,7 @@ export async function exportViteProject(project: Project, assets: AssetMap): Pro
   zip.file('package.json', PACKAGE_JSON.replace('NAME', safe.toLowerCase()))
   zip.file('tsconfig.json', TSCONFIG)
   zip.file('vite.config.ts', VITE_CONFIG)
-  zip.file('index.html', INDEX_HTML(project.meta.name || 'playable'))
+  zip.file('index.html', INDEX_HTML(project.meta.client || project.meta.name || 'playable'))
   zip.file('README.md', readme(project.meta.name || 'Playable'))
   zip.file('.gitignore', 'node_modules\ndist\n')
 

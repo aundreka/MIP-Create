@@ -49,6 +49,24 @@ export function makeCta(): SceneElement {
   }
 }
 
+export function makeButton(): SceneElement {
+  return {
+    id: nextId('btn'),
+    type: 'button',
+    name: 'Button',
+    x: cx(),
+    y: Math.round(meta().baseH * 0.88),
+    anchor: 'center',
+    zIndex: topZ(),
+    mode: 'fit',
+    w: 560,
+    h: 150,
+    button: {}, // targetSceneId chosen in the Inspector
+    text: { value: 'CONTINUE', fontSizePx: 64, fontWeight: 800, color: '#ffffff' },
+    box: { bgColor: '#3a7bd5', radiusPx: 75 },
+  }
+}
+
 export function makeChoice(): SceneElement {
   const m = meta()
   return {

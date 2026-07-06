@@ -19,6 +19,12 @@ interface CellState {
   col: number
   cellCoverImg: HTMLImageElement | null  // per-cell cover; null = use global
   cellCoverReady: boolean
+  // Reveal background rendered on its OWN canvas (not an <img>) so it aligns pixel-for-pixel
+  // with the cover canvas above it — same element type, size and fit math → no edge leak.
+  revealCanvas: HTMLCanvasElement | null
+  revealC2d: CanvasRenderingContext2D | null
+  revealImg: HTMLImageElement | null
+  revealReady: boolean
   // Per-cell win overlay (resolved at mount: cell override || global default).
   // Only meaningful for win cells; lose cells use the shared lose overlay.
   winSceneId: string
@@ -164,6 +170,22 @@ export function createScratchGrid(): GameModule {
     }
   }
 
+  // Draw an image into a canvas ctx with object-fit placement (contain/cover), centered.
+  // Used for BOTH the cover canvas and the reveal-background canvas. Because they are the
+  // SAME element type at the SAME backing size and use the SAME math, they land on the
+  // EXACT same rect in every browser — including AppLovin's old WebView, which rounds a
+  // <canvas> differently from an <img> (the source of the reveal "leak"). No stretch, no
+  // crop beyond the chosen fit, and the cover keeps its own aspect/corners untouched.
+  const drawImageFit = (g: CanvasRenderingContext2D, img: HTMLImageElement, w: number, h: number): void => {
+    const iw = img.naturalWidth || img.width
+    const ih = img.naturalHeight || img.height
+    if (!iw || !ih) return
+    const s = imageFit === 'contain' ? Math.min(w / iw, h / ih) : Math.max(w / iw, h / ih)
+    const dw = iw * s
+    const dh = ih * s
+    g.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh)
+  }
+
   const fillCellCover = (cell: CellState): void => {
     const { canvas, c2d } = cell
     const w = canvas.width
@@ -174,31 +196,13 @@ export function createScratchGrid(): GameModule {
     const img = cell.cellCoverImg ?? coverImg
     const ready = cell.cellCoverImg ? cell.cellCoverReady : coverReady
     if (img && ready) {
-      if (imageFit === 'contain') {
-        // Fit the whole cover inside the cell (no crop). Fill the letterbox with the
-        // cover color so the rest stays a scratchable surface — but if the cover color
-        // is cleared (empty), leave it transparent so no box leaks around the image.
-        if (coverColor) {
-          c2d.fillStyle = coverColor
-          c2d.fillRect(0, 0, w, h)
-        }
-        const iw = img.naturalWidth || img.width
-        const ih = img.naturalHeight || img.height
-        const s = Math.min(w / iw, h / ih)
-        const dw = iw * s
-        const dh = ih * s
-        c2d.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh)
-      } else {
-        // True "cover": scale to FILL the cell, cropping overflow — preserves the image's
-        // aspect (no stretch/squish), so baked-in text stays readable when the cell aspect
-        // changes (e.g. landscape → portrait). Matches CSS object-fit:cover on the reveal.
-        const iw = img.naturalWidth || img.width
-        const ih = img.naturalHeight || img.height
-        const s = Math.max(w / iw, h / ih)
-        const dw = iw * s
-        const dh = ih * s
-        c2d.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh)
+      // In contain mode fill the letterbox with the cover color (if set) so it stays a
+      // scratchable surface; a cleared color leaves it transparent (no box around the image).
+      if (imageFit === 'contain' && coverColor) {
+        c2d.fillStyle = coverColor
+        c2d.fillRect(0, 0, w, h)
       }
+      drawImageFit(c2d, img, w, h)
       return
     }
     // No cover image: a cleared cover color leaves the cell transparent.
@@ -211,6 +215,17 @@ export function createScratchGrid(): GameModule {
     c2d.textAlign = 'center'
     c2d.textBaseline = 'middle'
     c2d.fillText('SCRATCH', w / 2, h / 2)
+  }
+
+  // Paint the reveal BACKGROUND onto its own canvas — same size + same fit math as the
+  // cover, so the cover sits pixel-perfect over it (no leak). Runs in the editor too (the
+  // reveal is visible there), independent of `started`.
+  const fillCellReveal = (cell: CellState): void => {
+    const g = cell.revealC2d
+    const canvas = cell.revealCanvas
+    if (!g || !canvas) return
+    g.clearRect(0, 0, canvas.width, canvas.height)
+    if (cell.revealImg && cell.revealReady) drawImageFit(g, cell.revealImg, canvas.width, canvas.height)
   }
 
   // Fraction of the reveal ZONE (within this cell) scratched clear (alpha < 128).
@@ -269,8 +284,11 @@ export function createScratchGrid(): GameModule {
       el.style.borderRadius = `${tl}px ${tr}px ${br}px ${bl}px`
       // Keep the canvas's CSS size pinned to the cell every pass (cheap) so it fills the
       // cell exactly even when only the CSS size shifts (e.g. a live browser-zoom resize).
-      canvas.style.width = cssW + 'px'
-      canvas.style.height = cssH + 'px'
+      // width/height:100% (not a rounded px value) so the cover canvas and the reveal canvas
+      // fill the identical cell box — AppLovin's WebView would otherwise render a rounded-px
+      // box a hair off and leak a ~1px edge sliver.
+      canvas.style.width = '100%'
+      canvas.style.height = '100%'
       // Backing store at the FULL device pixel ratio keeps the cover crisp at the current
       // browser-zoom level. In the FIT-scaled viewport the cell SHRINKS in CSS px as zoom
       // (and thus devicePixelRatio) rises, so cssW·dpr — the cell's true physical pixel
@@ -286,6 +304,13 @@ export function createScratchGrid(): GameModule {
       // Reallocate the backing store ONLY when the device-pixel size actually changes —
       // assigning canvas.width/height resets the bitmap, which would wipe in-progress
       // scratching. (Browser zoom that keeps the physical size constant won't reset it.)
+      // Keep the reveal canvas backing in lockstep with the cover so their fit math matches
+      // exactly. Resizing resets the bitmap, so repaint the reveal (in editor + play).
+      if (cell.revealCanvas && (cell.revealCanvas.width !== w || cell.revealCanvas.height !== h)) {
+        cell.revealCanvas.width = w
+        cell.revealCanvas.height = h
+        fillCellReveal(cell)
+      }
       if (w === canvas.width && h === canvas.height) continue
       canvas.width = w
       canvas.height = h
@@ -636,13 +661,21 @@ export function createScratchGrid(): GameModule {
         revealDiv.style.cssText = `position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;font-weight:800;color:#fff;user-select:none;-webkit-user-select:none;background:${isWin ? winBgColor : loseBgColor};`
 
         let labelEl: HTMLDivElement | null = null
+        let revealCanvas: HTMLCanvasElement | null = null
+        let revealC2d: CanvasRenderingContext2D | null = null
+        let revealImg: HTMLImageElement | null = null
         const imgSrc = cellImageSrc(i)
         if (imgSrc) {
-          const img = document.createElement('img')
-          img.src = imgSrc
-          img.draggable = false
-          img.style.cssText = `position:absolute;inset:0;width:100%;height:100%;object-fit:${imageFit};pointer-events:none;`
-          revealDiv.appendChild(img)
+          // Reveal background on a canvas (mirrors the cover canvas exactly) instead of an
+          // <img>, so the cover lines up pixel-for-pixel and can't leak around the edges.
+          revealCanvas = document.createElement('canvas')
+          revealCanvas.draggable = false
+          revealCanvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none;'
+          revealC2d = revealCanvas.getContext('2d')
+          revealDiv.appendChild(revealCanvas)
+          revealImg = new Image()
+          revealImg.draggable = false
+          // onload + src wired AFTER cellState exists (below), so the handler can reference it.
         } else {
           labelEl = document.createElement('div')
           labelEl.textContent = cellLabel(i)
@@ -682,10 +715,23 @@ export function createScratchGrid(): GameModule {
           el: cellEl, canvas, c2d, labelEl, won: false, isWin,
           row: Math.floor(i / cols), col: i % cols,
           cellCoverImg: null, cellCoverReady: false,
+          revealCanvas, revealC2d, revealImg, revealReady: false,
           winSceneId: cellWinSceneId(i),
           winOverlayImage: cellWinOverlayImage(i),
           winOverlayDurationMs: cellWinOverlayDurationMs(i),
           ...hintPath,
+        }
+        if (revealImg && imgSrc) {
+          revealImg.onload = () => {
+            cellState.revealReady = true
+            fillCellReveal(cellState)
+          }
+          revealImg.src = imgSrc
+          // Cached/decoded images may never fire onload — draw immediately if already ready.
+          if (revealImg.complete && revealImg.naturalWidth) {
+            cellState.revealReady = true
+            fillCellReveal(cellState)
+          }
         }
         const cellCoverSrc = ctx.assets.src(str(params['cell' + i + 'cover'] as unknown, ''))
         if (cellCoverSrc) {

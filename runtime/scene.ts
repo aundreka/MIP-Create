@@ -25,6 +25,7 @@ export type ElementType =
   | 'image'
   | 'text'
   | 'cta'
+  | 'button'
   | 'choice'
   | 'handguide'
   | 'countdown'
@@ -142,6 +143,16 @@ export interface CtaConfig {
   pulseDurationMs?: number // full cycle duration ms; default from preset
   customPulse?: KeyframeStep[]
   clickUrlOverride?: string
+}
+
+// A plain clickable button. Visually it's a CTA (text label OR image via assetId,
+// styled with the shared `box`), but on click it navigates to another SCENE instead
+// of firing the store redirect. Animation is opt-in (via `el.animations`, not an
+// always-on pulse) and it only floats above overlays when `overlayImmune` is set.
+export interface ButtonConfig {
+  // Target scene id to navigate to on click. Empty/unset = advance to the scene's
+  // configured next scene (same as a tap), via the generic 'pa-advance' signal.
+  targetSceneId?: string
 }
 
 export interface EndsceneConfig {
@@ -441,6 +452,7 @@ export interface SceneElement {
 
   text?: TextConfig
   cta?: CtaConfig
+  button?: ButtonConfig
   choice?: ChoiceConfig
   box?: BoxStyle // background box for text / cta / choice
   endscene?: EndsceneConfig

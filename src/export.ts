@@ -407,7 +407,8 @@ export function buildBaseHtml(project: Project, assets: AssetMap, runtimeSrc = s
   return (
     `<!doctype html><html lang="en"><head><meta charset="utf-8">` +
     `<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">` +
-    `<title>${esc(project.meta.name || 'playable')}</title>` +
+    // Title is always the brand (Client) name; fall back to the MIP name, then a generic label.
+    `<title>${esc(project.meta.client || project.meta.name || 'playable')}</title>` +
     `<style>html,body{margin:0;padding:0;background:${bg}!important;}</style>` +
     `</head><body>` +
     `<script>window.PA_PROJECT=${esc(JSON.stringify(project))};window.PA_ASSETS=${esc(JSON.stringify(assets))};</script>` +

@@ -59,9 +59,12 @@ export function attachScratchCover(
 
   const canvas = document.createElement('canvas')
   canvas.style.cssText =
-    'position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:crosshair;' +
+    'position:absolute;touch-action:none;cursor:crosshair;' +
     'border-radius:' + (getComputedStyle(cover.content ?? cover.outer).borderRadius || '0px') + ';'
-  cover.outer.style.overflow = 'hidden'
+  // NOTE: no overflow:hidden on the outer — the coating is allowed to extend a few
+  // px beyond the cover's own box so it fully hides reveal elements underneath whose
+  // box drifts slightly (see sizeCanvas: the canvas is sized to the UNION of the
+  // cover box and every reveal target beneath it, killing edge leaks).
   cover.outer.appendChild(canvas)
   const c2d = canvas.getContext('2d')!
 
@@ -84,9 +87,41 @@ export function attachScratchCover(
       c2d.fillRect(0, 0, w, h)
     }
   }
+  // Reveal targets this coating is responsible for hiding: every reveal element
+  // stacked BEHIND the cover (lower zIndex). Used to size the coating so it always
+  // fully covers them — even when their box drifts from the cover's (the two are
+  // independent elements authored separately, so identical images can still end up
+  // with slightly different boxes: scale-vs-explicit-w/h, anchor, sub-pixel, etc.).
+  const coverTargets = (): CoverRec[] => recs.filter((r) => r !== cover && r.el.reveal && r.el.zIndex < cover.el.zIndex)
+
   const sizeCanvas = (): void => {
-    const w = Math.max(2, Math.round(cover.outer.clientWidth))
-    const h = Math.max(2, Math.round(cover.outer.clientHeight))
+    const cr = cover.outer.getBoundingClientRect()
+    if (cr.width < 1 || cr.height < 1) return
+    // The stage may be scaled via a CSS transform on an ancestor, so getBoundingClientRect
+    // returns viewport px. Convert to the cover's LOCAL (design) px, which is what the
+    // canvas's own left/top/width/height use, via clientWidth (layout px) / rect width.
+    const sx = cover.outer.clientWidth / cr.width
+    const sy = cover.outer.clientHeight / cr.height
+    // Union the cover box with every reveal target beneath it.
+    let L = cr.left, T = cr.top, R = cr.right, B = cr.bottom
+    for (const t of coverTargets()) {
+      const tr = t.outer.getBoundingClientRect()
+      if (tr.width < 1 || tr.height < 1) continue
+      if (tr.left < L) L = tr.left
+      if (tr.top < T) T = tr.top
+      if (tr.right > R) R = tr.right
+      if (tr.bottom > B) B = tr.bottom
+    }
+    const MARGIN = 1 // local-px safety for sub-pixel rounding on top of the union
+    const left = (L - cr.left) * sx - MARGIN
+    const top = (T - cr.top) * sy - MARGIN
+    const w = Math.max(2, Math.round((R - L) * sx + MARGIN * 2))
+    const h = Math.max(2, Math.round((B - T) * sy + MARGIN * 2))
+    // Position the coating relative to the cover's own box (it is the offset parent).
+    canvas.style.left = left.toFixed(2) + 'px'
+    canvas.style.top = top.toFixed(2) + 'px'
+    canvas.style.width = w + 'px'
+    canvas.style.height = h + 'px'
     if (w === canvas.width && h === canvas.height) return
     canvas.width = w
     canvas.height = h
@@ -105,6 +140,8 @@ export function attachScratchCover(
   // scratching, so we never wipe their progress mid-play (ads rarely resize then).
   const ro = new ResizeObserver(() => sizeCanvas())
   ro.observe(cover.outer)
+  // Also re-sync if a covered reveal element resizes, so the union stays correct.
+  for (const t of coverTargets()) ro.observe(t.outer)
 
   // ---- erosion --------------------------------------------------------------
   let lastPt: { x: number; y: number } | null = null

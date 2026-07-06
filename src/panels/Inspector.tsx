@@ -803,7 +803,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
   const setText = (patch: Partial<TextConfig>): void =>
     patchElement(id, { text: { ...(el.text ?? { value: '', fontSizePx: 48 }), ...patch } })
   const setBox = (patch: Partial<BoxStyle>): void => patchElement(id, { box: { ...(el.box ?? {}), ...patch } })
-  const isTextOrCta = el.type === 'text' || el.type === 'cta' || el.type === 'choice'
+  const isTextOrCta = el.type === 'text' || el.type === 'cta' || el.type === 'button' || el.type === 'choice'
   // countdown is styled like text (font/colour/box), so it shares those sections
   const hasTextStyle = isTextOrCta || el.type === 'countdown'
   // asset-ish elements can take a stroke/frame (border + radius + padding) too
@@ -1420,6 +1420,25 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
             <Slider label="Squish"    value={minPct}  min={85}  max={100} step={0.5} suffix="%" onChange={(v) => patch({ pulseMinScale: +(v / 100).toFixed(4) })} />
             <Slider label="Speed"     value={dur}     min={300} max={3000} step={50} suffix="ms" onChange={(v) => patch({ pulseDurationMs: v })} />
           </>
+        )
+      })()}
+
+      {el.type === 'button' && (() => {
+        const cfg = el.button ?? {}
+        const others = state.project.scenes.filter((s) => s.id !== activeSceneDef(state)?.id)
+        const patch = (p: Partial<typeof cfg>): void => patchElement(id, { button: { ...cfg, ...p } })
+        return (
+          <Accordion id="inspector.button" title="Button">
+            <Row label="Go to screen">
+              <Select
+                value={cfg.targetSceneId ?? ''}
+                onChange={(v) => patch({ targetSceneId: v || undefined })}
+                options={[{ value: '', label: '(next screen / advance)' }, ...others.map((s) => ({ value: s.id, label: s.name || s.id }))]}
+              />
+            </Row>
+            <AssetPicker label="Image (optional)" allowNone value={el.assetId} onChange={(aid) => patchElement(id, { assetId: aid ?? undefined })} />
+            <div className="hint pad">Uses the image if set, otherwise the text label below. Style the fill &amp; corners in Background box. Animation is optional (Animation section). Toggle “Above overlays” at the top to float it over game win/lose cards.</div>
+          </Accordion>
         )
       })()}
 

@@ -18,6 +18,7 @@ import { createContainerContent, createImageContent, styleContainer } from './el
 import { applyBarFill, createBarContent } from './elements/bar'
 import { createTextContent } from './elements/text'
 import { createCtaContent } from './elements/cta'
+import { createButtonContent } from './elements/button'
 import { createChoiceContent } from './elements/choice'
 import { localize } from './i18n'
 import { getPicks, isPicked, togglePick } from './selection'
@@ -505,7 +506,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     // game canvas or CTAs layered behind them in z-order. Scratch/reveal covers
     // keep their overlay canvas interactive; dim and the interactive widgets do too.
     const nonInteractive =
-      el.type !== 'cta' && el.type !== 'choice' &&
+      el.type !== 'cta' && el.type !== 'choice' && el.type !== 'button' &&
       el.type !== 'game-mount' && el.type !== 'endscene' &&
       el.type !== 'unboxing' &&
       el.type !== 'dim' && !el.scratch && !el.reveal
@@ -1033,6 +1034,11 @@ function mountContent(el: SceneElement, anim: HTMLDivElement, ctx: RuntimeCtx): 
       anim.appendChild(c) // loop/pulse applied by applyMountAnim after build
       return c
     }
+    case 'button': {
+      const c = createButtonContent(el, ctx)
+      anim.appendChild(c) // no auto-pulse; animates only if el.animations is set
+      return c
+    }
     case 'choice': {
       const c = createChoiceContent(el, ctx)
       anim.appendChild(c)
@@ -1159,7 +1165,7 @@ function layoutRec(rec: Rec): void {
       return
     default:
       layoutAsset(rec, e, e.mode === 'extend' ? 'extend' : 'fit')
-      if ((rec.el.type === 'cta' || rec.el.type === 'choice') && rec.content) styleCta(rec.content, rec.el, scale())
+      if ((rec.el.type === 'cta' || rec.el.type === 'choice' || rec.el.type === 'button') && rec.content) styleCta(rec.content, rec.el, scale())
       else {
         applyFrame(rec) // image / handguide / game-mount: stroke + radius + padding
         if (rec.el.container) {
