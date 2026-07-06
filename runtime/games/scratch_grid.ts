@@ -125,6 +125,13 @@ export function createScratchGrid(): GameModule {
   let loseOverlayDurationMs = 1500
   let winOverlayDurationMs = 800
   let threshold = 0.5
+  // Reveal zone (shared, normalized 0..1 WITHIN each cell): only clearing inside this
+  // rectangle counts toward a cell's threshold; scratching outside it never contributes.
+  // Defaults to the whole cell (no gating), so existing grids are unchanged.
+  let zoneX = 0
+  let zoneY = 0
+  let zoneW = 1
+  let zoneH = 1
   // 'cover' fills each cell (may crop); 'contain' fits the whole image inside the cell
   // (letterboxed, nothing cut) — applies to cover + reveal-background images.
   let imageFit: 'cover' | 'contain' = 'cover'
@@ -206,16 +213,30 @@ export function createScratchGrid(): GameModule {
     c2d.fillText('SCRATCH', w / 2, h / 2)
   }
 
+  // Fraction of the reveal ZONE (within this cell) scratched clear (alpha < 128).
+  // Pixels outside the zone are ignored, so scratching there can't trip the threshold.
+  // Sampled at 64×64 so a small zone still has enough pixels to measure.
   const measure = (canvas: HTMLCanvasElement): number => {
+    const S = 64
     const o = document.createElement('canvas')
-    o.width = 32
-    o.height = 32
+    o.width = S
+    o.height = S
     const oc = o.getContext('2d')!
-    oc.drawImage(canvas, 0, 0, 32, 32)
-    const data = oc.getImageData(0, 0, 32, 32).data
+    oc.drawImage(canvas, 0, 0, S, S)
+    const data = oc.getImageData(0, 0, S, S).data
+    const x0 = Math.max(0, Math.floor(zoneX * S))
+    const y0 = Math.max(0, Math.floor(zoneY * S))
+    const x1 = Math.min(S, Math.ceil((zoneX + zoneW) * S))
+    const y1 = Math.min(S, Math.ceil((zoneY + zoneH) * S))
     let clear = 0
-    for (let i = 3; i < data.length; i += 4) if (data[i] < 128) clear++
-    return clear / (32 * 32)
+    let total = 0
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        total++
+        if (data[(y * S + x) * 4 + 3] < 128) clear++
+      }
+    }
+    return total > 0 ? clear / total : 0
   }
 
   const sizeAll = (): void => {
@@ -488,6 +509,10 @@ export function createScratchGrid(): GameModule {
       gridRows = rows
       const total = cols * rows
       threshold = Math.max(0.2, Math.min(0.95, num(params.threshold, 0.5)))
+      zoneX = Math.max(0, Math.min(1, num(params.zoneX, 0) / 100))
+      zoneY = Math.max(0, Math.min(1, num(params.zoneY, 0) / 100))
+      zoneW = Math.max(0.02, Math.min(1 - zoneX, num(params.zoneW, 100) / 100))
+      zoneH = Math.max(0.02, Math.min(1 - zoneY, num(params.zoneH, 100) / 100))
       imageFit = str(params.imageFit as unknown, 'cover') === 'contain' ? 'contain' : 'cover'
       coverColor = str(params.coverColor, '#9aa3b2')
       // Empty string = user cleared the swatch → transparent cell background.
@@ -812,6 +837,10 @@ export const SCRATCH_GRID_TEMPLATE: GameTemplate = {
     { key: 'loseOverlayDurationMs', label: 'Lose overlay duration (ms)', type: 'number', min: 200, max: 5000, step: 100 },
     { key: 'winOverlayDurationMs', label: 'Win overlay duration (ms)', type: 'number', min: 200, max: 5000, step: 100 },
     { key: 'threshold', label: 'Reveal at (fraction scratched)', type: 'number', min: 0.2, max: 0.9, step: 0.05 },
+    { key: 'zoneX', label: 'Reveal zone left (%, per cell)', type: 'number', min: 0, max: 100, step: 1 },
+    { key: 'zoneY', label: 'Reveal zone top (%, per cell)', type: 'number', min: 0, max: 100, step: 1 },
+    { key: 'zoneW', label: 'Reveal zone width (%, per cell)', type: 'number', min: 2, max: 100, step: 1 },
+    { key: 'zoneH', label: 'Reveal zone height (%, per cell)', type: 'number', min: 2, max: 100, step: 1 },
     {
       key: 'revealAssets',
       label: 'Threshold assets (JSON list: src/showAt/hideAt/x/y/width/height)',
@@ -862,6 +891,7 @@ export const SCRATCH_GRID_TEMPLATE: GameTemplate = {
     winOverlayDurationMs: 800,
     bgImage: '', bgScale: 100, bgX: 50, bgY: 50,
     threshold: 0.5,
+    zoneX: 0, zoneY: 0, zoneW: 100, zoneH: 100,
     imageFit: 'cover',
     cover: '',
     sharedBg: '', sharedText: '',

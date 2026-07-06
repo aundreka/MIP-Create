@@ -198,6 +198,15 @@ export function EditorCanvas(props: Props): JSX.Element {
   const [revealLive, setRevealLive] = useState<{ scale: number; x: number; y: number } | null>(null)
   const revealDrag = useRef<{ mode: 'move' | 'scale'; sx: number; sy: number; startX: number; startY: number; startScale: number; rectW: number; rectH: number; ccx: number; ccy: number; startDist: number; last: { scale: number; x: number; y: number } | null } | null>(null)
   const curRevealRef = useRef<{ scale: number; x: number; y: number }>({ scale: 1, x: 0, y: 0 })
+  // Reveal-zone editor (scratch / scratch grid): which game-mount's zone is being drawn,
+  // the live rect during a drag (percent of the card / cell), and the in-flight gesture.
+  const [zoneEdit, setZoneEdit] = useState<string | null>(null)
+  const [zoneLive, setZoneLive] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
+  const zoneDrag = useRef<
+    | { mode: 'move' | 'resize'; hx: number; hy: number; ox: number; oy: number; base: { x: number; y: number; w: number; h: number }; start: { x: number; y: number; w: number; h: number }; last: { x: number; y: number; w: number; h: number } | null }
+    | null
+  >(null)
+  const curZoneRef = useRef<{ x: number; y: number; w: number; h: number }>({ x: 0, y: 0, w: 100, h: 100 })
   const [posTick, setPosTick] = useState(0)
   const [panning, setPanning] = useState(false)
   const pathDraw = usePathDraw()
@@ -267,6 +276,38 @@ export function EditorCanvas(props: Props): JSX.Element {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [revealEdit])
+
+  // Reveal-zone edit is entered from the inspector (a button dispatches this event).
+  useEffect(() => {
+    const onEnter = (e: Event): void => {
+      const id = (e as CustomEvent<{ elementId: string }>).detail?.elementId
+      if (!id) return
+      setRevealEdit(null)
+      setRevealLive(null)
+      setZoneLive(null)
+      setZoneEdit(id)
+    }
+    window.addEventListener('pa:zone-edit', onEnter)
+    return () => window.removeEventListener('pa:zone-edit', onEnter)
+  }, [])
+  useEffect(() => {
+    if (zoneEdit && !scene.elements.some((e) => e.id === zoneEdit)) {
+      setZoneEdit(null)
+      setZoneLive(null)
+    }
+  }, [zoneEdit, scene])
+  useEffect(() => {
+    if (!zoneEdit) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        zoneDrag.current = null
+        setZoneEdit(null)
+        setZoneLive(null)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [zoneEdit])
 
   const handleLayout = useCallback((id: string, r: FrameRect[], m: FrameMetrics): void => {
     metricsByScene.current[id] = m
@@ -419,6 +460,12 @@ export function EditorCanvas(props: Props): JSX.Element {
       // stops its own events) → exit reveal-edit mode.
       setRevealEdit(null)
       setRevealLive(null)
+      return
+    }
+    if (zoneEdit) {
+      // Clicking outside the zone box (which stops its own events) exits zone-edit.
+      setZoneEdit(null)
+      setZoneLive(null)
       return
     }
     const { px, py } = toIntrinsic(e.clientX, e.clientY)
@@ -917,6 +964,123 @@ export function EditorCanvas(props: Props): JSX.Element {
     }
   }
 
+  // ---- reveal-zone editor ---------------------------------------------------
+  const zoneEl = zoneEdit ? scene.elements.find((e) => e.id === zoneEdit) ?? null : null
+  const zoneRect = zoneEdit ? rects.find((r) => r.id === zoneEdit) ?? null : null
+  const zoneParams: Record<string, unknown> = zoneEl?.game?.params ?? {}
+  const curZone = zoneLive ?? {
+    x: typeof zoneParams.zoneX === 'number' ? zoneParams.zoneX : 0,
+    y: typeof zoneParams.zoneY === 'number' ? zoneParams.zoneY : 0,
+    w: typeof zoneParams.zoneW === 'number' ? zoneParams.zoneW : 100,
+    h: typeof zoneParams.zoneH === 'number' ? zoneParams.zoneH : 100,
+  }
+  curZoneRef.current = curZone
+  // The base rect(s) the zone is normalized against: the whole card (scratch) or each
+  // cell (scratch grid). All coords are in overlay space (pre-zoom), like `rects`.
+  const zoneBaseRects: { x: number; y: number; w: number; h: number }[] = (() => {
+    if (!zoneEl || !zoneRect) return []
+    const g = zoneEl.game
+    if (g?.templateId !== 'scratch_grid') return [{ x: zoneRect.x, y: zoneRect.y, w: zoneRect.w, h: zoneRect.h }]
+    const cols = Math.max(1, Math.min(4, Number(g.params?.cols ?? 2)))
+    const rows = Math.max(1, Math.min(4, Number(g.params?.rows ?? 2)))
+    const gap = Math.max(0, Number(g.params?.gap ?? 10))
+    const colGap = Math.max(0, Number(g.params?.colGap ?? gap))
+    const rowGap = Math.max(0, Number(g.params?.rowGap ?? gap))
+    const ew = zoneEl.w ?? 980
+    const eh = zoneEl.h ?? 1100
+    const sx = zoneRect.w / ew // design px → overlay px (uniform scale)
+    const sy = zoneRect.h / eh
+    const cellW = (zoneRect.w - gap * sx * 2 - colGap * sx * (cols - 1)) / cols
+    const cellH = (zoneRect.h - gap * sy * 2 - rowGap * sy * (rows - 1)) / rows
+    const out: { x: number; y: number; w: number; h: number }[] = []
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        out.push({
+          x: zoneRect.x + gap * sx + col * (cellW + colGap * sx),
+          y: zoneRect.y + gap * sy + row * (cellH + rowGap * sy),
+          w: cellW,
+          h: cellH,
+        })
+      }
+    }
+    return out
+  })()
+  // The editable base rect (whole card, or the top-left cell for a grid). Dragging here
+  // sets the shared zone that every cell mirrors.
+  const zoneBase = zoneBaseRects[0] ?? null
+  const zoneBoxFor = (b: { x: number; y: number; w: number; h: number }, z: { x: number; y: number; w: number; h: number }) => ({
+    x: b.x + (z.x / 100) * b.w,
+    y: b.y + (z.y / 100) * b.h,
+    w: (z.w / 100) * b.w,
+    h: (z.h / 100) * b.h,
+  })
+  const onZoneBodyDown = (e: React.PointerEvent): void => {
+    e.stopPropagation()
+    if (!zoneBase) return
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    const o = overlayRef.current!.getBoundingClientRect()
+    const z = liveRef.current.zoom
+    zoneDrag.current = { mode: 'move', hx: 0, hy: 0, ox: (e.clientX - o.left) / z, oy: (e.clientY - o.top) / z, base: zoneBase, start: curZoneRef.current, last: null }
+  }
+  const onZoneHandleDown = (e: React.PointerEvent, hx: number, hy: number): void => {
+    e.stopPropagation()
+    if (!zoneBase) return
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    const o = overlayRef.current!.getBoundingClientRect()
+    const z = liveRef.current.zoom
+    zoneDrag.current = { mode: 'resize', hx, hy, ox: (e.clientX - o.left) / z, oy: (e.clientY - o.top) / z, base: zoneBase, start: curZoneRef.current, last: null }
+  }
+  const onZoneMove = (e: React.PointerEvent): void => {
+    const d = zoneDrag.current
+    if (!d) return
+    e.stopPropagation()
+    const o = overlayRef.current!.getBoundingClientRect()
+    const z = liveRef.current.zoom
+    const ox = (e.clientX - o.left) / z
+    const oy = (e.clientY - o.top) / z
+    let next: { x: number; y: number; w: number; h: number }
+    if (d.mode === 'move') {
+      const dx = ((ox - d.ox) / d.base.w) * 100
+      const dy = ((oy - d.oy) / d.base.h) * 100
+      next = {
+        x: Math.max(0, Math.min(100 - d.start.w, d.start.x + dx)),
+        y: Math.max(0, Math.min(100 - d.start.h, d.start.y + dy)),
+        w: d.start.w,
+        h: d.start.h,
+      }
+    } else {
+      // Pointer position as a fraction of the base rect, clamped to it.
+      const fx = Math.max(0, Math.min(1, (ox - d.base.x) / d.base.w))
+      const fy = Math.max(0, Math.min(1, (oy - d.base.y) / d.base.h))
+      const left = d.start.x / 100
+      const top = d.start.y / 100
+      const right = (d.start.x + d.start.w) / 100
+      const bottom = (d.start.y + d.start.h) / 100
+      const MIN = 0.02
+      let nx = left
+      let nw = right - left
+      let ny = top
+      let nh = bottom - top
+      if (d.hx < 0) { nx = Math.min(fx, right - MIN); nw = right - nx }
+      else if (d.hx > 0) { nw = Math.max(MIN, fx - left) }
+      if (d.hy < 0) { ny = Math.min(fy, bottom - MIN); nh = bottom - ny }
+      else if (d.hy > 0) { nh = Math.max(MIN, fy - top) }
+      next = { x: nx * 100, y: ny * 100, w: nw * 100, h: nh * 100 }
+    }
+    d.last = next
+    setZoneLive(next)
+  }
+  const onZoneUp = (e: React.PointerEvent): void => {
+    e.stopPropagation()
+    const d = zoneDrag.current
+    zoneDrag.current = null
+    const g = zoneEl?.game
+    if (d?.last && zoneEl && g) {
+      const r = (n: number): number => Math.round(n * 10) / 10
+      patchElement(zoneEl.id, { game: { ...g, params: { ...(g.params ?? {}), zoneX: r(d.last.x), zoneY: r(d.last.y), zoneW: r(d.last.w), zoneH: r(d.last.h) } } })
+    }
+  }
+
   const menuItems = (): MenuItem[] => {
     const multi = selectedIds.length > 1
     const locked = single?.locked
@@ -994,7 +1158,7 @@ export function EditorCanvas(props: Props): JSX.Element {
                   onDoubleClick={onDoubleClick}
                   onContextMenu={onContextMenu}
                 >
-                  {!revealEdit &&
+                  {!revealEdit && !zoneEdit &&
                     selectedIds.map((id) => {
                       const r = rects.find((x) => x.id === id)
                       return r ? <div key={id} className="sel-box" style={{ left: r.x, top: r.y, width: r.w, height: r.h }} /> : null
@@ -1014,7 +1178,7 @@ export function EditorCanvas(props: Props): JSX.Element {
                       </div>
                     )
                   })}
-                  {!revealEdit && single && singleRect && singleHandles.map((h) => (
+                  {!revealEdit && !zoneEdit && single && singleRect && singleHandles.map((h) => (
                     <div
                       key={h.k}
                       className={'handle h-' + h.k}
@@ -1022,7 +1186,7 @@ export function EditorCanvas(props: Props): JSX.Element {
                       onPointerDown={(e) => onHandlePointerDown(e, h, 'single')}
                     />
                   ))}
-                  {!revealEdit && single && singleRect && (
+                  {!revealEdit && !zoneEdit && single && singleRect && (
                     <div
                       className="dim-badge"
                       style={{ left: singleRect.x + singleRect.w / 2, top: singleRect.y + singleRect.h, transform: `translate(-50%, 6px) scale(${1 / zoom})` }}
@@ -1144,6 +1308,45 @@ export function EditorCanvas(props: Props): JSX.Element {
                         />
                       ))}
                     </div>
+                  )}
+                  {zoneEdit && zoneBase && (
+                    <>
+                      {/* Read-only preview of the shared zone in every OTHER grid cell. */}
+                      {zoneBaseRects.slice(1).map((b, i) => {
+                        const bx = zoneBoxFor(b, curZone)
+                        return (
+                          <div
+                            key={'zprev-' + i}
+                            style={{ position: 'absolute', left: bx.x, top: bx.y, width: bx.w, height: bx.h, border: '1.5px dashed var(--accent)', opacity: 0.45, pointerEvents: 'none', boxSizing: 'border-box' }}
+                          />
+                        )
+                      })}
+                      {/* The editable zone box (whole card, or the top-left cell for a grid). */}
+                      {(() => {
+                        const bx = zoneBoxFor(zoneBase, curZone)
+                        return (
+                          <div
+                            style={{ position: 'absolute', left: bx.x, top: bx.y, width: bx.w, height: bx.h, border: '2px solid var(--accent)', background: 'rgba(80,140,255,0.12)', boxSizing: 'border-box', cursor: 'move', touchAction: 'none' }}
+                            onPointerDown={onZoneBodyDown}
+                            onPointerMove={onZoneMove}
+                            onPointerUp={onZoneUp}
+                            onPointerCancel={onZoneUp}
+                          >
+                            {CORNERS.map((h) => (
+                              <div
+                                key={h.k}
+                                className={'handle h-' + h.k}
+                                style={{ left: ((h.hx + 1) / 2) * bx.w, top: ((h.hy + 1) / 2) * bx.h }}
+                                onPointerDown={(e) => onZoneHandleDown(e, h.hx, h.hy)}
+                                onPointerMove={onZoneMove}
+                                onPointerUp={onZoneUp}
+                                onPointerCancel={onZoneUp}
+                              />
+                            ))}
+                          </div>
+                        )
+                      })()}
+                    </>
                   )}
                 </div>
               ) : (

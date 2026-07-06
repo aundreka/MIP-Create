@@ -481,6 +481,18 @@ function ScratchGridCells({ params, setParam, elementId }: ScratchGridCellsProps
       <NumField label="Column gap" value={Number(params.colGap ?? params.gap ?? 10)} step={2} min={0} max={60} onChange={(n) => setParam('colGap', n)} />
       <NumField label="Row gap" value={Number(params.rowGap ?? params.gap ?? 10)} step={2} min={0} max={60} onChange={(n) => setParam('rowGap', n)} />
       <NumField label="Reveal threshold" value={Number(params.threshold ?? 0.5)} step={0.05} min={0.2} max={0.9} onChange={(n) => setParam('threshold', n)} />
+      <NumField label="Reveal zone left (%, per cell)" value={Number(params.zoneX ?? 0)} step={1} min={0} max={100} onChange={(n) => setParam('zoneX', n)} />
+      <NumField label="Reveal zone top (%, per cell)" value={Number(params.zoneY ?? 0)} step={1} min={0} max={100} onChange={(n) => setParam('zoneY', n)} />
+      <NumField label="Reveal zone width (%, per cell)" value={Number(params.zoneW ?? 100)} step={1} min={2} max={100} onChange={(n) => setParam('zoneW', n)} />
+      <NumField label="Reveal zone height (%, per cell)" value={Number(params.zoneH ?? 100)} step={1} min={2} max={100} onChange={(n) => setParam('zoneH', n)} />
+      <button
+        className="btn"
+        style={{ width: '100%', marginTop: 6 }}
+        onClick={() => window.dispatchEvent(new CustomEvent('pa:zone-edit', { detail: { elementId } }))}
+      >
+        Edit reveal zone on canvas
+      </button>
+      <div className="hint pad">Only scratching inside the reveal zone counts toward a cell&apos;s threshold — anywhere outside never contributes. The same zone applies to every cell. Drag the box in the first cell to move, corner handles to resize. Esc to finish.</div>
       <ColorField label="Cover color" value={(params.coverColor as string) || undefined} allowNone onChange={(c) => setParam('coverColor', c ?? '')} />
       <ColorField label="Win cell bg" value={(params.winBgColor as string) || undefined} allowNone onChange={(c) => setParam('winBgColor', c ?? '')} />
       <ColorField label="Lose cell bg" value={(params.loseBgColor as string) || undefined} allowNone onChange={(c) => setParam('loseBgColor', c ?? '')} />
@@ -964,6 +976,18 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               ) : (
               <>
               {tpl.paramFields.map(renderField)}
+              {tpl.id === 'scratch' && (
+                <>
+                  <button
+                    className="btn"
+                    style={{ width: '100%', marginTop: 6 }}
+                    onClick={() => window.dispatchEvent(new CustomEvent('pa:zone-edit', { detail: { elementId: id } }))}
+                  >
+                    Edit reveal zone on canvas
+                  </button>
+                  <div className="hint pad">Only scratching inside the reveal zone counts toward the threshold — anywhere outside never contributes. Drag the box to move, corner handles to resize. Esc to finish.</div>
+                </>
+              )}
               {tpl.id === 'scratch' && params.fit === 'fit' && (
                 <div className="hint pad">Double-click the card on the canvas to position &amp; scale the reveal image: drag to move, corner handles to resize.</div>
               )}
