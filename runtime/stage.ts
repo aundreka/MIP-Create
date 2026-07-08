@@ -53,7 +53,7 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
   // Waypoints (design px). 'slide' uses the configured nodes (or legacy toX/toY);
   // 'smart' targets the CTA/game; 'tap' stays in place (no waypoints).
   let pts: { x: number; y: number; pauseMs?: number }[] = []
-  let kind: 'tap' | 'slide' | 'scratch' = 'tap'
+  let kind: 'tap' | 'slide' | 'scratch' | 'match' = 'tap'
   if (cfg.mode === 'slide') {
     if (cfg.nodes && cfg.nodes.length) pts = cfg.nodes.filter((p) => p && p.x != null && p.y != null)
     else if (cfg.toX != null && cfg.toY != null) pts = [{ x: cfg.toX, y: cfg.toY }]
@@ -66,6 +66,8 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     }
   } else if (cfg.mode === 'scratch') {
     kind = 'scratch'
+  } else if (cfg.mode === 'match') {
+    kind = 'match'
   }
   const travel = cfg.periodMs && cfg.periodMs > 0 ? cfg.periodMs : kind === 'scratch' ? 600 : kind === 'slide' ? 1500 : 900
   const cubic = (t: number): number => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
@@ -130,6 +132,25 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
         oy = cellRect.top + cellRect.height * (fy + (ty - fy) * p) - guideCY
         // Smooth press in/out instead of a binary 0/1 snap (which popped the scale).
         press = phase < 0.14 ? cubic(phase / 0.14) : phase > 0.86 ? cubic((1 - phase) / 0.14) : 1
+      }
+    } else if (kind === 'match') {
+      // Follow the memory-match game's suggested card: the game keeps
+      // data-mm-hint="1" on the card to tap next (one of a pair, then its
+      // partner once the player flips the first). Query every frame so the
+      // hand re-targets as the player plays; tap-bounce over the card.
+      const cardEl = root.querySelector<HTMLElement>('[data-mm-hint]')
+      if (cardEl) {
+        const cardRect = cardEl.getBoundingClientRect()
+        const guideRect = rec.outer.getBoundingClientRect()
+        // Land the fingertip (22%/12% of the hand, matching transformOrigin) on the
+        // LOWER part of the card (72% down) so the cover art's text stays visible,
+        // and tap with a hover-and-dip — the hand floats slightly above the spot
+        // and dips down to touch it (a scale-only pulse read as "pushing").
+        const phase = ((now - t0) % travel) / travel
+        const dip = phase < 0.55 ? Math.sin((phase / 0.55) * Math.PI) : 0
+        ox = cardRect.left + cardRect.width / 2 - (guideRect.left + guideRect.width * 0.22)
+        oy = cardRect.top + cardRect.height * 0.72 - guideRect.height * 0.28 * (1 - dip) - (guideRect.top + guideRect.height * 0.12)
+        press = dip
       }
     } else if (kind === 'slide') {
       const c = (now - t0) % total
@@ -578,7 +599,13 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
             navigate: (id) => emit('scene-goto', id),
             // An editable handguide element in the scene replaces the coded hint hand.
             hint: rec.el.game?.hintEnabled !== false && !recs.some((r) => r.el.type === 'handguide'),
-            sfx: (event) => emit('sfx', event),
+            // A same-named binding on the game-mount element overrides the
+            // project-wide event sound (e.g. a custom "On card flip" asset).
+            sfx: (event) => {
+              const bind = (rec.el.sfx ?? []).find((b) => b.event === event && b.assetId)
+              if (bind) emit('sfx-asset', bind.assetId, bind.volume ?? 1)
+              else emit('sfx', event)
+            },
             sfxLoopStart: (event) => {
               const bind = (rec.el.sfx ?? []).find((b) => b.event === 'whileScratching' && b.assetId)
               if (bind) emit('sfx-asset-loop-start', bind.assetId, bind.volume ?? 1)

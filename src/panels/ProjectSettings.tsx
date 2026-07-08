@@ -21,6 +21,7 @@ const EVENTS: { key: string; label: string; wired?: boolean }[] = [
   { key: 'gameWin', label: 'Game win', wired: true },
   { key: 'ctaClick', label: 'CTA click / endscene tap', wired: true },
   { key: 'endscene', label: 'Endscene shown', wired: true },
+  { key: 'flip', label: 'Card flip', wired: true },
   { key: 'tap', label: 'Tap' },
   { key: 'drag', label: 'Drag / scratch (loops while held)', wired: true },
   { key: 'pop', label: 'Pop' },

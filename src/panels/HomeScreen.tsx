@@ -12,7 +12,7 @@ import { allBrands, brandsFor, usagesFor } from '../templateUsage'
 import { TemplateCard } from './TemplateCard'
 import { exportAllData, backupFilename, importAllData, readBackupInfo } from '../backup'
 import { downloadBlob } from '../export'
-import { ArrowDownToLine, ArrowUpToLine, Copy, Diamond, FolderOpen, Icon, LayoutGrid, ListChecks, Pencil, Plus, Search, Star, Upload, User, X } from '../icons'
+import { ArrowDownToLine, ArrowUpToLine, Copy, Diamond, FolderOpen, Icon, LayoutGrid, ListChecks, Pencil, Plus, ScanSearch, Search, Star, Upload, User, X } from '../icons'
 
 // Team library loads lazily (keeps Supabase out of the Home chunk until the tab opens).
 const TeamLibrary = lazy(() => import('./TeamPanel').then((m) => ({ default: m.TeamLibrary })))
@@ -79,7 +79,7 @@ function when(ts: number): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 }
 
-export function HomeScreen(props: { onClose: () => void; onProfile: () => void; onGenerate?: () => void; onQuizFunnel?: () => void; onImportBuilt?: () => void; onShare?: () => void; initialTab?: 'projects' | 'team' }): JSX.Element {
+export function HomeScreen(props: { onClose: () => void; onProfile: () => void; onGenerate?: () => void; onQuizFunnel?: () => void; onImportBuilt?: () => void; onShare?: () => void; onQaCheck?: () => void; initialTab?: 'projects' | 'team' }): JSX.Element {
   const [tick, force] = useState(0)
   const refresh = (): void => force((n) => n + 1)
   const [editId, setEditId] = useState<string | null>(null)
@@ -315,6 +315,14 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
                     <Icon icon={Copy} size={22} />
                   </span>
                   <span>Share / import by code</span>
+                </button>
+              )}
+              {props.onQaCheck && (
+                <button className="new-card" onClick={() => props.onQaCheck!()} title="Compare a built MIP/SIP against the Figma mockup: overlay, side by side, color pick & auto-diff">
+                  <span className="plus">
+                    <Icon icon={ScanSearch} size={22} />
+                  </span>
+                  <span>QA checker</span>
                 </button>
               )}
             </div>

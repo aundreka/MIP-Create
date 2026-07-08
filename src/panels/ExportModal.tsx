@@ -25,7 +25,7 @@ import { applyVariant, stripVariants } from '../variants'
 import { mipName } from '../mipName'
 import { applovinOpen, applovinProbe, applovinUpload, canApplovin, compressHtmlScript, type ApplovinFile } from '../bridge'
 import { Modal, NumField, Slider, Toggle } from '../ui'
-import { AlertTriangle, Check, Icon } from '../icons'
+import { AlertTriangle, Check, Icon, ScanSearch } from '../icons'
 import { FlowPreview } from '../preview/FlowPreview'
 import type { Project } from '../../runtime/scene'
 import type { AssetMap, CompressProfile } from '../../runtime/types'
@@ -67,7 +67,7 @@ function CompressFields(props: { kind: 'video' | 'audio'; value: CompressProfile
 
 const slug = (s: string): string => s.replace(/[^a-z0-9_-]+/gi, '_').replace(/^_+|_+$/g, '') || 'variant'
 
-export function ExportModal(props: { onClose: () => void }): JSX.Element {
+export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void }): JSX.Element {
   const { project, assets } = useEditorState()
   const [optimize, setOptimize] = useState(true)
   const [quality, setQuality] = useState(82)
@@ -454,6 +454,14 @@ export function ExportModal(props: { onClose: () => void }): JSX.Element {
         </div>
       )}
 
+      {props.onQaCheck && (
+        <div className="export-qa">
+          <span className="hint">Final check against the Figma mockup</span>
+          <button onClick={props.onQaCheck}>
+            <Icon icon={ScanSearch} size={13} /> QA check…
+          </button>
+        </div>
+      )}
       <button className="primary wide" disabled={busy || !nets.size} onClick={() => void doExport()}>
         Export {nets.size} {nets.size === 1 ? 'file' : 'files'}
       </button>

@@ -28,6 +28,7 @@ const HomeScreen = lazy(() => import('./panels/HomeScreen').then((m) => ({ defau
 const ShareModal = lazy(() => import('./panels/ShareModal').then((m) => ({ default: m.ShareModal })))
 const ProfilePanel = lazy(() => import('./panels/ProfilePanel').then((m) => ({ default: m.ProfilePanel })))
 const QaPanel = lazy(() => import('./panels/QaPanel').then((m) => ({ default: m.QaPanel })))
+const QaCheckPanel = lazy(() => import('./panels/QaCheckPanel').then((m) => ({ default: m.QaCheckPanel })))
 const PreviewOverlay = lazy(() => import('./preview/PreviewOverlay').then((m) => ({ default: m.PreviewOverlay })))
 
 const clampZoom = (z: number): number => Math.max(0.05, Math.min(3, z)) // matches the canvas wheel-zoom range
@@ -51,7 +52,8 @@ export function App(): JSX.Element {
   const [homeTab, setHomeTab] = useState<'projects' | 'team'>(() => (location.hash.toLowerCase().includes('team') ? 'team' : 'projects'))
   const [profile, setProfile] = useState(() => location.hash.toLowerCase().includes('profile'))
   const [exportOpen, setExportOpen] = useState(() => location.hash.toLowerCase().includes('export'))
-  const [qa, setQa] = useState(() => location.hash.toLowerCase().includes('qa'))
+  const [qa, setQa] = useState(() => location.hash.toLowerCase().includes('qa') && !location.hash.toLowerCase().includes('qacheck'))
+  const [qaCheck, setQaCheck] = useState(() => location.hash.toLowerCase().includes('qacheck'))
   // Share / import by code. A '#share=<code>' deep link opens the modal with the
   // code prefilled so a recipient can import straight from a pasted link.
   const shareCode = useMemo(() => /share=([a-z0-9]+)/i.exec(location.hash)?.[1] ?? '', [])
@@ -76,6 +78,7 @@ export function App(): JSX.Element {
         openHome: () => setHome(true),
         openQuizFunnel: () => setQuiz(true),
         openQa: () => setQa(true),
+        openQaCheck: () => setQaCheck(true),
         openTeam: () => { setHomeTab('team'); setHome(true) },
         openShare: () => setShare(true),
         openGenerateMip: () => setGenMip(true),
@@ -155,7 +158,7 @@ export function App(): JSX.Element {
         // Home route — the editor is unmounted behind it (its state lives in the
         // module-level store, so nothing is lost). Opening a project enters the editor.
         <Suspense fallback={null}>
-          <HomeScreen onClose={() => setHome(false)} initialTab={homeTab} onProfile={() => setProfile(true)} onGenerate={() => { setHome(false); setGenMip(true) }} onQuizFunnel={() => { setHome(false); setQuiz(true) }} onImportBuilt={() => { setHome(false); setImportBuilt(true) }} onShare={() => setShare(true)} />
+          <HomeScreen onClose={() => setHome(false)} initialTab={homeTab} onProfile={() => setProfile(true)} onGenerate={() => { setHome(false); setGenMip(true) }} onQuizFunnel={() => { setHome(false); setQuiz(true) }} onImportBuilt={() => { setHome(false); setImportBuilt(true) }} onShare={() => setShare(true)} onQaCheck={() => setQaCheck(true)} />
         </Suspense>
       ) : (
         <>
@@ -170,6 +173,7 @@ export function App(): JSX.Element {
             onProjectSettings={() => setSettings(true)}
             onExport={() => setExportOpen(true)}
             onQa={() => setQa(true)}
+            onQaCheck={() => setQaCheck(true)}
             onShare={() => setShare(true)}
           />
           <div className="body">
@@ -195,10 +199,11 @@ export function App(): JSX.Element {
         {settings && <ProjectSettings onClose={() => setSettings(false)} />}
         {templates && <TemplatesModal onClose={() => setTemplates(false)} />}
         {quiz && <QuizFunnel onClose={() => setQuiz(false)} />}
-        {genMip && <GenerateMip onClose={() => setGenMip(false)} />}
+        {genMip && <GenerateMip onClose={() => setGenMip(false)} onQaCheck={() => { setGenMip(false); setHome(false); setQaCheck(true) }} />}
         {profile && <ProfilePanel onClose={() => setProfile(false)} />}
-        {exportOpen && <ExportModal onClose={() => setExportOpen(false)} />}
+        {exportOpen && <ExportModal onClose={() => setExportOpen(false)} onQaCheck={() => setQaCheck(true)} />}
         {qa && <QaPanel onClose={() => setQa(false)} onNavigate={qaNavigate} />}
+        {qaCheck && <QaCheckPanel onClose={() => setQaCheck(false)} />}
         {share && <ShareModal initialCode={shareCode} onClose={() => setShare(false)} onImported={() => { setShare(false); setHome(false) }} />}
         {cmdK && <CommandPalette commands={commands} onClose={() => setCmdK(false)} />}
       </Suspense>

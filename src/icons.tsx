@@ -18,6 +18,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Clapperboard,
+  Columns2,
   Contrast,
   Copy,
   Diamond,
@@ -31,6 +32,7 @@ import {
   GripVertical,
   Hand,
   Image as ImageIcon,
+  Layers,
   LayoutGrid,
   LayoutTemplate,
   ListChecks,
@@ -55,6 +57,7 @@ import {
   RectangleHorizontal,
   RotateCcw,
   Save,
+  ScanSearch,
   Search,
   Settings,
   Smartphone,
@@ -77,6 +80,9 @@ export type { LucideIcon }
 
 export {
   AlignCenterHorizontal,
+  Columns2,
+  Layers,
+  ScanSearch,
   AlignCenterVertical,
   AlignEndHorizontal,
   AlignEndVertical,

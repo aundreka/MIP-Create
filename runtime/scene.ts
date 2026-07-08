@@ -239,10 +239,12 @@ export interface HandguideNode {
 // A hand-guide element (its own asset image). When interactive it animates:
 // 'tap' bounces in place; 'slide' loops from its position through `nodes` (each
 // with its own dwell time) in design px; 'smart' auto-targets the scene's CTA (or
-// game) and slides/taps toward it. `toX/toY` is the legacy single-waypoint form,
-// still honored when `nodes` is empty.
+// game) and slides/taps toward it; 'match' tap-bounces over the memory-match
+// game's suggested card (the element marked data-mm-hint — one card of a pair,
+// then its partner once the first is flipped). `toX/toY` is the legacy
+// single-waypoint form, still honored when `nodes` is empty.
 export interface HandguideConfig {
-  mode: 'smart' | 'tap' | 'slide' | 'scratch'
+  mode: 'smart' | 'tap' | 'slide' | 'scratch' | 'match'
   toX?: number
   toY?: number
   nodes?: HandguideNode[]

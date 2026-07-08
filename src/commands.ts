@@ -22,6 +22,7 @@ import {
   Plus,
   RectangleHorizontal,
   Redo2,
+  ScanSearch,
   Smartphone,
   Star,
   Sun,
@@ -69,6 +70,7 @@ export interface AppCommandActions {
   openHome: () => void
   openQuizFunnel: () => void
   openQa: () => void
+  openQaCheck: () => void
   openTeam: () => void
   openShare: () => void
   openGenerateMip: () => void
@@ -111,6 +113,7 @@ export function buildCommands(a: AppCommandActions): Command[] {
     { id: 'quizfunnel', title: 'Quiz / survey funnel…', run: a.openQuizFunnel },
     { id: 'genmip', title: 'Generate MIP…', hint: 'logo + product → scaffold', icon: Star, run: a.openGenerateMip },
     { id: 'qa', title: 'QA consistency check…', hint: 'compare MIPs', run: a.openQa },
+    { id: 'qacheck', title: 'QA checker…', hint: 'compare vs Figma mockup', icon: ScanSearch, run: a.openQaCheck },
     { id: 'team', title: 'Team library (cloud)…', hint: 'publish / browse MIPs', icon: Upload, run: a.openTeam },
     { id: 'share', title: 'Share / import a MIP by code…', hint: 'send or receive a project', icon: Upload, run: a.openShare },
     { id: 'figma', title: 'Import from Figma…', run: a.openFigma },

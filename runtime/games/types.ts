@@ -27,6 +27,10 @@ export interface GameContext {
   sfx: { play(event: string): void; loopStart?(event: string): void; loopStop?(event: string): void }
   /** Deterministic RNG so boards + hints stay consistent. */
   rng: () => number
+  /** Current stage scale (screen px per design px). Multiply design-px params
+   * (gaps, radii, offsets) by this so the game scales as ONE unit with the rest
+   * of the layout at any viewport size/zoom, instead of keeping fixed px. */
+  scale?: () => number
   /** Navigate to a named scene (for games with multi-scene flows, e.g. scratch grid lose → return). */
   navigate?(sceneId: string): void
   /** Stable ID of this game-mount element — use as a state key for cross-scene persistence. */
@@ -79,8 +83,10 @@ export interface GameTemplate {
   defaultParams: Record<string, unknown>
   /** Optional default hint route (points normalized 0..1 of the game card) used to
    * seed an editable handguide when the game is added. The first point is the start;
-   * the rest are slide waypoints. Omit for a simple centered tap hint. */
-  defaultHandguide?: { nodes: { x: number; y: number; pauseMs?: number }[]; periodMs?: number }
+   * the rest are slide waypoints. Omit for a simple centered tap hint. A `mode`
+   * picks a game-aware logic template instead (e.g. 'match' follows the game's
+   * data-mm-hint card); nodes then only place the hand's initial position. */
+  defaultHandguide?: { mode?: 'match'; nodes: { x: number; y: number; pauseMs?: number }[]; periodMs?: number }
   create(): GameModule
 }
 

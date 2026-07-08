@@ -5,6 +5,7 @@
 import { createHand, type Hand } from './hint'
 import { getTemplate } from './games/registry'
 import { mulberry32, type GameModule } from './games/types'
+import { scale } from './responsive'
 import type { AssetMap } from './types'
 
 export interface GameHost {
@@ -40,6 +41,7 @@ export function createGameHost(opts: GameHostOptions): GameHost | null {
   const tpl = getTemplate(opts.templateId)
   if (!tpl) return null
   const mod: GameModule = tpl.create()
+  const params = { ...tpl.defaultParams, ...opts.params }
 
   mod.mount(
     {
@@ -47,10 +49,11 @@ export function createGameHost(opts: GameHostOptions): GameHost | null {
       assets: { src: (id) => (id && opts.assets[id] ? opts.assets[id].src : '') },
       sfx: { play: opts.sfx, loopStart: opts.sfxLoopStart, loopStop: opts.sfxLoopStop },
       rng: mulberry32(123456),
+      scale,
       navigate: opts.navigate,
       elementId: opts.elementId,
     },
-    { ...tpl.defaultParams, ...opts.params },
+    params,
   )
 
   let hand: Hand | null = null
@@ -61,14 +64,18 @@ export function createGameHost(opts: GameHostOptions): GameHost | null {
     mod.start()
     opts.sfx('gameStart')
     if (opts.hint !== false) {
-      hand = createHand(opts.handLayer)
+      // Templates may expose a 'handImage' asset slot to swap the hint hand's art.
+      const handAsset = typeof params.handImage === 'string' ? opts.assets[params.handImage] : undefined
+      hand = createHand(opts.handLayer, handAsset?.src)
       let inputActive = false
       const schedule = (): void => {
         window.clearTimeout(idle)
         idle = window.setTimeout(() => {
           if (destroyed || inputActive) return
           const move = mod.getHint()
-          if (move) hand!.show(move.from, move.to, move.kind ?? 'slide', move.scale)
+          // The hand is drawn in screen px: multiply the game's own size hint by
+          // the stage scale so it shrinks/grows with the rest of the layout.
+          if (move) hand!.show(move.from, move.to, move.kind ?? 'slide', (move.scale ?? 1) * scale())
         }, opts.hintIdleMs)
       }
       const onStart = (): void => {

@@ -62,8 +62,13 @@ export function createScratch(): GameModule {
     if (w === canvas.width && h === canvas.height) return
     canvas.width = w
     canvas.height = h
-    canvas.style.width = w + 'px'
-    canvas.style.height = h + 'px'
+    // CSS box stays 100% (from the `inset:0` in the cssText above) so it matches the
+    // reveal layer's box exactly. Explicit rounded-px width/height here would override
+    // that stretch and can drift a fraction of a px from the root's fractional CSS size,
+    // leaking a reveal sliver at the rounded corners — the same bug scratch_grid.ts fixed
+    // by keeping its cell canvases at width/height:100%.
+    canvas.style.width = '100%'
+    canvas.style.height = '100%'
     ctx.root.style.borderRadius = Math.round(Math.min(w, h) * 0.055) + 'px'
     lastPt = null
     if (!won) fillCover()

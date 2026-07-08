@@ -224,8 +224,55 @@ export function createScratchGrid(): GameModule {
     const g = cell.revealC2d
     const canvas = cell.revealCanvas
     if (!g || !canvas) return
+    g.globalCompositeOperation = 'source-over'
     g.clearRect(0, 0, canvas.width, canvas.height)
     if (cell.revealImg && cell.revealReady) drawImageFit(g, cell.revealImg, canvas.width, canvas.height)
+  }
+
+  // Wipe the reveal canvas to fully transparent. During PLAY the reveal starts empty and is
+  // painted in ONLY where the player scratches (paintCellReveal), so unscratched areas —
+  // crucially the rounded corners — never carry the reveal image and can't leak past the
+  // cover. (In the editor the reveal is filled fully so the designer can see it.)
+  const clearCellReveal = (cell: CellState): void => {
+    const g = cell.revealC2d
+    const canvas = cell.revealCanvas
+    if (!g || !canvas) return
+    g.globalCompositeOperation = 'source-over'
+    g.clearRect(0, 0, canvas.width, canvas.height)
+  }
+
+  // Reveal the prize image only within the current brush stroke. We first stamp the brush
+  // (round-capped line + dot, matching the cover's erosion) to build up an opaque mask on
+  // the reveal canvas, then redraw the image with 'source-in' so it survives only where that
+  // accumulated mask is — i.e. exactly the scratched region. Everything else (corners
+  // included) stays transparent, so there is nothing to leak.
+  const paintCellReveal = (
+    cell: CellState,
+    x: number,
+    y: number,
+    r: number,
+    from: { x: number; y: number } | null,
+  ): void => {
+    const g = cell.revealC2d
+    const canvas = cell.revealCanvas
+    if (!g || !canvas || !cell.revealImg || !cell.revealReady) return
+    g.globalCompositeOperation = 'source-over'
+    g.fillStyle = '#000'
+    g.strokeStyle = '#000'
+    if (from) {
+      g.lineWidth = r * 2
+      g.lineCap = 'round'
+      g.beginPath()
+      g.moveTo(from.x, from.y)
+      g.lineTo(x, y)
+      g.stroke()
+    }
+    g.beginPath()
+    g.arc(x, y, r, 0, Math.PI * 2)
+    g.fill()
+    g.globalCompositeOperation = 'source-in'
+    drawImageFit(g, cell.revealImg, canvas.width, canvas.height)
+    g.globalCompositeOperation = 'source-over'
   }
 
   // Fraction of the reveal ZONE (within this cell) scratched clear (alpha < 128).
@@ -309,7 +356,11 @@ export function createScratchGrid(): GameModule {
       if (cell.revealCanvas && (cell.revealCanvas.width !== w || cell.revealCanvas.height !== h)) {
         cell.revealCanvas.width = w
         cell.revealCanvas.height = h
-        fillCellReveal(cell)
+        // Resizing resets the bitmap. In play the cover is also refilled fully (below), so keep
+        // the reveal empty to match (scratch progress is already reset here); in the editor —
+        // or a cell already won — show the full reveal.
+        if (started && !won) clearCellReveal(cell)
+        else fillCellReveal(cell)
       }
       if (w === canvas.width && h === canvas.height) continue
       canvas.width = w
@@ -391,6 +442,9 @@ export function createScratchGrid(): GameModule {
     cell.el.dataset.won = '1'
     updateRevealAssets()
     lockAllCells() // stops loop + blocks all canvases immediately
+    // Fill in the FULL reveal now (during play only the scratched strokes were painted) so the
+    // whole prize is shown as the cover fades away.
+    fillCellReveal(cell)
     cell.canvas.style.transition = 'opacity 400ms ease'
     requestAnimationFrame(() => { cell.canvas.style.opacity = '0' })
 
@@ -456,6 +510,8 @@ export function createScratchGrid(): GameModule {
       c2d.beginPath()
       c2d.arc(x, y, r, 0, Math.PI * 2)
       c2d.fill()
+      // Reveal the prize image only within this same brush stroke (see paintCellReveal).
+      paintCellReveal(cell, x, y, r, lastPt)
       lastPt = { x, y }
     }
 
@@ -722,16 +778,16 @@ export function createScratchGrid(): GameModule {
           ...hintPath,
         }
         if (revealImg && imgSrc) {
-          revealImg.onload = () => {
+          const showReveal = (): void => {
             cellState.revealReady = true
-            fillCellReveal(cellState)
+            // Editor: show the full reveal. Play: keep it empty until scratched (a cell that
+            // has already been won still fills, so its prize stays visible).
+            if (!started || cellState.won) fillCellReveal(cellState)
           }
+          revealImg.onload = showReveal
           revealImg.src = imgSrc
           // Cached/decoded images may never fire onload — draw immediately if already ready.
-          if (revealImg.complete && revealImg.naturalWidth) {
-            cellState.revealReady = true
-            fillCellReveal(cellState)
-          }
+          if (revealImg.complete && revealImg.naturalWidth) showReveal()
         }
         const cellCoverSrc = ctx.assets.src(str(params['cell' + i + 'cover'] as unknown, ''))
         if (cellCoverSrc) {
@@ -799,7 +855,12 @@ export function createScratchGrid(): GameModule {
       started = true
       for (const cell of cells) {
         cell.canvas.style.opacity = '1'
-        if (!cell.won) fillCellCover(cell)
+        if (!cell.won) {
+          fillCellCover(cell)
+          // Start the reveal empty — it's now painted in only where the player scratches, so
+          // the rounded corners stay transparent and the reveal can't leak past the cover.
+          clearCellReveal(cell)
+        }
       }
       for (const cell of cells) setupCell(cell)
       // Staggered spring entrance: cells slide/fade in from the right, one at a time

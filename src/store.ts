@@ -333,9 +333,11 @@ export function addGameHint(gameId: string): void {
     mode: 'fit',
     assetId: HAND_ASSET_ID,
     handguide:
-      pts.length > 1
-        ? { mode: 'slide', nodes: pts.slice(1), periodMs: tpl?.defaultHandguide?.periodMs ?? 1800 }
-        : { mode: 'tap', periodMs: 900 },
+      tpl?.defaultHandguide?.mode // game-aware logic template (e.g. 'match' follows the game's next card)
+        ? { mode: tpl.defaultHandguide.mode, periodMs: tpl.defaultHandguide.periodMs ?? 900 }
+        : pts.length > 1
+          ? { mode: 'slide', nodes: pts.slice(1), periodMs: tpl?.defaultHandguide?.periodMs ?? 1800 }
+          : { mode: 'tap', periodMs: 900 },
   }
   addElement(hg)
 }

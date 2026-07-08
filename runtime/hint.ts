@@ -20,12 +20,15 @@ const HAND_H = 56
 
 const cubic = (t: number): number => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
 
-export function createHand(root: HTMLElement): Hand {
+/** `imgSrc` swaps the built-in white hand for a custom image (contain-fit in the
+ * same box, so show()'s fit/scale math is unchanged). */
+export function createHand(root: HTMLElement, imgSrc?: string): Hand {
   const el = document.createElement('div')
   el.style.cssText =
     `position:absolute;left:0;top:0;width:${HAND_W}px;height:${HAND_H}px;pointer-events:none;z-index:200000;` +
     'transform-origin:8px 6px;filter:drop-shadow(0 4px 6px rgba(0,0,0,.4));will-change:transform,opacity;display:none;'
-  el.innerHTML = HAND_SVG
+  if (imgSrc) el.innerHTML = `<img src="${imgSrc}" style="width:100%;height:100%;object-fit:contain" draggable="false" alt="">`
+  else el.innerHTML = HAND_SVG
   root.appendChild(el)
 
   let raf = 0
@@ -62,9 +65,12 @@ export function createHand(root: HTMLElement): Hand {
         // press in over the first 14% of the cycle and out over the last 14%.
         press = phase < 0.14 ? cubic(phase / 0.14) : phase > 0.86 ? cubic((1 - phase) / 0.14) : 1
       } else {
+        // Tap: hover a little above the point and dip DOWN to touch it — an
+        // actual tapping motion. (The old scale-only pulse read as "pushing".)
+        const dip = phase < 0.55 ? Math.sin((phase / 0.55) * Math.PI) : 0
         x = to.x
-        y = to.y
-        press = phase < 0.5 ? Math.sin(phase * Math.PI) : 0
+        y = to.y - 16 * fit * (1 - dip)
+        press = dip
       }
       const scale = (1 - press * 0.18) * fit
       if (kind === 'scratch') {

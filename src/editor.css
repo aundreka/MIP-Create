@@ -2370,6 +2370,316 @@ svg {
   cursor: pointer;
 }
 
+/* ---- QA checker (created vs Figma mockup) ---- */
+.qac-modal {
+  width: min(1240px, 96vw);
+}
+.qac-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.qac-toolbar .scope-label {
+  color: var(--muted);
+  font-size: 12px;
+}
+.qac-toolbar .spacer {
+  flex: 1;
+}
+.qac-toolbar .scope-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.qac-thresh {
+  font-size: 12px;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--input-bg);
+  color: var(--ink);
+}
+.qac-opacity {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.qac-opacity input[type='range'] {
+  width: 110px;
+}
+.qac-opacity .qac-end {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.qac-opacity .qac-pct {
+  min-width: 34px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.qac-layers {
+  position: relative;
+}
+.qac-zoom {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+}
+.qac-ghost {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  pointer-events: none;
+}
+.qac-mask {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  image-rendering: pixelated;
+}
+.qac-region {
+  position: absolute;
+  border: 2px solid #ff0080;
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.65);
+  pointer-events: none;
+}
+.qac-region span {
+  position: absolute;
+  top: -9px;
+  left: -9px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: #ff0080;
+  border-radius: 9px;
+}
+.qac-region.focus {
+  border-color: #ffd400;
+  z-index: 3;
+}
+/* animated zone (pulsing CTA, timer…) — excluded from the score */
+.qac-anim {
+  position: absolute;
+  border: 2px dashed #3b82f6;
+  border-radius: 3px;
+  background: rgba(59, 130, 246, 0.1);
+  pointer-events: none;
+}
+.qac-anim span {
+  position: absolute;
+  top: -9px;
+  right: -2px;
+  height: 16px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #fff;
+  background: #3b82f6;
+  border-radius: 8px;
+}
+.qac-region.focus span {
+  background: #ffd400;
+  color: #000;
+}
+.qac-catch {
+  position: absolute;
+  inset: 0;
+  cursor: crosshair;
+  z-index: 4;
+}
+.qac-cross {
+  position: absolute;
+  pointer-events: none;
+}
+.qac-cross .h,
+.qac-cross .v {
+  position: absolute;
+  background: rgba(255, 0, 128, 0.85);
+}
+.qac-cross .h {
+  left: -11px;
+  top: -0.5px;
+  width: 22px;
+  height: 1px;
+}
+.qac-cross .v {
+  top: -11px;
+  left: -0.5px;
+  width: 1px;
+  height: 22px;
+}
+.qac-cross.hover .h,
+.qac-cross.hover .v {
+  background: rgba(255, 255, 255, 0.8);
+  mix-blend-mode: difference;
+}
+.qac-grip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  z-index: 5;
+  background: linear-gradient(135deg, transparent 50%, var(--accent, #4a86ff) 50%);
+  border-radius: 0 0 var(--r-lg) 0;
+  opacity: 0.7;
+}
+.qac-grip:hover {
+  opacity: 1;
+}
+.qac-dropzone {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--accent, #4a86ff) 14%, var(--bg) 60%);
+  border: 2px dashed var(--accent, #4a86ff);
+  border-radius: inherit;
+  backdrop-filter: blur(2px);
+}
+.qac-drop {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  background: var(--input-bg);
+  border: 1px dashed var(--line);
+  cursor: pointer;
+}
+.qac-drop:hover {
+  color: var(--ink);
+  border-color: var(--accent, #4a86ff);
+}
+.qac-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+  min-height: 36px;
+  font-size: 12px;
+}
+.qac-pickinfo,
+.qac-diffinfo {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-family: var(--mono, ui-monospace, monospace);
+}
+.qac-swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  display: inline-block;
+}
+.qac-vs {
+  color: var(--muted);
+}
+.qac-verdict.match {
+  color: #22a559;
+}
+.qac-verdict.close {
+  color: #d99a00;
+}
+.qac-verdict.different {
+  color: #e5484d;
+}
+.qac-msg {
+  color: var(--muted);
+}
+.qac-score {
+  font-size: 13px;
+  padding: 3px 10px;
+  border-radius: var(--r-pill);
+  color: #fff;
+}
+.qac-score.good {
+  background: #22a559;
+}
+.qac-score.ok {
+  background: #d99a00;
+}
+.qac-score.bad {
+  background: #e5484d;
+}
+.qac-animnote {
+  color: var(--muted);
+}
+.qac-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 6px;
+  color: var(--muted);
+}
+.qac-legend i {
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  display: inline-block;
+}
+.qac-legend .mis {
+  background: rgba(255, 0, 128, 0.8);
+  border: 1px solid #ff0080;
+}
+.qac-legend .anim {
+  background: rgba(59, 130, 246, 0.25);
+  border: 1px dashed #3b82f6;
+}
+.export-qa {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  margin: 8px 0;
+  border: 1px dashed var(--line);
+  border-radius: var(--r-sm);
+}
+.export-qa .hint {
+  flex: 1;
+}
+.export-qa button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
 /* ---- flow preview (storyboard of scenes + transitions) ---- */
 .flow-preview {
   margin-bottom: 12px;
@@ -2593,8 +2903,8 @@ svg {
   gap: 12px;
 }
 .home-new {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
   margin-bottom: 18px;
 }
@@ -2603,10 +2913,9 @@ svg {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  width: 170px;
-  height: 96px;
-  border: 1px dashed var(--line);
+  gap: 8px;
+  height: 88px;
+  border: 1px solid var(--line);
   border-radius: var(--r-lg);
   background: var(--input-bg);
   color: var(--ink);
@@ -2619,7 +2928,6 @@ svg {
   color: var(--ink);
 }
 .new-card.blank {
-  border-style: solid;
   background: var(--surface-sunken);
 }
 .new-card .plus {

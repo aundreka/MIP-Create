@@ -405,6 +405,24 @@ ipcMain.handle('runtime:read', () => {
   }
 })
 
+// Capture a rect of the app window (DIP page coordinates) as a PNG data URL.
+// Used by the QA checker to read rendered pixels out of the playable iframe
+// (its data: origin is opaque, so canvas readback isn't possible in-renderer).
+ipcMain.handle('capture:rect', async (e, rect) => {
+  try {
+    const r = {
+      x: Math.max(0, Math.round(rect.x)),
+      y: Math.max(0, Math.round(rect.y)),
+      width: Math.max(1, Math.round(rect.width)),
+      height: Math.max(1, Math.round(rect.height)),
+    }
+    const img = await e.sender.capturePage(r)
+    return { ok: true, dataUrl: img.toDataURL() }
+  } catch (err) {
+    return { ok: false, error: String(err) }
+  }
+})
+
 app.whenReady().then(() => {
   createWindow()
   app.on('activate', () => {

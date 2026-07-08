@@ -10,6 +10,7 @@ import { PICK_TEMPLATE } from './pick'
 import { DRAG_TEMPLATE } from './drag'
 import { BUBBLES_TEMPLATE } from './bubbles'
 import { FLIPMATCH_TEMPLATE } from './flipmatch'
+import { MEMORYMATCH_TEMPLATE } from './memorymatch'
 import { SORT_TEMPLATE } from './sort'
 import { SLIDER_TEMPLATE } from './slider'
 import { SPINCATCH_TEMPLATE } from './spincatch'
@@ -28,6 +29,7 @@ import { EMBED_TEMPLATE } from './embed'
 
 export const GAME_TEMPLATES: GameTemplate[] = [
   FLIPMATCH_TEMPLATE,
+  MEMORYMATCH_TEMPLATE,
   MATCH_TEMPLATE,
   SORT_TEMPLATE,
   MERGE_TEMPLATE,

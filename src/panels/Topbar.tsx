@@ -35,6 +35,7 @@ export function Topbar(props: {
   onProjectSettings: () => void
   onExport: () => void
   onQa: () => void
+  onQaCheck: () => void
   onShare: () => void
 }): JSX.Element {
   const { orientation, dirty, projectPath, canUndo, canRedo, scene } = useEditorState()
@@ -95,6 +96,7 @@ export function Topbar(props: {
     { label: 'Project settings…', onClick: props.onProjectSettings },
     { label: 'Share / import by code…', onClick: props.onShare },
     { label: 'QA & reports…', onClick: props.onQa },
+    { label: 'QA checker (vs Figma mockup)…', onClick: props.onQaCheck },
     { label: 'Profile…', onClick: props.onProfile },
     { label: theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme', onClick: () => toggleTheme() },
   ]

@@ -11,9 +11,9 @@ import { extractTheme } from '../brandTheme'
 import { buildMip, type UploadAsset } from '../mipGen'
 import { DEFAULT_THEME, type BgStyle, type Theme } from '../svgAssets'
 import { ColorField, Modal, Select, Toggle } from '../ui'
-import { Icon, Upload } from '../icons'
+import { Icon, ScanSearch, Upload } from '../icons'
 
-export function GenerateMip(props: { onClose: () => void }): JSX.Element {
+export function GenerateMip(props: { onClose: () => void; onQaCheck?: () => void }): JSX.Element {
   const [name, setName] = useState('New MIP')
   const [logo, setLogo] = useState<UploadAsset & { preview: string }>()
   const [product, setProduct] = useState<UploadAsset & { preview: string }>()
@@ -24,6 +24,7 @@ export function GenerateMip(props: { onClose: () => void }): JSX.Element {
   const [endDate, setEndDate] = useState(false)
   const [endTimer, setEndTimer] = useState(true)
   const [busy, setBusy] = useState(false)
+  const [done, setDone] = useState(false)
   const set = (patch: Partial<Theme>): void => setTheme((t) => ({ ...t, ...patch }))
 
   const pickLogo = async (): Promise<void> => {
@@ -51,10 +52,27 @@ export function GenerateMip(props: { onClose: () => void }): JSX.Element {
         endscene: { dynamicDate: endDate, timer: endTimer, badge: decor },
       })
       await createProject({ project, assets })
-      props.onClose()
+      // Last step: offer the QA checker so the fresh MIP can be lined up
+      // against the Figma mockup and adjusted right away.
+      if (props.onQaCheck) setDone(true)
+      else props.onClose()
     } finally {
       setBusy(false)
     }
+  }
+
+  if (done) {
+    return (
+      <Modal title="Generate MIP — QA check" onClose={props.onClose} size="sm">
+        <p className="hint pad">Your MIP is ready. Compare it against the Figma mockup and adjust what's off.</p>
+        <div className="quiz-gen-foot">
+          <button onClick={props.onClose}>Skip</button>
+          <button className="primary" onClick={props.onQaCheck}>
+            <Icon icon={ScanSearch} size={14} /> Open QA checker
+          </button>
+        </div>
+      </Modal>
+    )
   }
 
   return (

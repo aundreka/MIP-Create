@@ -76,6 +76,7 @@ interface NativeAPI {
   ): Promise<{ ok: boolean; dataUrl?: string; bytes?: number; reencoded?: boolean; error?: string }>
   readRuntimeSrc?(): Promise<{ ok: boolean; src?: string; error?: string }>
   compressHtml?(html: string): Promise<{ ok: boolean; html?: string; bytes?: number; error?: string }>
+  captureRect?(rect: { x: number; y: number; width: number; height: number }): Promise<{ ok: boolean; dataUrl?: string; error?: string }>
   applovinOpen?(url: string): Promise<{ ok: boolean; error?: string }>
   applovinProbe?(opts: { url?: string; addButtonText?: string; uploadButtonText?: string }): Promise<ApplovinProbe>
   applovinUpload?(opts: ApplovinUploadOpts): Promise<{ ok: boolean; files?: number; submitted?: boolean; error?: string }>
@@ -85,6 +86,20 @@ const native: NativeAPI | undefined = (window as unknown as { editorAPI?: Native
 export const hasNative = !!native
 export const canTranscode = !!native?.transcodeMedia
 export const canApplovin = !!native?.applovinUpload
+export const canCapture = !!native?.captureRect
+
+/** Capture a rect of the app window (viewport CSS px) to a PNG data URL.
+ * Desktop only — the QA checker uses it to read pixels from the playable
+ * iframe, whose data: origin blocks in-renderer canvas readback. */
+export async function captureRect(rect: { x: number; y: number; width: number; height: number }): Promise<string | null> {
+  if (!native?.captureRect) return null
+  try {
+    const r = await native.captureRect(rect)
+    return r.ok && r.dataUrl ? r.dataUrl : null
+  } catch {
+    return null
+  }
+}
 export const platformLabel = native ? 'desktop' : 'browser'
 
 /** Open (or focus) the AppLovin upload site in a persistent-session window so the

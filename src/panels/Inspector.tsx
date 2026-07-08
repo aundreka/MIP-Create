@@ -69,9 +69,17 @@ function ElementSound(props: { el: SceneElement }): JSX.Element {
   // Trigger options grow with the element: scratch covers add a looped "while
   // scratching" sound; reveal targets add a "when revealed" one-shot.
   const isScratching = el.scratch || el.game?.templateId === 'scratch' || el.game?.templateId === 'scratch_grid'
+  const isFlipping = el.game?.templateId === 'memorymatch' || el.game?.templateId === 'flipmatch'
   const eventOptions = [
     { value: 'tap', label: 'On tap' },
     { value: 'sceneEnter', label: 'On scene enter' },
+    ...(isFlipping
+      ? [
+          { value: 'flip', label: 'On card flip' },
+          { value: 'correct', label: 'On pair found' },
+          { value: 'wrong', label: 'Incorrect pair' },
+        ]
+      : []),
     ...(isScratching ? [{ value: 'whileScratching', label: 'While scratching (loop)' }] : []),
     ...(isScratching || el.reveal ? [{ value: 'onReveal', label: 'When revealed / win' }] : []),
     ...(el.type === 'unboxing' ? [
@@ -80,7 +88,7 @@ function ElementSound(props: { el: SceneElement }): JSX.Element {
       { value: 'onLose', label: 'On lose' },
     ] : []),
   ]
-  const defaultEvent = el.reveal ? 'onReveal' : isScratching ? 'whileScratching' : 'tap'
+  const defaultEvent = el.reveal ? 'onReveal' : isScratching ? 'whileScratching' : isFlipping ? 'flip' : 'tap'
   const pick = (assetId: string): void => {
     if (chooser == null) return
     if (chooser >= binds.length) setBinds([...binds, { event: defaultEvent, assetId }])
@@ -1035,7 +1043,10 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                   Add hint hand (editable)
                 </button>
               )}
-              <NumField label="Hint after (ms)" value={el.game?.hintIdleMs ?? 4000} step={500} onChange={(n) => patchElement(id, { game: { ...(el.game ?? { templateId: tpl.id, params: {} }), hintIdleMs: n } })} />
+              <Toggle label="Hint hand (points at the next move)" checked={el.game?.hintEnabled !== false} onChange={(v) => patchElement(id, { game: { ...(el.game ?? { templateId: tpl.id, params: {} }), hintEnabled: v } })} />
+              {el.game?.hintEnabled !== false && (
+                <NumField label="Hint after (ms)" value={el.game?.hintIdleMs ?? 4000} step={500} onChange={(n) => patchElement(id, { game: { ...(el.game ?? { templateId: tpl.id, params: {} }), hintIdleMs: n } })} />
+              )}
               <div className="hint pad">Games are interactive in Preview/export; the canvas shows a static layout. Mark a CTA/text "Show on game win" to reveal it on win.</div>
             </Accordion>
           )
@@ -1179,6 +1190,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                     { value: 'tap', label: 'Tap (bounce in place)' },
                     { value: 'slide', label: 'Slide along a path' },
                     { value: 'scratch', label: 'Scratch (back-and-forth rub)' },
+                    { value: 'match', label: 'Match pairs (follow the game’s next card)' },
                   ]}
                 />
               </Row>
