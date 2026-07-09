@@ -318,6 +318,16 @@ export function playProject(
       overStage.playEntrances()
       overlayStages.add(overStage)
 
+      // Lift the overlay scene's OWN "top layer" (overlayTop) elements OUT of overlayDiv.
+      // overlayDiv is a z:9000 stacking context, so anything inside it — including overlay
+      // confetti — is trapped below the game's immune header/logo that were pulled up to
+      // z:10000. Re-parent those top-layer nodes into stageContainer at z:10050 so they
+      // render ABOVE the immune header/logo. They stay full-screen (their .pa-el uses
+      // left/top/width/height:100%), keep animating (same DOM node), and relayout() keeps
+      // their z (stage.ts sets 10050 for floated overlayTop). Removed on teardown.
+      const overTopEls = Array.from(overStage.root.querySelectorAll<HTMLElement>('.pa-el--immune-top'))
+      overTopEls.forEach((el) => { el.style.zIndex = '10050'; stageContainer.appendChild(el) })
+
       let dismissed = false
       const restoreImmune = (): void => {
         immuneEls.forEach((el, i) => {
@@ -329,7 +339,8 @@ export function playProject(
       }
       const removeOverlayDom = (): void => {
         overlayStages.delete(overStage)
-        overStage.destroy()
+        overStage.destroy() // stops confetti/games; won't remove the lifted nodes (moved out of root)
+        overTopEls.forEach((el) => el.remove()) // tear down the re-parented top-layer nodes
         overlayDiv.remove()
         coverPairs.forEach((p) => { overlayCovers.delete(p); p.cover.remove() })
       }
