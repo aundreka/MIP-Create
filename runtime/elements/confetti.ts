@@ -62,6 +62,7 @@ export function createConfetti(canvas: HTMLCanvasElement, getEl: () => SceneElem
   let dpr = 1
   let mode: 'live' | 'static' | 'idle' = 'idle'
   let waitRaf = 0 // rAF id for the "wait until laid out" retry (bounded)
+  let prevT = 0 // timestamp of the last frame, for delta-time normalization
 
   const cfg = (): ConfettiConfig => getEl().confetti ?? {}
 
@@ -185,16 +186,22 @@ export function createConfetti(canvas: HTMLCanvasElement, getEl: () => SceneElem
     const emitting = burst ? false : c.recycle !== false && (!(c.durationMs && c.durationMs > 0) || now - emitStart < c.durationMs)
     let alive = 0
 
+    // Delta-time factor normalized to 60fps, so speed is independent of the display's
+    // refresh rate (otherwise a 120Hz / uncapped Chromium runs ~2x faster than a
+    // vsync-capped 60Hz Chrome). Clamped so a backgrounded tab can't teleport pieces.
+    const k = Math.min(3, (prevT ? now - prevT : 16.667) / 16.667)
+    prevT = now
+
     for (const p of pieces) {
       if (p.dead) continue
-      p.tilt += p.tiltInc
-      p.rot += p.spin
-      p.vy += g
-      p.vx += wind * 0.03
-      if (burst) p.vx *= 0.985
-      p.x += p.vx + Math.sin(p.tilt) * p.wobble * s
-      p.y += p.vy
-      if (p.fade) p.alpha -= p.fade
+      p.tilt += p.tiltInc * k
+      p.rot += p.spin * k
+      p.vy += g * k
+      p.vx += wind * 0.03 * k
+      if (burst) p.vx *= Math.pow(0.985, k)
+      p.x += (p.vx + Math.sin(p.tilt) * p.wobble * s) * k
+      p.y += p.vy * k
+      if (p.fade) p.alpha -= p.fade * k
 
       const off = p.y - p.sz > H || p.x < -p.sz * 4 || p.x > W + p.sz * 4 || p.alpha <= 0.02
       if (off) {
@@ -231,6 +238,7 @@ export function createConfetti(canvas: HTMLCanvasElement, getEl: () => SceneElem
       mode = 'live'
       running = true
       emitStart = performance.now()
+      prevT = 0 // first frame uses a 1.0 factor rather than a huge dt
       seed(cfg().mode !== 'burst') // rain staggers pieces across the height at t=0
       raf = requestAnimationFrame(step)
     })
