@@ -23,6 +23,7 @@ const DATE_OPTS: Record<string, Intl.DateTimeFormatOptions> = {
   short: { month: 'short', day: 'numeric', year: 'numeric' }, // Jun 24, 2026
   long: { month: 'long', day: 'numeric', year: 'numeric' }, // June 24, 2026
   numeric: { year: 'numeric', month: '2-digit', day: '2-digit' }, // 2026/06/24
+  monthDay: { month: 'long', day: 'numeric' }, // June 24
 }
 
 /** A live ticker is only needed when the display changes by the second/minute/hour
@@ -39,14 +40,32 @@ export function formatCountdown(el: SceneElement, deadline: number, now: number)
   const h = Math.floor(total / 3600000) % 24
   const m = Math.floor(total / 60000) % 60
   const s = Math.floor(total / 1000) % 60
+  const locale = el.countdown?.dateLocale || 'en-US'
+  const target = new Date(deadline)
   let dateStr = ''
   try {
-    dateStr = new Date(deadline).toLocaleDateString('en-US', DATE_OPTS[el.countdown?.dateStyle ?? 'short'] ?? DATE_OPTS.short)
+    dateStr = target.toLocaleDateString(locale, DATE_OPTS[el.countdown?.dateStyle ?? 'short'] ?? DATE_OPTS.short)
   } catch {
     dateStr = ''
   }
+  // Localized month name for the {MMMM}/{MMM} date-part tokens.
+  const monthName = (style: 'long' | 'short'): string => {
+    try {
+      return target.toLocaleDateString(locale, { month: style })
+    } catch {
+      return ''
+    }
+  }
   const out = fmt
     .replace(/\{date\}/g, dateStr)
+    .replace(/\{MMMM\}/g, monthName('long'))
+    .replace(/\{MMM\}/g, monthName('short'))
+    .replace(/\{MM\}/g, pad(target.getMonth() + 1))
+    .replace(/\{M\}/g, String(target.getMonth() + 1))
+    .replace(/\{DD\}/g, pad(target.getDate()))
+    .replace(/\{D\}/g, String(target.getDate()))
+    .replace(/\{YYYY\}/g, String(target.getFullYear()))
+    .replace(/\{YY\}/g, pad(target.getFullYear() % 100))
     .replace(/\{dd\}/g, pad(d))
     .replace(/\{hh\}/g, pad(h))
     .replace(/\{mm\}/g, pad(m))

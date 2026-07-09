@@ -211,14 +211,17 @@ export interface BoxStyle {
 // A live countdown / dynamic date. 'timer' counts down `seconds` from load;
 // 'date' counts to a fixed `targetIso`; 'dynamic' targets (now + dynamicDays) so
 // the date auto-updates whenever the ad runs. `format` is a token string:
-// {d}{h}{m}{s} (raw) / {dd}{hh}{mm}{ss} (2-digit) / {date} (localized date).
+// {d}{h}{m}{s} (raw) / {dd}{hh}{mm}{ss} (2-digit) / {date} (localized date) /
+// date parts of the target date: {MMMM} July, {MMM} Jul, {M}/{MM} 7/07,
+// {D}/{DD} 12/12, {YYYY}/{YY} — month names follow dateLocale.
 export interface CountdownConfig {
   mode: 'timer' | 'date' | 'dynamic'
   seconds?: number
   targetIso?: string
   dynamicDays?: number
   format: string
-  dateStyle?: 'short' | 'long' | 'numeric' // how {date} renders
+  dateStyle?: 'short' | 'long' | 'numeric' | 'monthDay' // how {date} renders
+  dateLocale?: string // BCP-47 tag for {date} rendering (default 'en-US')
   capitalize?: boolean // upper-case the first letter of every word in the rendered text
 }
 

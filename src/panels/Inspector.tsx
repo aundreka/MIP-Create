@@ -1358,6 +1358,19 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                       { value: 'short', label: 'Jun 24, 2026' },
                       { value: 'long', label: 'June 24, 2026' },
                       { value: 'numeric', label: '2026/06/24' },
+                      { value: 'monthDay', label: 'June 24' },
+                    ]}
+                  />
+                </Row>
+              )}
+              {(cfg.format.includes('{date}') || cfg.format.includes('{MMM')) && (
+                <Row label="Date language">
+                  <Select
+                    value={cfg.dateLocale ?? 'en-US'}
+                    onChange={(v) => setCd({ dateLocale: v })}
+                    options={[
+                      { value: 'en-US', label: 'English' },
+                      { value: 'es', label: 'Español (12 de julio)' },
                     ]}
                   />
                 </Row>
@@ -1365,7 +1378,9 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               <Toggle label="Capitalize text" checked={!!cfg.capitalize} onChange={(v) => setCd({ capitalize: v || undefined })} />
               <div className="hint pad">
                 <b>Timer</b> tokens (live): <b>{'{hh}:{mm}:{ss}'}</b> / <b>{'{d} {h} {m} {s}'}</b>. <b>Date</b> label (no ticking):{' '}
-                <b>{'{date}'}</b>, e.g. "Order by {'{date}'}". "Dynamic" recomputes from today whenever the ad runs.
+                <b>{'{date}'}</b>, e.g. "Order by {'{date}'}", or build your own from parts: <b>{'{MMMM}'}</b> July, <b>{'{MMM}'}</b> Jul,{' '}
+                <b>{'{M}/{MM}'}</b> 7/07, <b>{'{D}/{DD}'}</b> day, <b>{'{YYYY}/{YY}'}</b> year — e.g. "Ends {'{MMMM} {D}'}" → "Ends July 12".
+                "Dynamic" recomputes from today whenever the ad runs.
               </div>
             </Accordion>
           )
