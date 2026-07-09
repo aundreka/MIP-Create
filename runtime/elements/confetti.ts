@@ -206,7 +206,11 @@ export function createConfetti(canvas: HTMLCanvasElement, getEl: () => SceneElem
       const off = p.y - p.sz > H || p.x < -p.sz * 4 || p.x > W + p.sz * 4 || p.alpha <= 0.02
       if (off) {
         if (emitting) {
-          Object.assign(p, makeRainPiece(palette(), false)) // recycle at the top
+          // Recycle SPREAD across a screen-height above the top (stagger=true), not a
+          // thin line — otherwise the initial clump exits and re-enters coherently,
+          // producing bands of confetti separated by empty gaps. Staggering the
+          // re-entry height decoheres the group into a steady, continuous stream.
+          Object.assign(p, makeRainPiece(palette(), true))
           alive++
         } else {
           p.dead = true
