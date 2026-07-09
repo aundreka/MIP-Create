@@ -33,6 +33,7 @@ export type ElementType =
   | 'game-mount'
   | 'endscene'
   | 'unboxing'
+  | 'confetti'
 
 export type ObjectFit = 'contain' | 'cover'
 
@@ -373,6 +374,27 @@ export interface SyncConfig {
   scope: 'scene' | 'all'
 }
 
+// Full-screen celebratory confetti overlay. A self-contained canvas particle system
+// ported from the react-confetti model (fluttering, drifting, spinning rectangles +
+// circles) — no npm dependency. 'rain' falls from the top; 'burst' explodes from a
+// point (originX/originY). It animates only during interactive playback
+// (Preview/export); the editor canvas shows a single frozen frame so it can be placed.
+export interface ConfettiConfig {
+  mode?: 'rain' | 'burst'
+  trigger?: 'sceneEnter' | 'onGameWin' // when it fires (default sceneEnter)
+  pieces?: number // particle count (default 200)
+  colors?: string[] // palette (default a Material-ish 16-colour set)
+  gravity?: number // downward acceleration per frame (default 0.08 rain / 0.28 burst)
+  wind?: number // constant horizontal drift (default 0)
+  spread?: number // initial horizontal velocity range, rain (default 5)
+  power?: number // launch/fall speed (default 8 rain / 9 burst)
+  scalar?: number // piece-size multiplier (default 1)
+  recycle?: boolean // rain: keep respawning pieces so it never runs out (default true)
+  durationMs?: number // rain+recycle: emit for N ms then let it fall out (0/unset = forever)
+  originX?: number // burst origin X, % of width (default 50)
+  originY?: number // burst origin Y, % of height (default 45)
+}
+
 export interface GameMountConfig {
   templateId: string
   params: Record<string, unknown>
@@ -390,6 +412,10 @@ export interface BackgroundConfig {
   // whole (wider) screen.
   focusX?: number
   focusY?: number
+  // Extra zoom applied on top of the object-fit crop. 1 = none; >1 zooms IN around
+  // the focal point (portrait) / center (landscape); <1 zooms out (may reveal the
+  // scene background at the edges). Overflow beyond the screen is clipped.
+  zoom?: number
 }
 
 // Header/footer bar (or, in 'fit' mode, a rectangle). Fill with a solid colour
@@ -435,6 +461,7 @@ export interface SceneElement {
   hidden?: boolean
   locked?: boolean // not selectable/movable on the editor canvas
   overlayImmune?: boolean // always rendered above in-game overlays (e.g. scratch-grid lose/win)
+  hideOnOverlay?: boolean // hidden while a floating overlay (win/lose card) is up over this scene
   groupId?: string // elements sharing a groupId select/move/scale together
   showOnWin?: boolean // revealed when the mounted game completes (endcard seed)
   rotation?: number
@@ -469,6 +496,7 @@ export interface SceneElement {
   fill?: FillConfig
   generate?: GenerateConfig
   unboxing?: UnboxingConfig
+  confetti?: ConfettiConfig
 }
 
 export interface HeaderConfig {

@@ -297,6 +297,13 @@ export function playProject(
         overlayCovers.add(pair) // relayout() re-syncs it to the bar on resize
       })
 
+      // Elements opted into "hide on overlay" vanish for the overlay's lifetime, then
+      // restore their prior inline display on dismiss. Saved individually so an element
+      // already hidden (display:none) is left hidden on restore.
+      const hideEls = Array.from(gameRoot.querySelectorAll<HTMLElement>('.pa-el--hide-on-overlay'))
+      const savedDisplay = hideEls.map((el) => el.style.display)
+      hideEls.forEach((el) => { el.style.display = 'none' })
+
       const overlayDiv = document.createElement('div')
       overlayDiv.style.cssText = 'position:absolute;inset:0;z-index:9000;pointer-events:all;'
       stageContainer.appendChild(overlayDiv)
@@ -315,6 +322,7 @@ export function playProject(
           el.style.zIndex = savedZ[i]
           el.style.transform = savedTransform[i]
         })
+        hideEls.forEach((el, i) => { el.style.display = savedDisplay[i] })
       }
       const removeOverlayDom = (): void => {
         overlayStages.delete(overStage)

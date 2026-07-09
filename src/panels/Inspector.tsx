@@ -2,7 +2,7 @@
 // single-element editor with a visual Background-box section.
 
 import { useState, useEffect } from 'react'
-import type { Anchor, AdvanceOn, AnimPresetId, AnimSpec, AnimTrigger, BackgroundConfig, BoxStyle, CountdownConfig, CtaPulsePreset, EndsceneConfig, HandguideConfig, HandguideNode, KeyframeStep, LayoutMode, ObjectFit, SceneElement, SceneKind, SceneOverlay, SfxBinding, ShadowPreset, TextConfig, TransitionType, UnboxingConfig } from '../../runtime/scene'
+import type { Anchor, AdvanceOn, AnimPresetId, AnimSpec, AnimTrigger, BackgroundConfig, BoxStyle, ConfettiConfig, CountdownConfig, CtaPulsePreset, EndsceneConfig, HandguideConfig, HandguideNode, KeyframeStep, LayoutMode, ObjectFit, SceneElement, SceneKind, SceneOverlay, SfxBinding, ShadowPreset, TextConfig, TransitionType, UnboxingConfig } from '../../runtime/scene'
 import { GAME_TEMPLATES } from '../../runtime/games/registry'
 import type { ParamField } from '../../runtime/games/types'
 import { importFont } from '../bridge'
@@ -839,6 +839,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
       {el.type !== 'cta' && (
         <Toggle label="Above overlays" checked={!!el.overlayImmune} onChange={(v) => patchElement(id, { overlayImmune: v || undefined })} />
       )}
+      <Toggle label="Hide on overlay" checked={!!el.hideOnOverlay} onChange={(v) => patchElement(id, { hideOnOverlay: v || undefined })} />
 
       {!activeVariant && (
         <>
@@ -913,7 +914,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
         <NumField label="X" value={g.x} suffix="px" onChange={(n) => patchGeometry(id, { x: n })} />
         <NumField label="Y" value={g.y} suffix="px" onChange={(n) => patchGeometry(id, { y: n })} />
       </div>
-      {el.type === 'text' || el.type === 'countdown' || el.type === 'background' || (el.type === 'endscene' && g.mode === 'extend') ? null : el.type === 'bar' && g.mode === 'extend' ? (
+      {el.type === 'text' || el.type === 'countdown' || el.type === 'background' || el.type === 'confetti' || (el.type === 'endscene' && g.mode === 'extend') ? null : el.type === 'bar' && g.mode === 'extend' ? (
         <NumField label="Height" value={g.h} suffix="px" onChange={(n) => patchGeometry(id, { h: n })} />
       ) : g.w != null && g.h != null ? (
         <div className="grid2">
@@ -1460,6 +1461,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                   ]}
                 />
               </Row>
+              <Slider label="Zoom" value={bg.zoom ?? 1} min={0.5} max={4} step={0.05} suffix="×" onChange={(n) => setBg({ zoom: n === 1 ? undefined : n })} />
               {fit === 'cover' && (
                 <>
                   <Slider label="Crop X (portrait)" value={Math.round(bg.focusX ?? 50)} min={0} max={100} suffix="%" onChange={(n) => setBg({ focusX: n })} />
@@ -1573,6 +1575,75 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
         })()}
 
       {el.type === 'unboxing' && <UnboxingInspector el={el} />}
+
+      {el.type === 'confetti' && (() => {
+        const cfg: ConfettiConfig = el.confetti ?? {}
+        const set = (p: Partial<ConfettiConfig>): void => patchElement(id, { confetti: { ...cfg, ...p } })
+        const mode = cfg.mode ?? 'rain'
+        return (
+          <Accordion id="inspector.confetti" title="Confetti">
+            <Row label="Style">
+              <Chips
+                items={[
+                  { key: 'rain', label: 'Rain', active: mode === 'rain', onClick: () => set({ mode: 'rain' }) },
+                  { key: 'burst', label: 'Burst', active: mode === 'burst', onClick: () => set({ mode: 'burst' }) },
+                ]}
+              />
+            </Row>
+            <Row label="Fires">
+              <Select
+                value={cfg.trigger ?? 'sceneEnter'}
+                onChange={(v) => set({ trigger: v as ConfettiConfig['trigger'] })}
+                options={[
+                  { value: 'sceneEnter', label: 'when scene appears' },
+                  { value: 'onGameWin', label: 'when game is won' },
+                ]}
+              />
+            </Row>
+            <Slider label="Pieces" value={cfg.pieces ?? 200} min={20} max={600} step={10} onChange={(n) => set({ pieces: n })} />
+            <Slider label="Size" value={cfg.scalar ?? 1} min={0.4} max={3} step={0.1} suffix="×" onChange={(n) => set({ scalar: n })} />
+            <Slider label="Power" value={cfg.power ?? (mode === 'burst' ? 9 : 8)} min={2} max={20} step={0.5} onChange={(n) => set({ power: n })} />
+            <Slider label="Gravity" value={cfg.gravity ?? (mode === 'burst' ? 0.28 : 0.08)} min={0} max={0.6} step={0.02} onChange={(n) => set({ gravity: n })} />
+            <Slider label="Wind" value={cfg.wind ?? 0} min={-6} max={6} step={0.5} onChange={(n) => set({ wind: n || undefined })} />
+            {mode === 'rain' ? (
+              <>
+                <Slider label="Spread" value={cfg.spread ?? 5} min={0} max={20} step={0.5} onChange={(n) => set({ spread: n })} />
+                <Toggle label="Continuous (keep raining)" checked={cfg.recycle !== false} onChange={(v) => set({ recycle: v })} />
+                {cfg.recycle !== false && (
+                  <NumField label="Emit for (ms, 0 = forever)" value={cfg.durationMs ?? 0} step={250} min={0} onChange={(n) => set({ durationMs: n || undefined })} />
+                )}
+              </>
+            ) : (
+              <div className="grid2">
+                <Slider label="Origin X" value={cfg.originX ?? 50} min={0} max={100} suffix="%" onChange={(n) => set({ originX: n })} />
+                <Slider label="Origin Y" value={cfg.originY ?? 45} min={0} max={100} suffix="%" onChange={(n) => set({ originY: n })} />
+              </div>
+            )}
+            <Row label="Colours">
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                {(cfg.colors ?? []).map((c, i) => (
+                  <button
+                    key={c + i}
+                    className="swatch-dot"
+                    title={`${c} — click to remove`}
+                    style={{ background: c }}
+                    onClick={() => set({ colors: (cfg.colors ?? []).filter((_, j) => j !== i) })}
+                  />
+                ))}
+                <label className="swatch-dot" title="Add colour" style={{ display: 'grid', placeItems: 'center', cursor: 'pointer' }}>
+                  +
+                  <input type="color" style={{ display: 'none' }} onChange={(e) => set({ colors: [...(cfg.colors ?? []), e.target.value] })} />
+                </label>
+                {cfg.colors && cfg.colors.length > 0 && (
+                  <button className="mini" onClick={() => set({ colors: undefined })}>Reset</button>
+                )}
+              </div>
+            </Row>
+            {(!cfg.colors || cfg.colors.length === 0) && <div className="hint pad">Using the default multi-colour palette. Add colours to override it.</div>}
+            <div className="hint pad">Full-screen celebration overlay — always covers the whole screen (position &amp; size are ignored). It only animates in <b>Preview</b> / export; here you see a frozen sample. Use the layers panel to place it above your content.</div>
+          </Accordion>
+        )
+      })()}
 
       {hasTextStyle && (
         <Accordion id="inspector.box" title="Background box" defaultOpen={false}>

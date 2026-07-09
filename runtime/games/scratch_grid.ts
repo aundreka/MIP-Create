@@ -217,6 +217,28 @@ export function createScratchGrid(): GameModule {
     c2d.fillText('SCRATCH', w / 2, h / 2)
   }
 
+  // Snapshot the player's scratched-away holes as an OPAQUE mask so a backing-store
+  // realloc (an AppLovin orientation flip resizes the cell, which resets the bitmap) can
+  // re-punch them into the freshly repainted cover — preserving progress across rotation
+  // instead of resetting it. The mask is opaque exactly where the cover has been cleared
+  // (canvas alpha low) and transparent everywhere the cover still stands.
+  const captureScratchMask = (cell: CellState): HTMLCanvasElement | null => {
+    const { canvas } = cell
+    if (canvas.width < 2 || canvas.height < 2) return null
+    const m = document.createElement('canvas')
+    m.width = canvas.width
+    m.height = canvas.height
+    const mc = m.getContext('2d')
+    if (!mc) return null
+    // Fill opaque, then subtract wherever the cover is still present (high alpha) →
+    // opaque coverage remains ONLY over the cleared holes.
+    mc.fillStyle = '#000'
+    mc.fillRect(0, 0, m.width, m.height)
+    mc.globalCompositeOperation = 'destination-out'
+    mc.drawImage(canvas, 0, 0)
+    return m
+  }
+
   // Paint the reveal BACKGROUND onto its own canvas — same size + same fit math as the
   // cover, so the cover sits pixel-perfect over it (no leak). Runs in the editor too (the
   // reveal is visible there), independent of `started`.
@@ -312,9 +334,21 @@ export function createScratchGrid(): GameModule {
         fillCellReveal(cell)
       }
       if (w === canvas.width && h === canvas.height) continue
+      // The realloc below resets the bitmap, which would wipe in-progress scratching on an
+      // AppLovin rotation (the cell's device-pixel size changes → we land here). Snapshot
+      // the cleared holes BEFORE the reset, then re-punch them into the repainted cover so
+      // the player's progress survives the orientation flip instead of resetting.
+      const scratchMask = !won && started ? captureScratchMask(cell) : null
       canvas.width = w
       canvas.height = h
-      if (!won && started) fillCellCover(cell)
+      if (!won && started) {
+        fillCellCover(cell)
+        if (scratchMask) {
+          cell.c2d.globalCompositeOperation = 'destination-out'
+          cell.c2d.drawImage(scratchMask, 0, 0, w, h)
+          cell.c2d.globalCompositeOperation = 'source-over'
+        }
+      }
     }
   }
 

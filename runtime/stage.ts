@@ -24,6 +24,7 @@ import { localize } from './i18n'
 import { getPicks, isPicked, togglePick } from './selection'
 import { createEndsceneContent, updateEndsceneMedia } from './elements/endscene'
 import { applyUnboxingImages, createUnboxingContent } from './elements/unboxing'
+import { createConfetti, createConfettiContent, type ConfettiController } from './elements/confetti'
 import { computeDeadline, formatCountdown, needsTicker } from './elements/countdown'
 import { createGameHost, type GameHost } from './gameHost'
 import { mulberry32 } from './games/types'
@@ -40,6 +41,7 @@ interface Rec {
   deadline?: number // countdown target (ms epoch)
   ticker?: number // countdown setInterval id
   hg?: { stop(): void } // handguide animator
+  confetti?: ConfettiController // confetti particle system
 }
 
 // Animate a handguide element's image: loop a tap-bounce in place, or slide from
@@ -520,6 +522,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     const a = ctx.asset(el.assetId)
     const intrinsic = a ? { w: a.w, h: a.h } : { w: 100, h: 100 }
     const rec: Rec = { el, outer, anim, content, intrinsic }
+    if (el.type === 'confetti' && content) rec.confetti = createConfetti(content as HTMLCanvasElement, () => rec.el)
     recs.push(rec)
     byId.set(el.id, rec)
   }
@@ -552,6 +555,9 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
         runEntrance(rec)
       }
     }
+    for (const rec of recs)
+      if (rec.el.type === 'confetti' && rec.confetti && (rec.el.confetti?.trigger ?? 'sceneEnter') === 'onGameWin')
+        rec.confetti.start()
     emit('sfx', 'gameWin') // central win sound (every game template)
     emit('game-complete')
   }
@@ -561,6 +567,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     layoutAll() {
       for (const rec of recs) layoutRec(rec)
       for (const rec of recs) if (rec.host) rec.host.relayout()
+      for (const rec of recs) if (rec.confetti) rec.confetti.resize()
       for (const fn of postLayout) fn() // re-anchor imperatively-positioned mechanics (drag, …)
     },
     startGames(interactive) {
@@ -599,6 +606,14 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
           })
         } else if (rec.el.type === 'handguide' && interactive && !rec.hg && rec.content) {
           rec.hg = startHandguide(rec, recs, root)
+        } else if (rec.el.type === 'confetti' && rec.confetti) {
+          // Interactive: fire sceneEnter now (onGameWin waits for revealOnWin).
+          // Editor (non-interactive): paint one static frame so it's visible/placeable.
+          if (interactive) {
+            if ((rec.el.confetti?.trigger ?? 'sceneEnter') !== 'onGameWin') rec.confetti.start()
+          } else {
+            rec.confetti.renderStatic()
+          }
         }
       }
       // quiz/survey choices: options select (mutually exclusive within a group);
@@ -1006,6 +1021,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       for (const rec of recs) {
         rec.host?.destroy()
         rec.hg?.stop()
+        rec.confetti?.destroy()
         if (rec.ticker) window.clearInterval(rec.ticker)
       }
       root.remove()
@@ -1073,6 +1089,11 @@ function mountContent(el: SceneElement, anim: HTMLDivElement, ctx: RuntimeCtx): 
       anim.appendChild(c)
       return c
     }
+    case 'confetti': {
+      const c = createConfettiContent()
+      anim.appendChild(c)
+      return c
+    }
     case 'countdown': {
       // rendered like text (styled via el.text); the ticker sets the value
       const c = createTextContent(el)
@@ -1125,6 +1146,9 @@ function layoutRec(rec: Rec): void {
   outer.style.zIndex = floatedImmune ? '10000' : String(e.zIndex)
   // CTA is always immune; other elements opt in via overlayImmune
   outer.classList.toggle('pa-el--immune', rec.el.type === 'cta' || !!rec.el.overlayImmune)
+  // Elements that should disappear while a floating overlay is up (opt-in). The
+  // scene-overlay handler queries this class and hides them for the overlay's life.
+  outer.classList.toggle('pa-el--hide-on-overlay', !!rec.el.hideOnOverlay)
   outer.style.opacity = e.opacity != null ? String(e.opacity) : ''
 
   if (e.hidden) {
@@ -1162,6 +1186,15 @@ function layoutRec(rec: Rec): void {
       return
     case 'unboxing':
       layoutAsset(rec, e, 'fit')
+      return
+    case 'confetti':
+      // Always full-viewport (like the built-in dim/overlay) regardless of the
+      // element's x/y/w/h — the canvas rains/bursts across the whole screen.
+      outer.style.left = '0'
+      outer.style.top = '0'
+      outer.style.width = '100%'
+      outer.style.height = '100%'
+      outer.style.transform = 'none'
       return
     default:
       layoutAsset(rec, e, e.mode === 'extend' ? 'extend' : 'fit')
@@ -1474,6 +1507,11 @@ function layoutBackground(rec: Rec): void {
     const bg = rec.el.background
     img.style.objectFit = bg?.objectFit ?? 'cover'
     img.style.objectPosition = isLandscape() ? '50% 50%' : `${bg?.focusX ?? 50}% ${bg?.focusY ?? 50}%`
+    // Zoom pivots around the same focal point so zooming keeps the chosen subject
+    // centered; overflow past the screen is clipped by pa-root's overflow:hidden.
+    const zoom = bg?.zoom ?? 1
+    img.style.transformOrigin = isLandscape() ? '50% 50%' : `${bg?.focusX ?? 50}% ${bg?.focusY ?? 50}%`
+    img.style.transform = zoom !== 1 ? `scale(${zoom})` : ''
   }
 }
 
