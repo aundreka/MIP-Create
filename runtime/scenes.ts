@@ -97,6 +97,19 @@ export function playProject(
   // resize — otherwise the bar re-lays out but its backing rectangle keeps the mount-time size
   // and the header background appears mis-sized.
   const overlayCovers = new Set<{ cover: HTMLElement; el: HTMLElement }>()
+  // Re-copy each cover's geometry/background from its bar. Runs on relayout (resize),
+  // shortly after park (the bar's sampled image-edge color lands async, after the art
+  // decodes — the cover must not keep the bar.color fallback captured at mount), and
+  // at overlay-open.
+  const syncCovers = (): void => {
+    for (const { cover, el } of overlayCovers) {
+      cover.style.top = el.style.top
+      cover.style.left = el.style.left
+      cover.style.width = el.style.width
+      cover.style.height = el.style.height
+      cover.style.background = el.style.background
+    }
+  }
   // Immune elements are parked OUT of their scene's pa-root into pa-stage for the
   // scene's WHOLE life, not just while an overlay is up. Inside pa-root a
   // top-extended bar needs translateZ(0) to escape the root's overflow clip on
@@ -108,7 +121,7 @@ export function playProject(
   // used, which is confirmed artifact-free on AppLovin. relayout() still reaches
   // parked elements via current.stage.layoutAll(); applyBarExtend's inImmune
   // guard keeps translateZ off while parked.
-  const parkedByStage = new Map<StageHandle, HTMLElement[]>()
+  const parkedByStage = new Map<StageHandle, { els: HTMLElement[]; covers: { cover: HTMLElement; el: HTMLElement }[] }>()
   const parkImmune = (stage: StageHandle): void => {
     const els = Array.from(stage.root.querySelectorAll<HTMLElement>('.pa-el--immune'))
     els.forEach((el) => {
@@ -118,14 +131,44 @@ export function playProject(
       // style.transform returns the CSSOM-serialized value ("translateZ(0px)").
       el.style.transform = el.style.transform.replace(/\s*translateZ\(0(?:px)?\)/gi, '').trim() || 'none'
     })
-    if (els.length) parkedByStage.set(stage, els)
+    // Backing cover per fixed (edge-hugging) element, alive as long as the parking.
+    // Two jobs, both compositor-related: (1) it is PROMOTED (translateZ), so unlike
+    // un-promoted paint it reaches past the CSS viewport into the 1-3px physical gap
+    // AppLovin leaves at the screen edges — the gap reads as bar color (the faint
+    // "blue vignette") instead of body bg; (2) anything that forces the bar above it
+    // into an implicit compositor layer (e.g. an overlay's backdropFilter) now has the
+    // bar's layer edge anti-alias against SAME-COLORED cover instead of whatever is
+    // underneath. Geometry/background re-sync on relayout via overlayCovers.
+    const covers: { cover: HTMLElement; el: HTMLElement }[] = []
+    els.forEach((el) => {
+      if (el.style.position !== 'fixed') return
+      const cover = document.createElement('div')
+      cover.style.cssText =
+        `position:fixed;top:${el.style.top};left:${el.style.left};` +
+        `width:${el.style.width};height:${el.style.height};` +
+        `background:${el.style.background};z-index:9500;pointer-events:none;` +
+        `transform:translateZ(0);`
+      container.appendChild(cover)
+      const pair = { cover, el }
+      covers.push(pair)
+      overlayCovers.add(pair)
+    })
+    if (els.length) {
+      parkedByStage.set(stage, { els, covers })
+      // One-shot delayed syncs pick up the async sampled edge color (see syncCovers).
+      if (covers.length) {
+        window.setTimeout(syncCovers, 250)
+        window.setTimeout(syncCovers, 1200)
+      }
+    }
   }
   // Move a stage's parked elements back inside its root so they fade/slide out
   // WITH the scene (and are torn down by the root's destroy), then forget them.
   const unparkInto = (stage: StageHandle): void => {
-    const els = parkedByStage.get(stage)
-    if (els) {
-      els.forEach((el) => stage.root.appendChild(el))
+    const parked = parkedByStage.get(stage)
+    if (parked) {
+      parked.els.forEach((el) => stage.root.appendChild(el))
+      parked.covers.forEach((p) => { overlayCovers.delete(p); p.cover.remove() })
       parkedByStage.delete(stage)
     }
   }
@@ -289,30 +332,14 @@ export function playProject(
       // — parked there at scene mount (see parkImmune above), un-promoted, above the
       // overlay dim (z 9000) and below a redirecting scene (raised to 11000 below).
       // Nothing to move or restore here; they stay parked across the overlay's life.
-      const immuneEls = parkedByStage.get(current.stage) ?? []
-
-      // Cover divs sit at z:9500 — between overlayDiv (z:9000) and immune bar (z:10000).
-      // When the overlay scene has backdropFilter (from overlay.blurPx), Chrome GPU-promotes
-      // the element behind it (game pa-root) AND forces anything above the promoted overlayDiv
-      // (i.e. the immune bar at z:10000) into its own compositor layer — even after the
-      // translateZ strip. The bar's compositor layer edge then anti-aliases against the
-      // overlayDiv below it, picking up the overlay's background color (beige) as a 1px strip.
-      // The cover has the same position/size/background as the immune bar; the bar's compositor
-      // edge anti-aliases against the cover (dark navy) instead of the overlay's beige.
-      const coverPairs: { cover: HTMLElement; el: HTMLElement }[] = []
-      immuneEls.forEach((el) => {
-        if (el.style.position !== 'fixed') return
-        const cover = document.createElement('div')
-        cover.style.cssText =
-          `position:fixed;top:${el.style.top};left:${el.style.left};` +
-          `width:${el.style.width};height:${el.style.height};` +
-          `background:${el.style.background};z-index:9500;pointer-events:none;` +
-          `transform:translateZ(0);`
-        stageContainer.appendChild(cover)
-        const pair = { cover, el }
-        coverPairs.push(pair)
-        overlayCovers.add(pair) // relayout() re-syncs it to the bar on resize
-      })
+      // The z:9500 backing covers (between overlayDiv z:9000 and the bar z:10000)
+      // already exist too — created at park time. They matter here doubly: when the
+      // overlay scene has backdropFilter (overlay.blurPx), Chrome force-promotes the
+      // bar above the promoted overlayDiv into its own compositor layer, and the
+      // bar's layer edge anti-aliases against the same-colored cover instead of the
+      // overlay's background.
+      const immuneEls = parkedByStage.get(current.stage)?.els ?? []
+      syncCovers()
 
       // Elements opted into "hide on overlay" vanish for the overlay's lifetime, then
       // restore their prior inline display on dismiss. Saved individually so an element
@@ -352,7 +379,7 @@ export function playProject(
         overStage.destroy() // stops confetti/games; won't remove the lifted nodes (moved out of root)
         overTopEls.forEach((el) => el.remove()) // tear down the re-parented top-layer nodes
         overlayDiv.remove()
-        coverPairs.forEach((p) => { overlayCovers.delete(p); p.cover.remove() })
+        // covers persist with the parking (removed by unparkInto / container teardown)
       }
       // Redirect path (e.g. scratch win overlay → end scene). Mount the destination scene
       // ABOVE the overlay (and the floated immune bar) and fade IT in so it covers the
@@ -428,13 +455,7 @@ export function playProject(
       for (const ov of overlayStages) ov.layoutAll() // keep floating win/lose overlays responsive
       // Re-sync each immune-bar cover to its (now re-laid-out) bar so the header backing tracks
       // the viewport on resize instead of keeping its mount-time size.
-      for (const { cover, el } of overlayCovers) {
-        cover.style.top = el.style.top
-        cover.style.left = el.style.left
-        cover.style.width = el.style.width
-        cover.style.height = el.style.height
-        cover.style.background = el.style.background
-      }
+      syncCovers()
     },
     destroy() {
       clearTriggers()
