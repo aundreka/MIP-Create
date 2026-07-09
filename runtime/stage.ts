@@ -1143,9 +1143,12 @@ function layoutRec(rec: Rec): void {
   // BEHIND the dim (z:9000) and they vanish. Detect the floated state (outside any
   // pa-root, inside pa-stage) and preserve the overlay z; restoreImmune resets it later.
   const floatedImmune = !outer.closest('.pa-root') && !!outer.closest('.pa-stage')
-  outer.style.zIndex = floatedImmune ? '10000' : String(e.zIndex)
-  // CTA is always immune; other elements opt in via overlayImmune
-  outer.classList.toggle('pa-el--immune', rec.el.type === 'cta' || !!rec.el.overlayImmune)
+  // overlayTop is a higher immune tier (z:10050) that floats above ordinary
+  // "above overlays" elements (z:10000); keep it in sync with scenes.ts.
+  outer.style.zIndex = floatedImmune ? (rec.el.overlayTop ? '10050' : '10000') : String(e.zIndex)
+  // CTA is always immune; other elements opt in via overlayImmune / overlayTop (top tier).
+  outer.classList.toggle('pa-el--immune', rec.el.type === 'cta' || !!rec.el.overlayImmune || !!rec.el.overlayTop)
+  outer.classList.toggle('pa-el--immune-top', !!rec.el.overlayTop)
   // Elements that should disappear while a floating overlay is up (opt-in). The
   // scene-overlay handler queries this class and hides them for the overlay's life.
   outer.classList.toggle('pa-el--hide-on-overlay', !!rec.el.hideOnOverlay)

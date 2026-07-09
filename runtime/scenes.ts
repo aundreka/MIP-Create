@@ -264,7 +264,10 @@ export function playProject(
       const savedTransform = immuneEls.map((el) => el.style.transform)
       immuneEls.forEach((el) => {
         stageContainer.appendChild(el)
-        el.style.zIndex = '10000'
+        // overlayTop elements ride a higher tier (10050) so they float above the
+        // ordinary immune tier (10000). Both stay below the redirect scene (raised
+        // to 11000 below) so an incoming win/end scene still fully covers them.
+        el.style.zIndex = el.classList.contains('pa-el--immune-top') ? '10050' : '10000'
         // Remove translateZ(0) so the bar is no longer GPU-promoted inside pa-stage.
         // A GPU-promoted fixed child inside pa-stage's scroll-container (overflow:hidden)
         // gets compositor-clipped at the viewport boundary, producing a 1px blend artifact
@@ -345,9 +348,9 @@ export function playProject(
         current = { def: next, stage }
         const t = next.transition
         const dur = t && t.type === 'fade' && t.durationMs > 0 ? t.durationMs : 380
-        // z above the overlay (9000) and the floated immune bar (10000) so the incoming
-        // scene covers everything as it fades in; reset to the normal scene layer after.
-        stage.root.style.zIndex = '10001'
+        // z above the overlay (9000) and BOTH immune tiers (10000 / overlayTop 10050) so
+        // the incoming scene covers everything as it fades in; reset to normal after.
+        stage.root.style.zIndex = '11000'
         stage.root.style.opacity = '0'
         stage.root.style.transition = `opacity ${dur}ms ease`
         requestAnimationFrame(() => requestAnimationFrame(() => { stage.root.style.opacity = '1' }))

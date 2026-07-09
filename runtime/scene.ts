@@ -461,6 +461,7 @@ export interface SceneElement {
   hidden?: boolean
   locked?: boolean // not selectable/movable on the editor canvas
   overlayImmune?: boolean // always rendered above in-game overlays (e.g. scratch-grid lose/win)
+  overlayTop?: boolean // a HIGHER immune tier — floats above other "above overlays" elements
   hideOnOverlay?: boolean // hidden while a floating overlay (win/lose card) is up over this scene
   groupId?: string // elements sharing a groupId select/move/scale together
   showOnWin?: boolean // revealed when the mounted game completes (endcard seed)
