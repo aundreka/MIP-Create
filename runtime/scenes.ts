@@ -97,6 +97,10 @@ export function playProject(
   // resize — otherwise the bar re-lays out but its backing rectangle keeps the mount-time size
   // and the header background appears mis-sized.
   const overlayCovers = new Set<{ cover: HTMLElement; el: HTMLElement }>()
+  // Background-image gap covers: cloned <img>s in pa-stage that continue the scene's
+  // background art past the CSS viewport (see parkImmune). The clone must track the
+  // real img's fit / focus / zoom, which layoutBackground rewrites per orientation.
+  const bgCovers = new Set<{ img: HTMLImageElement; src: HTMLImageElement }>()
   // Re-copy each cover's geometry/background from its bar. Runs on relayout (resize),
   // shortly after park (the bar's sampled image-edge color lands async, after the art
   // decodes — the cover must not keep the bar.color fallback captured at mount), and
@@ -108,6 +112,13 @@ export function playProject(
       cover.style.width = el.style.width
       cover.style.height = el.style.height
       cover.style.background = el.style.background
+    }
+    for (const { img, src } of bgCovers) {
+      img.style.objectFit = src.style.objectFit
+      img.style.objectPosition = src.style.objectPosition
+      img.style.transformOrigin = src.style.transformOrigin
+      img.style.transform = src.style.transform
+      if (img.src !== src.src) img.src = src.src // asset swapped (editor live-edit)
     }
   }
   // Immune elements are parked OUT of their scene's pa-root into pa-stage for the
@@ -121,7 +132,11 @@ export function playProject(
   // used, which is confirmed artifact-free on AppLovin. relayout() still reaches
   // parked elements via current.stage.layoutAll(); applyBarExtend's inImmune
   // guard keeps translateZ off while parked.
-  const parkedByStage = new Map<StageHandle, { els: HTMLElement[]; covers: { cover: HTMLElement; el: HTMLElement }[] }>()
+  const parkedByStage = new Map<StageHandle, {
+    els: HTMLElement[]
+    covers: { cover: HTMLElement; el: HTMLElement }[]
+    bgPairs: { cover: HTMLElement; img: HTMLImageElement; src: HTMLImageElement }[]
+  }>()
   const parkImmune = (stage: StageHandle): void => {
     const els = Array.from(stage.root.querySelectorAll<HTMLElement>('.pa-el--immune'))
     els.forEach((el) => {
@@ -153,8 +168,31 @@ export function playProject(
       covers.push(pair)
       overlayCovers.add(pair)
     })
-    if (els.length) {
-      parkedByStage.set(stage, { els, covers })
+    // Background images get the same physical-gap treatment as the bar: a promoted
+    // (translateZ) cover in pa-stage extending 6px past the CSS viewport on ALL sides
+    // continues the IMAGE into AppLovin's 1-3px edge gap — pa-bleed only fills the gap
+    // with the scene COLOR, which reads as a tinted strip against a photo background.
+    // The cover sits at z:0, above pa-bleed (later in DOM) but below every scene root
+    // (z:1+), so inside the viewport it is fully hidden by the opaque root; only the
+    // gap ever shows it. The clone renders the same art in a box 12px larger (~3%
+    // zoom), which is indistinguishable at the screen edge.
+    const bgPairs: { cover: HTMLElement; img: HTMLImageElement; src: HTMLImageElement }[] = []
+    stage.root.querySelectorAll<HTMLImageElement>('.pa-el--background img').forEach((src) => {
+      const cover = document.createElement('div')
+      cover.style.cssText =
+        'position:fixed;top:-6px;left:-6px;width:calc(100% + 12px);height:calc(100% + 12px);' +
+        'z-index:0;overflow:hidden;pointer-events:none;transform:translateZ(0);'
+      const img = src.cloneNode(false) as HTMLImageElement
+      img.style.cssText = 'display:block;width:100%;height:100%;pointer-events:none;'
+      cover.appendChild(img)
+      container.appendChild(cover)
+      const pair = { cover, img, src }
+      bgPairs.push(pair)
+      bgCovers.add(pair)
+    })
+    if (els.length || bgPairs.length) {
+      parkedByStage.set(stage, { els, covers, bgPairs })
+      syncCovers() // copy the img fit/focus/zoom (and bar geometry) captured by layoutAll
       // One-shot delayed syncs pick up the async sampled edge color (see syncCovers).
       if (covers.length) {
         window.setTimeout(syncCovers, 250)
@@ -169,6 +207,7 @@ export function playProject(
     if (parked) {
       parked.els.forEach((el) => stage.root.appendChild(el))
       parked.covers.forEach((p) => { overlayCovers.delete(p); p.cover.remove() })
+      parked.bgPairs.forEach((p) => { bgCovers.delete(p); p.cover.remove() })
       parkedByStage.delete(stage)
     }
   }

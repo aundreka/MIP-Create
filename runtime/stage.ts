@@ -503,6 +503,9 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     outer.appendChild(anim)
 
     const content = mountContent(el, anim, ctx)
+    // Marker for the scene manager: background elements get a physical-gap cover
+    // in pa-stage (see parkImmune in scenes.ts), found via this class.
+    if (el.type === 'background') outer.classList.add('pa-el--background')
 
     // Non-interactive decorative elements must not absorb touches meant for the
     // game canvas or CTAs layered behind them in z-order. Scratch/reveal covers
