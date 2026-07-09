@@ -369,9 +369,10 @@ export function createScratchGrid(): GameModule {
       el.style.zIndex = '10000'
       // Strip translateZ so Chrome's compositor doesn't anti-alias the bar's GPU layer
       // edge against the overlay content (which would show the overlay's bg color as a
-      // 1px strip at the bar's top/left edges).
+      // 1px strip at the bar's top/left edges). style.transform reads back CSSOM-serialized
+      // ("translateZ(0px)"), so the regex must accept the 0px form or it silently no-ops.
       const t = el.style.transform
-      el.style.transform = t.replace(/\s*translateZ\(0\)/gi, '').trim() || 'none'
+      el.style.transform = t.replace(/\s*translateZ\(0(?:px)?\)/gi, '').trim() || 'none'
     })
 
     const overlay = document.createElement('div')

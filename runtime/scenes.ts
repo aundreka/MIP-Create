@@ -269,12 +269,15 @@ export function playProject(
         // to 11000 below) so an incoming win/end scene still fully covers them.
         el.style.zIndex = el.classList.contains('pa-el--immune-top') ? '10050' : '10000'
         // Remove translateZ(0) so the bar is no longer GPU-promoted inside pa-stage.
+        // NOTE: reading style.transform back returns the CSSOM-SERIALIZED value, which
+        // renders the authored translateZ(0) as "translateZ(0px)" — the regex must accept
+        // the 0px form or the strip silently no-ops and the edge artifact returns.
         // A GPU-promoted fixed child inside pa-stage's scroll-container (overflow:hidden)
         // gets compositor-clipped at the viewport boundary, producing a 1px blend artifact
         // where overlay content (e.g. the endscene's beige bg) bleeds through the bar edge.
         // Non-promoted fixed elements are not subject to compositor scroll-container clips.
         const t = el.style.transform
-        el.style.transform = t.replace(/\s*translateZ\(0\)/gi, '').trim() || 'none'
+        el.style.transform = t.replace(/\s*translateZ\(0(?:px)?\)/gi, '').trim() || 'none'
       })
 
       // Cover divs sit at z:9500 — between overlayDiv (z:9000) and immune bar (z:10000).
