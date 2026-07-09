@@ -97,6 +97,38 @@ export function playProject(
   // resize — otherwise the bar re-lays out but its backing rectangle keeps the mount-time size
   // and the header background appears mis-sized.
   const overlayCovers = new Set<{ cover: HTMLElement; el: HTMLElement }>()
+  // Immune elements are parked OUT of their scene's pa-root into pa-stage for the
+  // scene's WHOLE life, not just while an overlay is up. Inside pa-root a
+  // top-extended bar needs translateZ(0) to escape the root's overflow clip on
+  // AppLovin, but that GPU promotion makes AppLovin's compositor blend the
+  // promoted layer's clipped edge against whatever sits behind it — a visible
+  // tinted strip along the bar's top/left even in the plain game scene. Parked
+  // directly in pa-stage (overflow:clip — not a scroll container, see above) the
+  // bar renders un-promoted with a sharp paint clip: the state overlays always
+  // used, which is confirmed artifact-free on AppLovin. relayout() still reaches
+  // parked elements via current.stage.layoutAll(); applyBarExtend's inImmune
+  // guard keeps translateZ off while parked.
+  const parkedByStage = new Map<StageHandle, HTMLElement[]>()
+  const parkImmune = (stage: StageHandle): void => {
+    const els = Array.from(stage.root.querySelectorAll<HTMLElement>('.pa-el--immune'))
+    els.forEach((el) => {
+      container.appendChild(el)
+      el.style.zIndex = el.classList.contains('pa-el--immune-top') ? '10050' : '10000'
+      // Strip the GPU promotion the initial in-root layout pass applied. Reading
+      // style.transform returns the CSSOM-serialized value ("translateZ(0px)").
+      el.style.transform = el.style.transform.replace(/\s*translateZ\(0(?:px)?\)/gi, '').trim() || 'none'
+    })
+    if (els.length) parkedByStage.set(stage, els)
+  }
+  // Move a stage's parked elements back inside its root so they fade/slide out
+  // WITH the scene (and are torn down by the root's destroy), then forget them.
+  const unparkInto = (stage: StageHandle): void => {
+    const els = parkedByStage.get(stage)
+    if (els) {
+      els.forEach((el) => stage.root.appendChild(el))
+      parkedByStage.delete(stage)
+    }
+  }
 
   const toScene = (def: SceneDef): Scene => ({
     meta: { ...project.meta, bgMatchColor: def.bgColor ?? project.meta.bgMatchColor },
@@ -124,6 +156,7 @@ export function playProject(
   const mountScene = (def: SceneDef): StageHandle => {
     const stage = buildScene(toScene(def), assets, { mount: container })
     stage.layoutAll()
+    parkImmune(stage)
     stage.startGames(opts.interactive)
     if (opts.interactive) {
       stage.playEntrances() // onMount entrances (skipped on the static editor canvas)
@@ -208,6 +241,7 @@ export function playProject(
     clearTriggers()
     const old = current
     old.stage.playExit() // exit animations play as the scene leaves
+    unparkInto(old.stage) // parked header leaves with the old scene, not on top of the new one
     const stage = mountScene(def)
     current = { def, stage }
     applyTransition(old.stage.root, stage.root, def.transition ?? { type: 'fade', durationMs: 350 }, () => {
@@ -251,34 +285,11 @@ export function playProject(
       const gameRoot = current.stage.root
       const stageContainer = gameRoot.parentElement ?? gameRoot
 
-      // Immune elements (header bar) must appear ABOVE the overlay dim.
-      // pa-root has isolation:isolate which forms a stacking context at z-index:1
-      // inside pa-stage — below overlayDiv at z-index:9000. Any z-index set on
-      // elements inside pa-root can't escape that context. Fix: move immune elements
-      // to stageContainer so they participate directly in pa-stage's stacking context.
-      // applyBarExtend already made them position:fixed with bleed offsets; that layout
-      // is viewport-relative and carries over unchanged when the DOM parent changes.
-      const immuneEls = Array.from(gameRoot.querySelectorAll<HTMLElement>('.pa-el--immune'))
-      const savedParents = immuneEls.map((el) => el.parentElement)
-      const savedZ = immuneEls.map((el) => el.style.zIndex)
-      const savedTransform = immuneEls.map((el) => el.style.transform)
-      immuneEls.forEach((el) => {
-        stageContainer.appendChild(el)
-        // overlayTop elements ride a higher tier (10050) so they float above the
-        // ordinary immune tier (10000). Both stay below the redirect scene (raised
-        // to 11000 below) so an incoming win/end scene still fully covers them.
-        el.style.zIndex = el.classList.contains('pa-el--immune-top') ? '10050' : '10000'
-        // Remove translateZ(0) so the bar is no longer GPU-promoted inside pa-stage.
-        // NOTE: reading style.transform back returns the CSSOM-SERIALIZED value, which
-        // renders the authored translateZ(0) as "translateZ(0px)" — the regex must accept
-        // the 0px form or the strip silently no-ops and the edge artifact returns.
-        // A GPU-promoted fixed child inside pa-stage's scroll-container (overflow:hidden)
-        // gets compositor-clipped at the viewport boundary, producing a 1px blend artifact
-        // where overlay content (e.g. the endscene's beige bg) bleeds through the bar edge.
-        // Non-promoted fixed elements are not subject to compositor scroll-container clips.
-        const t = el.style.transform
-        el.style.transform = t.replace(/\s*translateZ\(0(?:px)?\)/gi, '').trim() || 'none'
-      })
+      // Immune elements (header bar / logo) already live in pa-stage at z 10000/10050
+      // — parked there at scene mount (see parkImmune above), un-promoted, above the
+      // overlay dim (z 9000) and below a redirecting scene (raised to 11000 below).
+      // Nothing to move or restore here; they stay parked across the overlay's life.
+      const immuneEls = parkedByStage.get(current.stage) ?? []
 
       // Cover divs sit at z:9500 — between overlayDiv (z:9000) and immune bar (z:10000).
       // When the overlay scene has backdropFilter (from overlay.blurPx), Chrome GPU-promotes
@@ -332,12 +343,8 @@ export function playProject(
       overTopEls.forEach((el) => { el.style.zIndex = '10050'; stageContainer.appendChild(el) })
 
       let dismissed = false
+      // Immune elements stay parked (see parkImmune) — only hidden elements restore.
       const restoreImmune = (): void => {
-        immuneEls.forEach((el, i) => {
-          savedParents[i]?.appendChild(el)
-          el.style.zIndex = savedZ[i]
-          el.style.transform = savedTransform[i]
-        })
         hideEls.forEach((el, i) => { el.style.display = savedDisplay[i] })
       }
       const removeOverlayDom = (): void => {
@@ -370,7 +377,8 @@ export function playProject(
         requestAnimationFrame(() => requestAnimationFrame(() => { stage.root.style.opacity = '1' }))
         window.setTimeout(() => {
           removeOverlayDom()
-          restoreImmune()      // immune bar returns to the old game root, torn down with it
+          restoreImmune()
+          unparkInto(old.stage) // parked header rejoins the old game root, torn down with it
           old.stage.destroy()
           stage.root.style.transition = ''
           stage.root.style.opacity = ''
