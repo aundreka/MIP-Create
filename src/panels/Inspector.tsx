@@ -11,6 +11,8 @@ import {
   addAsset,
   addGameHint,
   alignSelected,
+  beginTransaction,
+  endTransaction,
   convertElement,
   copyStyle,
   duplicateSelected,
@@ -480,6 +482,8 @@ function ScratchGridCells({ params, setParam, elementId }: ScratchGridCellsProps
       <NumField label="Outer padding" value={Number(params.gap ?? 10)} step={2} min={0} max={60} onChange={(n) => setParam('gap', n)} />
       <NumField label="Column gap" value={Number(params.colGap ?? params.gap ?? 10)} step={2} min={0} max={60} onChange={(n) => setParam('colGap', n)} />
       <NumField label="Row gap" value={Number(params.rowGap ?? params.gap ?? 10)} step={2} min={0} max={60} onChange={(n) => setParam('rowGap', n)} />
+      <NumField label="Cell corner radius (%)" value={Number(params.cellRadius ?? 9)} step={1} min={0} max={50} onChange={(n) => setParam('cellRadius', n)} />
+      <div className="hint pad">Rounds the grid&apos;s 4 outer cell corners (% of the cell&apos;s short side). Set 0 for square corners so cell images aren&apos;t clipped.</div>
       <NumField label="Reveal threshold" value={Number(params.threshold ?? 0.5)} step={0.05} min={0.2} max={0.9} onChange={(n) => setParam('threshold', n)} />
       <NumField label="Reveal zone left (%, per cell)" value={Number(params.zoneX ?? 0)} step={1} min={0} max={100} onChange={(n) => setParam('zoneX', n)} />
       <NumField label="Reveal zone top (%, per cell)" value={Number(params.zoneY ?? 0)} step={1} min={0} max={100} onChange={(n) => setParam('zoneY', n)} />
@@ -641,12 +645,50 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
 
   if (state.selectedIds.length > 1) {
     const anyGroup = state.scene.elements.some((e) => state.selectedIds.includes(e.id) && e.groupId)
+    // Animation controls edit all selected elements at once. The rows display the
+    // first selected element's spec; any change writes that same spec to every
+    // selected element, so identical timing makes them animate in sync as a group.
+    const first = state.scene.elements.find((e) => e.id === state.selectedIds[0]) ?? state.scene.elements.find((e) => state.selectedIds.includes(e.id))
+    const patchAllAnim = (phase: 'entrance' | 'loop' | 'exit', s: AnimSpec | undefined): void => {
+      beginTransaction()
+      for (const id of state.selectedIds) {
+        const e = state.scene.elements.find((x) => x.id === id)
+        if (!e) continue
+        patchElement(id, { animations: { ...(e.animations ?? {}), [phase]: s } })
+      }
+      endTransaction()
+    }
     return (
       <div className="panel inspector">
         {variantBanner}
         <div className="panel-title">{state.selectedIds.length} selected</div>
         <div className="group-title">Align to canvas</div>
         <AlignRow />
+        <Accordion id="inspector.multiAnimation" title="Animation (all selected)" defaultOpen={false}>
+          <div className="hint pad">Applies the same animation to every selected element — same preset, duration, and delay, so they move together as a group.</div>
+          <AnimRow
+            title="Entrance"
+            trigger
+            spec={first?.animations?.entrance}
+            presets={ENTRANCE_PRESETS}
+            defaultSpec={{ preset: 'slide-up', durationMs: 520, delayMs: 0, easing: 'ease-out', trigger: 'onMount' }}
+            onChange={(s) => patchAllAnim('entrance', s)}
+          />
+          <AnimRow
+            title="Loop"
+            spec={first?.animations?.loop}
+            presets={LOOP_PRESETS}
+            defaultSpec={{ preset: 'float', durationMs: 2200, delayMs: 0, easing: 'ease-in-out', iterations: 'infinite' }}
+            onChange={(s) => patchAllAnim('loop', s)}
+          />
+          <AnimRow
+            title="Exit"
+            spec={first?.animations?.exit}
+            presets={EXIT_PRESETS}
+            defaultSpec={{ preset: 'fade-out', durationMs: 300, delayMs: 0, easing: 'ease-in' }}
+            onChange={(s) => patchAllAnim('exit', s)}
+          />
+        </Accordion>
         <div className="group-title" />
         <button className="wide" onClick={groupSelected}>
           Group (Ctrl+G)

@@ -144,6 +144,9 @@ export function createScratchGrid(): GameModule {
   let gridCols = 2
   let gridRows = 2
   let gridEl: HTMLDivElement | null = null
+  // Outer-corner rounding as a fraction of the cell's short side. Authored via the
+  // cellRadius param (percent); 9% is the historical hardcoded look, 0 = square.
+  let cellRadiusFrac = 0.09
   let basePad = 0
   let baseColGap = 0
   let baseRowGap = 0
@@ -298,7 +301,7 @@ export function createScratchGrid(): GameModule {
         labelEl.style.fontSize = Math.round(Math.min(cssW, cssH) * 0.12) + 'px'
       }
       // Only round the 4 outer corners of the grid; inner corners stay square
-      const r = Math.round(Math.min(cssW, cssH) * 0.09)
+      const r = Math.round(Math.min(cssW, cssH) * cellRadiusFrac)
       const tl = row === 0 && col === 0 ? r : 0
       const tr = row === 0 && col === gridCols - 1 ? r : 0
       const br = row === gridRows - 1 && col === gridCols - 1 ? r : 0
@@ -574,6 +577,7 @@ export function createScratchGrid(): GameModule {
       zoneW = Math.max(0.02, Math.min(1 - zoneX, num(params.zoneW, 100) / 100))
       zoneH = Math.max(0.02, Math.min(1 - zoneY, num(params.zoneH, 100) / 100))
       imageFit = str(params.imageFit as unknown, 'cover') === 'contain' ? 'contain' : 'cover'
+      cellRadiusFrac = Math.max(0, Math.min(50, num(params.cellRadius, 9))) / 100
       coverColor = str(params.coverColor, '#9aa3b2')
       // Empty string = user cleared the swatch → transparent cell background.
       const winBgColor = str(params.winBgColor, '#1b3a6e') || 'transparent'
@@ -911,6 +915,7 @@ export const SCRATCH_GRID_TEMPLATE: GameTemplate = {
     { key: 'gap', label: 'Outer padding', type: 'number', min: 0, max: 60, step: 2 },
     { key: 'colGap', label: 'Column gap', type: 'number', min: 0, max: 60, step: 2 },
     { key: 'rowGap', label: 'Row gap', type: 'number', min: 0, max: 60, step: 2 },
+    { key: 'cellRadius', label: 'Cell corner radius (% of cell, 0 = square)', type: 'number', min: 0, max: 50, step: 1 },
     { key: 'bgScale', label: 'BG image scale (%)', type: 'number', min: 10, max: 300, step: 5 },
     { key: 'bgX', label: 'BG image X (%)', type: 'number', min: 0, max: 100, step: 5 },
     { key: 'bgY', label: 'BG image Y (%)', type: 'number', min: 0, max: 100, step: 5 },
@@ -964,6 +969,7 @@ export const SCRATCH_GRID_TEMPLATE: GameTemplate = {
     gap: 10,
     colGap: 10,
     rowGap: 10,
+    cellRadius: 9,
     loseSceneId: '',
     winSceneId: '',
     loseOverlayImage: '',
