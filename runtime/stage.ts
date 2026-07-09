@@ -1294,7 +1294,11 @@ function layoutAsset(rec: Rec, e: Effective, mode: 'fit' | 'extend'): void {
     // sampleTopEdge in elements/bar.ts) so the extend-to-screen-top band blends
     // seamlessly with the image instead of showing the scene background as a gap.
     const edgeColor = rec.content instanceof HTMLElement ? rec.content.dataset.paEdge : undefined
-    const barBgColor = rec.el.bar?.color ?? edgeColor ?? paBg
+    // For an IMAGE bar the sampled top-edge color IS the correct bleed fill (it matches the
+    // art). bar.color is the "if no image" fallback (see elements/bar.ts) and must NOT shadow
+    // the edge — otherwise a relayout (AppLovin fires one as its WebView settles to the true
+    // size) recomputes the extension with bar.color and the header detaches from the top again.
+    const barBgColor = (rec.el.assetId ? edgeColor : undefined) ?? rec.el.bar?.color ?? paBg
     const isBarDiv = (rec.el.type === 'bar' || rec.el.type === 'image') && !rec.el.blur
       && rec.content instanceof HTMLDivElement
     // BLEED: for top-pinned/letterbox bars, switch to position:fixed so the bar can
