@@ -284,8 +284,18 @@ export async function processAssets(
         const bytes = new Uint8Array(binStr.length)
         for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i)
         let inner = new TextDecoder().decode(bytes)
-        // Strip base64-embedded @font-face blocks (font-family falls through to next family)
-        inner = inner.replace(/@font-face\s*\{[^}]*url\s*\(\s*['"]data:[^'"]+['"]\s*\)[^}]*\}/gs, '')
+        // Strip base64-embedded @font-face blocks — but ONLY when the font isn't
+        // referenced by any element. A used custom font can carry layout-critical
+        // glyph metrics (e.g. an end-card countdown whose digit groups are spaced
+        // to land inside fixed boxes); dropping it reflows the text to a system
+        // fallback and breaks the layout. Truly-unused embedded fonts are dead
+        // weight and still get stripped.
+        const FONT_FACE_RE = /@font-face\s*\{[^}]*url\s*\(\s*['"]data:[^'"]+['"]\s*\)[^}]*\}/gs
+        const withoutFonts = inner.replace(FONT_FACE_RE, '')
+        inner = inner.replace(FONT_FACE_RE, (block) => {
+          const fam = /font-family\s*:\s*(['"]?)([^;'"}]+)\1/i.exec(block)?.[2]?.trim()
+          return fam && withoutFonts.includes(fam) ? block : ''
+        })
         // Hoist portrait and landscape videos out of the inner HTML into outer PA_ASSETS.
         // The srcdoc iframe is same-origin, so window.parent.PA_ASSETS is accessible at runtime.
         // This eliminates the double-base64 encoding and saves ~33% of combined video size.
@@ -439,13 +449,17 @@ export interface Output {
 export function buildOutputs(project: Project, assets: AssetMap, networks: Network[], runtimeSrc = staticRuntimeSrc): { outputs: Output[]; baseBytes: number } {
   const base = buildBaseHtml(project, assets, runtimeSrc)
   const baseName = (project.meta.name || 'playable').replace(/[^a-z0-9_-]+/gi, '_')
+  // Only append the network tag when more than one network is being emitted in
+  // this call — otherwise the file name is exactly the base name, nothing else.
+  const multiNet = networks.length > 1
   const outputs: Output[] = networks.map((net) => {
     const html = transformForNetwork(base, net)
     const htmlBytes = bytesOfStr(html)
+    const stem = multiNet ? `${baseName}_${net.tag}` : baseName
     if (net.zip) {
       return {
         net: net.name,
-        filename: `${baseName}_${net.tag}.zip`,
+        filename: `${stem}.zip`,
         bytes: htmlBytes, // gate on the HTML payload (coinsort behavior)
         over: htmlBytes > MAX_BYTES,
         make: async () => {
@@ -457,7 +471,7 @@ export function buildOutputs(project: Project, assets: AssetMap, networks: Netwo
     }
     return {
       net: net.name,
-      filename: `${baseName}_${net.tag}.html`,
+      filename: `${stem}.html`,
       bytes: htmlBytes,
       over: htmlBytes > MAX_BYTES,
       make: async () => new Blob([html], { type: 'text/html' }),

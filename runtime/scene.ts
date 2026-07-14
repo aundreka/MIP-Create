@@ -49,6 +49,7 @@ export type AnimPresetId =
   | 'shake'
   | 'wave'
   | 'shine'
+  | 'lightray'
   | 'glow'
   | 'spin'
   | 'float'
@@ -73,16 +74,27 @@ export interface AnimSpec {
   easing: string
   iterations?: number | 'infinite'
   trigger?: AnimTrigger
+  // Direction of the 'lightray' reflection sweep, in degrees: 0 = left→right, 90 = top→bottom,
+  // 180 = right→left, 270 = bottom→top, 45 = top-left→bottom-right, etc. Ignored by other presets.
+  angleDeg?: number
 }
 
 export interface ElementAnimations {
   entrance?: AnimSpec
   loop?: AnimSpec
   exit?: AnimSpec
+  // Additional specs stacked ON TOP of the primary one in each phase, played together with it
+  // (e.g. entrance = pop + shine). Empty/absent = just the primary. The primary must exist for
+  // extras to apply; extras share the primary entrance's trigger.
+  entranceExtra?: AnimSpec[]
+  loopExtra?: AnimSpec[]
+  exitExtra?: AnimSpec[]
 }
 
 export interface SfxBinding {
-  // 'tap' | 'sceneEnter' for any element. For scratch/reveal elements also:
+  // 'tap' | 'sceneEnter' | 'elementEnter' for any element. 'elementEnter' fires one-shot as the
+  // element animates in — at its entrance stagger delay — so staggered pop-ins each get their sound
+  // (fires immediately if the element has no entrance). For scratch/reveal elements also:
   // 'whileScratching' (looped while the cover is being scratched) and
   // 'onReveal' (one-shot when a reveal target is uncovered).
   event: string
@@ -165,6 +177,7 @@ export interface EndsceneConfig {
   portraitImageId?: string
   landscapeImageId?: string
   objectFit: ObjectFit
+  zoom?: number // scale factor (0.5 - 2.0); default 1.0 for no scaling
   // Letterbox fills are independent per orientation, since portrait splits the
   // bars top/bottom while landscape splits them left/right (and a clip's top/bottom
   // edges differ in colour from its left/right edges).
@@ -246,11 +259,17 @@ export interface HandguideNode {
 // game) and slides/taps toward it. `toX/toY` is the legacy single-waypoint form,
 // still honored when `nodes` is empty.
 export interface HandguideConfig {
-  mode: 'smart' | 'tap' | 'slide' | 'scratch'
+  // 'brush' points the hand at the scratch card's brush (appears only after the brush's intro).
+  mode: 'smart' | 'tap' | 'slide' | 'scratch' | 'brush'
   toX?: number
   toY?: number
   nodes?: HandguideNode[]
   periodMs?: number
+  // 'brush' mode only: extra offset of the hand from the brush (screen px; the hand already sits
+  // BELOW the brush by default), and a rotation. The hand mimes a drag across the card.
+  brushOffsetX?: number
+  brushOffsetY?: number
+  brushRotateDeg?: number
   easing?: 'linear' | 'ease' | 'ease-in' | 'ease-out' | 'ease-in-out'
   // Idle visibility (interactive runs only): hide on the player's tap, then reappear
   // after `idleMs` of no interaction, repeating. Defaults: hideOnInteract=true,

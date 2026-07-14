@@ -13,7 +13,7 @@
 import type { Anchor, Scene, SceneElement } from './scene'
 import type { AssetEntry, AssetMap, RuntimeCtx } from './types'
 import { isLandscape, scale, sx, sy, viewH, viewW } from './responsive'
-import { composeElementAnim, entranceTriggers, exitCss, injectAnimStyles } from './anim'
+import { composeElementAnim, entranceLeadDelayMs, entranceTriggers, exitCss, injectAnimStyles, lightraySpec } from './anim'
 import { createContainerContent, createImageContent, styleContainer } from './elements/image'
 import { applyBarFill, createBarContent } from './elements/bar'
 import { createTextContent } from './elements/text'
@@ -55,7 +55,7 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
   // Waypoints (design px). 'slide' uses the configured nodes (or legacy toX/toY);
   // 'smart' targets the CTA/game; 'tap' stays in place (no waypoints).
   let pts: { x: number; y: number; pauseMs?: number }[] = []
-  let kind: 'tap' | 'slide' | 'scratch' = 'tap'
+  let kind: 'tap' | 'slide' | 'scratch' | 'brush' = 'tap'
   if (cfg.mode === 'slide') {
     if (cfg.nodes && cfg.nodes.length) pts = cfg.nodes.filter((p) => p && p.x != null && p.y != null)
     else if (cfg.toX != null && cfg.toY != null) pts = [{ x: cfg.toX, y: cfg.toY }]
@@ -68,6 +68,8 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     }
   } else if (cfg.mode === 'scratch') {
     kind = 'scratch'
+  } else if (cfg.mode === 'brush') {
+    kind = 'brush'
   }
   const travel = cfg.periodMs && cfg.periodMs > 0 ? cfg.periodMs : kind === 'scratch' ? 600 : kind === 'slide' ? 1500 : 900
   const cubic = (t: number): number => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
@@ -104,12 +106,94 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     content.style.transformOrigin = '22% 12%'
     content.style.transition = 'opacity 200ms ease'
   }
+  // 'brush' mode: render the hand on the STAGE layer so it sits in front of the brush (the brush is
+  // itself above the scene), positioned absolutely. Remember how to put it back on stop().
+  let brushHostEl: HTMLElement | null = null
+  let brushRestore: { parent: Node | null; next: Node | null; cssText: string } | null = null
+  // Measure the hand's intended size BEFORE reparenting it out (the handguide element sizes to its
+  // content, so once the hand leaves it the element collapses). Store it as DESIGN px so the frame
+  // can re-apply designSize × FIT-scale — otherwise the reparented <img> shows at its raw (huge) size.
+  let brushHandW = 0
+  let brushHandH = 0
+  if (kind === 'brush' && content) {
+    brushHostEl = rec.outer.closest('.pa-stage') as HTMLElement | null
+    if (brushHostEl) {
+      const s0 = scale() || 1
+      let cr = content.getBoundingClientRect()
+      if (cr.width < 1 || cr.height < 1) cr = rec.outer.getBoundingClientRect()
+      brushHandW = cr.width / s0
+      brushHandH = cr.height / s0
+      brushRestore = { parent: content.parentNode, next: content.nextSibling, cssText: content.style.cssText }
+      content.style.position = 'absolute'
+      content.style.left = '0'
+      content.style.top = '0'
+      content.style.zIndex = '501' // just above the brush (z-index 500)
+      content.style.transformOrigin = 'center top'
+      content.style.transition = 'opacity 200ms ease'
+      content.style.opacity = '0' // stay hidden until the frame has sized + positioned it (no huge flash)
+      if (brushHandW > 1 && brushHandH > 1) {
+        content.style.width = (brushHandW * s0).toFixed(1) + 'px'
+        content.style.height = (brushHandH * s0).toFixed(1) + 'px'
+      }
+      brushHostEl.appendChild(content)
+    }
+  }
   const frame = (now: number): void => {
     if (!running || !content) return
     const s = scale()
     let ox = 0
     let oy = 0
     let press = 0
+    if (kind === 'brush') {
+      // Mime dragging the brush across the card. The hand sits IN FRONT of the brush and BELOW it
+      // (offset, not centered), optionally rotated, and only after the brush's intro (data-brush-ready).
+      const host = brushHostEl
+      const brush = (host ?? root).querySelector<HTMLElement>('[data-pa-brush][data-brush-ready="1"]')
+      // Keep the hand's on-screen size = its measured DESIGN size × FIT scale (responsive), independent
+      // of the now-collapsed handguide element. Do this even while hidden so it's never the raw size.
+      if (brushHandW > 1 && brushHandH > 1) {
+        content.style.width = (brushHandW * s).toFixed(1) + 'px'
+        content.style.height = (brushHandH * s).toFixed(1) + 'px'
+      }
+      if (!host || !brush) {
+        content.style.opacity = '0' // brush not ready yet (intro still playing) → stay hidden
+        raf = requestAnimationFrame(frame)
+        return
+      }
+      const b = brush.getBoundingClientRect()
+      const hostRect = host.getBoundingClientRect()
+      const cardEl = recs.find((r) => r.el.type === 'game-mount')?.outer
+      const cardRect = cardEl ? cardEl.getBoundingClientRect() : b
+      // Offsets are a direct screen-px nudge (the base position — brush center + half the brush
+      // height — already tracks the card live, so it stays put across orientation/resize regardless).
+      const offX = cfg.brushOffsetX ?? 0
+      const offY = (cfg.brushOffsetY ?? 0) + b.height * 0.5 // default: below the brush, not centered on it
+      const rot = cfg.brushRotateDeg ?? 0
+      // Drag from the brush TO the card center (pressed), then lift and return to repeat — a
+      // one-directional "drag it to the middle" demo, not a back-and-forth rub.
+      const startX = b.left + b.width / 2 + offX
+      const startY = b.top + b.height / 2 + offY
+      const endX = cardRect.left + cardRect.width / 2 + offX
+      const endY = cardRect.top + cardRect.height / 2 + offY
+      const phase = ((now - t0) % travel) / travel
+      let fx: number
+      let pressed: number
+      if (phase < 0.72) {
+        fx = cubic(phase / 0.72) // outbound: brush → center, finger pressed
+        pressed = phase < 0.08 ? phase / 0.08 : 1
+      } else {
+        fx = 1 - (phase - 0.72) / 0.28 // return: back to the brush, finger lifted
+        pressed = 0
+      }
+      const cx = startX + (endX - startX) * fx
+      const cy = startY + (endY - startY) * fx
+      content.style.left = (cx - hostRect.left).toFixed(1) + 'px'
+      content.style.top = (cy - hostRect.top).toFixed(1) + 'px'
+      content.style.transform = `translateX(-50%) rotate(${rot}deg) scale(${(1 - pressed * 0.12).toFixed(3)})`
+      content.style.opacity = '1' // reveal only now that it's sized + positioned
+      raf = requestAnimationFrame(frame)
+      return
+    }
     if (kind === 'scratch') {
       // Target the first unscratched cell; query every frame so the hand
       // automatically shifts to the next cell once the current one is won.
@@ -169,7 +253,9 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     if (running || !content) return
     running = true
     t0 = performance.now() // replay the route from the start on each appearance
-    content.style.opacity = '1'
+    // 'brush' mode reveals itself inside the frame, AFTER it's sized + positioned — otherwise it
+    // would flash at its initial top-left (0,0) for a frame. All other modes reveal immediately.
+    if (kind !== 'brush') content.style.opacity = '1'
     raf = requestAnimationFrame(frame)
   }
   const hide = (): void => {
@@ -225,6 +311,14 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
       if (content) {
         content.style.transform = ''
         content.style.opacity = ''
+      }
+      // Restore a 'brush'-mode hand that was reparented onto the stage layer.
+      if (brushRestore && content) {
+        content.style.cssText = brushRestore.cssText
+        if (brushRestore.parent) {
+          if (brushRestore.next) brushRestore.parent.insertBefore(content, brushRestore.next)
+          else brushRestore.parent.appendChild(content)
+        }
       }
     },
   }
@@ -349,6 +443,25 @@ function applyMountAnim(rec: Rec): void {
   const css = composeElementAnim(rec.el, false)
   rec.anim.style.animation = css === 'none' ? '' : css
   setAnimHints(rec.anim, css !== 'none')
+  applyLightray(rec)
+}
+// The 'lightray' loop preset is a pseudo-element glare sweep (see anim.ts). Toggle the
+// driving class + feed its timing via CSS vars whenever the element's loop is re-applied.
+function applyLightray(rec: Rec): void {
+  const ray = lightraySpec(rec.el) // a lightray in ANY phase (entrance / loop / exit), primary or extra
+  if (ray) {
+    rec.anim.classList.add('pa-lightray')
+    rec.anim.style.setProperty('--pa-lightray-dur', (ray.durationMs ?? 2400) + 'ms')
+    rec.anim.style.setProperty('--pa-lightray-delay', (ray.delayMs ?? 0) + 'ms')
+    rec.anim.style.setProperty('--pa-lightray-ease', ray.easing ?? 'ease-in-out')
+    rec.anim.style.setProperty('--pa-lightray-ang', (ray.angleDeg ?? 20) + 'deg') // sweep direction
+  } else {
+    rec.anim.classList.remove('pa-lightray')
+    rec.anim.style.removeProperty('--pa-lightray-dur')
+    rec.anim.style.removeProperty('--pa-lightray-delay')
+    rec.anim.style.removeProperty('--pa-lightray-ease')
+    rec.anim.style.removeProperty('--pa-lightray-ang')
+  }
 }
 function restartAnim(node: HTMLElement, css: string): void {
   node.style.animation = 'none'
@@ -365,36 +478,44 @@ function runEntrance(rec: Rec): void {
 // ---------------------------------------------------------------------------
 // Font injection — one <style> tag updated whenever buildScene is called.
 // ---------------------------------------------------------------------------
-function fontFormatHint(src: string): string {
-  // Extract MIME from data URI header only; fall back to extension in the path.
-  const mime = src.match(/^data:([^;,]+)/)?.[1] ?? ''
-  if (mime === 'font/woff2' || src.includes('.woff2')) return "format('woff2')"
-  if (mime === 'font/woff' || src.includes('.woff')) return "format('woff')"
-  if (mime === 'font/otf' || mime === 'font/opentype' || mime === 'application/x-font-opentype' || src.includes('.otf')) return "format('opentype')"
-  if (mime === 'font/ttf' || mime === 'application/x-font-ttf' || src.includes('.ttf')) return "format('truetype')"
-  // Unknown MIME (e.g. application/octet-stream from Electron) — omit the hint
-  // so the browser probes the file itself rather than rejecting on a wrong hint.
-  return ''
+// Decode a base64 data URL to its raw bytes. Font assets are always imported
+// via FileReader.readAsDataURL (see src/bridge.ts importFont), so every font
+// src reaching us is a `data:...;base64,...` URL.
+function dataUrlToBytes(src: string): Uint8Array | null {
+  const comma = src.indexOf(',')
+  if (comma < 0 || !/;base64/i.test(src.slice(0, comma))) return null
+  try {
+    const bin = atob(src.slice(comma + 1))
+    const bytes = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+    return bytes
+  } catch {
+    return null
+  }
 }
 
+// Register embedded fonts via the CSS Font Loading API from the decoded bytes,
+// rather than injecting an `@font-face{...src:url('<data-uri>')...}` <style>.
+// Both render identically, but the FontFace(ArrayBuffer) form keeps any literal
+// `url(...)` out of the exported bundle — AppLovin's static preflight scanner
+// reads a templated `url('${a.src}')` in the runtime source as an un-inlined
+// external font and blocks the upload, even when no fonts are present.
 function injectFontStyles(assets: AssetMap): void {
   const fonts = Object.entries(assets).filter(([, a]) => a.kind === 'font')
-  if (!fonts.length) return
-  const id = 'pa-fonts'
-  let el = document.getElementById(id) as HTMLStyleElement | null
-  if (!el) {
-    el = document.createElement('style')
-    el.id = id
-    document.head.appendChild(el)
-  }
-  el.textContent = fonts
-    .map(([assetId, a]) => {
-      const hint = fontFormatHint(a.src)
+  if (!fonts.length || typeof FontFace === 'undefined') return
+  for (const [assetId, a] of fonts) {
+    const bytes = dataUrlToBytes(a.src)
+    if (!bytes) continue
+    try {
       // font-weight range covers all weights so the browser never synthesizes
       // bold or falls back when the element uses a non-default weight.
-      return `@font-face{font-family:'${assetId}';font-weight:100 900;src:url('${a.src}')${hint ? ' ' + hint : ''};}`
-    })
-    .join('\n')
+      const face = new FontFace(assetId, bytes.buffer as ArrayBuffer, { weight: '100 900' })
+      document.fonts.add(face)
+      void face.load().catch(() => {})
+    } catch {
+      /* malformed font data — skip so one bad asset can't break the scene */
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -545,6 +666,18 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     if (inner) inner.textContent = String(value)
   })
 
+  // Fire 'elementEnter' SFX bindings for an element as it animates in. Scheduled at the
+  // entrance's own delay so staggered elements each pop with their sound in sync with the
+  // visual (delay 0 = element has no entrance → fires immediately). Used for staggered pop-ins.
+  const enterSfxTimers: number[] = []
+  const fireEnterSfx = (rec: Rec): void => {
+    const binds = (rec.el.sfx ?? []).filter((b) => b.event === 'elementEnter' && b.assetId)
+    if (!binds.length) return
+    const delay = entranceLeadDelayMs(rec.el)
+    for (const b of binds)
+      enterSfxTimers.push(window.setTimeout(() => emit('sfx-asset', b.assetId, b.volume ?? 1), delay))
+  }
+
   let stageWon = false
   const revealOnWin = (): void => {
     if (stageWon) return // idempotent: a game may report completion more than once
@@ -554,8 +687,10 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
         rec.el.hidden = false
         layoutRec(rec)
         runEntrance(rec) // a revealed element animates in
+        fireEnterSfx(rec)
       } else if (entranceTriggers(rec.el, 'onGameWin')) {
         runEntrance(rec)
+        fireEnterSfx(rec)
       }
     }
     for (const rec of recs)
@@ -932,6 +1067,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       for (const rec of recs) {
         if (rec.el.hidden) continue // hidden/showOnWin elements animate when revealed
         if (entranceTriggers(rec.el, 'onMount')) runEntrance(rec)
+        fireEnterSfx(rec) // at the entrance's stagger delay (or immediately if no entrance)
       }
     },
     playExit() {
@@ -1019,6 +1155,8 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     get: (id) => byId.get(id),
     destroy() {
       offSetText()
+      for (const t of enterSfxTimers) window.clearTimeout(t)
+      enterSfxTimers.length = 0
       for (const dispose of scratchDisposers) dispose()
       scratchDisposers.length = 0
       for (const rec of recs) {

@@ -17,6 +17,11 @@ interface CellState {
   isWin: boolean
   row: number
   col: number
+  // Analytic scratch coverage in normalized cell space (COVERAGE_S × COVERAGE_S grid; 1 = cleared).
+  // measure() reads THIS, never the canvas — a getImageData readback is farbled/zeroed by Brave's
+  // fingerprint shield inside a 3rd-party ad iframe (AppLovin) → false ~100% → instant win on the
+  // first touch. The grid is normalized, so it also survives a backing-store resize untouched.
+  coverGrid: Uint8Array
   cellCoverImg: HTMLImageElement | null  // per-cell cover; null = use global
   cellCoverReady: boolean
   // Reveal background rendered on its OWN canvas (not an <img>) so it aligns pixel-for-pixel
@@ -113,6 +118,51 @@ function buildCellEntranceKeyframes(fromPct: number): Keyframe[] {
 }
 const CELL_ENTER_KF = buildCellEntranceKeyframes(28) // start 28% to the right (≈ the 100px on a ~385px card)
 
+// Opaque stand-in painted over a cell while its configured cover image is still loading (or if
+// the load never resolves in a shielded webview). Matches the default cover color so the momentary
+// state looks intentional; it's replaced by the real image the instant onload fires.
+const COVER_LOAD_FALLBACK = '#9aa3b2'
+
+// Parse an authored brush-intro path: a JSON list of {x,y} points, each a fraction 0..1 of the card.
+// Returns [] on anything malformed (the runtime then falls back to a default rub).
+const parseBrushPath = (raw: string): { x: number; y: number }[] => {
+  if (!raw) return []
+  try {
+    const a = JSON.parse(raw)
+    if (!Array.isArray(a)) return []
+    return a
+      .filter((p) => p && typeof p.x === 'number' && typeof p.y === 'number')
+      .map((p) => ({ x: Math.max(0, Math.min(1, p.x)), y: Math.max(0, Math.min(1, p.y)) }))
+  } catch {
+    return []
+  }
+}
+
+// Resolution of the per-cell analytic coverage grid (see CellState.coverGrid). 64×64 matches the
+// old getImageData sample density, so the win threshold feels the same — just without a canvas read.
+const COVERAGE_S = 64
+
+// Mark every grid cell whose center falls inside the ellipse (gcx,gcy) radius (grx,gry) as cleared.
+// The ellipse (rather than a circle) accounts for a non-square cell mapping onto the uniform grid.
+const stampDisc = (grid: Uint8Array, gcx: number, gcy: number, grx: number, gry: number): void => {
+  const S = COVERAGE_S
+  const rx = Math.max(0.5, grx)
+  const ry = Math.max(0.5, gry)
+  const x0 = Math.max(0, Math.floor(gcx - rx))
+  const x1 = Math.min(S - 1, Math.ceil(gcx + rx))
+  const y0 = Math.max(0, Math.floor(gcy - ry))
+  const y1 = Math.min(S - 1, Math.ceil(gcy + ry))
+  const rx2 = rx * rx
+  const ry2 = ry * ry
+  for (let gy = y0; gy <= y1; gy++) {
+    for (let gx = x0; gx <= x1; gx++) {
+      const dx = gx + 0.5 - gcx
+      const dy = gy + 0.5 - gcy
+      if ((dx * dx) / rx2 + (dy * dy) / ry2 <= 1) grid[gy * S + gx] = 1
+    }
+  }
+}
+
 export function createScratchGrid(): GameModule {
   let ctx: GameContext
   let cells: CellState[] = []
@@ -152,6 +202,176 @@ export function createScratchGrid(): GameModule {
   let baseRowGap = 0
   let dprCleanup: (() => void) | null = null
   let revealAssetsState: RevealAssetState[] = []
+
+  // ---- brush (optional) ----------------------------------------------------
+  // An image that follows the finger/cursor while scratching. The SCRATCH happens at the
+  // brush's authored TIP (a point within the image, fraction 0..1), and the erode radius is
+  // authored independently — so a paintbrush graphic can have its bristle tip do the clearing
+  // while the handle just trails along. Purely visual + the tip offset; the coverage math is
+  // unchanged. When no brush image is set, none of this activates (radius still configurable).
+  let brushImg: HTMLImageElement | null = null // decoded source (for aspect ratio)
+  let brushEl: HTMLImageElement | null = null // the floating visual
+  // The brush is mounted on a NON-CLIPPED ancestor (the stage) rather than ctx.root, so it can
+  // overflow past the card's edges (a big brush's handle can stick out) instead of being cut off
+  // by the game root's overflow:hidden. All positions are computed relative to this host.
+  let brushHost: HTMLElement | null = null
+  let brushTipX = 0.5 // tip position within the brush image, 0..1 (0.5 = center)
+  let brushTipY = 0.5
+  let brushRadiusFrac = 0.1 // erode radius as a fraction of the cell's short side (0.1 = old default)
+  let brushScaleFrac = 0.4 // brush display width as a fraction of the cell's short side
+  let brushSpawnX = 0.5 // resting spawn position, fraction of the card (0.5 = center)
+  let brushSpawnY = 0.5
+  let brushIntro = false // play a demo "draw path" rub at the start (like the handguide hint)
+  let brushIntroPath: { x: number; y: number }[] = [] // authored path, points as fractions 0..1 of the card
+  let brushIntroDurationMs = 1600 // duration of ONE pass along the path (lower = faster)
+  let brushIntroLoops = 2 // how many times the path repeats
+  let brushIntroAnim: Animation | null = null
+  // Per-gesture cache so a pointermove does zero layout reads (toCanvas already forces one).
+  let brushRootRect: DOMRect | null = null // brushHost rect
+  let brushW = 0 // rendered brush size in px
+  let brushH = 0
+  let brushCenter: { x: number; y: number } | null = null // current brush center, in client coords
+  let brushCardRect: DOMRect | null = null // card (ctx.root) rect, cached per gesture — clamps the brush
+  // The brush's resting position as a FRACTION of the card (0..1). This is the source of truth so the
+  // brush stays put RELATIVE to the card across AppLovin orientation flips / resizes / zoom (its
+  // absolute pixel spot is recomputed from this on every relayout). Starts at the authored spawn.
+  let brushFracX = 0.5
+  let brushFracY = 0.5
+  const brushHostRect = (): DOMRect => (brushHost ?? ctx.root).getBoundingClientRect()
+
+  // Is a press ON the brush? Used to require the player to GRAB the brush and drag it, rather than
+  // scratching wherever they tap. Generous padding so it's easy to grab on touch.
+  const brushHit = (clientX: number, clientY: number): boolean => {
+    if (!brushEl || !brushCenter) return false
+    return Math.abs(clientX - brushCenter.x) <= brushW * 0.5 + 18 && Math.abs(clientY - brushCenter.y) <= brushH * 0.5 + 18
+  }
+
+  // Size the floating brush to the active cell (cells are uniform), preserving its aspect ratio,
+  // and cache the pixel size for moveBrush's tip math.
+  const sizeBrush = (cell: CellState): void => {
+    if (!brushEl) return
+    const short = Math.min(cell.el.clientWidth, cell.el.clientHeight)
+    const aspect = brushImg && brushImg.naturalWidth && brushImg.naturalHeight
+      ? brushImg.naturalWidth / brushImg.naturalHeight
+      : 1
+    brushW = Math.max(8, short * brushScaleFrac)
+    brushH = brushW / (aspect || 1)
+    brushEl.style.width = brushW.toFixed(1) + 'px'
+    brushEl.style.height = brushH.toFixed(1) + 'px'
+  }
+
+  // Draw the brush CENTERED on the finger (the finger "holds" the brush), so the authored tip can
+  // sit somewhere else in the image and reveal there — not under the finger. Pure compositor
+  // transform against the gesture-cached rect + size — no layout read per move.
+  const moveBrush = (clientX: number, clientY: number): void => {
+    if (!brushEl || !brushRootRect) return
+    // Keep the brush CENTER within the card so at least ~half of it always stays over the card —
+    // part may overflow the edges, but never the whole brush.
+    let cx = clientX
+    let cy = clientY
+    if (brushCardRect) {
+      cx = Math.max(brushCardRect.left, Math.min(brushCardRect.right, cx))
+      cy = Math.max(brushCardRect.top, Math.min(brushCardRect.bottom, cy))
+    }
+    const left = cx - brushRootRect.left - 0.5 * brushW
+    const top = cy - brushRootRect.top - 0.5 * brushH
+    brushEl.style.transform = `translate(${left.toFixed(1)}px, ${top.toFixed(1)}px)`
+    brushCenter = { x: cx, y: cy } // the (clamped) center — used for grab hit-testing + the scratch tip
+  }
+
+  // Record the brush's card-fraction from its CURRENT position — ONLY from a real user drag (where
+  // brushCardRect is a valid, freshly-measured card rect). Never called during relayout, so an
+  // intermediate/degenerate card rect at orientation-flip time can't corrupt the stored fraction.
+  const rememberBrushFrac = (): void => {
+    if (!brushCenter || !brushCardRect || brushCardRect.width < 2 || brushCardRect.height < 2) return
+    brushFracX = Math.max(0, Math.min(1, (brushCenter.x - brushCardRect.left) / brushCardRect.width))
+    brushFracY = Math.max(0, Math.min(1, (brushCenter.y - brushCardRect.top) / brushCardRect.height))
+  }
+
+  // Re-place the brush at its stored card-fraction after a layout change (orientation flip, resize,
+  // zoom). Keeps its position ABSOLUTE relative to the card. Skips degenerate rects (mid-transition)
+  // and never rewrites the stored fraction, so flipping to landscape and back restores it exactly.
+  const relayoutBrush = (): void => {
+    if (!brushEl || !started || !cells[0]) return
+    const card = ctx.root.getBoundingClientRect()
+    if (card.width < 2 || card.height < 2) return // mid-transition — don't reposition on a bad rect
+    brushRootRect = brushHostRect()
+    brushCardRect = card
+    sizeBrush(cells[0])
+    moveBrush(card.left + brushFracX * card.width, card.top + brushFracY * card.height)
+  }
+
+  // Where the scratch actually happens (client coords): the brush's authored tip pixel, which is
+  // offset from the finger by (tip − center) × brush size. No brush → the finger itself.
+  const brushTip = (clientX: number, clientY: number): { x: number; y: number } => {
+    if (!brushEl) return { x: clientX, y: clientY }
+    return { x: clientX + (brushTipX - 0.5) * brushW, y: clientY + (brushTipY - 0.5) * brushH }
+  }
+
+  // The client-space point the brush rests at (its authored spawn, as a fraction of the card).
+  const spawnClient = (): { x: number; y: number } => {
+    const rect = ctx.root.getBoundingClientRect()
+    return { x: rect.left + brushSpawnX * rect.width, y: rect.top + brushSpawnY * rect.height }
+  }
+
+  // Park the brush at its spawn spot and keep it visible. The brush is a persistent tool the player
+  // drags, so it never disappears between strokes — only rests where it was left. Then plays the
+  // optional intro demo.
+  // Signal that the brush is done with its intro and is ready to be pointed at (handguide 'brush' mode
+  // waits for this so the hint only appears AFTER the intro animation).
+  const markBrushReady = (): void => { if (brushEl) brushEl.dataset.brushReady = '1' }
+
+  const parkBrush = (): void => {
+    if (!brushEl || !cells[0]) return
+    brushRootRect = brushHostRect()
+    brushCardRect = ctx.root.getBoundingClientRect()
+    brushFracX = brushSpawnX // rest at the authored spawn (as a card fraction)
+    brushFracY = brushSpawnY
+    sizeBrush(cells[0])
+    const s = spawnClient()
+    moveBrush(s.x, s.y)
+    brushEl.style.opacity = '1'
+    playBrushIntro()
+    if (!brushIntroAnim) markBrushReady() // no intro playing → ready immediately
+  }
+
+  // Fade the brush away on win — its job is done. Matches the cover's reveal fade.
+  const fadeBrush = (): void => {
+    if (!brushEl) return
+    brushIntroAnim?.cancel()
+    brushIntroAnim = null
+    brushEl.style.transition = 'opacity 400ms ease'
+    brushEl.style.opacity = '0'
+  }
+
+  // Optional start animation: the brush traces the authored path (or a default rub) a few times
+  // like the handguide's draw-path hint, then rests. Cancelled the moment the player interacts.
+  // The path is a list of points as fractions 0..1 of the card; speed + loops are authored.
+  const playBrushIntro = (): void => {
+    if (!brushEl || !brushIntro || typeof brushEl.animate !== 'function') return
+    const rect = ctx.root.getBoundingClientRect()
+    const host = brushHostRect()
+    const xf = (cx: number, cy: number): string => {
+      const left = cx - host.left - 0.5 * brushW
+      const top = cy - host.top - 0.5 * brushH
+      return `translate(${left.toFixed(1)}px, ${top.toFixed(1)}px)`
+    }
+    // Start AND end each pass at the spawn point so the brush eases back to rest gracefully
+    // (and loops without a jump) instead of teleporting from the last path point.
+    const s = spawnClient()
+    const spawnXf = xf(s.x, s.y)
+    let mid: string[]
+    if (brushIntroPath.length >= 2) {
+      mid = brushIntroPath.map((p) => xf(rect.left + p.x * rect.width, rect.top + p.y * rect.height))
+    } else {
+      const amp = rect.width * 0.22 // default: a horizontal rub across the spawn point
+      mid = [xf(s.x - amp, s.y), xf(s.x + amp, s.y), xf(s.x - amp, s.y)]
+    }
+    const kf: Keyframe[] = [spawnXf, ...mid, spawnXf].map((t) => ({ transform: t }))
+    brushIntroAnim?.cancel()
+    brushIntroAnim = brushEl.animate(kf, { duration: brushIntroDurationMs, iterations: brushIntroLoops, easing: 'ease-in-out' })
+    brushIntroAnim.onfinish = (): void => { brushIntroAnim = null; const p = spawnClient(); moveBrush(p.x, p.y); markBrushReady() }
+  }
 
   // Fraction of cells revealed (won) out of the total — the shared progress metric
   // that drives revealAssetsState visibility.
@@ -198,7 +418,9 @@ export function createScratchGrid(): GameModule {
     // Per-cell cover takes priority; fall back to shared global cover
     const img = cell.cellCoverImg ?? coverImg
     const ready = cell.cellCoverImg ? cell.cellCoverReady : coverReady
-    if (img && ready) {
+    // A decoded, usable image needs BOTH the ready flag AND real pixels — a load that failed
+    // (Brave shield / webview that swallows onerror) can flip ready with naturalWidth still 0.
+    if (img && ready && (img.naturalWidth || img.width)) {
       // In contain mode fill the letterbox with the cover color (if set) so it stays a
       // scratchable surface; a cleared color leaves it transparent (no box around the image).
       if (imageFit === 'contain' && coverColor) {
@@ -208,7 +430,17 @@ export function createScratchGrid(): GameModule {
       drawImageFit(c2d, img, w, h)
       return
     }
-    // No cover image: a cleared cover color leaves the cell transparent.
+    // A cover image is CONFIGURED but not yet usable (still downloading on a cold/hard-refresh
+    // load, or a load that never resolved in a shielded webview). Paint an OPAQUE fallback so
+    // the cell is never left transparent during that window — otherwise the reveal shows through
+    // immediately and the very first scratch measures ~100% cleared → instant win. This is the
+    // Brave / AppLovin "cover doesn't appear" bug. On the real onload we repaint the image over it.
+    if (img) {
+      c2d.fillStyle = coverColor || COVER_LOAD_FALLBACK
+      c2d.fillRect(0, 0, w, h)
+      return
+    }
+    // Genuinely no cover image configured: a cleared cover color is an intentional transparent cell.
     if (!coverColor) return
     c2d.fillStyle = coverColor
     c2d.fillRect(0, 0, w, h)
@@ -253,17 +485,14 @@ export function createScratchGrid(): GameModule {
     if (cell.revealImg && cell.revealReady) drawImageFit(g, cell.revealImg, canvas.width, canvas.height)
   }
 
-  // Fraction of the reveal ZONE (within this cell) scratched clear (alpha < 128).
-  // Pixels outside the zone are ignored, so scratching there can't trip the threshold.
-  // Sampled at 64×64 so a small zone still has enough pixels to measure.
-  const measure = (canvas: HTMLCanvasElement): number => {
-    const S = 64
-    const o = document.createElement('canvas')
-    o.width = S
-    o.height = S
-    const oc = o.getContext('2d')!
-    oc.drawImage(canvas, 0, 0, S, S)
-    const data = oc.getImageData(0, 0, S, S).data
+  // Fraction of the reveal ZONE (within this cell) scratched clear, read from the analytic
+  // coverGrid — NOT from the canvas. A getImageData readback is farbled/zeroed by Brave's shield
+  // in a 3rd-party ad iframe (returns ~0 alpha → false ~100% cleared → instant win on first touch);
+  // the grid is populated directly from the erode stroke geometry, so it's immune to that and reads
+  // exactly 0 until the player actually scratches inside the zone. Cells outside the zone are ignored.
+  const measure = (cell: CellState): number => {
+    const S = COVERAGE_S
+    const grid = cell.coverGrid
     const x0 = Math.max(0, Math.floor(zoneX * S))
     const y0 = Math.max(0, Math.floor(zoneY * S))
     const x1 = Math.min(S, Math.ceil((zoneX + zoneW) * S))
@@ -273,7 +502,7 @@ export function createScratchGrid(): GameModule {
     for (let y = y0; y < y1; y++) {
       for (let x = x0; x < x1; x++) {
         total++
-        if (data[(y * S + x) * 4 + 3] < 128) clear++
+        if (grid[y * S + x]) clear++
       }
     }
     return total > 0 ? clear / total : 0
@@ -353,6 +582,7 @@ export function createScratchGrid(): GameModule {
         }
       }
     }
+    relayoutBrush() // keep the brush pinned to its card-fraction across resize / orientation flips
   }
 
   // Show a full-screen overlay on the stage container (above all scene elements).
@@ -433,6 +663,7 @@ export function createScratchGrid(): GameModule {
     requestAnimationFrame(() => { cell.canvas.style.opacity = '0' })
 
     if (cell.isWin) {
+      fadeBrush() // prize revealed — fade the brush out
       winCb?.()
       if (cell.winSceneId) {
         // Redirect straight INTO the win scene (a full transition that covers the game)
@@ -469,6 +700,10 @@ export function createScratchGrid(): GameModule {
     let lastPt: { x: number; y: number } | null = null
     let moves = 0
     let touchActive = false
+    // Offset between the brush center and the finger at grab time, so dragging moves the brush by
+    // the finger delta (no jump-to-finger). Zero when there's no brush (scratch follows the finger).
+    let grabDX = 0
+    let grabDY = 0
 
     const toCanvas = (cx: number, cy: number): { x: number; y: number } => {
       const r = canvas.getBoundingClientRect()
@@ -482,7 +717,7 @@ export function createScratchGrid(): GameModule {
       c2d.globalCompositeOperation = 'destination-out'
       c2d.fillStyle = '#000'
       c2d.strokeStyle = '#000'
-      const r = Math.max(10, Math.min(canvas.width, canvas.height) * 0.1)
+      const r = Math.max(10, Math.min(canvas.width, canvas.height) * brushRadiusFrac)
       if (lastPt) {
         c2d.lineWidth = r * 2
         c2d.lineCap = 'round'
@@ -494,32 +729,75 @@ export function createScratchGrid(): GameModule {
       c2d.beginPath()
       c2d.arc(x, y, r, 0, Math.PI * 2)
       c2d.fill()
+      // Mirror the same erode geometry into the analytic coverage grid that measure() reads
+      // (canvas → normalized grid coords). Stamp the round cap at both ends and step discs along
+      // the segment so a fast swipe still fills the grid continuously, matching the visual stroke.
+      const cw = Math.max(1, canvas.width)
+      const ch = Math.max(1, canvas.height)
+      const grx = (r / cw) * COVERAGE_S
+      const gry = (r / ch) * COVERAGE_S
+      const stamp = (px: number, py: number): void =>
+        stampDisc(cell.coverGrid, (px / cw) * COVERAGE_S, (py / ch) * COVERAGE_S, grx, gry)
+      if (lastPt) {
+        const dist = Math.hypot(x - lastPt.x, y - lastPt.y)
+        const steps = Math.max(1, Math.ceil(dist / Math.max(1, r * 0.5)))
+        for (let i = 1; i < steps; i++) stamp(lastPt.x + (x - lastPt.x) * (i / steps), lastPt.y + (y - lastPt.y) * (i / steps))
+        stamp(lastPt.x, lastPt.y)
+      }
+      stamp(x, y)
       lastPt = { x, y }
+    }
+
+    // Begin a stroke: require grabbing the brush (if any). Returns false if the press missed it, so
+    // the caller can bail out and NOT scratch. Sets the grab offset + does the first erode.
+    const beginStroke = (clientX: number, clientY: number): boolean => {
+      if (brushEl && !brushHit(clientX, clientY)) return false // must grab the brush, not tap anywhere
+      brushIntroAnim?.cancel()
+      brushIntroAnim = null
+      markBrushReady() // player took over — the (possibly interrupted) intro is done
+      grabDX = brushEl && brushCenter ? brushCenter.x - clientX : 0
+      grabDY = brushEl && brushCenter ? brushCenter.y - clientY : 0
+      if (brushEl) { brushRootRect = brushHostRect(); brushCardRect = ctx.root.getBoundingClientRect(); sizeBrush(cell) }
+      const bx = clientX + grabDX
+      const by = clientY + grabDY
+      moveBrush(bx, by)
+      rememberBrushFrac() // user placed the brush → update its resting card-fraction
+      const c = brushEl && brushCenter ? brushCenter : { x: bx, y: by } // clamped center
+      const t = brushTip(c.x, c.y)
+      const p = toCanvas(t.x, t.y)
+      erodeAt(p.x, p.y)
+      return true
     }
 
     const onMove = (cx: number, cy: number): void => {
       if (cell.won || scratchingLocked) return
-      const p = toCanvas(cx, cy)
+      const bx = cx + grabDX
+      const by = cy + grabDY
+      moveBrush(bx, by)
+      rememberBrushFrac() // user dragged the brush → track its card-fraction
+      const c = brushEl && brushCenter ? brushCenter : { x: bx, y: by } // clamped center
+      const t = brushTip(c.x, c.y)
+      const p = toCanvas(t.x, t.y)
       erodeAt(p.x, p.y)
-      if ((moves++ & 7) === 0 && measure(canvas) >= threshold) revealCell(cell)
+      if ((moves++ & 7) === 0 && measure(cell) >= threshold) revealCell(cell)
     }
 
     const onEnd = (): void => {
       ctx.sfx.loopStop?.('drag')
       lastPt = null
-      if (!cell.won && measure(canvas) >= threshold) revealCell(cell)
+      // NOTE: the brush stays on screen (persistent draggable tool) — no hideBrush() here.
+      if (!cell.won && measure(cell) >= threshold) revealCell(cell)
     }
 
     canvas.addEventListener(
       'touchstart',
       (e) => {
         if (cell.won || scratchingLocked) return
+        const t = e.changedTouches[0]
+        lastPt = null
+        if (!beginStroke(t.clientX, t.clientY)) return // press missed the brush — ignore
         touchActive = true
         ctx.sfx.loopStart?.('drag')
-        lastPt = null
-        const t = e.changedTouches[0]
-        const p = toCanvas(t.clientX, t.clientY)
-        erodeAt(p.x, p.y)
         const onTouchMove = (ev: TouchEvent): void => {
           ev.preventDefault()
           onMove(ev.changedTouches[0].clientX, ev.changedTouches[0].clientY)
@@ -540,6 +818,8 @@ export function createScratchGrid(): GameModule {
 
     canvas.addEventListener('pointerdown', (e) => {
       if (cell.won || touchActive || e.pointerType === 'touch' || scratchingLocked) return
+      lastPt = null
+      if (!brushHit(e.clientX, e.clientY) && brushEl) return // must grab the brush, not tap anywhere
       e.preventDefault()
       try {
         canvas.setPointerCapture(e.pointerId)
@@ -547,9 +827,7 @@ export function createScratchGrid(): GameModule {
         /* ignore */
       }
       ctx.sfx.loopStart?.('drag')
-      lastPt = null
-      const p = toCanvas(e.clientX, e.clientY)
-      erodeAt(p.x, p.y)
+      beginStroke(e.clientX, e.clientY)
       const onPointerMove = (ev: PointerEvent): void => onMove(ev.clientX, ev.clientY)
       const onPointerUp = (): void => {
         canvas.removeEventListener('pointermove', onPointerMove)
@@ -578,6 +856,17 @@ export function createScratchGrid(): GameModule {
       zoneH = Math.max(0.02, Math.min(1 - zoneY, num(params.zoneH, 100) / 100))
       imageFit = str(params.imageFit as unknown, 'cover') === 'contain' ? 'contain' : 'cover'
       cellRadiusFrac = Math.max(0, Math.min(50, num(params.cellRadius, 9))) / 100
+      // Brush: tip position + erode radius + display size + spawn + intro (all authored).
+      brushTipX = Math.max(0, Math.min(1, num(params.brushTipX as unknown, 50) / 100))
+      brushTipY = Math.max(0, Math.min(1, num(params.brushTipY as unknown, 50) / 100))
+      brushRadiusFrac = Math.max(1, Math.min(50, num(params.brushRadius as unknown, 10))) / 100
+      brushScaleFrac = Math.max(5, Math.min(200, num(params.brushScale as unknown, 40))) / 100
+      brushSpawnX = Math.max(0, Math.min(1, num(params.brushSpawnX as unknown, 50) / 100))
+      brushSpawnY = Math.max(0, Math.min(1, num(params.brushSpawnY as unknown, 50) / 100))
+      brushIntro = params.brushIntro === true || params.brushIntro === 'on' || params.brushIntro === 1
+      brushIntroDurationMs = Math.max(200, num(params.brushIntroDurationMs as unknown, 1600))
+      brushIntroLoops = Math.max(1, Math.min(20, Math.round(num(params.brushIntroLoops as unknown, 2))))
+      brushIntroPath = parseBrushPath(str(params.brushIntroPath as unknown, ''))
       coverColor = str(params.coverColor, '#9aa3b2')
       // Empty string = user cleared the swatch → transparent cell background.
       const winBgColor = str(params.winBgColor, '#1b3a6e') || 'transparent'
@@ -680,7 +969,40 @@ export function createScratchGrid(): GameModule {
           coverReady = true
           if (started) for (const cell of cells) if (!cell.won) fillCellCover(cell)
         }
+        coverImg.onerror = () => {
+          // Fallback: mark cover as ready even if image load fails, so cells aren't transparent.
+          // fillCellCover will fall back to coverColor; if that's also empty, shows 'SCRATCH' text.
+          coverReady = true
+          if (started) for (const cell of cells) if (!cell.won) fillCellCover(cell)
+        }
         coverImg.src = coverSrc
+        // Cached/decoded images may never fire onload — draw immediately if already ready.
+        if (coverImg.complete && coverImg.naturalWidth) {
+          coverReady = true
+          if (started) for (const cell of cells) if (!cell.won) fillCellCover(cell)
+        }
+      }
+
+      // Optional brush: a floating image (tip does the scratching) that follows the pointer while
+      // dragging. z-index sits above the reveal assets (400) so the tool reads as on top; it never
+      // eats pointer events. Sizing/positioning is handled by parkBrush()/beginStroke().
+      const brushSrc = ctx.assets.src(str(params.brushImage as unknown, ''))
+      if (brushSrc) {
+        brushImg = new Image()
+        brushImg.onload = () => { /* aspect ratio now available for the next sizeBrush() */ }
+        brushImg.src = brushSrc
+        brushEl = document.createElement('img')
+        brushEl.src = brushSrc
+        brushEl.draggable = false
+        brushEl.dataset.paBrush = '1' // marker so a handguide's 'point at brush' mode can find it
+        brushEl.style.cssText =
+          'position:absolute;left:0;top:0;pointer-events:none;opacity:0;z-index:500;' +
+          'will-change:transform;transition:opacity 120ms ease;-webkit-user-drag:none;user-select:none;'
+        // Mount on the non-clipped stage container (like the win/lose overlay) so the brush can
+        // overflow past the card edges instead of being cut off by ctx.root's overflow:hidden.
+        const paRoot = ctx.root.closest?.('.pa-root') as HTMLElement | null
+        brushHost = (paRoot ?? ctx.root).parentElement ?? ctx.root
+        brushHost.appendChild(brushEl)
       }
 
       for (let i = 0; i < total; i++) {
@@ -753,6 +1075,7 @@ export function createScratchGrid(): GameModule {
         const cellState: CellState = {
           el: cellEl, canvas, c2d, labelEl, won: false, isWin,
           row: Math.floor(i / cols), col: i % cols,
+          coverGrid: new Uint8Array(COVERAGE_S * COVERAGE_S),
           cellCoverImg: null, cellCoverReady: false,
           revealCanvas, revealC2d, revealImg, revealReady: false,
           winSceneId: cellWinSceneId(i),
@@ -779,8 +1102,17 @@ export function createScratchGrid(): GameModule {
             cellState.cellCoverReady = true
             if (started && !cellState.won) fillCellCover(cellState)
           }
+          img.onerror = () => {
+            cellState.cellCoverReady = true
+            if (started && !cellState.won) fillCellCover(cellState)
+          }
           img.src = cellCoverSrc
           cellState.cellCoverImg = img
+          // Cached/decoded images may never fire onload — draw immediately if already ready.
+          if (img.complete && img.naturalWidth) {
+            cellState.cellCoverReady = true
+            if (started && !cellState.won) fillCellCover(cellState)
+          }
         }
         cells.push(cellState)
       }
@@ -841,6 +1173,7 @@ export function createScratchGrid(): GameModule {
         if (!cell.won) fillCellCover(cell)
       }
       for (const cell of cells) setupCell(cell)
+      parkBrush() // show the brush at rest from the start — it's a persistent draggable tool
       // Staggered spring entrance: cells slide/fade in from the right, one at a time
       // (row-major order). `fill:'backwards'` holds each cell hidden through its delay
       // so the reveal is truly one-at-a-time, then releases to the natural state. The
@@ -856,6 +1189,7 @@ export function createScratchGrid(): GameModule {
     relayout: sizeAll,
 
     getHint(): HintMove | null {
+      if (brushEl) return null // the brush IS the on-screen tool; point-at-brush is a handguide mode
       const cell = cells.find((c) => !c.won)
       if (!cell) return null
       const r = cell.canvas.getBoundingClientRect()
@@ -885,6 +1219,13 @@ export function createScratchGrid(): GameModule {
       scratchingLocked = false
       coverImg = null
       coverReady = false
+      brushIntroAnim?.cancel()
+      brushIntroAnim = null
+      brushEl?.remove() // mounted on the stage host, not ctx.root — remove it explicitly
+      brushImg = null
+      brushEl = null
+      brushHost = null
+      brushRootRect = null
       ro?.disconnect()
       dprCleanup?.()
       dprCleanup = null
@@ -923,6 +1264,10 @@ export const SCRATCH_GRID_TEMPLATE: GameTemplate = {
     { key: 'loseOverlayDurationMs', label: 'Lose overlay duration (ms)', type: 'number', min: 200, max: 5000, step: 100 },
     { key: 'winOverlayDurationMs', label: 'Win overlay duration (ms)', type: 'number', min: 200, max: 5000, step: 100 },
     { key: 'threshold', label: 'Reveal at (fraction scratched)', type: 'number', min: 0.2, max: 0.9, step: 0.05 },
+    { key: 'brushRadius', label: 'Brush/scratch radius (% of cell)', type: 'number', min: 1, max: 50, step: 1 },
+    { key: 'brushScale', label: 'Brush image size (% of cell)', type: 'number', min: 5, max: 200, step: 5 },
+    { key: 'brushTipX', label: 'Brush tip X — reveal point (% of image, 50 = center)', type: 'number', min: 0, max: 100, step: 1 },
+    { key: 'brushTipY', label: 'Brush tip Y — reveal point (% of image, 50 = center)', type: 'number', min: 0, max: 100, step: 1 },
     { key: 'zoneX', label: 'Reveal zone left (%, per cell)', type: 'number', min: 0, max: 100, step: 1 },
     { key: 'zoneY', label: 'Reveal zone top (%, per cell)', type: 'number', min: 0, max: 100, step: 1 },
     { key: 'zoneW', label: 'Reveal zone width (%, per cell)', type: 'number', min: 2, max: 100, step: 1 },
@@ -935,6 +1280,7 @@ export const SCRATCH_GRID_TEMPLATE: GameTemplate = {
   ],
   assetSlots: [
     { key: 'cover', label: 'Cover image (shared fallback)' },
+    { key: 'brushImage', label: 'Brush image (drag to scratch; optional)' },
     { key: 'sharedBg', label: 'Shared background reveal (all cells)' },
     { key: 'sharedText', label: 'Shared text overlay (all cells)' },
     { key: 'cell0cover', label: 'Cell 1 cover image' },
@@ -978,6 +1324,8 @@ export const SCRATCH_GRID_TEMPLATE: GameTemplate = {
     winOverlayDurationMs: 800,
     bgImage: '', bgScale: 100, bgX: 50, bgY: 50,
     threshold: 0.5,
+    brushImage: '', brushRadius: 10, brushScale: 40, brushTipX: 50, brushTipY: 50,
+    brushSpawnX: 50, brushSpawnY: 50, brushIntro: false, brushIntroPath: '', brushIntroDurationMs: 1600, brushIntroLoops: 2,
     zoneX: 0, zoneY: 0, zoneW: 100, zoneH: 100,
     imageFit: 'cover',
     cover: '',

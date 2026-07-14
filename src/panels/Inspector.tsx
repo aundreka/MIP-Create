@@ -1,7 +1,7 @@
 ﻿// Inspector — project meta (no selection), a multi-select panel, or the full
 // single-element editor with a visual Background-box section.
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useMemo, type PointerEvent as ReactPointerEvent } from 'react'
 import type { Anchor, AdvanceOn, AnimPresetId, AnimSpec, AnimTrigger, BackgroundConfig, BoxStyle, ConfettiConfig, CountdownConfig, CtaPulsePreset, EndsceneConfig, HandguideConfig, HandguideNode, KeyframeStep, LayoutMode, ObjectFit, SceneElement, SceneKind, SceneOverlay, SfxBinding, ShadowPreset, TextConfig, TransitionType, UnboxingConfig } from '../../runtime/scene'
 import { GAME_TEMPLATES } from '../../runtime/games/registry'
 import type { ParamField } from '../../runtime/games/types'
@@ -74,6 +74,7 @@ function ElementSound(props: { el: SceneElement }): JSX.Element {
   const eventOptions = [
     { value: 'tap', label: 'On tap' },
     { value: 'sceneEnter', label: 'On scene enter' },
+    { value: 'elementEnter', label: 'When this element enters' },
     ...(isScratching ? [{ value: 'whileScratching', label: 'While scratching (loop)' }] : []),
     ...(isScratching || el.reveal ? [{ value: 'onReveal', label: 'When revealed / win' }] : []),
     ...(el.type === 'unboxing' ? [
@@ -375,9 +376,41 @@ const EASINGS: { value: string; label: string }[] = [
   { value: 'ease', label: 'ease' },
   { value: 'linear', label: 'linear' },
 ]
-const ENTRANCE_PRESETS: AnimPresetId[] = ['fade', 'slide-up', 'slide-down', 'slide-left', 'slide-right', 'pop', 'bounce', 'spin']
-const LOOP_PRESETS: AnimPresetId[] = ['pulse', 'float', 'bounce', 'shake', 'wave', 'shine', 'glow', 'spin']
-const EXIT_PRESETS: AnimPresetId[] = ['fade-out', 'scale-out']
+// 'lightray' (the moving reflection) is a class-driven pseudo effect, so it can be picked in ANY
+// phase — entrance, loop, or exit — not just as a loop.
+const ENTRANCE_PRESETS: AnimPresetId[] = ['fade', 'slide-up', 'slide-down', 'slide-left', 'slide-right', 'pop', 'bounce', 'spin', 'lightray']
+const LOOP_PRESETS: AnimPresetId[] = ['pulse', 'float', 'bounce', 'shake', 'wave', 'shine', 'lightray', 'glow', 'spin']
+const EXIT_PRESETS: AnimPresetId[] = ['fade-out', 'scale-out', 'lightray']
+// Presets offered for STACKED (extra) animations: every node-driven preset + the reflection.
+const NODE_PRESETS: AnimPresetId[] = ['fade', 'slide-up', 'slide-down', 'slide-left', 'slide-right', 'pop', 'bounce', 'shake', 'wave', 'shine', 'glow', 'spin', 'float', 'pulse', 'fade-out', 'scale-out', 'lightray']
+const LOOP_EXTRA_PRESETS: AnimPresetId[] = NODE_PRESETS
+// Friendly labels so effects are findable in the dropdown (the raw ids are terse).
+const PRESET_LABELS: Partial<Record<AnimPresetId, string>> = {
+  shine: 'shine (brightness glint)',
+  lightray: 'shine — moving reflection',
+  glow: 'glow (soft halo)',
+  'slide-up': 'slide up',
+  'slide-down': 'slide down',
+  'slide-left': 'slide left',
+  'slide-right': 'slide right',
+  'fade-out': 'fade out',
+  'scale-out': 'scale out',
+}
+const presetLabel = (p: AnimPresetId): string => PRESET_LABELS[p] ?? (p as string)
+// Direction options for the 'lightray' reflection sweep (mapped to an angle in degrees).
+const LIGHTRAY_DIRECTIONS: { value: number; label: string }[] = [
+  { value: 20, label: 'diagonal ↘ (default)' },
+  { value: 0, label: 'left → right' },
+  { value: 180, label: 'right → left' },
+  { value: 90, label: 'top → bottom' },
+  { value: 270, label: 'bottom → top' },
+  { value: 45, label: 'corner ↘ (top-left → bottom-right)' },
+  { value: 135, label: 'corner ↙ (top-right → bottom-left)' },
+  { value: 315, label: 'corner ↗ (bottom-left → top-right)' },
+  { value: 225, label: 'corner ↖ (bottom-right → top-left)' },
+]
+// Brush params rendered by the custom <BrushControls> block instead of the generic field list.
+const BRUSH_PARAM_KEYS = new Set(['brushRadius', 'brushScale', 'brushTipX', 'brushTipY', 'brushSpawnX', 'brushSpawnY', 'brushIntro', 'brushIntroPath', 'brushIntroDurationMs', 'brushIntroLoops'])
 // seeded when switching a phase to 'custom' so there's something to edit
 const DEFAULT_CUSTOM: KeyframeStep[] = [
   { at: 0, opacity: 0, transform: 'scale(0.6)' },
@@ -407,11 +440,20 @@ function AnimRow(props: {
               onChange={(v) =>
                 v === 'custom' && !spec.custom?.length ? patch({ preset: 'custom', custom: DEFAULT_CUSTOM }) : patch({ preset: v as AnimSpec['preset'] })
               }
-              options={[...props.presets.map((p) => ({ value: p as string, label: p as string })), { value: 'custom', label: '✦ custom keyframes' }]}
+              options={[...props.presets.map((p) => ({ value: p as string, label: presetLabel(p) })), { value: 'custom', label: '✦ custom keyframes' }]}
             />
           </Row>
           {spec.preset === 'custom' && (
             <KeyframeEditor steps={spec.custom ?? []} onChange={(c) => patch({ custom: c })} />
+          )}
+          {spec.preset === 'lightray' && (
+            <Row label="Direction">
+              <Select
+                value={String(spec.angleDeg ?? 20)}
+                onChange={(v) => patch({ angleDeg: Number(v) })}
+                options={LIGHTRAY_DIRECTIONS.map((d) => ({ value: String(d.value), label: d.label }))}
+              />
+            </Row>
           )}
           <div className="grid2">
             <NumField label="Duration" value={spec.durationMs} step={50} onChange={(n) => patch({ durationMs: n })} />
@@ -438,14 +480,204 @@ function AnimRow(props: {
   )
 }
 
+// A phase editor that stacks MULTIPLE animations: the primary AnimRow plus any number of extra
+// rows played together with it (e.g. entrance = pop + shine). Extras only show once a primary
+// exists; removing the primary clears the extras too.
+function AnimPhase(props: {
+  title: string
+  trigger?: boolean
+  primary?: AnimSpec
+  extra?: AnimSpec[]
+  presets: AnimPresetId[]
+  extraPresets: AnimPresetId[]
+  defaultSpec: AnimSpec
+  defaultExtraSpec: AnimSpec
+  onChange: (primary: AnimSpec | undefined, extra: AnimSpec[]) => void
+}): JSX.Element {
+  const extra = props.extra ?? []
+  return (
+    <div className="anim-phase">
+      <AnimRow
+        title={props.title}
+        trigger={props.trigger}
+        spec={props.primary}
+        presets={props.presets}
+        defaultSpec={props.defaultSpec}
+        onChange={(s) => props.onChange(s, s ? extra : [])}
+      />
+      {props.primary && (
+        <div className="anim-extra-list">
+          {extra.map((sp, i) => (
+            <AnimRow
+              key={i}
+              title={`+ ${props.title} ${i + 2}`}
+              spec={sp}
+              presets={props.extraPresets}
+              defaultSpec={props.defaultExtraSpec}
+              onChange={(s) =>
+                props.onChange(
+                  props.primary,
+                  s ? extra.map((x, j) => (j === i ? s : x)) : extra.filter((_, j) => j !== i),
+                )
+              }
+            />
+          ))}
+          <button
+            className="btn"
+            style={{ width: '100%', marginTop: 4 }}
+            onClick={() => props.onChange(props.primary, [...extra, props.defaultExtraSpec])}
+          >
+            + Add another {props.title.toLowerCase()} animation
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Visual picker for the brush tip — the point on the brush image where the scratch reveals.
+// The box is sized to the brush image's aspect ratio (so it fills with no letterbox), so a
+// click/drag maps directly to a 0..100% position within the image. Falls back to nothing when
+// there's no brush image (caller shows number fields instead).
+function BrushTipPicker(props: {
+  src: string
+  tipXPct: number
+  tipYPct: number
+  onChange: (xPct: number, yPct: number) => void
+}): JSX.Element {
+  const [aspect, setAspect] = useState(1)
+  const dragging = useRef(false)
+  const setFromEvent = (e: ReactPointerEvent<HTMLDivElement>): void => {
+    const r = e.currentTarget.getBoundingClientRect()
+    const x = Math.max(0, Math.min(1, (e.clientX - r.left) / Math.max(1, r.width)))
+    const y = Math.max(0, Math.min(1, (e.clientY - r.top) / Math.max(1, r.height)))
+    props.onChange(Math.round(x * 100), Math.round(y * 100))
+  }
+  return (
+    <div>
+      <div className="hint pad">Click or drag on the brush to set its tip — the point that does the revealing (offset from the finger).</div>
+      <div
+        onPointerDown={(e) => { dragging.current = true; e.currentTarget.setPointerCapture(e.pointerId); setFromEvent(e) }}
+        onPointerMove={(e) => { if (dragging.current) setFromEvent(e) }}
+        onPointerUp={(e) => { dragging.current = false; try { e.currentTarget.releasePointerCapture(e.pointerId) } catch { /* ignore */ } }}
+        style={{
+          position: 'relative', width: '100%', maxWidth: 200, margin: '4px auto 2px',
+          aspectRatio: String(aspect || 1),
+          backgroundImage: `url("${props.src}")`, backgroundSize: '100% 100%', backgroundRepeat: 'no-repeat',
+          backgroundColor: 'rgba(127,127,127,0.15)',
+          border: '1px solid var(--border, #444)', borderRadius: 6, cursor: 'crosshair', touchAction: 'none',
+        }}
+      >
+        <img src={props.src} alt="" style={{ display: 'none' }} onLoad={(e) => {
+          const im = e.currentTarget
+          if (im.naturalWidth && im.naturalHeight) setAspect(im.naturalWidth / im.naturalHeight)
+        }} />
+        <div style={{ position: 'absolute', left: `${props.tipXPct}%`, top: 0, bottom: 0, width: 1, background: 'rgba(255,255,255,0.5)', pointerEvents: 'none' }} />
+        <div style={{ position: 'absolute', top: `${props.tipYPct}%`, left: 0, right: 0, height: 1, background: 'rgba(255,255,255,0.5)', pointerEvents: 'none' }} />
+        <div style={{
+          position: 'absolute', left: `${props.tipXPct}%`, top: `${props.tipYPct}%`,
+          width: 14, height: 14, transform: 'translate(-50%,-50%)', borderRadius: '50%',
+          border: '2px solid #fff', boxShadow: '0 0 0 2px rgba(0,0,0,0.6)', pointerEvents: 'none',
+        }} />
+      </div>
+    </div>
+  )
+}
+
+// Draw the brush intro path: click inside the card-shaped box to add points; the brush traces them
+// in order. Points are stored as fractions 0..1 in a JSON list. Undo/clear provided.
+function BrushPathEditor(props: { pathJson: string; aspect: number; onChange: (json: string) => void }): JSX.Element {
+  const pts = useMemo<{ x: number; y: number }[]>(() => {
+    try { const a = JSON.parse(props.pathJson || '[]'); return Array.isArray(a) ? a : [] } catch { return [] }
+  }, [props.pathJson])
+  const addAt = (e: ReactPointerEvent<HTMLDivElement>): void => {
+    const r = e.currentTarget.getBoundingClientRect()
+    const x = Math.max(0, Math.min(1, (e.clientX - r.left) / Math.max(1, r.width)))
+    const y = Math.max(0, Math.min(1, (e.clientY - r.top) / Math.max(1, r.height)))
+    props.onChange(JSON.stringify([...pts, { x: +x.toFixed(3), y: +y.toFixed(3) }]))
+  }
+  const poly = pts.map((p) => `${(p.x * 100).toFixed(1)},${(p.y * 100).toFixed(1)}`).join(' ')
+  return (
+    <div>
+      <div className="hint pad">Click inside the box to add points — the brush traces them in order ({pts.length} point{pts.length === 1 ? '' : 's'}). Green = start.</div>
+      <div
+        onPointerDown={addAt}
+        style={{
+          position: 'relative', width: '100%', maxWidth: 220, margin: '4px auto',
+          aspectRatio: String(props.aspect || 1), background: 'rgba(127,127,127,0.12)',
+          border: '1px solid var(--border, #444)', borderRadius: 6, cursor: 'crosshair', touchAction: 'none',
+        }}
+      >
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
+          {pts.length >= 2 && <polyline points={poly} fill="none" stroke="rgba(120,170,255,0.95)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />}
+          {pts.map((p, i) => (
+            <circle key={i} cx={p.x * 100} cy={p.y * 100} r={2.6} fill={i === 0 ? '#4ade80' : '#fff'} stroke="rgba(0,0,0,0.6)" strokeWidth={0.8} vectorEffect="non-scaling-stroke" />
+          ))}
+        </svg>
+      </div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button className="btn" style={{ flex: 1 }} disabled={!pts.length} onClick={() => props.onChange(JSON.stringify(pts.slice(0, -1)))}>Undo point</button>
+        <button className="btn" style={{ flex: 1 }} disabled={!pts.length} onClick={() => props.onChange('')}>Clear path</button>
+      </div>
+    </div>
+  )
+}
+
+// Shared brush editor (used by both the scratch card and the scratch grid). Image + size + radius,
+// a visual tip picker, spawn, and the optional intro path/speed.
+function BrushControls(props: {
+  params: Record<string, unknown>
+  setParam: (k: string, v: unknown) => void
+  setParams: (patch: Record<string, unknown>) => void
+  brushSrc: string
+  radiusLabel: string
+  cardAspect: number
+}): JSX.Element {
+  const { params, setParam, setParams, brushSrc } = props
+  const tipX = Number(params.brushTipX ?? 50)
+  const tipY = Number(params.brushTipY ?? 50)
+  const introOn = !!params.brushIntro && params.brushIntro !== 'off'
+  return (
+    <>
+      <div className="group-title2">Brush (drag to scratch)</div>
+      <AssetPicker label="Brush image (optional)" value={(params.brushImage as string) || undefined} allowNone onChange={(aid) => setParam('brushImage', aid ?? '')} />
+      <NumField label="Brush image size (% of card)" value={Number(params.brushScale ?? 40)} step={5} min={5} max={200} onChange={(n) => setParam('brushScale', n)} />
+      <NumField label={props.radiusLabel} value={Number(params.brushRadius ?? 10)} step={1} min={1} max={50} onChange={(n) => setParam('brushRadius', n)} />
+      {brushSrc ? (
+        <BrushTipPicker src={brushSrc} tipXPct={tipX} tipYPct={tipY} onChange={(x, y) => setParams({ brushTipX: x, brushTipY: y })} />
+      ) : (
+        <>
+          <NumField label="Brush tip X — reveal point (%)" value={tipX} step={1} min={0} max={100} onChange={(n) => setParam('brushTipX', n)} />
+          <NumField label="Brush tip Y — reveal point (%)" value={tipY} step={1} min={0} max={100} onChange={(n) => setParam('brushTipY', n)} />
+        </>
+      )}
+      <NumField label="Spawn X — resting spot (% of card)" value={Number(params.brushSpawnX ?? 50)} step={1} min={0} max={100} onChange={(n) => setParam('brushSpawnX', n)} />
+      <NumField label="Spawn Y — resting spot (% of card)" value={Number(params.brushSpawnY ?? 50)} step={1} min={0} max={100} onChange={(n) => setParam('brushSpawnY', n)} />
+      <Toggle label="Intro animation (demo at start)" checked={introOn} onChange={(v) => setParam('brushIntro', v)} />
+      <div className="hint pad">The brush stays on screen and can overflow past the card edges. Spawn sets where it rests; the intro plays a demo motion (like the hint hand) until the player touches.</div>
+      {introOn && (
+        <>
+          <NumField label="Intro speed — ms per pass (lower = faster)" value={Number(params.brushIntroDurationMs ?? 1600)} step={100} min={200} max={8000} onChange={(n) => setParam('brushIntroDurationMs', n)} />
+          <NumField label="Intro loops" value={Number(params.brushIntroLoops ?? 2)} step={1} min={1} max={20} onChange={(n) => setParam('brushIntroLoops', n)} />
+          <BrushPathEditor pathJson={String(params.brushIntroPath ?? '')} aspect={props.cardAspect} onChange={(j) => setParam('brushIntroPath', j)} />
+          <div className="hint pad">No path drawn = a default left-right rub at the spawn point.</div>
+        </>
+      )}
+    </>
+  )
+}
+
 interface ScratchGridCellsProps {
   params: Record<string, unknown>
   setParam: (k: string, v: unknown) => void
+  setParams: (patch: Record<string, unknown>) => void
   elementId: string
+  cardAspect: number
 }
-function ScratchGridCells({ params, setParam, elementId }: ScratchGridCellsProps): JSX.Element {
+function ScratchGridCells({ params, setParam, setParams, elementId, cardAspect }: ScratchGridCellsProps): JSX.Element {
   const [activeCell, setActiveCell] = useState(0)
-  const { project } = useEditorState()
+  const { project, assets } = useEditorState()
+  const brushSrc = assets[(params.brushImage as string) || '']?.src ?? ''
 
   useEffect(() => {
     const handler = (e: Event): void => {
@@ -507,6 +739,8 @@ function ScratchGridCells({ params, setParam, elementId }: ScratchGridCellsProps
           options={[{ value: 'cover', label: 'Cover (fill cell, may crop)' }, { value: 'contain', label: 'Contain (fit whole image, no crop)' }]}
         />
       </Row>
+
+      <BrushControls params={params} setParam={setParam} setParams={setParams} brushSrc={brushSrc} radiusLabel="Brush/scratch radius (% of cell)" cardAspect={cardAspect} />
 
       <div className="group-title2">Scratch surface: double-click a cell on the canvas to select it</div>
       <AssetPicker label="Shared cover (fallback)" value={(params.cover as string) || undefined} allowNone onChange={(aid) => setParam('cover', aid ?? '')} />
@@ -649,12 +883,12 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
     // first selected element's spec; any change writes that same spec to every
     // selected element, so identical timing makes them animate in sync as a group.
     const first = state.scene.elements.find((e) => e.id === state.selectedIds[0]) ?? state.scene.elements.find((e) => state.selectedIds.includes(e.id))
-    const patchAllAnim = (phase: 'entrance' | 'loop' | 'exit', s: AnimSpec | undefined): void => {
+    const patchAllPhase = (phase: 'entrance' | 'loop' | 'exit', primary: AnimSpec | undefined, extra: AnimSpec[]): void => {
       beginTransaction()
       for (const id of state.selectedIds) {
         const e = state.scene.elements.find((x) => x.id === id)
         if (!e) continue
-        patchElement(id, { animations: { ...(e.animations ?? {}), [phase]: s } })
+        patchElement(id, { animations: { ...(e.animations ?? {}), [phase]: primary, [`${phase}Extra`]: extra.length ? extra : undefined } })
       }
       endTransaction()
     }
@@ -665,28 +899,37 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
         <div className="group-title">Align to canvas</div>
         <AlignRow />
         <Accordion id="inspector.multiAnimation" title="Animation (all selected)" defaultOpen={false}>
-          <div className="hint pad">Applies the same animation to every selected element — same preset, duration, and delay, so they move together as a group.</div>
-          <AnimRow
+          <div className="hint pad">Applies the same animation(s) to every selected element — stack multiple per phase with “+ Add another”, and they animate together as a group.</div>
+          <AnimPhase
             title="Entrance"
             trigger
-            spec={first?.animations?.entrance}
+            primary={first?.animations?.entrance}
+            extra={first?.animations?.entranceExtra}
             presets={ENTRANCE_PRESETS}
+            extraPresets={NODE_PRESETS}
             defaultSpec={{ preset: 'slide-up', durationMs: 520, delayMs: 0, easing: 'ease-out', trigger: 'onMount' }}
-            onChange={(s) => patchAllAnim('entrance', s)}
+            defaultExtraSpec={{ preset: 'shine', durationMs: 900, delayMs: 0, easing: 'ease-in-out' }}
+            onChange={(primary, ex) => patchAllPhase('entrance', primary, ex)}
           />
-          <AnimRow
+          <AnimPhase
             title="Loop"
-            spec={first?.animations?.loop}
+            primary={first?.animations?.loop}
+            extra={first?.animations?.loopExtra}
             presets={LOOP_PRESETS}
+            extraPresets={LOOP_EXTRA_PRESETS}
             defaultSpec={{ preset: 'float', durationMs: 2200, delayMs: 0, easing: 'ease-in-out', iterations: 'infinite' }}
-            onChange={(s) => patchAllAnim('loop', s)}
+            defaultExtraSpec={{ preset: 'lightray', durationMs: 2400, delayMs: 0, easing: 'ease-in-out', iterations: 'infinite' }}
+            onChange={(primary, ex) => patchAllPhase('loop', primary, ex)}
           />
-          <AnimRow
+          <AnimPhase
             title="Exit"
-            spec={first?.animations?.exit}
+            primary={first?.animations?.exit}
+            extra={first?.animations?.exitExtra}
             presets={EXIT_PRESETS}
+            extraPresets={NODE_PRESETS}
             defaultSpec={{ preset: 'fade-out', durationMs: 300, delayMs: 0, easing: 'ease-in' }}
-            onChange={(s) => patchAllAnim('exit', s)}
+            defaultExtraSpec={{ preset: 'scale-out', durationMs: 300, delayMs: 0, easing: 'ease-in' }}
+            onChange={(primary, ex) => patchAllPhase('exit', primary, ex)}
           />
         </Accordion>
         <div className="group-title" />
@@ -987,8 +1230,12 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
         (() => {
           const tpl = GAME_TEMPLATES.find((t) => t.id === (el.game?.templateId ?? 'match')) ?? GAME_TEMPLATES[0]
           const params: Record<string, unknown> = { ...tpl.defaultParams, ...(el.game?.params ?? {}) }
-          const setParam = (k: string, v: unknown): void =>
-            patchElement(id, { game: { ...(el.game ?? { templateId: tpl.id, params: {} }), templateId: tpl.id, params: { ...params, [k]: v } } })
+          const setParams = (patch: Record<string, unknown>): void =>
+            patchElement(id, { game: { ...(el.game ?? { templateId: tpl.id, params: {} }), templateId: tpl.id, params: { ...params, ...patch } } })
+          // Single-key setter must funnel through setParams — two back-to-back setParam calls would
+          // each read the same stale `params` snapshot and the second would clobber the first.
+          const setParam = (k: string, v: unknown): void => setParams({ [k]: v })
+          const cardAspect = el.w && el.h ? el.w / el.h : 1 // for the brush intro-path editor box
           const renderField = (f: ParamField): JSX.Element => {
             const v = params[f.key]
             if (f.type === 'number') return <NumField key={f.key} label={f.label} value={typeof v === 'number' ? v : 0} step={f.step ?? 1} min={f.min} max={f.max} onChange={(n) => setParam(f.key, n)} />
@@ -1016,10 +1263,44 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 />
               </Row>
               {tpl.id === 'scratch_grid' ? (
-                <ScratchGridCells params={params} setParam={setParam} elementId={id} />
+                <ScratchGridCells params={params} setParam={setParam} setParams={setParams} elementId={id} cardAspect={cardAspect} />
               ) : (
               <>
-              {tpl.paramFields.map(renderField)}
+              {tpl.paramFields.filter((f) => !BRUSH_PARAM_KEYS.has(f.key) && !(tpl.id === 'scratch' && (f.key === 'coverColor' || f.key === 'shadowColor'))).map(renderField)}
+              {tpl.id === 'scratch' && (
+                <ColorField
+                  label="Cover color (none = transparent)"
+                  value={(params.coverColor as string) || undefined}
+                  allowNone
+                  onChange={(c) => setParam('coverColor', c ?? '')}
+                />
+              )}
+              {tpl.id === 'scratch' && (
+                <ColorField
+                  label="Reveal background (none = transparent)"
+                  value={(params.revealBgColor as string) || undefined}
+                  allowNone
+                  onChange={(c) => setParam('revealBgColor', c ?? '')}
+                />
+              )}
+              {tpl.id === 'scratch' && (
+                <ColorField
+                  label="Shadow color (none = no shadow)"
+                  value={(params.shadowColor as string) || undefined}
+                  allowNone
+                  onChange={(c) => setParam('shadowColor', c ?? '')}
+                />
+              )}
+              {tpl.id === 'scratch' && (
+                <BrushControls
+                  params={params}
+                  setParam={setParam}
+                  setParams={setParams}
+                  brushSrc={state.assets[(params.brushImage as string) || '']?.src ?? ''}
+                  radiusLabel="Brush/scratch radius (% of card)"
+                  cardAspect={cardAspect}
+                />
+              )}
               {tpl.id === 'scratch' && (
                 <>
                   <button
@@ -1035,7 +1316,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               {tpl.id === 'scratch' && params.fit === 'fit' && (
                 <div className="hint pad">Double-click the card on the canvas to position &amp; scale the reveal image: drag to move, corner handles to resize.</div>
               )}
-              {(tpl.assetSlots ?? []).map((slot) => {
+              {(tpl.assetSlots ?? []).filter((slot) => slot.key !== 'brushImage').map((slot) => {
                 if (slot.list) {
                   const n = Number(params[slot.countParam ?? '']) || 0
                   const arr = Array.isArray(params[slot.key]) ? (params[slot.key] as string[]) : []
@@ -1223,6 +1504,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                     { value: 'tap', label: 'Tap (bounce in place)' },
                     { value: 'slide', label: 'Slide along a path' },
                     { value: 'scratch', label: 'Scratch (back-and-forth rub)' },
+                    { value: 'brush', label: 'Point at the scratch brush (after its intro)' },
                   ]}
                 />
               </Row>
@@ -1259,6 +1541,16 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                     </>
                   )
                 })()}
+              {hg.mode === 'brush' && (
+                <>
+                  <div className="hint pad">The hand renders in front of the brush, sits below it, and mimes dragging it across the card. It only appears after the brush's intro. Adjust its offset &amp; rotation:</div>
+                  <div className="grid2">
+                    <NumField label="Offset X (px)" value={hg.brushOffsetX ?? 0} step={4} onChange={(n) => setHg({ brushOffsetX: n })} />
+                    <NumField label="Offset Y (px)" value={hg.brushOffsetY ?? 0} step={4} onChange={(n) => setHg({ brushOffsetY: n })} />
+                  </div>
+                  <NumField label="Rotation (deg)" value={hg.brushRotateDeg ?? 0} step={5} min={-180} max={180} onChange={(n) => setHg({ brushRotateDeg: n })} />
+                </>
+              )}
               <Row label="Easing">
                 <Select
                   value={hg.easing ?? 'ease-in-out'}
@@ -1591,6 +1883,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                       ]}
                     />
                   </Row>
+                  <Slider label="Zoom" value={cfg.zoom ?? 1} min={0.5} max={2} step={0.05} suffix="×" onChange={(n) => setEnd({ zoom: n })} />
                   <div className="group-title2">Portrait background</div>
                   {cfg.objectFit === 'contain' && (
                     <Toggle
@@ -1760,27 +2053,37 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
       </Accordion>
 
       <Accordion id="inspector.animation" title="Animation" defaultOpen={false}>
-        <AnimRow
+        <div className="hint pad">Stack multiple animations per phase with “+ Add another” — e.g. an entrance that pops in AND shines.</div>
+        <AnimPhase
           title="Entrance"
           trigger
-          spec={el.animations?.entrance}
+          primary={el.animations?.entrance}
+          extra={el.animations?.entranceExtra}
           presets={ENTRANCE_PRESETS}
+          extraPresets={NODE_PRESETS}
           defaultSpec={{ preset: 'fade', durationMs: 520, delayMs: 0, easing: 'ease-out', trigger: 'onMount' }}
-          onChange={(s) => patchElement(id, { animations: { ...(el.animations ?? {}), entrance: s } })}
+          defaultExtraSpec={{ preset: 'shine', durationMs: 900, delayMs: 0, easing: 'ease-in-out' }}
+          onChange={(primary, ex) => patchElement(id, { animations: { ...(el.animations ?? {}), entrance: primary, entranceExtra: ex.length ? ex : undefined } })}
         />
-        <AnimRow
+        <AnimPhase
           title="Loop"
-          spec={el.animations?.loop}
+          primary={el.animations?.loop}
+          extra={el.animations?.loopExtra}
           presets={LOOP_PRESETS}
+          extraPresets={LOOP_EXTRA_PRESETS}
           defaultSpec={{ preset: 'float', durationMs: 2200, delayMs: 0, easing: 'ease-in-out', iterations: 'infinite' }}
-          onChange={(s) => patchElement(id, { animations: { ...(el.animations ?? {}), loop: s } })}
+          defaultExtraSpec={{ preset: 'lightray', durationMs: 2400, delayMs: 0, easing: 'ease-in-out', iterations: 'infinite' }}
+          onChange={(primary, ex) => patchElement(id, { animations: { ...(el.animations ?? {}), loop: primary, loopExtra: ex.length ? ex : undefined } })}
         />
-        <AnimRow
+        <AnimPhase
           title="Exit"
-          spec={el.animations?.exit}
+          primary={el.animations?.exit}
+          extra={el.animations?.exitExtra}
           presets={EXIT_PRESETS}
+          extraPresets={NODE_PRESETS}
           defaultSpec={{ preset: 'fade-out', durationMs: 300, delayMs: 0, easing: 'ease-in' }}
-          onChange={(s) => patchElement(id, { animations: { ...(el.animations ?? {}), exit: s } })}
+          defaultExtraSpec={{ preset: 'scale-out', durationMs: 300, delayMs: 0, easing: 'ease-in' }}
+          onChange={(primary, ex) => patchElement(id, { animations: { ...(el.animations ?? {}), exit: primary, exitExtra: ex.length ? ex : undefined } })}
         />
       </Accordion>
 

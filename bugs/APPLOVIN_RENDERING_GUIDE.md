@@ -138,6 +138,87 @@ if (!inImmune) {
 
 ---
 
+## 6. Scratch grid: cover doesn't appear / instant win (Brave + cold load)
+
+**What you see:** In the scratch-grid minigame, the reveal (prize/answer) shows immediately, the scratch cover never appears, and the first touch instantly wins. Reported in **Brave** and in AppLovin's WebView. **Inconsistent — happens on the first preview / after a hard refresh, then goes away on reload.**
+
+**The "inconsistent, only when uncached" tell is the whole diagnosis:** it's a **cover-image load race**, NOT Brave's canvas farbling (farbling would break *every* time, deterministically).
+
+**Why it happens:**
+The scratch cover is drawn on a `<canvas>` per cell, on top of the reveal canvas. When the grid has **`coverColor` cleared (empty string)** — common, so the cover is *only* the WebP cover image — the cell depends entirely on that image being decoded.
+
+On a cold/hard-refresh load the cover image is **not cached**, so at `start()` time `coverReady` is still `false`. The old `fillCellCover` did:
+
+```ts
+// No cover image: a cleared cover color leaves the cell transparent.
+if (!coverColor) return   // ← paints NOTHING → canvas fully transparent
+```
+
+A transparent cover means:
+1. The reveal underneath shows through immediately ("cover doesn't appear").
+2. `measure()` reads alpha ≈ 0 across the whole cell → ~100% "cleared" → the first scratch **instant-wins**.
+
+Once the image is cached (reload), `coverReady` is `true` by `start()` and it paints fine — hence the inconsistency.
+
+**Traps that look like a fix but aren't:**
+- `img.complete && img.naturalWidth` immediate-draw check → only helps **cached** images; on a cold load `complete` is `false`.
+- `onerror` fallback → still calls `fillCellCover`, which with an empty `coverColor` **still paints nothing**. The load window is never bridged.
+
+**The fix (`runtime/games/scratch_grid.ts`, `fillCellCover`):**
+Never leave a cell transparent while a cover image is *configured but not yet usable*. Paint an **opaque fallback** during the load window; repaint the real image on `onload`.
+
+```ts
+const img = cell.cellCoverImg ?? coverImg
+const ready = cell.cellCoverImg ? cell.cellCoverReady : coverReady
+// Require BOTH the ready flag AND real pixels — a failed load can flip ready with naturalWidth 0.
+if (img && ready && (img.naturalWidth || img.width)) {
+  /* draw the real cover image */ return
+}
+// Configured but not usable yet (cold download, or a load that never resolved in a shielded
+// webview): paint an OPAQUE stand-in so the cell is never transparent → no reveal bleed-through,
+// no instant win. Repainted for real on img.onload.
+if (img) {
+  c2d.fillStyle = coverColor || COVER_LOAD_FALLBACK   // COVER_LOAD_FALLBACK = '#9aa3b2'
+  c2d.fillRect(0, 0, w, h)
+  return
+}
+// Genuinely no cover configured: a cleared coverColor is an intentional transparent cell.
+if (!coverColor) return
+```
+
+Graceful degradation: worst case (image never loads) the player gets a solid scratchable cover instead of an instant win.
+
+### 6b. The real Brave/Chrome killer: `getImageData` in the win check
+
+The opaque fallback (6a) fixes the *visual* "cover missing," but the harder half is the **instant win**, which repros in **Brave AND Chrome** and can't be cache-cleared away (a real first-time user still hits it).
+
+**Cause:** win detection used `measure()`, which drew the cover canvas to an offscreen canvas and called **`getImageData`** to count cleared (low-alpha) pixels. In a **third-party ad iframe** (AppLovin), Brave's fingerprint shield **farbles or zeroes** canvas readbacks — `getImageData` returns ~0 alpha across the board → `measure()` reads ~100% cleared → the cell "wins" and its cover fades on the **first touch**. (During the cold-load transparent window, even plain Chrome's `getImageData` reads alpha 0 → same instant win.) Because the shield's behavior varies by mode/session, it looks intermittent — but it's real for users.
+
+**Fix — never read the canvas back. Track coverage analytically (`runtime/games/scratch_grid.ts`):**
+- Each cell owns a normalized `coverGrid: Uint8Array` (`COVERAGE_S × COVERAGE_S`, `1 = cleared`).
+- `erodeAt()` stamps the *same* stroke geometry (round cap at each end + discs stepped along the segment) into the grid via `stampDisc()`, in normalized cell coords.
+- `measure(cell)` counts stamped grid cells inside the reveal zone — **no `getImageData`, no offscreen canvas.**
+
+```ts
+const measure = (cell: CellState): number => {
+  const S = COVERAGE_S, grid = cell.coverGrid
+  // ...count grid[y*S+x] === 1 within the reveal zone...
+}
+```
+
+Why this is strictly better:
+- **Immune to farbling / iframe canvas blocking** — the number comes from stroke geometry, not pixels.
+- **Reads exactly 0 until the player actually scratches** — kills instant-win even if the cover were transparent.
+- **Survives resize free** — the grid is normalized, so an AppLovin rotation doesn't touch it (the visual holes are still restored separately by `captureScratchMask`, which uses `drawImage`/`destination-out`, not a readback, so it's Brave-safe too).
+
+**Rule:** in a playable that may run in a shielded third-party iframe, never gate game logic on `getImageData` / `toDataURL` / `readPixels`. Track state in JS.
+
+**Remember:** the runtime is inlined into each export — after editing `runtime/games/*`, run `npm run build` **and re-export the MIP**. An old export keeps its old runtime.
+
+**Ship-today workaround (no rebuild):** set a non-empty **Cover color** on the scratch grid in the editor — a failed/slow image then still leaves an opaque scratchable cover.
+
+---
+
 ## Pre-export checklist
 
 Before shipping any AppLovin MIP:
@@ -148,3 +229,5 @@ Before shipping any AppLovin MIP:
 - [ ] No `filter:blur()` applied to game root during any transition
 - [ ] Immune elements move to `stageContainer` (not just change z-index) when overlay opens
 - [ ] `--pa-bg` is resolved to a literal hex before any DOM reparenting
+- [ ] Scratch-grid cover is never transparent while its image loads (opaque fallback in `fillCellCover`) — test in Brave with a hard refresh
+- [ ] After any `runtime/` edit: `npm run build` **and re-export** the MIP (the runtime is inlined into the export)
