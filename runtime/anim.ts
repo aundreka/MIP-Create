@@ -33,6 +33,20 @@ const KEYFRAMES = `
 @keyframes pa-wave{0%,100%{transform:rotate(-4deg)}50%{transform:rotate(4deg)}}
 @keyframes pa-shine{0%,100%{filter:brightness(1)}50%{filter:brightness(1.45)}}
 @keyframes pa-glow{0%,100%{filter:drop-shadow(0 0 0 rgba(255,255,255,0))}50%{filter:drop-shadow(0 0 14px rgba(255,255,255,.85))}}
+/* light-ray reflection sweep: a glossy highlight slides across the asset, clipped to its box
+   (overflow:hidden). TWO layers sweep together on the SAME box (so they stay in sync): ::before is
+   a wide soft halo/glow and ::after is a narrow bright core — together they read as a real specular
+   reflection instead of a flat white line. 'screen' blend keeps it additive (lightens only). The
+   band is rotated by --pa-lightray-ang and translated along its own x-axis, so ONE angle sets the
+   direction: 0=left→right, 90=top→bottom, 180=right→left, 45=corner→corner, etc. Driven by the
+   .pa-lightray class; duration/delay/easing/angle come from CSS vars set in applyMountAnim(). */
+.pa-lightray{position:relative;overflow:hidden}
+.pa-lightray::before,.pa-lightray::after{content:'';position:absolute;top:50%;left:50%;width:70%;height:320%;margin:-160% 0 0 -35%;pointer-events:none;z-index:2;mix-blend-mode:screen;transform:rotate(var(--pa-lightray-ang,20deg)) translateX(var(--pa-lightray-from,-340%));animation:pa-lightray-kf var(--pa-lightray-dur,2400ms) var(--pa-lightray-ease,ease-in-out) var(--pa-lightray-delay,0ms) infinite;will-change:transform}
+/* wide soft halo (the glow around the glint) */
+.pa-lightray::before{background:linear-gradient(90deg,rgba(255,255,255,0) 30%,rgba(255,255,255,0.07) 42%,rgba(255,255,255,0.20) 50%,rgba(255,255,255,0.07) 58%,rgba(255,255,255,0) 70%)}
+/* narrow bright core with soft shoulders (the specular streak itself) */
+.pa-lightray::after{background:linear-gradient(90deg,rgba(255,255,255,0) 41%,rgba(255,255,255,0.28) 46%,rgba(255,255,255,0.85) 49.5%,rgba(255,255,255,0.98) 50%,rgba(255,255,255,0.85) 50.5%,rgba(255,255,255,0.28) 54%,rgba(255,255,255,0) 59%)}
+@keyframes pa-lightray-kf{0%{transform:rotate(var(--pa-lightray-ang,20deg)) translateX(var(--pa-lightray-from,-340%))}55%,100%{transform:rotate(var(--pa-lightray-ang,20deg)) translateX(var(--pa-lightray-to,340%))}}
 @keyframes pa-spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
 @keyframes pa-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
 @keyframes pa-pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.04)}}
@@ -125,50 +139,90 @@ export function ctaPulseAnimation(cta: import('./scene').CtaConfig | undefined):
   return `${name} ${dur}ms ease-in-out infinite`
 }
 
-/** The element's persistent (loop) animation: an explicit loop, else the CTA pulse. */
-function loopCss(el: SceneElement, delayMs = 0): string {
-  const loop = el.animations?.loop
-  if (loop) return animationCss(loop, true, delayMs)
-  if (el.type === 'cta') {
-    if (el.cta?.pulse === 'custom') return ''
-    const presetKey = (el.cta?.pulse as 'calm' | 'medium' | 'strong') ?? 'medium'
-    const preset = CTA_PULSE[presetKey] ?? CTA_PULSE.medium
-    const min = el.cta?.pulseMinScale ?? 1.0
-    const max = el.cta?.pulseScale ?? CTA_PULSE_PEAK[presetKey] ?? 1.04
-    const dur = el.cta?.pulseDurationMs ?? preset.durationMs
-    const hasCustomShape = el.cta?.pulseScale != null || el.cta?.pulseMinScale != null
-    const name = hasCustomShape ? ensureCustomPulse(min, max) : preset.name
-    return `${name} ${dur}ms ease-in-out ${delayMs}ms infinite`
-  }
-  return ''
+// A phase can hold MULTIPLE stacked specs: the primary (`entrance`/`loop`/`exit`) plus any
+// `…Extra[]` played together with it (e.g. entrance = pop + shine). Collect them in order.
+type Phase = 'entrance' | 'loop' | 'exit'
+export function phaseSpecs(el: SceneElement, phase: Phase): AnimSpec[] {
+  const a = el.animations
+  if (!a) return []
+  const out: AnimSpec[] = []
+  const primary = a[phase]
+  if (primary) out.push(primary)
+  const extra = a[(phase + 'Extra') as 'entranceExtra' | 'loopExtra' | 'exitExtra']
+  if (Array.isArray(extra)) for (const s of extra) if (s) out.push(s)
+  return out
+}
+
+/** The lightray spec from ANY phase (entrance/loop/exit) — drives the .pa-lightray pseudo sweep.
+ * The reflection is an ambient class-driven effect, so it can be added in any phase, not just loop. */
+export function lightraySpec(el: SceneElement): AnimSpec | undefined {
+  return (['entrance', 'loop', 'exit'] as const).flatMap((p) => phaseSpecs(el, p)).find((s) => s.preset === 'lightray')
+}
+
+/** Earliest entrance start (min delay across stacked entrance specs) — when the element first appears. */
+export function entranceLeadDelayMs(el: SceneElement): number {
+  const ents = phaseSpecs(el, 'entrance')
+  if (!ents.length) return 0
+  return Math.max(0, Math.min(...ents.map((e) => e.delayMs || 0)))
+}
+
+/** The CTA's default pulse shorthand (used only when the element has no explicit loop spec). */
+function ctaPulseCss(el: SceneElement, delayMs: number): string {
+  if (el.type !== 'cta') return ''
+  if (el.cta?.pulse === 'custom') return ''
+  const presetKey = (el.cta?.pulse as 'calm' | 'medium' | 'strong') ?? 'medium'
+  const preset = CTA_PULSE[presetKey] ?? CTA_PULSE.medium
+  const min = el.cta?.pulseMinScale ?? 1.0
+  const max = el.cta?.pulseScale ?? CTA_PULSE_PEAK[presetKey] ?? 1.04
+  const dur = el.cta?.pulseDurationMs ?? preset.durationMs
+  const hasCustomShape = el.cta?.pulseScale != null || el.cta?.pulseMinScale != null
+  const name = hasCustomShape ? ensureCustomPulse(min, max) : preset.name
+  return `${name} ${dur}ms ease-in-out ${delayMs}ms infinite`
 }
 
 /**
- * Compose the `animation` value for an element's inner node.
+ * Compose the `animation` value for an element's inner node — a comma-joined list so
+ * stacked specs (e.g. pop + shine) run together.
  * - includeEntrance=false (mount, runs everywhere incl. editor): loop only.
- * - includeEntrance=true (interactive playback): entrance, then the loop delayed
- *   to start when the entrance ends, so transform-based presets don't fight.
+ * - includeEntrance=true (interactive playback): entrances, then the loop delayed to
+ *   start when the LAST entrance ends, so transform-based presets don't fight.
+ * 'lightray' loop specs are excluded here — that sweep lives on the .pa-lightray pseudo-element.
  */
 export function composeElementAnim(el: SceneElement, includeEntrance: boolean): string {
   const parts: string[] = []
-  const entrance = el.animations?.entrance
   let loopDelay = 0
-  if (includeEntrance && entrance) {
-    parts.push(animationCss(entrance, false))
-    loopDelay = (entrance.delayMs || 0) + entrance.durationMs
+  if (includeEntrance) {
+    for (const e of phaseSpecs(el, 'entrance')) {
+      if (e.preset === 'lightray') continue // pseudo-driven sweep, not a node animation
+      const css = animationCss(e, false)
+      if (css) parts.push(css)
+      loopDelay = Math.max(loopDelay, (e.delayMs || 0) + e.durationMs)
+    }
   }
-  const loop = loopCss(el, loopDelay)
-  if (loop) parts.push(loop)
+  const loops = phaseSpecs(el, 'loop')
+  const nodeLoops = loops.filter((s) => s.preset !== 'lightray') // lightray is pseudo-driven
+  if (loops.length) {
+    for (const l of nodeLoops) {
+      const css = animationCss(l, true, loopDelay)
+      if (css) parts.push(css)
+    }
+  } else {
+    const pulse = ctaPulseCss(el, loopDelay) // no explicit loop → CTA default pulse
+    if (pulse) parts.push(pulse)
+  }
   return parts.join(', ') || 'none'
 }
 
-/** The exit animation shorthand (or '' if none). */
+/** The exit animation shorthand — all stacked exit specs, comma-joined ('' if none). */
 export function exitCss(el: SceneElement): string {
-  const exit = el.animations?.exit
-  return exit ? animationCss(exit, false) : ''
+  return phaseSpecs(el, 'exit')
+    .filter((e) => e.preset !== 'lightray') // pseudo-driven sweep, not a node animation
+    .map((e) => animationCss(e, false))
+    .filter(Boolean)
+    .join(', ')
 }
 
-/** Whether the element should play an entrance at the given trigger. */
+/** Whether the element should play an entrance at the given trigger (primary entrance gates the phase). */
 export function entranceTriggers(el: SceneElement, trigger: 'onMount' | 'onGameWin'): boolean {
   const e = el.animations?.entrance
   if (!e) return false

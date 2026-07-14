@@ -73,7 +73,7 @@ export default defineConfig({
   base: './',
   // Don't let the dev watcher hold handles on build outputs — electron-builder
   // writes/renames executables under release/ and the watcher caused EPERM.
-  server: { watch: { ignored: ['**/release/**', '**/dist/**', '**/runtime-dist/**'] } },
+  server: { host: 'localhost', port: 5173, watch: { ignored: ['**/release/**', '**/dist/**', '**/runtime-dist/**'] } },
   build: {
     target: 'es2018',
     rollupOptions: {

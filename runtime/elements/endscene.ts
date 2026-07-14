@@ -151,6 +151,7 @@ export function createEndsceneContent(el: SceneElement, ctx: RuntimeCtx): HTMLEl
   wrap.style.background = wrap.dataset.bgP1 // initial; layout refines per orientation
 
   const fit = cfg?.objectFit ?? 'cover'
+  const zoom = cfg?.zoom ?? 1
 
   // resolve sources; landscape falls back to portrait so a single clip works both ways
   const pv = ctx.src(cfg?.portraitVideoId)
@@ -167,7 +168,7 @@ export function createEndsceneContent(el: SceneElement, ctx: RuntimeCtx): HTMLEl
   video.setAttribute('playsinline', '')
   video.setAttribute('webkit-playsinline', '')
   video.preload = 'auto'
-  video.style.cssText = `position:absolute;inset:0;width:100%;height:100%;object-fit:${fit};display:none;`
+  video.style.cssText = `position:absolute;inset:0;width:100%;height:100%;object-fit:${fit};transform:scale(${zoom});transform-origin:center;display:none;`
   video.dataset.p = pv
   video.dataset.l = lv
 
@@ -175,7 +176,7 @@ export function createEndsceneContent(el: SceneElement, ctx: RuntimeCtx): HTMLEl
   img.className = 'pa-endscene-img'
   img.alt = ''
   img.draggable = false
-  img.style.cssText = `position:absolute;inset:0;width:100%;height:100%;object-fit:${fit};display:none;`
+  img.style.cssText = `position:absolute;inset:0;width:100%;height:100%;object-fit:${fit};transform:scale(${zoom});transform-origin:center;display:none;`
   img.dataset.p = pi
   img.dataset.l = li
 

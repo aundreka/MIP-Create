@@ -22,7 +22,7 @@ import { preflightNetwork, type PreflightResult } from '../preflight'
 import { lintEngagement, type EngagementFinding } from '../qa/engagement'
 import { setAssetCompress, useEditorState } from '../store'
 import { applyVariant, stripVariants } from '../variants'
-import { mipName } from '../mipName'
+import { fileBaseName } from '../mipName'
 import { applovinOpen, applovinProbe, applovinUpload, canApplovin, compressHtmlScript, type ApplovinFile } from '../bridge'
 import { Modal, NumField, Slider, Toggle } from '../ui'
 import { AlertTriangle, Check, Icon, ScanSearch } from '../icons'
@@ -176,9 +176,9 @@ export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void
     for (const o of outputs) downloadBlob(o.filename, await o.make())
   }
 
-  // The exported file is named after the canonical MIP name (Client + MIP + Date),
-  // regardless of any manual rename. Variant files append "_<variant>" below.
-  const baseName = mipName(project.meta)
+  // The exported file is always named "<Client>_<MIP>" — nothing else (no date,
+  // no free-text rename). Variant files append "_<variant>" below.
+  const baseName = fileBaseName(project.meta)
   const doExportAll = async (): Promise<void> => {
     if (!confirmIfBlocked()) return
     setBusy(true)

@@ -191,10 +191,23 @@ def strip_endcard_fonts(html: str, log: list[str]) -> str:
             inner = base64.b64decode(b64).decode('utf-8')
         except Exception:
             return m.group(0)
-        new_inner = re.sub(
+        # Strip only fonts that aren't referenced by any element. A used custom
+        # font can carry layout-critical glyph metrics (e.g. an end-card countdown
+        # whose digit groups are spaced to land inside fixed boxes); dropping it
+        # reflows the text to a system fallback and breaks the layout.
+        font_face_re = re.compile(
             r'@font-face\s*\{[^}]*url\s*\(\s*["\']data:[^"\']+["\']\s*\)[^}]*\}',
-            '', inner, flags=re.DOTALL,
+            flags=re.DOTALL,
         )
+        without_fonts = font_face_re.sub('', inner)
+
+        def keep_used(fm: re.Match) -> str:
+            block = fm.group(0)
+            name = re.search(r'font-family\s*:\s*(["\']?)([^;"\'}]+)\1', block, re.I)
+            fam = name.group(2).strip() if name else None
+            return block if fam and fam in without_fonts else ''
+
+        new_inner = font_face_re.sub(keep_used, inner)
         if new_inner == inner:
             return m.group(0)
         new_b64 = base64.b64encode(new_inner.encode('utf-8')).decode('ascii')

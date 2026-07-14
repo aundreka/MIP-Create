@@ -242,6 +242,25 @@ export function makeUnboxing(): SceneElement {
   }
 }
 
+// Full-screen celebratory confetti overlay (canvas particle system, no dependency).
+// Sits above scene content; by default rains continuously when the scene appears.
+export function makeConfetti(): SceneElement {
+  const m = meta()
+  return {
+    id: nextId('confetti'),
+    type: 'confetti',
+    name: 'Confetti',
+    x: cx(),
+    y: cy(),
+    w: m.baseW,
+    h: m.baseH,
+    anchor: 'center',
+    zIndex: topZ() + 40, // celebration floats above everything else
+    mode: 'extend',
+    confetti: { mode: 'rain', trigger: 'sceneEnter', pieces: 200, recycle: true, durationMs: 0 },
+  }
+}
+
 export function makeBackground(assetId: string, name: string): SceneElement {
   return {
     id: nextId('bg'),

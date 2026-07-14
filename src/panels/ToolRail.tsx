@@ -3,7 +3,7 @@
 // so they're easy to tell apart at a glance.
 
 import { importImage, importImages } from '../bridge'
-import { makeBackground, makeBar, makeButton, makeChoice, makeCountdownTimer, makeCta, makeDynamicDate, makeEndcardBlock, makeEndsceneVideo, makeGame, makeHeaderBlock, makeImage, makeRect, makeText, makeUnboxing } from '../factories'
+import { makeBackground, makeBar, makeButton, makeChoice, makeConfetti, makeCountdownTimer, makeCta, makeDynamicDate, makeEndcardBlock, makeEndsceneVideo, makeGame, makeHeaderBlock, makeImage, makeRect, makeText, makeUnboxing } from '../factories'
 import { addAsset, addElement, addElements, addGameHint, clearSelection, getState, nextId } from '../store'
 import { Tooltip } from '../ui'
 import {
@@ -21,6 +21,7 @@ import {
   MousePointer2,
   MousePointerClick,
   PanelTop,
+  PartyPopper,
   Square,
   SquareMousePointer,
   Timer,
@@ -81,6 +82,7 @@ export function ToolRail(props: { onFigma: () => void }): JSX.Element {
       {/* interactive / dynamic */}
       <Tool title="Mini-game" icon={Gamepad2} onClick={() => { const g = makeGame(); addElement(g); addGameHint(g.id) }} />
       <Tool title="Mystery Box grid" icon={Gift} onClick={() => addElement(makeUnboxing())} />
+      <Tool title="Confetti" icon={PartyPopper} onClick={() => addElement(makeConfetti())} />
       <Tool title="Video endscene" icon={Film} onClick={() => addElement(makeEndsceneVideo())} />
       <Tool title="Countdown" icon={Timer} onClick={() => addElement(makeCountdownTimer())} />
       <Tool title="Dynamic date" icon={CalendarDays} onClick={() => addElement(makeDynamicDate())} />

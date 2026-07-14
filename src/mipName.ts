@@ -35,3 +35,14 @@ export function syncMipName(meta: ProjectMeta): ProjectMeta {
   const name = mipName(m)
   return name === m.name ? m : { ...m, name }
 }
+
+/**
+ * The export file's base name: "<Client>_<MIP>" only — no date, no free-text
+ * name. Falls back to the canonical mipName() when client/MIP aren't set.
+ */
+export function fileBaseName(meta: Pick<ProjectMeta, 'client' | 'mip' | 'mipDate' | 'name'>): string {
+  const client = (meta.client ?? '').trim()
+  const mip = (meta.mip ?? '').trim()
+  const base = [client, mip].filter(Boolean).join('_') || mipName(meta)
+  return base.replace(/[^a-z0-9_-]+/gi, '_').replace(/^_+|_+$/g, '') || 'playable'
+}

@@ -33,6 +33,7 @@ export type ElementType =
   | 'game-mount'
   | 'endscene'
   | 'unboxing'
+  | 'confetti'
 
 export type ObjectFit = 'contain' | 'cover'
 
@@ -48,6 +49,7 @@ export type AnimPresetId =
   | 'shake'
   | 'wave'
   | 'shine'
+  | 'lightray'
   | 'glow'
   | 'spin'
   | 'float'
@@ -72,16 +74,27 @@ export interface AnimSpec {
   easing: string
   iterations?: number | 'infinite'
   trigger?: AnimTrigger
+  // Direction of the 'lightray' reflection sweep, in degrees: 0 = left→right, 90 = top→bottom,
+  // 180 = right→left, 270 = bottom→top, 45 = top-left→bottom-right, etc. Ignored by other presets.
+  angleDeg?: number
 }
 
 export interface ElementAnimations {
   entrance?: AnimSpec
   loop?: AnimSpec
   exit?: AnimSpec
+  // Additional specs stacked ON TOP of the primary one in each phase, played together with it
+  // (e.g. entrance = pop + shine). Empty/absent = just the primary. The primary must exist for
+  // extras to apply; extras share the primary entrance's trigger.
+  entranceExtra?: AnimSpec[]
+  loopExtra?: AnimSpec[]
+  exitExtra?: AnimSpec[]
 }
 
 export interface SfxBinding {
-  // 'tap' | 'sceneEnter' for any element. For scratch/reveal elements also:
+  // 'tap' | 'sceneEnter' | 'elementEnter' for any element. 'elementEnter' fires one-shot as the
+  // element animates in — at its entrance stagger delay — so staggered pop-ins each get their sound
+  // (fires immediately if the element has no entrance). For scratch/reveal elements also:
   // 'whileScratching' (looped while the cover is being scratched) and
   // 'onReveal' (one-shot when a reveal target is uncovered).
   event: string
@@ -164,6 +177,7 @@ export interface EndsceneConfig {
   portraitImageId?: string
   landscapeImageId?: string
   objectFit: ObjectFit
+  zoom?: number // scale factor (0.5 - 2.0); default 1.0 for no scaling
   // Letterbox fills are independent per orientation, since portrait splits the
   // bars top/bottom while landscape splits them left/right (and a clip's top/bottom
   // edges differ in colour from its left/right edges).
@@ -210,14 +224,17 @@ export interface BoxStyle {
 // A live countdown / dynamic date. 'timer' counts down `seconds` from load;
 // 'date' counts to a fixed `targetIso`; 'dynamic' targets (now + dynamicDays) so
 // the date auto-updates whenever the ad runs. `format` is a token string:
-// {d}{h}{m}{s} (raw) / {dd}{hh}{mm}{ss} (2-digit) / {date} (localized date).
+// {d}{h}{m}{s} (raw) / {dd}{hh}{mm}{ss} (2-digit) / {date} (localized date) /
+// date parts of the target date: {MMMM} July, {MMM} Jul, {M}/{MM} 7/07,
+// {D}/{DD} 12/12, {YYYY}/{YY} — month names follow dateLocale.
 export interface CountdownConfig {
   mode: 'timer' | 'date' | 'dynamic'
   seconds?: number
   targetIso?: string
   dynamicDays?: number
   format: string
-  dateStyle?: 'short' | 'long' | 'numeric' // how {date} renders
+  dateStyle?: 'short' | 'long' | 'numeric' | 'monthDay' // how {date} renders
+  dateLocale?: string // BCP-47 tag for {date} rendering (default 'en-US')
   capitalize?: boolean // upper-case the first letter of every word in the rendered text
 }
 
@@ -244,11 +261,17 @@ export interface HandguideNode {
 // then its partner once the first is flipped). `toX/toY` is the legacy
 // single-waypoint form, still honored when `nodes` is empty.
 export interface HandguideConfig {
-  mode: 'smart' | 'tap' | 'slide' | 'scratch' | 'match'
+  // 'brush' points the hand at the scratch card's brush (appears only after the brush's intro).
+  mode: 'smart' | 'tap' | 'slide' | 'scratch' | 'match' | 'brush'
   toX?: number
   toY?: number
   nodes?: HandguideNode[]
   periodMs?: number
+  // 'brush' mode only: extra offset of the hand from the brush (screen px; the hand already sits
+  // BELOW the brush by default), and a rotation. The hand mimes a drag across the card.
+  brushOffsetX?: number
+  brushOffsetY?: number
+  brushRotateDeg?: number
   easing?: 'linear' | 'ease' | 'ease-in' | 'ease-out' | 'ease-in-out'
   // Idle visibility (interactive runs only): hide on the player's tap, then reappear
   // after `idleMs` of no interaction, repeating. Defaults: hideOnInteract=true,
@@ -375,6 +398,27 @@ export interface SyncConfig {
   scope: 'scene' | 'all'
 }
 
+// Full-screen celebratory confetti overlay. A self-contained canvas particle system
+// ported from the react-confetti model (fluttering, drifting, spinning rectangles +
+// circles) — no npm dependency. 'rain' falls from the top; 'burst' explodes from a
+// point (originX/originY). It animates only during interactive playback
+// (Preview/export); the editor canvas shows a single frozen frame so it can be placed.
+export interface ConfettiConfig {
+  mode?: 'rain' | 'burst'
+  trigger?: 'sceneEnter' | 'onGameWin' // when it fires (default sceneEnter)
+  pieces?: number // particle count (default 200)
+  colors?: string[] // palette (default a Material-ish 16-colour set)
+  gravity?: number // downward acceleration per frame (default 0.08 rain / 0.28 burst)
+  wind?: number // constant horizontal drift (default 0)
+  spread?: number // initial horizontal velocity range, rain (default 5)
+  power?: number // launch/fall speed (default 8 rain / 9 burst)
+  scalar?: number // piece-size multiplier (default 1)
+  recycle?: boolean // rain: keep respawning pieces so it never runs out (default true)
+  durationMs?: number // rain+recycle: emit for N ms then let it fall out (0/unset = forever)
+  originX?: number // burst origin X, % of width (default 50)
+  originY?: number // burst origin Y, % of height (default 45)
+}
+
 export interface GameMountConfig {
   templateId: string
   params: Record<string, unknown>
@@ -392,6 +436,10 @@ export interface BackgroundConfig {
   // whole (wider) screen.
   focusX?: number
   focusY?: number
+  // Extra zoom applied on top of the object-fit crop. 1 = none; >1 zooms IN around
+  // the focal point (portrait) / center (landscape); <1 zooms out (may reveal the
+  // scene background at the edges). Overflow beyond the screen is clipped.
+  zoom?: number
 }
 
 // Header/footer bar (or, in 'fit' mode, a rectangle). Fill with a solid colour
@@ -437,6 +485,8 @@ export interface SceneElement {
   hidden?: boolean
   locked?: boolean // not selectable/movable on the editor canvas
   overlayImmune?: boolean // always rendered above in-game overlays (e.g. scratch-grid lose/win)
+  overlayTop?: boolean // a HIGHER immune tier — floats above other "above overlays" elements
+  hideOnOverlay?: boolean // hidden while a floating overlay (win/lose card) is up over this scene
   groupId?: string // elements sharing a groupId select/move/scale together
   showOnWin?: boolean // revealed when the mounted game completes (endcard seed)
   rotation?: number
@@ -471,6 +521,7 @@ export interface SceneElement {
   fill?: FillConfig
   generate?: GenerateConfig
   unboxing?: UnboxingConfig
+  confetti?: ConfettiConfig
 }
 
 export interface HeaderConfig {
