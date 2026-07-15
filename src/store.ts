@@ -876,17 +876,20 @@ export function addGameScene(templateId: string): void {
   const m = state.project.meta
   const tpl = GAME_TEMPLATES.find((t) => t.id === templateId)
   const isScratch = templateId === 'scratch' || templateId === 'scratch_grid'
+  // The scrollable page IS the whole screen: full-bleed extend mount (like an
+  // endscene video) so the image fills the viewport width at any aspect.
+  const fullBleed = templateId === 'scroll'
   const gameEl: SceneElement = {
     id: nextId('game'),
     type: 'game-mount',
     name: tpl?.label ?? 'Game',
     x: c.x,
-    y: Math.round(m.baseH * 0.45),
-    w: Math.round(m.baseW * 0.9),
-    h: Math.round(m.baseH * 0.52),
+    y: fullBleed ? c.y : Math.round(m.baseH * 0.45),
+    w: fullBleed ? m.baseW : Math.round(m.baseW * 0.9),
+    h: fullBleed ? m.baseH : Math.round(m.baseH * 0.52),
     anchor: 'center',
     zIndex: 10,
-    mode: 'fit',
+    mode: fullBleed ? 'extend' : 'fit',
     game: { templateId, params: {} },
     sfx: isScratch ? [{ event: 'whileScratching', assetId: 'sfx_f_scratch' }, { event: 'onReveal', assetId: 'sfx_f_correctBright' }] : undefined,
   }

@@ -56,6 +56,9 @@ describe('memory match', () => {
   afterEach(() => {
     vi.useRealTimers()
     document.body.innerHTML = ''
+    window.sessionStorage.clear()
+    // the "seen this page" marker — cleared so each test starts as a fresh page load
+    delete (window as unknown as Record<string, unknown>)['__paMmSeen:0']
   })
 
   it('deals two cards per pair and one tracker symbol per pair', () => {
@@ -134,6 +137,28 @@ describe('memory match', () => {
     expect(b.isFlipped(a)).toBe(false)
     expect(b.isFlipped(other)).toBe(false)
     expect(a.style.opacity).not.toBe('0')
+  })
+
+  it('deals a different random board each fresh game', () => {
+    const seq = (b: Board): string => b.cards.map((c) => b.pairOf(c)).join(' ')
+    const first = seq(makeBoard({ pairs: 8, cols: 4, rows: 4 }))
+    const second = seq(makeBoard({ pairs: 8, cols: 4, rows: 4 }))
+    expect(first).not.toBe(second)
+  })
+
+  it('restores the same board and progress after a page reload (rotation)', () => {
+    const b1 = makeBoard()
+    const layout1 = b1.cards.map((c) => b1.pairOf(c)).join(' ')
+    const pair = b1.cards.filter((c) => b1.pairOf(c) === '1')
+    flip(pair[0])
+    flip(pair[1])
+    vi.runAllTimers() // resolve the match — progress is saved
+    b1.mod.destroy()
+    delete (window as unknown as Record<string, unknown>)['__paMmSeen:0'] // simulate the reload
+    const b2 = makeBoard()
+    expect(b2.cards.map((c) => b2.pairOf(c)).join(' ')).toBe(layout1) // identical layout
+    expect(b2.cards.filter((c) => c.style.visibility === 'hidden')).toHaveLength(2) // matched pair stayed gone
+    expect(b2.completed()).toBe(false) // game continues from where it was
   })
 
   it('scales design-px params with the stage scale (game resizes as one unit)', () => {

@@ -25,7 +25,7 @@
 // on the card the player should tap next, and the stage's hand follows it.
 
 import type { GameContext, GameModule, GameTemplate, HintMove } from './types'
-import { num, str } from './types'
+import { mulberry32, num, str } from './types'
 
 const PALETTE = ['#ef4444', '#f59e0b', '#22c55e', '#3b82f6', '#a855f7', '#ec4899', '#14b8a6', '#eab308', '#f97316', '#06b6d4']
 
@@ -45,6 +45,18 @@ interface TrackerItem {
   unlit: HTMLDivElement
   lit: HTMLDivElement
 }
+
+// Progress saved across page reloads — some containers (AppLovin) reload the
+// creative on orientation change. Restored only on the FIRST mount after a page
+// load (in-page remounts, e.g. a preview restart, deal a fresh random board) and
+// only while fresh (TTL), so a new impression never inherits an old game.
+interface SavedGame {
+  seed: number
+  lit: number[] // pair ids whose symbol is lit
+  removed: number[] // dealt-order indices of cards already off the board
+  t: number
+}
+const SAVE_TTL_MS = 30_000
 
 export function createMemoryMatch(): GameModule {
   let ctx: GameContext
@@ -72,6 +84,37 @@ export function createMemoryMatch(): GameModule {
   let done = false
   const lit: boolean[] = [] // per-pair: symbol already lit in the tracker
   let litCount = 0
+  let seed = 0 // board shuffle seed — random per game, persisted so reloads rebuild the same board
+
+  const saveKey = (): string => 'pa:mm:' + (ctx.elementId ?? '0')
+  const saveState = (): void => {
+    try {
+      const s: SavedGame = {
+        seed,
+        lit: lit.flatMap((v, i) => (v ? [i] : [])),
+        removed: cards.flatMap((c, i) => (c.matched || c.gone ? [i] : [])),
+        t: Date.now(),
+      }
+      window.sessionStorage.setItem(saveKey(), JSON.stringify(s))
+    } catch { /* storage unavailable — progress just won't survive a reload */ }
+  }
+  const loadState = (): SavedGame | null => {
+    try {
+      const raw = window.sessionStorage.getItem(saveKey())
+      if (!raw) return null
+      const s = JSON.parse(raw) as SavedGame
+      if (typeof s.seed !== 'number' || !Array.isArray(s.lit) || !Array.isArray(s.removed)) return null
+      if (Date.now() - (s.t ?? 0) > SAVE_TTL_MS) return null
+      return s
+    } catch {
+      return null
+    }
+  }
+  const clearState = (): void => {
+    try {
+      window.sessionStorage.removeItem(saveKey())
+    } catch { /* */ }
+  }
   let completeCb: (() => void) | null = null
   let winCb: (() => void) | null = null
   const timers: number[] = []
@@ -302,6 +345,7 @@ export function createMemoryMatch(): GameModule {
           litCount++
           lightSymbol(a.pairId)
         }
+        saveState() // progress survives a rotation-forced page reload
         // Let the player see the pair, then the cards disappear (empty space stays).
         later(() => {
           vanish(a, 1)
@@ -309,6 +353,7 @@ export function createMemoryMatch(): GameModule {
         }, 250)
         if (litCount >= pairCount && !done) {
           done = true
+          clearState() // a finished game never restores — the next view deals fresh
           markHint()
           winCb?.()
           // Once the last pair has left, the unpicked leftovers follow it off
@@ -383,15 +428,30 @@ export function createMemoryMatch(): GameModule {
       const litImgs = Array.isArray(params.symbolsLit) ? (params.symbolsLit as string[]) : []
       ctx.root.style.touchAction = 'none'
 
+      // A page reload (AppLovin rotates = reloads) restores the saved game; an
+      // in-page remount (preview restart, replaying the scene) deals fresh. The
+      // window marker below dies with the page, telling the two apart.
+      const W = window as unknown as Record<string, unknown>
+      const onceKey = '__paMmSeen:' + (ctx.elementId ?? '0')
+      const firstMountThisPage = !W[onceKey]
+      W[onceKey] = true
+      let restored = firstMountThisPage ? loadState() : null
+      if (restored && restored.lit.length >= pairCount) restored = null // finished game → fresh board
+
       // Board = rows × cols, independent of the pair count: every symbol lands on
       // the board twice (guaranteed findable), and leftover cells get random
       // symbols — extras can still pair up. Never smaller than one pair of each.
+      // The shuffle runs on a per-game RANDOM seed (not the host's fixed rng, which
+      // dealt the identical board every load); the seed is saved so a reload mid-
+      // game rebuilds the exact same layout before progress is re-applied.
+      seed = restored?.seed ?? Math.floor(Math.random() * 0xffffffff)
+      const rng = mulberry32(seed)
       const cardCount = Math.max(cols * rows, pairCount * 2)
       const order: number[] = []
       for (let i = 0; i < pairCount; i++) order.push(i, i)
-      while (order.length < cardCount) order.push(Math.floor(ctx.rng() * pairCount))
+      while (order.length < cardCount) order.push(Math.floor(rng() * pairCount))
       for (let i = order.length - 1; i > 0; i--) {
-        const j = Math.floor(ctx.rng() * (i + 1))
+        const j = Math.floor(rng() * (i + 1))
         ;[order[i], order[j]] = [order[j], order[i]]
       }
 
@@ -473,6 +533,32 @@ export function createMemoryMatch(): GameModule {
         ctx.root.appendChild(trackerRow)
       }
 
+      // Re-apply saved progress: lit symbols light silently, removed cards are
+      // simply absent (no animations — the player already saw them).
+      if (restored) {
+        for (const pid of restored.lit) {
+          if (pid >= 0 && pid < pairCount && !lit[pid]) {
+            lit[pid] = true
+            litCount++
+            const t = tracker[pid]
+            if (t) {
+              t.unlit.style.opacity = '0'
+              t.lit.style.opacity = '1'
+            }
+          }
+        }
+        for (const i of restored.removed) {
+          const c = cards[i]
+          if (!c) continue
+          c.matched = true
+          c.gone = true
+          c.el.style.pointerEvents = 'none'
+          c.el.style.opacity = '0'
+          c.el.style.visibility = 'hidden'
+        }
+      }
+      saveState() // persist the (possibly fresh) seed so a rotate right away rebuilds this board
+
       layout()
       markHint()
     },
@@ -488,7 +574,7 @@ export function createMemoryMatch(): GameModule {
       // Aim at the lower part of the card, not the center — the cover art's
       // text/logo sits mid-card and the hand must not hide it.
       const r = target.el.getBoundingClientRect()
-      const p = { x: r.left + r.width / 2, y: r.top + r.height * 0.72 }
+      const p = { x: r.left + r.width / 2, y: r.top + r.height * 0.85 }
       return { from: p, to: p, kind: 'tap' }
     },
     onComplete(cb) {

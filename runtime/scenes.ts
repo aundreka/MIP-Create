@@ -59,7 +59,7 @@ function applyTransition(oldRoot: HTMLElement, newRoot: HTMLElement, t: Transiti
 export function playProject(
   project: Project,
   assets: AssetMap,
-  opts: { mount: HTMLElement; interactive: boolean },
+  opts: { mount: HTMLElement; interactive: boolean; startSceneId?: string },
 ): SceneManager {
   const container = document.createElement('div')
   container.className = 'pa-stage'
@@ -241,6 +241,12 @@ export function playProject(
     parkImmune(stage)
     stage.startGames(opts.interactive)
     if (opts.interactive) {
+      // Remember where the player is: some containers (AppLovin) RELOAD the page
+      // on orientation change. boot() re-enters this scene within a short TTL so
+      // rotating doesn't restart the ad from the first scene.
+      try {
+        window.sessionStorage.setItem('pa:resume-scene', JSON.stringify({ id: def.id, t: Date.now() }))
+      } catch { /* storage unavailable — rotation reloads restart the flow */ }
       stage.playEntrances() // onMount entrances (skipped on the static editor canvas)
       if (def.kind === 'endscene') {
         emit('sfx', 'endscene')
@@ -481,7 +487,7 @@ export function playProject(
     })
   }
 
-  const startDef = project.scenes.find((s) => s.id === project.startSceneId) ?? project.scenes[0]
+  const startDef = project.scenes.find((s) => s.id === (opts.startSceneId ?? project.startSceneId)) ?? project.scenes[0]
   if (startDef) {
     current = { def: startDef, stage: mountScene(startDef) }
     armAdvance(startDef)

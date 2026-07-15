@@ -229,13 +229,13 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
         const cardRect = cardEl.getBoundingClientRect()
         const guideRect = rec.outer.getBoundingClientRect()
         // Land the fingertip (22%/12% of the hand, matching transformOrigin) on the
-        // LOWER part of the card (72% down) so the cover art's text stays visible,
+        // LOWER part of the card (85% down) so the cover art's text stays visible,
         // and tap with a hover-and-dip — the hand floats slightly above the spot
         // and dips down to touch it (a scale-only pulse read as "pushing").
         const phase = ((now - t0) % travel) / travel
         const dip = phase < 0.55 ? Math.sin((phase / 0.55) * Math.PI) : 0
         ox = cardRect.left + cardRect.width / 2 - (guideRect.left + guideRect.width * 0.22)
-        oy = cardRect.top + cardRect.height * 0.72 - guideRect.height * 0.28 * (1 - dip) - (guideRect.top + guideRect.height * 0.12)
+        oy = cardRect.top + cardRect.height * 0.85 - guideRect.height * 0.28 * (1 - dip) - (guideRect.top + guideRect.height * 0.12)
         press = dip
       }
     } else if (kind === 'slide') {

@@ -25,6 +25,7 @@ import { CONVEYOR_TEMPLATE } from './conveyor'
 import { VENDING_TEMPLATE } from './vending'
 import { WORD_TEMPLATE } from './word'
 import { SONGMIX_TEMPLATE } from './songmix'
+import { SCROLL_TEMPLATE } from './scroll'
 import { EMBED_TEMPLATE } from './embed'
 
 export const GAME_TEMPLATES: GameTemplate[] = [
@@ -51,6 +52,7 @@ export const GAME_TEMPLATES: GameTemplate[] = [
   BINGO_TEMPLATE,
   WORD_TEMPLATE,
   SONGMIX_TEMPLATE,
+  SCROLL_TEMPLATE,
   EMBED_TEMPLATE,
 ]
 
