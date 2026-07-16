@@ -235,7 +235,12 @@ export function playProject(
     if (unsubAdvance) { unsubAdvance(); unsubAdvance = null }
   }
 
+  // Per-scene header visibility: scenes flagged hideHeader suppress the pinned date band while
+  // they're current, and endscenes NEVER show it (an end card carries no date/countdown urgency).
+  const headerAllowed = (def: SceneDef): boolean => !def.hideHeader && def.kind !== 'endscene'
+
   const mountScene = (def: SceneDef): StageHandle => {
+    header?.setVisible(headerAllowed(def))
     const stage = buildScene(toScene(def), assets, { mount: container })
     stage.layoutAll()
     parkImmune(stage)
@@ -244,8 +249,17 @@ export function playProject(
       // Remember where the player is: some containers (AppLovin) RELOAD the page
       // on orientation change. boot() re-enters this scene within a short TTL so
       // rotating doesn't restart the ad from the first scene.
+      //
+      // BUT the terminal end card must never be resumed: once the player reaches it,
+      // any reload (a manual refresh, or AppLovin reopening the creative after the
+      // player taps Exit) should start the ad over — not drop straight back onto the
+      // end card. So entering an end card CLEARS the resume record instead of saving it.
       try {
-        window.sessionStorage.setItem('pa:resume-scene', JSON.stringify({ id: def.id, t: Date.now() }))
+        if (def.kind === 'endscene') {
+          window.sessionStorage.removeItem('pa:resume-scene')
+        } else {
+          window.sessionStorage.setItem('pa:resume-scene', JSON.stringify({ id: def.id, t: Date.now() }))
+        }
       } catch { /* storage unavailable — rotation reloads restart the flow */ }
       stage.playEntrances() // onMount entrances (skipped on the static editor canvas)
       if (def.kind === 'endscene') {
@@ -364,6 +378,10 @@ export function playProject(
       overlayShownThisScene = true
       const def = project.scenes.find((s) => s.id === sceneId)
       if (!def) { onDone?.(); return }
+      // Per-scene header hide applies to floated overlay scenes too — they never pass through
+      // mountScene. Restored to the underlying scene's setting on dismiss (see restoreImmune);
+      // a redirect's mountScene sets it for the destination scene.
+      if (!headerAllowed(def)) header?.setVisible(false)
       // Redirect overlays (e.g. scratch win → end scene) leave the game for good. Suspend
       // the underlying game scene's still-armed advance NOW so ONLY this overlay scene's
       // own advance duration decides when we move on — otherwise the game's live timer/
@@ -418,6 +436,9 @@ export function playProject(
       // Immune elements stay parked (see parkImmune) — only hidden elements restore.
       const restoreImmune = (): void => {
         hideEls.forEach((el, i) => { el.style.display = savedDisplay[i] })
+        // Header follows whichever scene is current after the overlay closes: the game scene
+        // on a plain dismiss, or the redirect destination (mountScene already set it; same value).
+        if (current) header?.setVisible(headerAllowed(current.def))
       }
       const removeOverlayDom = (): void => {
         overlayStages.delete(overStage)

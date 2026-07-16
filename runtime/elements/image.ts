@@ -15,6 +15,40 @@ export function createImageContent(el: SceneElement, ctx: RuntimeCtx): HTMLImage
   return img
 }
 
+// Canva-style crop of a plain image (el.crop). The box (boxW×boxH px) is the crop
+// WINDOW; the source image is absolutely positioned behind it at its own size/offset
+// (keeping its natural aspect) and the window clips it. No crop config → clears the
+// styles so the <img> reverts to filling the box (legacy behaviour). The window's
+// own overflow is clipped by applyFrame when el.crop is set.
+export function applyImageCrop(
+  img: HTMLElement,
+  anim: HTMLElement,
+  el: SceneElement,
+  boxW: number,
+  boxH: number,
+  natW: number,
+  natH: number,
+): void {
+  const c = el.crop
+  if (!c || el.container) {
+    img.style.position = ''
+    img.style.width = ''
+    img.style.height = ''
+    img.style.left = ''
+    img.style.top = ''
+    return
+  }
+  const sc = c.scale ?? 1
+  const iw = sc * boxW
+  const ih = natW > 0 ? iw * (natH / natW) : sc * boxH
+  anim.style.position = 'relative'
+  img.style.position = 'absolute'
+  img.style.width = `${iw}px`
+  img.style.height = `${ih}px`
+  img.style.left = `${(c.x ?? 0) * boxW}px`
+  img.style.top = `${(c.y ?? 0) * boxH}px`
+}
+
 // Container/mask: the element's own asset (e.g. a heart or star with transparency)
 // becomes a MASK, and the inner asset (container.imageId — an IMAGE or a VIDEO) is
 // clipped to that shape, filling per `fit`. Works for any shape (alpha mask).

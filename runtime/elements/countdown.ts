@@ -28,23 +28,38 @@ const DATE_OPTS: Record<string, Intl.DateTimeFormatOptions> = {
 
 /** A live ticker is only needed when the display changes by the second/minute/hour
  * (a pure {date} or {d} label doesn't tick). */
+export function formatTicks(fmt: string): boolean {
+  return /\{s\}|\{ss\}|\{m\}|\{mm\}|\{h\}|\{hh\}/.test(fmt)
+}
+
 export function needsTicker(el: SceneElement): boolean {
-  return /\{s\}|\{ss\}|\{m\}|\{mm\}|\{h\}|\{hh\}/.test(el.countdown?.format || '')
+  return formatTicks(el.countdown?.format || '')
+}
+
+export interface CountdownFormatOpts {
+  dateLocale?: string
+  dateStyle?: 'short' | 'long' | 'numeric' | 'monthDay'
+  capitalize?: boolean
 }
 
 /** Render the format string for the remaining time to `deadline`. */
 export function formatCountdown(el: SceneElement, deadline: number, now: number): string {
-  const fmt = el.countdown?.format || '{d}d {hh}:{mm}:{ss}'
+  return renderCountdownFormat(el.countdown?.format || '{d}d {hh}:{mm}:{ss}', deadline, now, el.countdown ?? {})
+}
+
+/** Element-independent core of formatCountdown — also drives the pinned header's
+ * countdown mode, so both surfaces share one token vocabulary. */
+export function renderCountdownFormat(fmt: string, deadline: number, now: number, opts: CountdownFormatOpts = {}): string {
   const total = Math.max(0, deadline - now)
   const d = Math.floor(total / DAY)
   const h = Math.floor(total / 3600000) % 24
   const m = Math.floor(total / 60000) % 60
   const s = Math.floor(total / 1000) % 60
-  const locale = el.countdown?.dateLocale || 'en-US'
+  const locale = opts.dateLocale || 'en-US'
   const target = new Date(deadline)
   let dateStr = ''
   try {
-    dateStr = target.toLocaleDateString(locale, DATE_OPTS[el.countdown?.dateStyle ?? 'short'] ?? DATE_OPTS.short)
+    dateStr = target.toLocaleDateString(locale, DATE_OPTS[opts.dateStyle ?? 'short'] ?? DATE_OPTS.short)
   } catch {
     dateStr = ''
   }
@@ -75,5 +90,5 @@ export function formatCountdown(el: SceneElement, deadline: number, now: number)
     .replace(/\{m\}/g, String(m))
     .replace(/\{s\}/g, String(s))
   // Capitalize the first letter of every word (e.g. "Order by" -> "Order By").
-  return el.countdown?.capitalize ? out.replace(/\b\p{L}/gu, (c) => c.toUpperCase()) : out
+  return opts.capitalize ? out.replace(/\b\p{L}/gu, (c) => c.toUpperCase()) : out
 }

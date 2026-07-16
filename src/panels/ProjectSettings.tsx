@@ -145,7 +145,7 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
         />
       </Row>
       <div className="hint pad">Client + MIP group this playable for the QA consistency check.</div>
-      <div className="hint pad">The date header is customized from the <b>date header</b> button in the top toolbar.</div>
+      <div className="hint pad">The pinned header (date or countdown) is customized from the <b>header</b> button in the top toolbar.</div>
 
       <div className="group-title">Audio</div>
       <div className="sfx-row">

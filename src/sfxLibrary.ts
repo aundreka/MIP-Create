@@ -6,6 +6,7 @@
 
 import { addAsset, getState } from './store'
 import { remoteToDataUrl } from './net'
+import type { AssetMap, AssetEntry } from '../runtime/types'
 
 const SR = 22050
 
@@ -211,4 +212,38 @@ export async function ensureLibrarySfx(id: string): Promise<string> {
   }
   addAsset(assetId, { src, w: 0, h: 0, kind: 'audio' })
   return assetId
+}
+
+/** Data URL for a built-in sound id (the part after the `sfx_` asset-id prefix):
+ * synthesized clips render inline; recorded clips inline from the LOCAL bundled
+ * file (cached). Returns null only if a recorded clip can't be fetched. */
+export async function builtinSfxDataUrl(id: string): Promise<string | null> {
+  if (id in FILE_DEFS) {
+    if (fileDataUrlCache[id]?.startsWith('data:')) return fileDataUrlCache[id]
+    const url = await remoteToDataUrl(fileUrl(id))
+    if (url) fileDataUrlCache[id] = url
+    return url
+  }
+  if (id in DEFS) return sfxDataUrl(id)
+  return null
+}
+
+/** Make a project's audio assets self-contained after a load/import. Built-in SFX
+ * are historically stored with a Vite bundle URL (e.g. `/assets/sfx/x-<hash>.wav`)
+ * rather than a `data:` URL; that path doesn't resolve on a different build/machine,
+ * so imported/shared/team-pulled projects lose their sound. This re-inlines any
+ * non-`data:` audio asset from the LOCAL build — built-in SFX are recovered by their
+ * `sfx_<id>` key even when the stored URL is dead; other audio is re-fetched if its
+ * URL still resolves. Returns only the CHANGED entries (or null if nothing changed),
+ * so the caller can merge without clobbering assets added meanwhile. */
+export async function inlineProjectSfx(assets: AssetMap): Promise<Record<string, AssetEntry> | null> {
+  const changed: Record<string, AssetEntry> = {}
+  for (const [id, a] of Object.entries(assets)) {
+    if (!a || a.kind !== 'audio' || !a.src || a.src.startsWith('data:')) continue
+    let src: string | null = null
+    if (id.startsWith('sfx_')) src = await builtinSfxDataUrl(id.slice(4))
+    if (!src) src = await remoteToDataUrl(a.src) // custom/uploaded audio whose URL still resolves
+    if (src && src.startsWith('data:')) changed[id] = { ...a, src }
+  }
+  return Object.keys(changed).length ? changed : null
 }

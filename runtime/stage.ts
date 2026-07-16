@@ -14,7 +14,7 @@ import type { Anchor, Scene, SceneElement } from './scene'
 import type { AssetEntry, AssetMap, RuntimeCtx } from './types'
 import { isLandscape, scale, sx, sy, viewH, viewW } from './responsive'
 import { composeElementAnim, entranceLeadDelayMs, entranceTriggers, exitCss, injectAnimStyles, lightraySpec } from './anim'
-import { createContainerContent, createImageContent, styleContainer } from './elements/image'
+import { applyImageCrop, createContainerContent, createImageContent, styleContainer } from './elements/image'
 import { applyBarFill, createBarContent } from './elements/bar'
 import { createTextContent } from './elements/text'
 import { createCtaContent } from './elements/cta'
@@ -129,7 +129,7 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
       content.style.position = 'absolute'
       content.style.left = '0'
       content.style.top = '0'
-      content.style.zIndex = '501' // just above the brush (z-index 500)
+      content.style.zIndex = '100001' // just above the brush (z-index 100000)
       content.style.transformOrigin = 'center top'
       content.style.transition = 'opacity 200ms ease'
       content.style.opacity = '0' // stay hidden until the frame has sized + positioned it (no huge flash)
@@ -1393,7 +1393,8 @@ function applyFrame(rec: Rec): void {
   const s = scale()
   const radius = !box ? '' : box.pill ? '9999px' : box.radiusPx ? box.radiusPx * s + 'px' : ''
   anim.style.borderRadius = radius
-  anim.style.overflow = radius ? 'hidden' : ''
+  // Clip the box for rounded corners OR when an image is being cropped to it.
+  anim.style.overflow = radius || (rec.el.type === 'image' && rec.el.crop) ? 'hidden' : ''
   anim.style.background = box?.bgColor ?? ''
   anim.style.boxShadow = box ? shadowCss(box.shadow, s) : ''
   if (box?.borderPx) {
@@ -1552,6 +1553,9 @@ function layoutAsset(rec: Rec, e: Effective, mode: 'fit' | 'extend'): void {
   }
   const [tx, ty] = ANCHOR[e.anchor]
   applyBox(outer, px, py, w, h, tx, ty, e.rotation)
+  // Plain images: place the source behind the box window for a Canva-style crop
+  // (no-op when el.crop is unset). Uses the box px + the asset's natural size.
+  if (rec.el.type === 'image' && rec.content) applyImageCrop(rec.content, rec.anim, rec.el, w, h, a.w, a.h)
 }
 
 function sceneBgCss(c1?: string, c2?: string): string {

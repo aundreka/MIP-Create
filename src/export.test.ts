@@ -24,4 +24,14 @@ describe('pruneAssets', () => {
     }
     expect(Object.keys(pruneAssets(p, assets)).sort()).toEqual(['s1', 's2'])
   })
+
+  it('keeps a font referenced only by the pinned header', () => {
+    const assets: AssetMap = { My_Font: { src: 'data:font/ttf;base64,AA==', w: 0, h: 0, kind: 'font' }, other: { src: 'x', w: 1, h: 1 } }
+    const p: Project = {
+      meta: { schemaVersion: 1, name: 'p', clickUrl: { ios: '', android: '' }, baseW: 1080, baseH: 1920, header: { fontFamily: 'My_Font' } },
+      scenes: [{ id: 's1', name: 's1', kind: 'overlay', advance: { on: 'manual' }, elements: [] }],
+      startSceneId: 's1',
+    }
+    expect(Object.keys(pruneAssets(p, assets))).toEqual(['My_Font'])
+  })
 })

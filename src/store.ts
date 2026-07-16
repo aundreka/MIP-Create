@@ -968,6 +968,20 @@ export function loadProject(raw: Project, assets: AssetMap, path: string | null,
     canRedo: false,
   }
   emit()
+  // Self-heal audio portability: built-in SFX were historically stored with a Vite
+  // bundle URL that doesn't resolve on another build/machine, so imported / shared /
+  // team-pulled projects lost their sound. Re-inline any non-data audio from the local
+  // build (fire-and-forget; a no-op when everything is already a data URL). Only patch
+  // if this same project is still loaded, and don't mark the project dirty.
+  void import('./sfxLibrary')
+    .then(async ({ inlineProjectSfx }) => {
+      const changed = await inlineProjectSfx(assets)
+      if (changed && state.project === project) {
+        state = { ...state, assets: { ...state.assets, ...changed } }
+        emit()
+      }
+    })
+    .catch(() => {})
 }
 export function markSaved(path: string | null): void {
   set({ dirty: false, projectPath: path ?? state.projectPath }, false)

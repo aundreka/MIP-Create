@@ -995,6 +995,16 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
           <ColorField label={landscape ? 'BG left' : 'BG top'} value={sd.bgColor || undefined} allowNone onChange={(c) => setSceneBg(c ?? '')} />
           <ColorField label={landscape ? 'BG right' : 'BG bottom'} value={sd.bgColor2 || undefined} allowNone onChange={(c) => setSceneBg2(c)} />
         </div>
+        {state.project.meta.header && sd.kind !== 'endscene' && (
+          <Toggle
+            label="Hide date header in this scene"
+            checked={!!sd.hideHeader}
+            onChange={(v) => patchSceneDef(sd.id, { hideHeader: v || undefined })}
+          />
+        )}
+        {state.project.meta.header && sd.kind === 'endscene' && (
+          <div className="hint pad">The date header never shows on an endscene.</div>
+        )}
         {sd.kind === 'endscene' && (
           <div className="hint pad">
             Endscene = MRAID <b>end card</b>: in Preview/export the whole scene is tap-to-install and signals the network the ad
@@ -1107,6 +1117,23 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
     patchElement(id, { scratch: { ...(el.scratch ?? {}), ...patch } })
   const setReveal = (patch: Partial<NonNullable<SceneElement['reveal']>>): void =>
     patchElement(id, { reveal: { ...(el.reveal ?? {}), ...patch } })
+  const setCrop = (patch: Partial<NonNullable<SceneElement['crop']>>): void =>
+    patchElement(id, { crop: { ...(el.crop ?? {}), ...patch } })
+  // Turning crop on seeds an explicit w/h box (from the current display size, matching
+  // the image's aspect) so the source fills it exactly, then opens the on-canvas editor.
+  const enableCrop = (): void => {
+    beginTransaction()
+    if (g.w == null || g.h == null) {
+      const a = state.assets[el.assetId ?? '']
+      const sc = g.scale || 1
+      const w = Math.max(1, Math.round((a?.w ?? 300) * sc))
+      const h = Math.max(1, Math.round((a?.h ?? 300) * sc))
+      patchGeometry(id, { w, h })
+    }
+    patchElement(id, { crop: { scale: 1, x: 0, y: 0 } })
+    endTransaction()
+    window.dispatchEvent(new CustomEvent('pa:crop-edit', { detail: { elementId: id } }))
+  }
 
   const BOX_PRESETS: { key: string; label: string; box: BoxStyle | undefined }[] = [
     { key: 'none', label: 'None', box: undefined },
@@ -1406,6 +1433,23 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
           )}
 
           </Accordion>
+          {!el.container && el.assetId && (
+            <Accordion id="inspector.crop" title="Crop">
+              <Toggle label="Crop this image" checked={!!el.crop} onChange={(v) => (v ? enableCrop() : patchElement(id, { crop: undefined }))} />
+              {el.crop && (
+                <>
+                  <button className="wide" onClick={() => window.dispatchEvent(new CustomEvent('pa:crop-edit', { detail: { elementId: id } }))}>
+                    Adjust crop on canvas
+                  </button>
+                  <button className="wide" onClick={() => setCrop({ scale: undefined, x: undefined, y: undefined })}>Reset crop</button>
+                  <div className="hint pad">
+                    <b>Double-click the image</b> on the canvas to crop it — drag the <b>edges/corners</b> to change what shows,
+                    drag the <b>middle</b> to move the picture, and <b>scroll</b> to zoom. Press <b>Enter</b> or click away when done.
+                  </div>
+                </>
+              )}
+            </Accordion>
+          )}
           <Accordion id="inspector.dragdrop" title="Drag & drop" defaultOpen={false}>
           <Toggle label="Draggable item" checked={!!el.drag} onChange={(v) => patchElement(id, { drag: v ? { group: el.slot?.group ?? 'a' } : undefined })} />
           {el.drag && (
@@ -1885,17 +1929,44 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                   <div className="group-title2">Image fallback (used if no video)</div>
                   <AssetPicker label="Portrait image" allowNone value={cfg.portraitImageId} onChange={(aid) => setEnd({ portraitImageId: aid })} />
                   <AssetPicker label="Landscape image (optional)" allowNone value={cfg.landscapeImageId} onChange={(aid) => setEnd({ landscapeImageId: aid })} />
-                  <Row label="Fit">
+                  <Row label="Fit (portrait)">
                     <Select
-                      value={cfg.objectFit}
-                      onChange={(v) => setEnd({ objectFit: v as ObjectFit })}
+                      value={cfg.fullHeight ? 'height' : cfg.objectFit}
+                      onChange={(v) => (v === 'height' ? setEnd({ fullHeight: true }) : setEnd({ objectFit: v as ObjectFit, fullHeight: undefined }))}
                       options={[
                         { value: 'cover', label: 'cover (fill, may crop)' },
                         { value: 'contain', label: 'contain (letterbox)' },
+                        { value: 'height', label: 'extend (full height)' },
+                      ]}
+                    />
+                  </Row>
+                  <Row label="Fit (landscape)">
+                    <Select
+                      value={cfg.objectFitL === undefined && cfg.fullHeightL === undefined ? 'same' : cfg.fullHeightL ? 'height' : cfg.objectFitL ?? 'cover'}
+                      onChange={(v) =>
+                        v === 'same'
+                          ? setEnd({ objectFitL: undefined, fullHeightL: undefined })
+                          : v === 'height'
+                            ? setEnd({ fullHeightL: true, objectFitL: undefined })
+                            : setEnd({ objectFitL: v as ObjectFit, fullHeightL: false })
+                      }
+                      options={[
+                        { value: 'same', label: 'same as portrait' },
+                        { value: 'cover', label: 'cover (fill, may crop)' },
+                        { value: 'contain', label: 'contain (letterbox)' },
+                        { value: 'height', label: 'extend (full height)' },
                       ]}
                     />
                   </Row>
                   <Slider label="Zoom" value={cfg.zoom ?? 1} min={0.5} max={2} step={0.05} suffix="×" onChange={(n) => setEnd({ zoom: n })} />
+                  <Toggle label="Transparent background (show element behind)" checked={!!cfg.transparentBg} onChange={(v) => setEnd({ transparentBg: v || undefined })} />
+                  {cfg.transparentBg ? (
+                    <div className="hint pad">
+                      The endcard fill is transparent — put a full-screen <b>background image</b> (or any element) on a lower layer and it
+                      shows through the gaps around the {cfg.fullHeight ? 'full-height' : cfg.objectFit === 'contain' ? 'contained' : ''} clip.
+                    </div>
+                  ) : (
+                    <>
                   <div className="group-title2">Portrait background</div>
                   {cfg.objectFit === 'contain' && (
                     <Toggle
@@ -1924,6 +1995,8 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
 
                   {cfg.objectFit === 'contain' && (
                     <Toggle label="Match fill to clip edge(s)" checked={!!cfg.matchBgEdge} onChange={(v) => setEnd({ matchBgEdge: v })} />
+                  )}
+                    </>
                   )}
                   <Toggle label="Loop" checked={cfg.loop ?? true} onChange={(v) => setEnd({ loop: v })} />
                   <div className="hint pad">

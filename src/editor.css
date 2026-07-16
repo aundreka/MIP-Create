@@ -1273,6 +1273,66 @@ button.icon {
   background: rgba(79, 123, 240, 0.12);
   pointer-events: none;
 }
+/* Figma-style spacing readout shown while dragging: a thin connector + a pixel badge. */
+.measure-line {
+  position: absolute;
+  pointer-events: none;
+  background: var(--danger, #f5455c);
+  z-index: 6;
+}
+.measure-line::before,
+.measure-line::after {
+  content: '';
+  position: absolute;
+  background: var(--danger, #f5455c);
+}
+/* End caps: horizontal lines get vertical ticks, vertical lines get horizontal ticks. */
+.measure-line.mh {
+  height: 1px;
+  margin-top: -0.5px;
+}
+.measure-line.mh::before {
+  left: 0;
+  top: -3px;
+  width: 1px;
+  height: 7px;
+}
+.measure-line.mh::after {
+  right: 0;
+  top: -3px;
+  width: 1px;
+  height: 7px;
+}
+.measure-line.mv {
+  width: 1px;
+  margin-left: -0.5px;
+}
+.measure-line.mv::before {
+  top: 0;
+  left: -3px;
+  height: 1px;
+  width: 7px;
+}
+.measure-line.mv::after {
+  bottom: 0;
+  left: -3px;
+  height: 1px;
+  width: 7px;
+}
+.measure-badge {
+  position: absolute;
+  pointer-events: none;
+  background: var(--danger, #f5455c);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: var(--r-sm);
+  white-space: nowrap;
+  z-index: 7;
+  box-shadow: var(--sh-1);
+}
 
 /* ---- reveal-image editor (scratch: double-click to position/scale the prize) ---- */
 .reveal-edit {

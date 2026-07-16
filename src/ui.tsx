@@ -79,10 +79,14 @@ export function Slider(props: {
   step?: number
   suffix?: string
 }): JSX.Element {
+  // Show the value at the step's precision — a fractional step (e.g. 0.05 for zoom)
+  // must NOT be rounded to an integer, or 1.2 would misleadingly read as "1".
+  const dec = props.step && props.step < 1 ? String(props.step).split('.')[1]?.length ?? 0 : 0
+  const shown = dec ? props.value.toFixed(dec).replace(/\.?0+$/, '') : String(Math.round(props.value))
   return (
     <label className="field">
       <span>
-        {props.label} <em className="muted">{Math.round(props.value)}{props.suffix ?? ''}</em>
+        {props.label} <em className="muted">{shown}{props.suffix ?? ''}</em>
       </span>
       <input
         className="slider"

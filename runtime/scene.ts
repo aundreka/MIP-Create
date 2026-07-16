@@ -177,6 +177,19 @@ export interface EndsceneConfig {
   portraitImageId?: string
   landscapeImageId?: string
   objectFit: ObjectFit
+  // 'extend (full height)' fill: the media always spans the FULL screen height at its
+  // natural aspect, centred horizontally — cropping the sides when wider than the
+  // screen, or showing the background fill beside it when narrower. Overrides objectFit.
+  fullHeight?: boolean
+  // Per-orientation FIT overrides for LANDSCAPE. When unset, landscape inherits the
+  // portrait fit (objectFit / fullHeight); when set they win in landscape only — so a
+  // clip can e.g. 'contain' in portrait but 'cover' in landscape.
+  objectFitL?: ObjectFit
+  fullHeightL?: boolean
+  // Make the endcard background transparent instead of a solid/letterbox fill, so a
+  // lower-zIndex element (e.g. a full-screen background image) shows through the gaps
+  // around the media. Overrides the bgColor* fills.
+  transparentBg?: boolean
   zoom?: number // scale factor (0.5 - 2.0); default 1.0 for no scaling
   // Letterbox fills are independent per orientation, since portrait splits the
   // bars top/bottom while landscape splits them left/right (and a clip's top/bottom
@@ -295,6 +308,20 @@ export interface ChoiceConfig {
   correctColor?: string
   wrongColor?: string
   advanceDelayMs?: number
+}
+
+// Crop an ordinary image element, Canva-style. The element's box (w/h) is the crop
+// WINDOW; the source image sits behind it at its own size/offset and the box clips
+// it. Dragging the window's edges reveals/hides the image (it does NOT rescale the
+// picture); dragging inside pans it; scrolling zooms. Placement is stored RELATIVE
+// to the box so it survives responsive scaling — the image always keeps its aspect.
+//   scale = image width ÷ box width (1 = image exactly as wide as the box)
+//   x / y = image top-left as a fraction of box width / height (may be negative)
+// Absent = legacy behaviour (image simply fills the box, no clipping).
+export interface ImageCropConfig {
+  scale?: number // image width ÷ box width; default 1
+  x?: number     // image left as a fraction of box width; default 0
+  y?: number     // image top as a fraction of box height; default 0
 }
 
 // Turn an asset into a container: its shape (alpha) masks an inner image, which
@@ -515,6 +542,7 @@ export interface SceneElement {
   bar?: BarConfig
   handguide?: HandguideConfig
   container?: ContainerConfig
+  crop?: ImageCropConfig // crop/pan/zoom an ordinary image within its box
   drag?: DragConfig
   slot?: SlotConfig
   pick?: PickConfig
@@ -542,6 +570,16 @@ export interface HeaderConfig {
   // Literal text wrapped around the formatted date, e.g. prefix "DAY " → "DAY JULY 3, 2026".
   prefix?: string
   suffix?: string
+  // What the band displays. 'date' (default) renders today's date; 'countdown'
+  // renders a live timer counting down from countdownSeconds after load, using
+  // the same {hh}/{mm}/{ss} tokens as the countdown element.
+  mode?: 'date' | 'countdown'
+  countdownSeconds?: number // timer length in seconds (default 300)
+  countdownFormat?: string // token string, e.g. '{mm} {ss}' (default '{mm}:{ss}')
+  // Custom layout for date mode, e.g. 'MMMM D, YYYY' → "July 15, 2026". Tokens
+  // (bare or {braced}): MMMM full month, MMM short month, MM/M numeric month,
+  // DD/D day, YYYY/YY year. Empty → the legacy "JULY 15, 2026" rendering.
+  dateFormat?: string
 }
 
 export interface ProjectMeta {
@@ -641,6 +679,7 @@ export interface SceneDef {
   elements: SceneElement[]
   advance: AdvanceRule
   transition?: Transition // how THIS scene ENTERS
+  hideHeader?: boolean // hide the pinned date/countdown header (meta.header) while this scene is current
 }
 
 export interface Project {

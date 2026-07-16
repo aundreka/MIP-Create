@@ -148,10 +148,18 @@ export function createEndsceneContent(el: SceneElement, ctx: RuntimeCtx): HTMLEl
   wrap.dataset.bgL1 = cfg?.bgColorL || cfg?.bgColor || '#000000'
   wrap.dataset.bgL2 = cfg?.bgColorL2 || ''
   wrap.dataset.splitL = cfg?.bgColorL2 ? '1' : ''
-  wrap.style.background = wrap.dataset.bgP1 // initial; layout refines per orientation
+  // Transparent endcard: skip the fill entirely so a lower element shows through.
+  wrap.dataset.transparent = cfg?.transparentBg ? '1' : ''
+  wrap.style.background = cfg?.transparentBg ? 'transparent' : wrap.dataset.bgP1 // initial; layout refines per orientation
 
-  const fit = cfg?.objectFit ?? 'cover'
-  const zoom = cfg?.zoom ?? 1
+  // Fit is applied per-orientation by updateEndsceneMedia (so portrait and landscape can
+  // differ); stash both here. Landscape inherits portrait when its overrides are unset.
+  wrap.dataset.fitP = cfg?.objectFit ?? 'cover'
+  wrap.dataset.fhP = cfg?.fullHeight ? '1' : ''
+  wrap.dataset.fitL = cfg?.objectFitL ?? cfg?.objectFit ?? 'cover'
+  wrap.dataset.fhL = (cfg?.fullHeightL ?? cfg?.fullHeight) ? '1' : ''
+  wrap.dataset.zoom = String(cfg?.zoom ?? 1)
+  const mediaCss = 'display:none;'
 
   // resolve sources; landscape falls back to portrait so a single clip works both ways
   const pv = ctx.src(cfg?.portraitVideoId)
@@ -168,7 +176,7 @@ export function createEndsceneContent(el: SceneElement, ctx: RuntimeCtx): HTMLEl
   video.setAttribute('playsinline', '')
   video.setAttribute('webkit-playsinline', '')
   video.preload = 'auto'
-  video.style.cssText = `position:absolute;inset:0;width:100%;height:100%;object-fit:${fit};transform:scale(${zoom});transform-origin:center;display:none;`
+  video.style.cssText = mediaCss
   video.dataset.p = pv
   video.dataset.l = lv
 
@@ -176,7 +184,7 @@ export function createEndsceneContent(el: SceneElement, ctx: RuntimeCtx): HTMLEl
   img.className = 'pa-endscene-img'
   img.alt = ''
   img.draggable = false
-  img.style.cssText = `position:absolute;inset:0;width:100%;height:100%;object-fit:${fit};transform:scale(${zoom});transform-origin:center;display:none;`
+  img.style.cssText = mediaCss
   img.dataset.p = pi
   img.dataset.l = li
 
@@ -217,8 +225,48 @@ export function createEndsceneContent(el: SceneElement, ctx: RuntimeCtx): HTMLEl
 // hard-stop 50/50 gradient (the contain media is centred, so the split sits under
 // the media and each visible bar shows a single colour). Sampled edge colours win
 // over the configured ones when matchBgEdge produced them.
+// Apply the fit (cover / contain / extend-full-height + zoom) to a media element for
+// the current orientation. Re-run on every orientation change so portrait and landscape
+// can use different fits. Sets individual properties (not cssText) so `display` — owned
+// by the source/visibility logic — is preserved.
+function applyEndsceneMediaFit(el: HTMLElement, wrap: HTMLElement): void {
+  const d = wrap.dataset
+  const landscape = d.land === '1'
+  const fullH = landscape ? d.fhL === '1' : d.fhP === '1'
+  const fit = (landscape ? d.fitL : d.fitP) || 'cover'
+  const zoom = d.zoom || '1'
+  el.style.position = 'absolute'
+  el.style.transformOrigin = 'center'
+  if (fullH) {
+    // Full height: top & bottom at the screen edges, natural width, centred.
+    el.style.left = '50%'
+    el.style.top = '50%'
+    el.style.right = ''
+    el.style.bottom = ''
+    el.style.width = 'auto'
+    el.style.height = '100%'
+    el.style.maxWidth = 'none'
+    el.style.objectFit = ''
+    el.style.transform = `translate(-50%,-50%) scale(${zoom})`
+  } else {
+    el.style.left = '0'
+    el.style.top = '0'
+    el.style.right = '0'
+    el.style.bottom = '0'
+    el.style.width = '100%'
+    el.style.height = '100%'
+    el.style.maxWidth = ''
+    el.style.objectFit = fit
+    el.style.transform = `scale(${zoom})`
+  }
+}
+
 export function applyEndsceneFill(wrap: HTMLElement, landscape: boolean): void {
   const d = wrap.dataset
+  if (d.transparent === '1') {
+    wrap.style.background = 'transparent'
+    return
+  }
   if (landscape) {
     if (d.splitL === '1') {
       const c1 = d.sLeft ?? d.bgL1 ?? '#000000'
@@ -322,6 +370,9 @@ export function updateEndsceneMedia(wrap: HTMLElement, landscape: boolean): void
 
   wrap.dataset.land = landscape ? '1' : ''
   applyEndsceneFill(wrap, landscape)
+  // Re-apply the (possibly per-orientation) fit to both media elements.
+  applyEndsceneMediaFit(video, wrap)
+  applyEndsceneMediaFit(img, wrap)
 
   const vSrc = (landscape ? video.dataset.l : video.dataset.p) || ''
   const iSrc = (landscape ? img.dataset.l : img.dataset.p) || ''

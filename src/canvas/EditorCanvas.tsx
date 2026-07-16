@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { FrameMetrics, FrameRect, FrameToParent } from '../../runtime/frame-protocol'
-import type { ProjectMeta, Scene, SceneDef, SceneElement } from '../../runtime/scene'
+import type { Anchor, ProjectMeta, Scene, SceneDef, SceneElement } from '../../runtime/scene'
 import type { AssetMap } from '../../runtime/types'
 import { ContextMenu, type MenuItem } from '../panels/ContextMenu'
 import { getFramePos, setFramePos } from '../canvasLayout'
@@ -70,6 +70,28 @@ function effGeom(el: SceneElement, landscape: boolean) {
   const ov = landscape ? el.landscape : undefined
   return { x: ov?.x ?? el.x, y: ov?.y ?? el.y, scale: ov?.scale ?? el.scale ?? 1, w: ov?.w ?? el.w, h: ov?.h ?? el.h }
 }
+// Anchor point as a fraction of the box (x, y); mirrors the runtime ANCHOR map.
+const ANCHOR_FRAC: Record<Anchor, [number, number]> = {
+  center: [0.5, 0.5], top: [0.5, 0], bottom: [0.5, 1], left: [0, 0.5], right: [1, 0.5],
+  'top-left': [0, 0], 'top-right': [1, 0], 'bottom-left': [0, 1], 'bottom-right': [1, 1],
+}
+
+// Live crop-editor state: the image window (box, DESIGN px, top-left origin) plus the
+// source image's placement behind it (scale = imgWidth/boxWidth; cx/cy = image top-left
+// as a fraction of the box). natR = image natural height ÷ width.
+type CropView = { left: number; top: number; w: number; h: number; scale: number; cx: number; cy: number; natR: number }
+
+// Keep the source image fully covering the window (no gaps) after any edit: the image
+// must be at least as big as the box, and its offset kept within bounds. Canva-style.
+function clampCrop(w: number, h: number, scale: number, cx: number, cy: number, natR: number): { scale: number; cx: number; cy: number } {
+  const minScaleH = h > 0 && w > 0 && natR > 0 ? h / (w * natR) : 1
+  const s = Math.max(scale, 1, minScaleH)
+  const cxMin = 1 - s // image left may not move right past 0, nor left past (w - imgW)
+  const imgHfrac = (s * w * natR) / (h || 1) // image height ÷ box height
+  const cyMin = 1 - imgHfrac
+  return { scale: s, cx: Math.min(0, Math.max(cxMin, cx)), cy: Math.min(0, Math.max(cyMin, cy)) }
+}
+
 function boxSizable(el: SceneElement): boolean {
   return (
     el.type === 'cta' ||
@@ -186,6 +208,9 @@ export function EditorCanvas(props: Props): JSX.Element {
   const metricsByScene = useRef<Record<string, FrameMetrics>>({})
   const metricsRef = useRef<FrameMetrics>({ s: 1, offX: 0, offY: 0, vw: 1, vh: 1 })
   const [guides, setGuides] = useState<{ x: number[]; y: number[] }>({ x: [], y: [] })
+  // Figma-style spacing measurements shown while dragging: the pixel gap from the moving
+  // element to its nearest neighbour (or the canvas edge) on each side. Overlay coords.
+  const [measures, setMeasures] = useState<{ x1: number; y1: number; x2: number; y2: number; label: string; horiz: boolean }[]>([])
   const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
   const [editing, setEditing] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
@@ -207,6 +232,19 @@ export function EditorCanvas(props: Props): JSX.Element {
     | null
   >(null)
   const curZoneRef = useRef<{ x: number; y: number; w: number; h: number }>({ x: 0, y: 0, w: 100, h: 100 })
+  // Canva-style image crop: which image is being cropped, its live geometry, and the
+  // in-flight gesture (resize a window edge, pan the picture, or none).
+  const [cropEdit, setCropEdit] = useState<string | null>(null)
+  const [cropView, setCropView] = useState<CropView | null>(null)
+  const cropViewRef = useRef<CropView | null>(null)
+  cropViewRef.current = cropView
+  const cropEditRef = useRef<string | null>(null)
+  cropEditRef.current = cropEdit
+  const cropDrag = useRef<
+    | { mode: 'resize'; hx: -1 | 0 | 1; hy: -1 | 0 | 1; sx: number; sy: number; base: CropView; imgL: number; imgT: number; imgW: number }
+    | { mode: 'pan'; sx: number; sy: number; base: CropView }
+    | null
+  >(null)
   const [posTick, setPosTick] = useState(0)
   const [panning, setPanning] = useState(false)
   const pathDraw = usePathDraw()
@@ -308,6 +346,71 @@ export function EditorCanvas(props: Props): JSX.Element {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [zoneEdit])
+
+  // ---- Canva-style image crop ----------------------------------------------
+  // Enter crop mode for an image: ensure it has an explicit box (so it clips) + a
+  // crop config, normalise its anchor to top-left (so the box maths is direct), then
+  // seed the live geometry. Cropping never rescales the picture — dragging an edge
+  // reveals/hides it; dragging the middle pans; scrolling zooms.
+  const enterCrop = useCallback((rawId: string): void => {
+    const st = getState()
+    const el = st.scene.elements.find((x) => x.id === rawId)
+    if (!el || el.type !== 'image' || !el.assetId || el.container) return
+    const ls = st.orientation === 'landscape'
+    const g = effGeom(el, ls)
+    let w = g.w
+    let h = g.h
+    if (w == null || h == null) {
+      const a = st.assets[el.assetId]
+      const sc = g.scale || 1
+      w = Math.max(1, Math.round((a?.w ?? 300) * sc))
+      h = Math.max(1, Math.round((a?.h ?? 300) * sc))
+    }
+    let x = g.x
+    let y = g.y
+    if (el.anchor !== 'top-left') {
+      const [fx, fy] = ANCHOR_FRAC[el.anchor]
+      x = Math.round(g.x - fx * w)
+      y = Math.round(g.y - fy * h)
+    }
+    const a = st.assets[el.assetId]
+    const natR = a && a.w > 0 ? a.h / a.w : 1
+    const cur = el.crop ?? {}
+    const cl = clampCrop(w, h, cur.scale ?? 1, cur.x ?? 0, cur.y ?? 0, natR)
+    beginTransaction()
+    patchGeometry(rawId, { x, y, w, h, anchor: 'top-left' })
+    patchElement(rawId, { crop: { scale: cl.scale, x: cl.cx, y: cl.cy } })
+    endTransaction()
+    setRevealEdit(null)
+    setZoneEdit(null)
+    setCropView({ left: x, top: y, w, h, scale: cl.scale, cx: cl.cx, cy: cl.cy, natR })
+    setCropEdit(rawId)
+    selectOnly(rawId)
+  }, [])
+  useEffect(() => {
+    const onEnter = (e: Event): void => {
+      const id = (e as CustomEvent<{ elementId: string }>).detail?.elementId
+      if (id) enterCrop(id)
+    }
+    window.addEventListener('pa:crop-edit', onEnter)
+    return () => window.removeEventListener('pa:crop-edit', onEnter)
+  }, [enterCrop])
+  const exitCrop = useCallback((): void => {
+    cropDrag.current = null
+    setCropEdit(null)
+    setCropView(null)
+  }, [])
+  useEffect(() => {
+    if (cropEdit && !scene.elements.some((e) => e.id === cropEdit)) exitCrop()
+  }, [cropEdit, scene, exitCrop])
+  useEffect(() => {
+    if (!cropEdit) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape' || e.key === 'Enter') exitCrop()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [cropEdit, exitCrop])
 
   const handleLayout = useCallback((id: string, r: FrameRect[], m: FrameMetrics): void => {
     metricsByScene.current[id] = m
@@ -449,12 +552,59 @@ export function EditorCanvas(props: Props): JSX.Element {
     return { dx: dx + (okX ? aX : 0), dy: dy + (okY ? aY : 0) }
   }
 
+  // Figma/Canva-style spacing readout: for a moving bbox (overlay px), measure the gap
+  // to the nearest neighbouring element on each side (only counting elements that
+  // overlap on the perpendicular axis) — or to the canvas edge when there is none — and
+  // return connector segments + labels (design px) to draw. Also emits the bbox size.
+  const computeMeasures = (bbox: { x: number; y: number; w: number; h: number }): void => {
+    const m = metricsRef.current
+    const s = m.s || 1
+    const meta = liveRef.current.scene.meta
+    const cL = m.offX
+    const cR = m.offX + meta.baseW * s
+    const cT = m.offY
+    const cB = m.offY + meta.baseH * s
+    const others = liveRef.current.rects.filter((r) => !liveRef.current.selectedIds.includes(r.id) && r.type !== 'dim')
+    const bL = bbox.x
+    const bR = bbox.x + bbox.w
+    const bT = bbox.y
+    const bB = bbox.y + bbox.h
+    const cx = bbox.x + bbox.w / 2
+    const cy = bbox.y + bbox.h / 2
+    const out: { x1: number; y1: number; x2: number; y2: number; label: string; horiz: boolean }[] = []
+    const px = (v: number): string => String(Math.round(v / s))
+    const overlapY = others.filter((r) => r.y < bB && r.y + r.h > bT)
+    const overlapX = others.filter((r) => r.x < bR && r.x + r.w > bL)
+    // left
+    const leftN = overlapY.filter((r) => r.x + r.w <= bL + 0.5).sort((a, b) => b.x + b.w - (a.x + a.w))[0]
+    const leftEdge = leftN ? leftN.x + leftN.w : cL
+    if (bL - leftEdge > 0.5) out.push({ x1: leftEdge, y1: cy, x2: bL, y2: cy, label: px(bL - leftEdge), horiz: true })
+    // right
+    const rightN = overlapY.filter((r) => r.x >= bR - 0.5).sort((a, b) => a.x - b.x)[0]
+    const rightEdge = rightN ? rightN.x : cR
+    if (rightEdge - bR > 0.5) out.push({ x1: bR, y1: cy, x2: rightEdge, y2: cy, label: px(rightEdge - bR), horiz: true })
+    // top
+    const topN = overlapX.filter((r) => r.y + r.h <= bT + 0.5).sort((a, b) => b.y + b.h - (a.y + a.h))[0]
+    const topEdge = topN ? topN.y + topN.h : cT
+    if (bT - topEdge > 0.5) out.push({ x1: cx, y1: topEdge, x2: cx, y2: bT, label: px(bT - topEdge), horiz: false })
+    // bottom
+    const botN = overlapX.filter((r) => r.y >= bB - 0.5).sort((a, b) => a.y - b.y)[0]
+    const botEdge = botN ? botN.y : cB
+    if (botEdge - bB > 0.5) out.push({ x1: cx, y1: bB, x2: cx, y2: botEdge, label: px(botEdge - bB), horiz: false })
+    setMeasures(out)
+  }
+
   // ---- interactions (active frame) ------------------------------------------
   const drag = useRef<Drag>(null)
   const spaceRef = useRef(false)
 
   const onOverlayPointerDown = (e: React.PointerEvent): void => {
     if (editing) return
+    if (cropEdit) {
+      // Clicking outside the crop window (which stops its own events) commits & exits.
+      exitCrop()
+      return
+    }
     if (revealEdit) {
       // A pointer-down reaching the overlay = clicked outside the reveal box (the box
       // stops its own events) → exit reveal-edit mode.
@@ -574,6 +724,8 @@ export function EditorCanvas(props: Props): JSX.Element {
       if (liveRef.current.landscape) for (const id of Object.keys(patches)) patchGeometry(id, patches[id])
       else bulkPatch(patches)
       sendToActiveFrame()
+      // Spacing readout to the nearest neighbours (or canvas edges) at the snapped pos.
+      computeMeasures({ x: d.bbox.x + snapped.dx, y: d.bbox.y + snapped.dy, w: d.bbox.w, h: d.bbox.h })
       // Highlight another frame when the cursor is over it — dropping moves there.
       setDropTarget(frameUnderClient(e.clientX, e.clientY))
     } else if (d.mode === 'resize') {
@@ -673,6 +825,7 @@ export function EditorCanvas(props: Props): JSX.Element {
       drag.current = null
       setMarquee(null)
       setGuides({ x: [], y: [] })
+      setMeasures([])
       setDropTarget(null)
       return
     }
@@ -687,6 +840,7 @@ export function EditorCanvas(props: Props): JSX.Element {
     drag.current = null
     setMarquee(null)
     setGuides({ x: [], y: [] })
+    setMeasures([])
     setDropTarget(null)
   }
 
@@ -702,8 +856,13 @@ export function EditorCanvas(props: Props): JSX.Element {
       setEditing(hit.id)
       return
     }
-    // Double-click a scratch card that has a prize image → edit the reveal transform.
+    // Double-click a plain image → enter Canva-style crop mode.
     const el = liveRef.current.scene.elements.find((x) => x.id === hit.id)
+    if (el && el.type === 'image' && el.assetId && !el.container) {
+      enterCrop(el.id)
+      return
+    }
+    // Double-click a scratch card that has a prize image → edit the reveal transform.
     const g = el?.game
     if (el && el.type === 'game-mount' && g && g.templateId === 'scratch' && g.params?.prize) {
       if (g.params?.fit !== 'fit') patchElement(el.id, { game: { ...g, params: { ...(g.params ?? {}), fit: 'fit' } } })
@@ -812,6 +971,27 @@ export function EditorCanvas(props: Props): JSX.Element {
     if (!area) return
     const onWheel = (e: WheelEvent): void => {
       e.preventDefault()
+      // In crop mode, the wheel zooms the picture inside the window (about its centre).
+      if (cropEditRef.current && cropViewRef.current) {
+        const v = cropViewRef.current
+        const raw = v.scale * (e.deltaY < 0 ? 1.05 : 1 / 1.05)
+        const imgW = v.scale * v.w
+        const imgH = imgW * v.natR
+        const fx = imgW > 0 ? (v.w / 2 - v.cx * v.w) / imgW : 0.5
+        const fy = imgH > 0 ? (v.h / 2 - v.cy * v.h) / imgH : 0.5
+        const imgW2 = raw * v.w
+        const imgH2 = imgW2 * v.natR
+        const cl = clampCrop(v.w, v.h, raw, (v.w / 2 - fx * imgW2) / v.w, (v.h / 2 - fy * imgH2) / v.h, v.natR)
+        const nv: CropView = { ...v, scale: cl.scale, cx: cl.cx, cy: cl.cy }
+        setCropView(nv)
+        cropViewRef.current = nv
+        const idc = cropEditRef.current
+        if (idc) {
+          patchElement(idc, { crop: { scale: nv.scale, x: nv.cx, y: nv.cy } })
+          sendToActiveFrame()
+        }
+        return
+      }
       if (e.ctrlKey || e.metaKey) {
         const r = area.getBoundingClientRect()
         const ax = e.clientX - r.left
@@ -962,6 +1142,67 @@ export function EditorCanvas(props: Props): JSX.Element {
     if (d?.last && revealEl && g) {
       patchElement(revealEl.id, { game: { ...g, params: { ...(g.params ?? {}), revealScale: d.last.scale, revealX: d.last.x, revealY: d.last.y } } })
     }
+  }
+
+  // ---- Canva-style image crop editor ----------------------------------------
+  const cropEl = cropEdit ? scene.elements.find((e) => e.id === cropEdit) ?? null : null
+  const cropSrc = cropEl?.assetId ? assets[cropEl.assetId]?.src : undefined
+  const writeCrop = (v: CropView, box: boolean): void => {
+    setCropView(v)
+    cropViewRef.current = v
+    const idc = cropEditRef.current
+    if (!idc) return
+    if (box) patchGeometry(idc, { x: Math.round(v.left), y: Math.round(v.top), w: Math.round(v.w), h: Math.round(v.h) })
+    patchElement(idc, { crop: { scale: v.scale, x: v.cx, y: v.cy } })
+    sendToActiveFrame()
+  }
+  const onCropBodyDown = (e: React.PointerEvent): void => {
+    e.stopPropagation()
+    const v = cropViewRef.current
+    if (!v) return
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    const p = toIntrinsic(e.clientX, e.clientY)
+    cropDrag.current = { mode: 'pan', sx: p.px, sy: p.py, base: { ...v } }
+  }
+  const onCropHandleDown = (e: React.PointerEvent, hnd: Handle): void => {
+    e.stopPropagation()
+    const v = cropViewRef.current
+    if (!v) return
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    const p = toIntrinsic(e.clientX, e.clientY)
+    cropDrag.current = { mode: 'resize', hx: hnd.hx, hy: hnd.hy, sx: p.px, sy: p.py, base: { ...v }, imgL: v.left + v.cx * v.w, imgT: v.top + v.cy * v.h, imgW: v.scale * v.w }
+  }
+  const onCropMove = (e: React.PointerEvent): void => {
+    const d = cropDrag.current
+    if (!d) return
+    e.stopPropagation()
+    const p = toIntrinsic(e.clientX, e.clientY)
+    const dd = designDelta(p.px - d.sx, p.py - d.sy)
+    const b = d.base
+    if (d.mode === 'pan') {
+      // Drag the picture behind the window (clamped so it always covers the window).
+      const cl = clampCrop(b.w, b.h, b.scale, b.cx + dd.dx / b.w, b.cy + dd.dy / b.h, b.natR)
+      writeCrop({ ...b, scale: cl.scale, cx: cl.cx, cy: cl.cy }, false)
+      return
+    }
+    // Resize: move only the grabbed edge(s); the picture stays fixed on screen (its
+    // design-px rect was captured at drag start), so the window reveals/hides it.
+    let left = b.left
+    let top = b.top
+    let w = b.w
+    let h = b.h
+    if (d.hx === -1) { left = b.left + dd.dx; w = b.w - dd.dx } else if (d.hx === 1) { w = b.w + dd.dx }
+    if (d.hy === -1) { top = b.top + dd.dy; h = b.h - dd.dy } else if (d.hy === 1) { h = b.h + dd.dy }
+    const MIN = 20
+    if (w < MIN) { if (d.hx === -1) left = b.left + b.w - MIN; w = MIN }
+    if (h < MIN) { if (d.hy === -1) top = b.top + b.h - MIN; h = MIN }
+    const scale = d.imgW / w
+    const cl = clampCrop(w, h, scale, (d.imgL - left) / w, (d.imgT - top) / h, b.natR)
+    writeCrop({ left, top, w, h, scale: cl.scale, cx: cl.cx, cy: cl.cy, natR: b.natR }, true)
+  }
+  const onCropUp = (e: React.PointerEvent): void => {
+    e.stopPropagation()
+    cropDrag.current = null
   }
 
   // ---- reveal-zone editor ---------------------------------------------------
@@ -1158,7 +1399,7 @@ export function EditorCanvas(props: Props): JSX.Element {
                   onDoubleClick={onDoubleClick}
                   onContextMenu={onContextMenu}
                 >
-                  {!revealEdit && !zoneEdit &&
+                  {!revealEdit && !zoneEdit && !cropEdit &&
                     selectedIds.map((id) => {
                       const r = rects.find((x) => x.id === id)
                       return r ? <div key={id} className="sel-box" style={{ left: r.x, top: r.y, width: r.w, height: r.h }} /> : null
@@ -1178,7 +1419,7 @@ export function EditorCanvas(props: Props): JSX.Element {
                       </div>
                     )
                   })}
-                  {!revealEdit && !zoneEdit && single && singleRect && singleHandles.map((h) => (
+                  {!revealEdit && !zoneEdit && !cropEdit && single && singleRect && singleHandles.map((h) => (
                     <div
                       key={h.k}
                       className={'handle h-' + h.k}
@@ -1186,7 +1427,7 @@ export function EditorCanvas(props: Props): JSX.Element {
                       onPointerDown={(e) => onHandlePointerDown(e, h, 'single')}
                     />
                   ))}
-                  {!revealEdit && !zoneEdit && single && singleRect && (
+                  {!revealEdit && !zoneEdit && !cropEdit && single && singleRect && (
                     <div
                       className="dim-badge"
                       style={{ left: singleRect.x + singleRect.w / 2, top: singleRect.y + singleRect.h, transform: `translate(-50%, 6px) scale(${1 / zoom})` }}
@@ -1219,6 +1460,25 @@ export function EditorCanvas(props: Props): JSX.Element {
                   {guides.y.map((gy, i) => (
                     <div key={'gy' + i} className="guide h" style={{ top: gy }} />
                   ))}
+                  {measures.map((mo, i) => {
+                    const len = mo.horiz ? mo.x2 - mo.x1 : mo.y2 - mo.y1
+                    return (
+                      <div key={'ms' + i}>
+                        <div
+                          className={'measure-line ' + (mo.horiz ? 'mh' : 'mv')}
+                          style={mo.horiz
+                            ? { left: mo.x1, top: mo.y1, width: Math.max(0, len) }
+                            : { left: mo.x1, top: mo.y1, height: Math.max(0, len) }}
+                        />
+                        <div
+                          className="measure-badge"
+                          style={{ left: mo.horiz ? mo.x1 + len / 2 : mo.x1, top: mo.horiz ? mo.y1 : mo.y1 + len / 2, transform: `translate(-50%,-50%) scale(${1 / zoom})` }}
+                        >
+                          {mo.label}
+                        </div>
+                      </div>
+                    )
+                  })}
                   {marquee && <div className="marquee" style={{ left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h }} />}
                   {(() => {
                     const drawing = !!pathDraw && pathPoints.length > 0
@@ -1272,6 +1532,51 @@ export function EditorCanvas(props: Props): JSX.Element {
                       }}
                     />
                   )}
+                  {cropEdit && cropView && cropSrc && (() => {
+                    const m = metricsRef.current
+                    const rx = cropView.left * m.s + m.offX
+                    const ry = cropView.top * m.s + m.offY
+                    const rw = cropView.w * m.s
+                    const rh = cropView.h * m.s
+                    const iw = cropView.scale * rw
+                    const ih = iw * cropView.natR
+                    const ix = rx + cropView.cx * rw
+                    const iy = ry + cropView.cy * rh
+                    const dim = 'rgba(0,0,0,0.5)'
+                    return (
+                      <>
+                        {/* the full picture behind the window; bright inside, dimmed outside by the bands */}
+                        <img src={cropSrc} alt="" draggable={false} style={{ position: 'absolute', left: ix, top: iy, width: iw, height: ih, pointerEvents: 'none', userSelect: 'none' }} />
+                        <div style={{ position: 'absolute', left: 0, top: 0, width: box.w, height: Math.max(0, ry), background: dim, pointerEvents: 'none' }} />
+                        <div style={{ position: 'absolute', left: 0, top: ry + rh, width: box.w, height: Math.max(0, box.h - (ry + rh)), background: dim, pointerEvents: 'none' }} />
+                        <div style={{ position: 'absolute', left: 0, top: ry, width: Math.max(0, rx), height: rh, background: dim, pointerEvents: 'none' }} />
+                        <div style={{ position: 'absolute', left: rx + rw, top: ry, width: Math.max(0, box.w - (rx + rw)), height: rh, background: dim, pointerEvents: 'none' }} />
+                        {/* the crop window: drag the middle to pan, the handles to resize */}
+                        <div
+                          style={{ position: 'absolute', left: rx, top: ry, width: rw, height: rh, border: '2px solid var(--accent)', boxSizing: 'border-box', cursor: 'move', touchAction: 'none' }}
+                          onPointerDown={onCropBodyDown}
+                          onPointerMove={onCropMove}
+                          onPointerUp={onCropUp}
+                          onPointerCancel={onCropUp}
+                        >
+                          {[...CORNERS, ...EDGES].map((h) => (
+                            <div
+                              key={h.k}
+                              className={'handle h-' + h.k}
+                              style={{ left: ((h.hx + 1) / 2) * rw, top: ((h.hy + 1) / 2) * rh }}
+                              onPointerDown={(ev) => onCropHandleDown(ev, h)}
+                              onPointerMove={onCropMove}
+                              onPointerUp={onCropUp}
+                              onPointerCancel={onCropUp}
+                            />
+                          ))}
+                        </div>
+                        <div className="dim-badge" style={{ left: rx + rw / 2, top: ry + rh, transform: `translate(-50%, 6px) scale(${1 / zoom})`, whiteSpace: 'nowrap' }}>
+                          drag edges to crop · drag middle to move · scroll to zoom · Enter when done
+                        </div>
+                      </>
+                    )
+                  })()}
                   {revealEdit && revealRect && revealSrc && (
                     <div className="reveal-edit" style={{ left: revealRect.x, top: revealRect.y, width: revealRect.w, height: revealRect.h }}>
                       <div

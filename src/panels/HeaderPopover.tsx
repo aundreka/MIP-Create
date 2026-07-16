@@ -1,15 +1,16 @@
-// Date-header popover — quick-access customization for the pinned date band,
-// opened from the "Date header" button in the Topbar. Writes to meta.header
-// (see runtime/header.ts); leaving it undefined hides the band entirely.
+// Header popover — quick-access customization for the pinned top band (date or
+// countdown), opened from the "Header" button in the Topbar. Writes to
+// meta.header (see runtime/header.ts); leaving it undefined hides the band.
 
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { patchMeta, useEditorState } from '../store'
+import { addAsset, patchMeta, useEditorState } from '../store'
 import { ColorField, NumField, Row, Select, Toggle } from '../ui'
-import { Icon, X } from '../icons'
+import { Icon, Upload, X } from '../icons'
+import { importFont } from '../bridge'
 
 export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): JSX.Element {
-  const { project } = useEditorState()
+  const { project, assets } = useEditorState()
   const h = project.meta.header
   const ref = useRef<HTMLDivElement>(null)
 
@@ -40,28 +41,90 @@ export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): 
   const set = (patch: Record<string, unknown>): void => patchMeta({ header: { ...h, ...patch } })
 
   return createPortal(
-    <div ref={ref} className="header-pop" style={{ top: pos.top, right: pos.right }} role="dialog" aria-label="Date header">
+    <div ref={ref} className="header-pop" style={{ top: pos.top, right: pos.right }} role="dialog" aria-label="Header">
       <div className="header-pop-head">
-        <strong>Date header</strong>
+        <strong>Header</strong>
         <button className="icon" onClick={props.onClose} title="Close (Esc)" aria-label="Close">
           <Icon icon={X} size={15} />
         </button>
       </div>
       <div className="header-pop-body">
         <Toggle
-          label="Show date header"
+          label="Show header"
           checked={!!h}
           onChange={(on) => patchMeta({ header: on ? (h ?? {}) : undefined })}
         />
         {h && (
           <>
-            <Row label="Font">
-              <input
-                value={h.fontFamily ?? ''}
-                placeholder="e.g. Poppins, Arial, sans-serif"
-                onChange={(e) => set({ fontFamily: e.target.value || undefined })}
+            <Row label="Content">
+              <Select
+                value={h.mode ?? 'date'}
+                options={[
+                  { value: 'date', label: 'Current date' },
+                  { value: 'countdown', label: 'Countdown timer' },
+                ]}
+                onChange={(v) => set({ mode: v === 'date' ? undefined : v })}
               />
             </Row>
+            {h.mode === 'countdown' ? (
+              <div className="grid2">
+                <NumField
+                  label="Duration"
+                  value={h.countdownSeconds ?? 300}
+                  min={1}
+                  suffix="s"
+                  onChange={(n) => set({ countdownSeconds: n })}
+                />
+                <Row label="Format">
+                  <input
+                    value={h.countdownFormat ?? ''}
+                    placeholder="{mm}:{ss}"
+                    onChange={(e) => set({ countdownFormat: e.target.value || undefined })}
+                  />
+                </Row>
+              </div>
+            ) : (
+              <Row label="Format">
+                <input
+                  value={h.dateFormat ?? ''}
+                  placeholder="e.g. MMMM D, YYYY"
+                  onChange={(e) => set({ dateFormat: e.target.value || undefined })}
+                />
+              </Row>
+            )}
+            {(() => {
+              // Same pattern as the Inspector's text-font picker: font assets are
+              // base64 data URLs whose id doubles as the CSS font-family, embedded
+              // in the export and registered via FontFace (no external calls).
+              const fontAssets = Object.entries(assets).filter(([, a]) => a.kind === 'font')
+              const uploadFont = async (): Promise<void> => {
+                const f = await importFont()
+                if (!f) return
+                addAsset(f.id, { src: f.src, w: 0, h: 0, kind: 'font' })
+                set({ fontFamily: f.id })
+              }
+              // A hand-typed CSS family from before the picker existed (e.g.
+              // "Poppins, sans-serif") still shows and stays selectable.
+              const custom = h.fontFamily && !assets[h.fontFamily] ? h.fontFamily : null
+              return (
+                <Row label="Font">
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <Select
+                      value={h.fontFamily ?? ''}
+                      onChange={(v) => set({ fontFamily: v || undefined })}
+                      options={[
+                        { value: '', label: 'Default' },
+                        ...fontAssets.map(([id]) => ({ value: id, label: id.replace(/_/g, ' ') })),
+                        ...(custom ? [{ value: custom, label: `${custom} (system)` }] : []),
+                      ]}
+                    />
+                    <button className="icon-btn" title="Upload font (.ttf .otf .woff .woff2)" onClick={() => { void uploadFont() }}>
+                      <Icon icon={Upload} size={13} />
+                    </button>
+                  </div>
+                </Row>
+              )
+            })()}
             <div className="grid2">
               <NumField label="Font size" value={h.fontSizePx ?? 64} min={1} suffix="px" onChange={(n) => set({ fontSizePx: n })} />
               <NumField label="Weight" value={h.fontWeight ?? 500} min={100} max={900} step={100} onChange={(n) => set({ fontWeight: n })} />
@@ -86,7 +149,11 @@ export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): 
             </div>
             <div className="grid2">
               <Row label="Prefix">
-                <input value={h.prefix ?? ''} placeholder="e.g. “DAY ”" onChange={(e) => set({ prefix: e.target.value || undefined })} />
+                <input
+                  value={h.prefix ?? ''}
+                  placeholder={h.mode === 'countdown' ? 'e.g. “Limited Time Only ”' : 'e.g. “DAY ”'}
+                  onChange={(e) => set({ prefix: e.target.value || undefined })}
+                />
               </Row>
               <Row label="Suffix">
                 <input value={h.suffix ?? ''} placeholder="e.g. “ !”" onChange={(e) => set({ suffix: e.target.value || undefined })} />
@@ -96,7 +163,12 @@ export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): 
               <ColorField label="Background" value={h.bgColor || ''} onChange={(c) => set({ bgColor: c ?? undefined })} allowNone />
               <ColorField label="Text colour" value={h.color || '#ffffff'} onChange={(c) => set({ color: c ?? '#ffffff' })} />
             </div>
-            <div className="hint pad">Shows the current date at the top of the playable. Leave background as “none” for no band.</div>
+            <div className="hint pad">
+              {h.mode === 'countdown'
+                ? 'Counts down from the duration when the ad loads. Format tokens: {hh} {mm} {ss} (padded) or {h} {m} {s}.'
+                : 'Shows the current date. Format tokens: MMMM (July), MMM (Jul), MM (07), M (7), DD (05), D (5), YYYY (2026), YY (26). Empty = “JULY 15, 2026” style.'}{' '}
+              Leave background as “none” for no band.
+            </div>
           </>
         )}
       </div>

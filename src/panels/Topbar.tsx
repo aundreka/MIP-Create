@@ -178,7 +178,7 @@ export function Topbar(props: {
       <button
         ref={headerBtn}
         className={'icon' + (scene.meta.header ? ' on' : '')}
-        title="Date header"
+        title="Header (date or countdown)"
         aria-pressed={!!scene.meta.header}
         onClick={toggleHeaderPop}
       >

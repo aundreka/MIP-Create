@@ -94,9 +94,18 @@ function validateProjectShape(project: unknown): string | null {
 function collectMissingAssets(project: Project, assets: AssetMap): string[] {
   const have = new Set(Object.keys(assets || {}))
   const missing = new Set<string>()
+  const need = (id?: string): void => {
+    if (id && !have.has(id)) missing.add(id)
+  }
+  // Project-level audio (SFX bindings + background music) references, too — not just
+  // the visible image/video on each element — so missing SOUND is surfaced, not silent.
+  for (const b of project.sfx || []) need(b.assetId)
+  need(project.bgm?.assetId)
   for (const s of project.scenes) {
     for (const el of s.elements || []) {
-      if (el.assetId && !have.has(el.assetId)) missing.add(el.assetId)
+      need(el.assetId)
+      need(el.container?.imageId)
+      for (const b of el.sfx || []) need(b.assetId)
     }
   }
   return [...missing]

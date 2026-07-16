@@ -443,7 +443,8 @@ export function createScratch(): GameModule {
       }
 
       // Optional brush: a floating image whose authored tip does the scratching. Created hidden;
-      // sized/positioned at the first touch. Sits above the canvas and never eats pointer events.
+      // sized/positioned at the first touch. z-index sits above EVERYTHING — the win/lose overlay
+      // (9000) and the immune header/overlayTop tiers (10000/10050) — and never eats pointer events.
       const brushSrc = ctx.assets.src(str(params.brushImage, ''))
       if (brushSrc) {
         brushImg = new Image()
@@ -453,7 +454,7 @@ export function createScratch(): GameModule {
         brushEl.draggable = false
         brushEl.dataset.paBrush = '1' // marker so a handguide's 'point at brush' mode can find it
         brushEl.style.cssText =
-          'position:absolute;left:0;top:0;pointer-events:none;opacity:0;z-index:500;' +
+          'position:absolute;left:0;top:0;pointer-events:none;opacity:0;z-index:100000;' +
           'will-change:transform;transition:opacity 120ms ease;-webkit-user-drag:none;user-select:none;'
         // Mount on the non-clipped stage container so the brush can overflow past the card edges.
         const paRoot = ctx.root.closest?.('.pa-root') as HTMLElement | null

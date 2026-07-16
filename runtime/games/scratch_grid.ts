@@ -1040,8 +1040,9 @@ export function createScratchGrid(): GameModule {
       }
 
       // Optional brush: a floating image (tip does the scratching) that follows the pointer while
-      // dragging. z-index sits above the reveal assets (400) so the tool reads as on top; it never
-      // eats pointer events. Sizing/positioning is handled by parkBrush()/beginStroke().
+      // dragging. z-index sits above EVERYTHING — reveal assets (400), the win/lose overlay (9000)
+      // and the immune header/overlayTop tiers (10000/10050) — so the tool always reads as on top;
+      // it never eats pointer events. Sizing/positioning is handled by parkBrush()/beginStroke().
       const brushSrc = ctx.assets.src(str(params.brushImage as unknown, ''))
       if (brushSrc) {
         brushImg = new Image()
@@ -1052,7 +1053,7 @@ export function createScratchGrid(): GameModule {
         brushEl.draggable = false
         brushEl.dataset.paBrush = '1' // marker so a handguide's 'point at brush' mode can find it
         brushEl.style.cssText =
-          'position:absolute;left:0;top:0;pointer-events:none;opacity:0;z-index:500;' +
+          'position:absolute;left:0;top:0;pointer-events:none;opacity:0;z-index:100000;' +
           'will-change:transform;transition:opacity 120ms ease;-webkit-user-drag:none;user-select:none;'
         // Mount on the non-clipped stage container (like the win/lose overlay) so the brush can
         // overflow past the card edges instead of being cut off by ctx.root's overflow:hidden.

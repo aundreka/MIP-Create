@@ -109,6 +109,9 @@ export function pruneAssets(project: Project, assets: AssetMap): AssetMap {
   for (const scene of project.scenes) addSceneAssets(scene, assets, used, true)
   for (const b of project.sfx ?? []) add(b.assetId)
   if (project.bgm) add(project.bgm.assetId)
+  // The pinned header can use an uploaded font (meta.header.fontFamily = font
+  // asset id) without any element referencing it.
+  if (project.meta.header?.fontFamily) add(project.meta.header.fontFamily)
   const out: AssetMap = {}
   for (const id of used) out[id] = assets[id]
   return out
