@@ -7,12 +7,16 @@ import type { GameContext, GameModule, GameTemplate, HintMove } from './types'
 import { num, str } from './types'
 import { emit } from '../emitter'
 import { scale } from '../responsive'
+import { braceBareTokens, renderCountdownFormat } from '../elements/countdown'
 
 interface CellState {
   el: HTMLDivElement
   canvas: HTMLCanvasElement
   c2d: CanvasRenderingContext2D
   labelEl: HTMLDivElement | null
+  // Dynamic date rendered inside the reveal (under the cover). Sized in sizeAll
+  // as a fraction of the cell's short side, so it scales exactly like the cell art.
+  dateEl: HTMLDivElement | null
   won: boolean
   isWin: boolean
   row: number
@@ -197,6 +201,8 @@ export function createScratchGrid(): GameModule {
   // Outer-corner rounding as a fraction of the cell's short side. Authored via the
   // cellRadius param (percent); 9% is the historical hardcoded look, 0 = square.
   let cellRadiusFrac = 0.09
+  // Dynamic-date font size as a fraction of the cell's short side (see CellState.dateEl).
+  let dateSizeFrac = 0.08
   let basePad = 0
   let baseColGap = 0
   let baseRowGap = 0
@@ -575,6 +581,9 @@ export function createScratchGrid(): GameModule {
       const cssH = Math.max(2, Math.round(el.clientHeight))
       if (cssW > 2 && labelEl) {
         labelEl.style.fontSize = Math.round(Math.min(cssW, cssH) * 0.12) + 'px'
+      }
+      if (cssW > 2 && cell.dateEl) {
+        cell.dateEl.style.fontSize = Math.max(6, Math.round(Math.min(cssW, cssH) * dateSizeFrac)) + 'px'
       }
       // Only round the 4 outer corners of the grid; inner corners stay square
       const r = Math.round(Math.min(cssW, cssH) * cellRadiusFrac)
@@ -975,6 +984,28 @@ export function createScratchGrid(): GameModule {
         return v != null && v !== '' ? Math.max(10, Math.min(100, num(v as unknown, globalTextScale))) : globalTextScale
       }
 
+      // Dynamic date inside the reveal: a token format string ("MMMM D", "{date}", …)
+      // rendered once from today + dateDays. Per-cell override → win/lose fallback;
+      // empty everywhere = no date. Position/size are fractions of the CELL, so the
+      // date scales exactly like the cell art at every viewport size and zoom.
+      const winDateFmt = str(params.winDate as unknown, '')
+      const loseDateFmt = str(params.loseDate as unknown, '')
+      // Per-cell opt-out: cellNdateOff suppresses the date in that cell even when a
+      // win/lose fallback format is set (lets the author choose WHICH cells show it).
+      const cellDateOff = (i: number): boolean => {
+        const v = params['cell' + i + 'dateOff']
+        return v === true || v === 1 || v === '1' || v === 'on'
+      }
+      const cellDateFmt = (i: number): string =>
+        cellDateOff(i) ? '' : str(params['cell' + i + 'date'] as unknown, '') || (isWinCell[i] ? winDateFmt : loseDateFmt)
+      const dateDays = Math.max(0, num(params.dateDays as unknown, 0))
+      dateSizeFrac = Math.max(2, Math.min(40, num(params.dateSize as unknown, 8))) / 100
+      const dateX = Math.max(0, Math.min(100, num(params.dateX as unknown, 50)))
+      const dateY = Math.max(0, Math.min(100, num(params.dateY as unknown, 50)))
+      const dateColor = str(params.dateColor as unknown, '#ffffff')
+      const dateWeight = Math.max(100, Math.min(900, num(params.dateWeight as unknown, 700)))
+      const dateFont = str(params.dateFont as unknown, '')
+
       // Per-cell win overlay overrides (each falls back to the global default).
       const cellWinSceneId = (i: number): string =>
         str(params['cell' + i + 'winSceneId'] as unknown, '') || winSceneId
@@ -1113,6 +1144,23 @@ export function createScratchGrid(): GameModule {
             `pointer-events:none;padding:${pad}%;box-sizing:border-box;`
           revealDiv.appendChild(textImg)
         }
+        // Dynamic date: DOM text under the cover canvas, revealed by scratching like
+        // the text-image overlay. Rendered once (dates don't tick); font size is set
+        // per-resize in sizeAll as a fraction of the cell's short side.
+        let dateEl: HTMLDivElement | null = null
+        const dateFmt = cellDateFmt(i)
+        if (dateFmt) {
+          dateEl = document.createElement('div')
+          const now = Date.now()
+          dateEl.textContent = renderCountdownFormat(braceBareTokens(dateFmt), now + dateDays * 86400000, now)
+          dateEl.style.cssText =
+            `position:absolute;left:${dateX}%;top:${dateY}%;transform:translate(-50%,-50%);` +
+            'pointer-events:none;white-space:pre-line;text-align:center;line-height:1.15;user-select:none;-webkit-user-select:none;'
+          dateEl.style.color = dateColor
+          dateEl.style.fontWeight = String(dateWeight)
+          if (dateFont) dateEl.style.fontFamily = dateFont
+          revealDiv.appendChild(dateEl)
+        }
         cellEl.appendChild(revealDiv)
 
         const canvas = document.createElement('canvas')
@@ -1130,7 +1178,7 @@ export function createScratchGrid(): GameModule {
         grid.appendChild(cellEl)
 
         const cellState: CellState = {
-          el: cellEl, canvas, c2d, labelEl, won: false, isWin,
+          el: cellEl, canvas, c2d, labelEl, dateEl, won: false, isWin,
           row: Math.floor(i / cols), col: i % cols,
           coverGrid: new Uint8Array(COVERAGE_S * COVERAGE_S),
           cellCoverImg: null, cellCoverReady: false,
@@ -1315,6 +1363,19 @@ export const SCRATCH_GRID_TEMPLATE: GameTemplate = {
     { key: 'cell1Label', label: 'Cell 2 text override', type: 'text' },
     { key: 'cell2Label', label: 'Cell 3 text override', type: 'text' },
     { key: 'cell3Label', label: 'Cell 4 text override', type: 'text' },
+    { key: 'winDate', label: 'Win cells dynamic date (tokens: MMMM D YYYY; empty = off)', type: 'text' },
+    { key: 'loseDate', label: 'Lose cells dynamic date', type: 'text' },
+    { key: 'cell0date', label: 'Cell 1 date override', type: 'text' },
+    { key: 'cell1date', label: 'Cell 2 date override', type: 'text' },
+    { key: 'cell2date', label: 'Cell 3 date override', type: 'text' },
+    { key: 'cell3date', label: 'Cell 4 date override', type: 'text' },
+    { key: 'dateDays', label: 'Date offset (days from today)', type: 'number', min: 0, max: 60, step: 1 },
+    { key: 'dateSize', label: 'Date size (% of cell)', type: 'number', min: 2, max: 40, step: 1 },
+    { key: 'dateX', label: 'Date X (% of cell)', type: 'number', min: 0, max: 100, step: 1 },
+    { key: 'dateY', label: 'Date Y (% of cell)', type: 'number', min: 0, max: 100, step: 1 },
+    { key: 'dateColor', label: 'Date color', type: 'color' },
+    { key: 'dateWeight', label: 'Date weight', type: 'number', min: 100, max: 900, step: 100 },
+    { key: 'dateFont', label: 'Date font (family or uploaded font id)', type: 'text' },
     { key: 'gap', label: 'Outer padding', type: 'number', min: 0, max: 60, step: 2 },
     { key: 'colGap', label: 'Column gap', type: 'number', min: 0, max: 60, step: 2 },
     { key: 'rowGap', label: 'Row gap', type: 'number', min: 0, max: 60, step: 2 },

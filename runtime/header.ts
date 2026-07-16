@@ -2,7 +2,7 @@
 // letterbox reflow). Fixed positioning + transform scale only — no _offY term.
 
 import { scale, viewW } from './responsive'
-import { formatTicks, renderCountdownFormat } from './elements/countdown'
+import { braceBareTokens, formatTicks, renderCountdownFormat } from './elements/countdown'
 
 export interface HeaderConfig {
   bgColor?: string
@@ -34,13 +34,6 @@ const monthFormatter = new Intl.DateTimeFormat('en-US', { month: 'long' })
 
 function formatHeaderDate(d = new Date()): string {
   return `${monthFormatter.format(d).toUpperCase()} ${d.getDate()}, ${d.getFullYear()}`
-}
-
-// Date-format fields accept bare tokens ("MMMM D, YYYY") for convenience; the
-// shared countdown formatter only knows {braced} ones. Wrap bare standalone
-// tokens in braces, leaving anything already braced untouched.
-function braceBareTokens(fmt: string): string {
-  return fmt.replace(/\{[^}]*\}|\b(MMMM|MMM|MM|M|DD|D|YYYY|YY)\b/g, (match, bare: string | undefined) => (bare ? `{${bare}}` : match))
 }
 
 export function mountHeader(container: HTMLElement, opts: HeaderConfig): HeaderHandle {

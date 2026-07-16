@@ -42,9 +42,18 @@ export interface CountdownFormatOpts {
   capitalize?: boolean
 }
 
-/** Render the format string for the remaining time to `deadline`. */
+// Date-format fields accept bare tokens ("MMMM D, YYYY") for convenience; the
+// formatter itself only knows {braced} ones. Wrap bare standalone tokens in
+// braces, leaving anything already braced untouched. Shared by the pinned
+// header and the scratch-grid cell date.
+export function braceBareTokens(fmt: string): string {
+  return fmt.replace(/\{[^}]*\}|\b(MMMM|MMM|MM|M|DD|D|YYYY|YY)\b/g, (match, bare: string | undefined) => (bare ? `{${bare}}` : match))
+}
+
+/** Render the format string for the remaining time to `deadline`. Bare date
+ * tokens (MM.D, MMMM D YYYY) are accepted like everywhere else. */
 export function formatCountdown(el: SceneElement, deadline: number, now: number): string {
-  return renderCountdownFormat(el.countdown?.format || '{d}d {hh}:{mm}:{ss}', deadline, now, el.countdown ?? {})
+  return renderCountdownFormat(braceBareTokens(el.countdown?.format || '{d}d {hh}:{mm}:{ss}'), deadline, now, el.countdown ?? {})
 }
 
 /** Element-independent core of formatCountdown — also drives the pinned header's

@@ -232,6 +232,12 @@ export function EditorCanvas(props: Props): JSX.Element {
     | null
   >(null)
   const curZoneRef = useRef<{ x: number; y: number; w: number; h: number }>({ x: 0, y: 0, w: 100, h: 100 })
+  // Scratch-grid dynamic-date position editor: which game-mount's date marker is being
+  // dragged, and the live position (percent of the cell — shared by every cell).
+  const [dateEdit, setDateEdit] = useState<string | null>(null)
+  const [dateLive, setDateLive] = useState<{ x: number; y: number } | null>(null)
+  const dateDrag = useRef<{ base: { x: number; y: number; w: number; h: number }; last: { x: number; y: number } | null } | null>(null)
+  const curDateRef = useRef<{ x: number; y: number }>({ x: 50, y: 50 })
   // Canva-style image crop: which image is being cropped, its live geometry, and the
   // in-flight gesture (resize a window edge, pan the picture, or none).
   const [cropEdit, setCropEdit] = useState<string | null>(null)
@@ -322,6 +328,8 @@ export function EditorCanvas(props: Props): JSX.Element {
       if (!id) return
       setRevealEdit(null)
       setRevealLive(null)
+      setDateEdit(null)
+      setDateLive(null)
       setZoneLive(null)
       setZoneEdit(id)
     }
@@ -346,6 +354,40 @@ export function EditorCanvas(props: Props): JSX.Element {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [zoneEdit])
+
+  // Dynamic-date position edit (scratch grid) is entered from the inspector too.
+  useEffect(() => {
+    const onEnter = (e: Event): void => {
+      const id = (e as CustomEvent<{ elementId: string }>).detail?.elementId
+      if (!id) return
+      setRevealEdit(null)
+      setRevealLive(null)
+      setZoneEdit(null)
+      setZoneLive(null)
+      setDateLive(null)
+      setDateEdit(id)
+    }
+    window.addEventListener('pa:date-edit', onEnter)
+    return () => window.removeEventListener('pa:date-edit', onEnter)
+  }, [])
+  useEffect(() => {
+    if (dateEdit && !scene.elements.some((e) => e.id === dateEdit)) {
+      setDateEdit(null)
+      setDateLive(null)
+    }
+  }, [dateEdit, scene])
+  useEffect(() => {
+    if (!dateEdit) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        dateDrag.current = null
+        setDateEdit(null)
+        setDateLive(null)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [dateEdit])
 
   // ---- Canva-style image crop ----------------------------------------------
   // Enter crop mode for an image: ensure it has an explicit box (so it clips) + a
@@ -616,6 +658,12 @@ export function EditorCanvas(props: Props): JSX.Element {
       // Clicking outside the zone box (which stops its own events) exits zone-edit.
       setZoneEdit(null)
       setZoneLive(null)
+      return
+    }
+    if (dateEdit) {
+      // Clicking outside a date marker (markers stop their own events) exits date-edit.
+      setDateEdit(null)
+      setDateLive(null)
       return
     }
     const { px, py } = toIntrinsic(e.clientX, e.clientY)
@@ -1216,35 +1264,41 @@ export function EditorCanvas(props: Props): JSX.Element {
     h: typeof zoneParams.zoneH === 'number' ? zoneParams.zoneH : 100,
   }
   curZoneRef.current = curZone
-  // The base rect(s) the zone is normalized against: the whole card (scratch) or each
-  // cell (scratch grid). All coords are in overlay space (pre-zoom), like `rects`.
-  const zoneBaseRects: { x: number; y: number; w: number; h: number }[] = (() => {
-    if (!zoneEl || !zoneRect) return []
-    const g = zoneEl.game
-    if (g?.templateId !== 'scratch_grid') return [{ x: zoneRect.x, y: zoneRect.y, w: zoneRect.w, h: zoneRect.h }]
-    const cols = Math.max(1, Math.min(4, Number(g.params?.cols ?? 2)))
-    const rows = Math.max(1, Math.min(4, Number(g.params?.rows ?? 2)))
-    const gap = Math.max(0, Number(g.params?.gap ?? 10))
-    const colGap = Math.max(0, Number(g.params?.colGap ?? gap))
-    const rowGap = Math.max(0, Number(g.params?.rowGap ?? gap))
-    const ew = zoneEl.w ?? 980
-    const eh = zoneEl.h ?? 1100
-    const sx = zoneRect.w / ew // design px → overlay px (uniform scale)
-    const sy = zoneRect.h / eh
-    const cellW = (zoneRect.w - gap * sx * 2 - colGap * sx * (cols - 1)) / cols
-    const cellH = (zoneRect.h - gap * sy * 2 - rowGap * sy * (rows - 1)) / rows
+  // Cell rects (overlay space, pre-zoom — like `rects`) for a scratch_grid game-mount.
+  // Mirrors the runtime's grid math (design-px padding/gaps scaled uniformly). Shared
+  // by the reveal-zone editor and the dynamic-date position editor.
+  const gridCellRects = (el: SceneElement, r: { x: number; y: number; w: number; h: number }): { x: number; y: number; w: number; h: number }[] => {
+    const p = el.game?.params ?? {}
+    const cols = Math.max(1, Math.min(4, Number(p.cols ?? 2)))
+    const rows = Math.max(1, Math.min(4, Number(p.rows ?? 2)))
+    const gap = Math.max(0, Number(p.gap ?? 10))
+    const colGap = Math.max(0, Number(p.colGap ?? gap))
+    const rowGap = Math.max(0, Number(p.rowGap ?? gap))
+    const ew = el.w ?? 980
+    const eh = el.h ?? 1100
+    const sx = r.w / ew // design px → overlay px (uniform scale)
+    const sy = r.h / eh
+    const cellW = (r.w - gap * sx * 2 - colGap * sx * (cols - 1)) / cols
+    const cellH = (r.h - gap * sy * 2 - rowGap * sy * (rows - 1)) / rows
     const out: { x: number; y: number; w: number; h: number }[] = []
     for (let row = 0; row < rows; row++) {
       for (let col = 0; col < cols; col++) {
         out.push({
-          x: zoneRect.x + gap * sx + col * (cellW + colGap * sx),
-          y: zoneRect.y + gap * sy + row * (cellH + rowGap * sy),
+          x: r.x + gap * sx + col * (cellW + colGap * sx),
+          y: r.y + gap * sy + row * (cellH + rowGap * sy),
           w: cellW,
           h: cellH,
         })
       }
     }
     return out
+  }
+  // The base rect(s) the zone is normalized against: the whole card (scratch) or each
+  // cell (scratch grid). All coords are in overlay space (pre-zoom), like `rects`.
+  const zoneBaseRects: { x: number; y: number; w: number; h: number }[] = (() => {
+    if (!zoneEl || !zoneRect) return []
+    if (zoneEl.game?.templateId !== 'scratch_grid') return [{ x: zoneRect.x, y: zoneRect.y, w: zoneRect.w, h: zoneRect.h }]
+    return gridCellRects(zoneEl, zoneRect)
   })()
   // The editable base rect (whole card, or the top-left cell for a grid). Dragging here
   // sets the shared zone that every cell mirrors.
@@ -1319,6 +1373,57 @@ export function EditorCanvas(props: Props): JSX.Element {
     if (d?.last && zoneEl && g) {
       const r = (n: number): number => Math.round(n * 10) / 10
       patchElement(zoneEl.id, { game: { ...g, params: { ...(g.params ?? {}), zoneX: r(d.last.x), zoneY: r(d.last.y), zoneW: r(d.last.w), zoneH: r(d.last.h) } } })
+    }
+  }
+
+  // ---- scratch-grid dynamic-date position editor -----------------------------
+  // One shared (dateX, dateY) — dragging the marker in ANY cell moves it in all.
+  const dateEl = dateEdit ? scene.elements.find((e) => e.id === dateEdit) ?? null : null
+  const dateRect = dateEdit ? rects.find((r) => r.id === dateEdit) ?? null : null
+  const dateParams: Record<string, unknown> = dateEl?.game?.params ?? {}
+  const curDate = dateLive ?? {
+    x: typeof dateParams.dateX === 'number' ? dateParams.dateX : 50,
+    y: typeof dateParams.dateY === 'number' ? dateParams.dateY : 50,
+  }
+  curDateRef.current = curDate
+  const dateCellRects = dateEl && dateRect && dateEl.game?.templateId === 'scratch_grid' ? gridCellRects(dateEl, dateRect) : []
+  // Whether cell i actually shows a date (per-cell off flag + override/fallback formats).
+  const dateCellOn = (i: number): boolean => {
+    const off = dateParams['cell' + i + 'dateOff']
+    if (off === true || off === 1 || off === '1' || off === 'on') return false
+    if (String(dateParams['cell' + i + 'date'] ?? '')) return true
+    const isW = (String(dateParams.pattern ?? 'LWWL')[i] ?? 'L').toUpperCase() === 'W'
+    return !!String((isW ? dateParams.winDate : dateParams.loseDate) ?? '')
+  }
+  const onDateDown = (e: React.PointerEvent, base: { x: number; y: number; w: number; h: number }): void => {
+    e.stopPropagation()
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    dateDrag.current = { base, last: null }
+  }
+  const onDateMove = (e: React.PointerEvent): void => {
+    const d = dateDrag.current
+    if (!d) return
+    e.stopPropagation()
+    const o = overlayRef.current!.getBoundingClientRect()
+    const z = liveRef.current.zoom
+    const ox = (e.clientX - o.left) / z
+    const oy = (e.clientY - o.top) / z
+    // The marker centers on the pointer (the date is center-anchored at dateX/dateY).
+    const next = {
+      x: Math.max(0, Math.min(100, ((ox - d.base.x) / d.base.w) * 100)),
+      y: Math.max(0, Math.min(100, ((oy - d.base.y) / d.base.h) * 100)),
+    }
+    d.last = next
+    setDateLive(next)
+  }
+  const onDateUp = (e: React.PointerEvent): void => {
+    e.stopPropagation()
+    const d = dateDrag.current
+    dateDrag.current = null
+    const g = dateEl?.game
+    if (d?.last && dateEl && g) {
+      const r = (n: number): number => Math.round(n * 10) / 10
+      patchElement(dateEl.id, { game: { ...g, params: { ...(g.params ?? {}), dateX: r(d.last.x), dateY: r(d.last.y) } } })
     }
   }
 
@@ -1653,6 +1758,26 @@ export function EditorCanvas(props: Props): JSX.Element {
                       })()}
                     </>
                   )}
+                  {dateEdit && dateCellRects.length > 0 && dateCellRects.map((b, i) => {
+                    const on = dateCellOn(i)
+                    const mx = b.x + (curDate.x / 100) * b.w
+                    const my = b.y + (curDate.y / 100) * b.h
+                    return (
+                      <div
+                        key={'dmark-' + i}
+                        title={on ? 'Drag to position the date (shared by all cells). Esc to finish.' : 'No date in this cell — drag still moves the shared position'}
+                        style={{
+                          position: 'absolute', left: mx - 10, top: my - 10, width: 20, height: 20, borderRadius: '50%',
+                          border: '2px solid var(--accent)', background: 'rgba(80,140,255,0.28)', boxSizing: 'border-box',
+                          cursor: 'move', touchAction: 'none', opacity: on ? 1 : 0.35,
+                        }}
+                        onPointerDown={(e) => onDateDown(e, b)}
+                        onPointerMove={onDateMove}
+                        onPointerUp={onDateUp}
+                        onPointerCancel={onDateUp}
+                      />
+                    )
+                  })}
                 </div>
               ) : (
                 <div className="frame-activate" onPointerDown={(e) => activateFrame(e, sd.id)} />

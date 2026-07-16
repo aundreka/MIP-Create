@@ -249,6 +249,13 @@ export interface CountdownConfig {
   dateStyle?: 'short' | 'long' | 'numeric' | 'monthDay' // how {date} renders
   dateLocale?: string // BCP-47 tag for {date} rendering (default 'en-US')
   capitalize?: boolean // upper-case the first letter of every word in the rendered text
+  // Glue this element to another element (usually an image): position and font
+  // size are derived from the TARGET's rendered rect instead of the global FIT
+  // math, so the text keeps the same relative offset and proportional height at
+  // every viewport size / zoom — even when the target lays out differently
+  // (extend bars, pinned headers). x/y stay authored in design px; they become
+  // an offset from the target's design position.
+  attachToId?: string
 }
 
 export interface DimConfig {

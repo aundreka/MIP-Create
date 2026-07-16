@@ -450,6 +450,11 @@ const ANCHOR: Record<Anchor, [number, number]> = {
 
 const round = (n: number): number => Math.round(n)
 
+// Reverse lookup from an element's outer node to its Rec, across all live stages.
+// Lets the top-level layout functions resolve ANOTHER element (countdown attachToId)
+// via the DOM — same-root children only — without threading the per-stage recs map.
+const recByOuter = new WeakMap<Element, Rec>()
+
 // ---------------------------------------------------------------------------
 // Animation application (inner .pa-el-anim node, so it never fights the stage's
 // positional transform on the outer .pa-el).
@@ -670,6 +675,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     if (el.type === 'confetti' && content) rec.confetti = createConfetti(content as HTMLCanvasElement, () => rec.el)
     recs.push(rec)
     byId.set(el.id, rec)
+    recByOuter.set(outer, rec)
   }
 
   mount.appendChild(root)
@@ -1581,13 +1587,58 @@ function applyBoxStyle(node: HTMLElement, box: SceneElement['box'], s: number): 
   node.style.boxSizing = 'border-box'
 }
 
+// Resolve an attachToId countdown's position + scale from its TARGET's rendered
+// rect. Returns null when the target is missing/hidden (→ normal FIT layout).
+// For a plain FIT target this is mathematically identical to sx/sy positioning;
+// it only diverges when the target lays out differently (extend/pinned bars,
+// min-height floors) — exactly the cases where independent FIT math drifts on
+// zoom. `k` is the target's true rendered scale (rect height / design height),
+// applied to the text's font metrics so its height stays proportional to the
+// target, and to the authored design-px offset so the gap scales in lockstep.
+function attachedTextPos(rec: Rec, e: Effective): { left: number; top: number; k: number } | null {
+  const attachId = rec.el.type === 'countdown' ? rec.el.countdown?.attachToId : undefined
+  if (!attachId) return null
+  const root = rec.outer.parentElement
+  if (!root) return null
+  let target: Rec | undefined
+  for (const child of Array.from(root.children)) {
+    if ((child as HTMLElement).dataset?.id === attachId) {
+      target = recByOuter.get(child)
+      break
+    }
+  }
+  if (!target || target === rec) return null
+  // Make sure the target's geometry is current for this pass (element order in the
+  // scene is arbitrary). Never re-enter for text/countdown targets — no recursion.
+  if (target.el.type !== 'text' && target.el.type !== 'countdown') layoutRec(target)
+  const tE = effective(target.el)
+  if (tE.hidden) return null
+  const designW = tE.w ?? target.intrinsic.w * tE.scale
+  const designH = tE.h ?? target.intrinsic.h * tE.scale
+  if (!(designW > 0) || !(designH > 0)) return null
+  const tRect = target.outer.getBoundingClientRect()
+  if (tRect.width < 1 || tRect.height < 1) return null
+  const rootRect = root.getBoundingClientRect()
+  const k = tRect.height / designH
+  // The target's design-space top-left (its x/y is an anchor point, not a corner).
+  const [atx, aty] = ANCHOR[tE.anchor]
+  const tLeftD = tE.x + (atx / 100) * designW
+  const tTopD = tE.y + (aty / 100) * designH
+  return {
+    left: tRect.left - rootRect.left + (e.x - tLeftD) * k,
+    top: tRect.top - rootRect.top + (e.y - tTopD) * k,
+    k,
+  }
+}
+
 function layoutText(rec: Rec, e: Effective): void {
   const t = rec.el.text
   const box = rec.content
   if (!t || !box) return
   const inner = box.firstElementChild as HTMLElement | null
   if (!inner) return
-  const s = scale()
+  const attached = attachedTextPos(rec, e)
+  const s = attached ? attached.k : scale()
 
   // inner text styling (re-applied each layout so edits stay reactive).
   // Countdown elements show the live formatted time, not the static value.
@@ -1642,8 +1693,8 @@ function layoutText(rec: Rec, e: Effective): void {
   // don't set width/height so the nested inline-block chain sizes correctly.
   const [tx, ty] = ANCHOR[e.anchor]
   outer.style.position = ''
-  outer.style.left = round(sx(e.x)) + 'px'
-  outer.style.top = round(sy(e.y)) + 'px'
+  outer.style.left = round(attached ? attached.left : sx(e.x)) + 'px'
+  outer.style.top = round(attached ? attached.top : sy(e.y)) + 'px'
   outer.style.width = ''
   outer.style.height = ''
   outer.style.transform = `translate(${tx}%,${ty}%)` + (e.rotation ? ` rotate(${e.rotation}deg)` : '')

@@ -803,6 +803,24 @@ function ScratchGridCells({ params, setParam, setParams, elementId, cardAspect }
       <Row label="Cell label">
         <input value={String(params[`cell${safeCell}Label`] ?? '')} onChange={(e) => setParam(`cell${safeCell}Label`, e.target.value)} />
       </Row>
+      {(() => {
+        const off = params[`cell${safeCell}dateOff`]
+        const isOff = off === true || off === 1 || off === '1' || off === 'on'
+        return (
+          <Toggle
+            label="Show dynamic date (this cell)"
+            checked={!isOff}
+            onChange={(v) => setParam(`cell${safeCell}dateOff`, v ? '' : 1)}
+          />
+        )
+      })()}
+      <Row label="Dynamic date">
+        <input
+          value={String(params[`cell${safeCell}date`] ?? '')}
+          placeholder="e.g. (MMMM D) — empty = fallback"
+          onChange={(e) => setParam(`cell${safeCell}date`, e.target.value)}
+        />
+      </Row>
 
       <div className="group-title2">Hint path (this cell)</div>
       <div className="hint pad">The hint hand rubs from the start point to the end point. Values are % of the cell (0,0 = top-left). Default is a centered horizontal rub.</div>
@@ -839,6 +857,71 @@ function ScratchGridCells({ params, setParam, setParams, elementId, cardAspect }
       <AssetPicker label="Win text overlay (fallback)" value={(params.winTextImage as string) || undefined} allowNone onChange={(aid) => setParam('winTextImage', aid ?? '')} />
       <AssetPicker label="Lose text overlay (fallback)" value={(params.loseTextImage as string) || undefined} allowNone onChange={(aid) => setParam('loseTextImage', aid ?? '')} />
       <NumField label="Text overlay scale (%, default)" value={Number(params.textScale ?? 80)} step={5} min={10} max={100} onChange={(n) => setParam('textScale', n)} />
+
+      <Accordion id="inspector.scratchGridDate" title="Dynamic date (inside cells)" defaultOpen={false}>
+        <div className="hint pad">
+          Shows a live date inside the cell reveal (under the cover), scaling with the cell like the cell art. Tokens: <b>MMMM</b> July,{' '}
+          <b>MMM</b> Jul, <b>MM/M</b> 07/7, <b>DD/D</b> day, <b>YYYY/YY</b> year — e.g. “(MMMM D)” → “(July 16)”. Empty everywhere = no
+          date; each cell can opt out with its “Show dynamic date” toggle.
+        </div>
+        <Row label="Win cells date">
+          <input value={String(params.winDate ?? '')} placeholder="e.g. (MMMM D)" onChange={(e) => setParam('winDate', e.target.value)} />
+        </Row>
+        <Row label="Lose cells date">
+          <input value={String(params.loseDate ?? '')} placeholder="empty = none" onChange={(e) => setParam('loseDate', e.target.value)} />
+        </Row>
+        <button
+          className="btn"
+          style={{ width: '100%', margin: '6px 0' }}
+          onClick={() => window.dispatchEvent(new CustomEvent('pa:date-edit', { detail: { elementId } }))}
+        >
+          Drag date position on canvas
+        </button>
+        <div className="grid2">
+          <NumField label="X (% of cell)" value={Number(params.dateX ?? 50)} step={1} min={0} max={100} onChange={(n) => setParam('dateX', n)} />
+          <NumField label="Y (% of cell)" value={Number(params.dateY ?? 50)} step={1} min={0} max={100} onChange={(n) => setParam('dateY', n)} />
+        </div>
+        <div className="grid2">
+          <NumField label="Size (% of cell)" value={Number(params.dateSize ?? 8)} step={1} min={2} max={40} onChange={(n) => setParam('dateSize', n)} />
+          <NumField label="Days from today" value={Number(params.dateDays ?? 0)} step={1} min={0} max={60} onChange={(n) => setParam('dateDays', n)} />
+        </div>
+        <div className="grid2">
+          <ColorField label="Color" value={(params.dateColor as string) || '#ffffff'} onChange={(c) => setParam('dateColor', c ?? '#ffffff')} />
+          <NumField label="Weight" value={Number(params.dateWeight ?? 700)} step={100} min={100} max={900} onChange={(n) => setParam('dateWeight', n)} />
+        </div>
+        {(() => {
+          // Same font picker as text elements: pick an uploaded font asset (its id is the
+          // CSS family, embedded base64 on export) or upload a new one right here.
+          const fontAssets = Object.entries(assets).filter(([, a]) => a.kind === 'font')
+          const cur = String(params.dateFont ?? '')
+          const custom = cur && !assets[cur] ? cur : null
+          const uploadFont = async (): Promise<void> => {
+            const f = await importFont()
+            if (!f) return
+            addAsset(f.id, { src: f.src, w: 0, h: 0, kind: 'font' })
+            setParam('dateFont', f.id)
+          }
+          return (
+            <Row label="Font">
+              <div style={{ display: 'flex', gap: 4 }}>
+                <Select
+                  value={cur}
+                  onChange={(v) => setParam('dateFont', v)}
+                  options={[
+                    { value: '', label: 'Default' },
+                    ...fontAssets.map(([fid]) => ({ value: fid, label: fid.replace(/_/g, ' ') })),
+                    ...(custom ? [{ value: custom, label: `${custom} (system)` }] : []),
+                  ]}
+                />
+                <button className="icon-btn" title="Upload font (.ttf .otf .woff .woff2)" onClick={() => { void uploadFont() }}>
+                  <Icon icon={Upload} size={13} />
+                </button>
+              </div>
+            </Row>
+          )
+        })()}
+        <div className="hint pad">Dragging the round marker in any cell moves the shared position (Esc to finish). One position, size and style applies to every cell that shows a date.</div>
+      </Accordion>
 
       <div className="group-title2">Container background</div>
       <AssetPicker label="Background image" value={(params.bgImage as string) || undefined} allowNone onChange={(aid) => setParam('bgImage', aid ?? '')} />
@@ -1724,11 +1807,35 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 </Row>
               )}
               <Toggle label="Capitalize text" checked={!!cfg.capitalize} onChange={(v) => setCd({ capitalize: v || undefined })} />
+              {(() => {
+                const targets = state.scene.elements.filter((t) => t.id !== id && (t.type === 'image' || t.type === 'bar'))
+                // A stale id (target deleted) stays listed so it can be seen + cleared.
+                const stale = cfg.attachToId && !targets.some((t) => t.id === cfg.attachToId)
+                return (
+                  <Row label="Attach to">
+                    <Select
+                      value={cfg.attachToId ?? ''}
+                      onChange={(v) => setCd({ attachToId: v || undefined })}
+                      options={[
+                        { value: '', label: 'None (free position)' },
+                        ...targets.map((t) => ({ value: t.id, label: t.name || t.id })),
+                        ...(stale ? [{ value: cfg.attachToId!, label: `${cfg.attachToId} (missing)` }] : []),
+                      ]}
+                    />
+                  </Row>
+                )
+              })()}
+              {cfg.attachToId && (
+                <div className="hint pad">
+                  Attached: position and size follow the target image's rendered box, so this text keeps the same height and Y as
+                  the image at every screen size and zoom. Drag it where you want it relative to the image — the offset sticks.
+                </div>
+              )}
               <div className="hint pad">
                 <b>Timer</b> tokens (live): <b>{'{hh}:{mm}:{ss}'}</b> / <b>{'{d} {h} {m} {s}'}</b>. <b>Date</b> label (no ticking):{' '}
-                <b>{'{date}'}</b>, e.g. "Order by {'{date}'}", or build your own from parts: <b>{'{MMMM}'}</b> July, <b>{'{MMM}'}</b> Jul,{' '}
-                <b>{'{M}/{MM}'}</b> 7/07, <b>{'{D}/{DD}'}</b> day, <b>{'{YYYY}/{YY}'}</b> year — e.g. "Ends {'{MMMM} {D}'}" → "Ends July 12".
-                "Dynamic" recomputes from today whenever the ad runs.
+                <b>{'{date}'}</b>, e.g. "Order by {'{date}'}", or build your own from parts: <b>MMMM</b> July, <b>MMM</b> Jul,{' '}
+                <b>MM/M</b> 07/7, <b>DD/D</b> day, <b>YYYY/YY</b> year (braces optional — "MM.D" → "07.16") — e.g. "Ends MMMM D" →
+                "Ends July 12". "Dynamic" recomputes from today whenever the ad runs.
               </div>
             </Accordion>
           )
