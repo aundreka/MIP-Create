@@ -1,0 +1,8 @@
+@import "tailwindcss";
+
+/* Prevent dragging for images in the game to avoid browser default behavior */
+.catch-game-container img {
+  -webkit-user-drag: none;
+  user-drag: none;
+  user-select: none;
+}

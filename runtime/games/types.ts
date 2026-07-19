@@ -55,7 +55,7 @@ export interface GameModule {
 export interface ParamField {
   key: string
   label: string
-  type: 'number' | 'color' | 'select' | 'text'
+  type: 'number' | 'color' | 'select' | 'text' | 'boolean'
   min?: number
   max?: number
   step?: number

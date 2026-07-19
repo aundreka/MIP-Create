@@ -1,5 +1,6 @@
 import { defineConfig, type Connect, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
 import { resolve } from 'node:path'
 import type { ServerResponse, IncomingMessage } from 'node:http'
 
@@ -69,7 +70,7 @@ function corsProxy(): Plugin {
 // The single-file production EXPORT of a playable uses a separate config
 // (arrives in Pass 2); this config is for developing/running the editor.
 export default defineConfig({
-  plugins: [react(), corsProxy()],
+  plugins: [react(), tailwindcss(), corsProxy()],
   base: './',
   // Don't let the dev watcher hold handles on build outputs — electron-builder
   // writes/renames executables under release/ and the watcher caused EPERM.

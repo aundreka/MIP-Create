@@ -1,4 +1,4 @@
-﻿// Inspector — project meta (no selection), a multi-select panel, or the full
+// Inspector — project meta (no selection), a multi-select panel, or the full
 // single-element editor with a visual Background-box section.
 
 import { useState, useEffect, useRef, useMemo, type PointerEvent as ReactPointerEvent } from 'react'
@@ -387,10 +387,10 @@ const EASINGS: { value: string; label: string }[] = [
 // 'lightray' (the moving reflection) is a class-driven pseudo effect, so it can be picked in ANY
 // phase — entrance, loop, or exit — not just as a loop.
 const ENTRANCE_PRESETS: AnimPresetId[] = ['fade', 'slide-up', 'slide-down', 'slide-left', 'slide-right', 'pop', 'bounce', 'spin', 'lightray']
-const LOOP_PRESETS: AnimPresetId[] = ['pulse', 'float', 'bounce', 'shake', 'wave', 'shine', 'lightray', 'glow', 'spin']
+const LOOP_PRESETS: AnimPresetId[] = ['pulse', 'float', 'subtle-float', 'bounce', 'shake', 'wave', 'shine', 'lightray', 'glow', 'spin']
 const EXIT_PRESETS: AnimPresetId[] = ['fade-out', 'scale-out', 'lightray']
 // Presets offered for STACKED (extra) animations: every node-driven preset + the reflection.
-const NODE_PRESETS: AnimPresetId[] = ['fade', 'slide-up', 'slide-down', 'slide-left', 'slide-right', 'pop', 'bounce', 'shake', 'wave', 'shine', 'glow', 'spin', 'float', 'pulse', 'fade-out', 'scale-out', 'lightray']
+const NODE_PRESETS: AnimPresetId[] = ['fade', 'slide-up', 'slide-down', 'slide-left', 'slide-right', 'pop', 'bounce', 'shake', 'wave', 'shine', 'glow', 'spin', 'float', 'subtle-float', 'pulse', 'fade-out', 'scale-out', 'lightray']
 const LOOP_EXTRA_PRESETS: AnimPresetId[] = NODE_PRESETS
 // Friendly labels so effects are findable in the dropdown (the raw ids are terse).
 const PRESET_LABELS: Partial<Record<AnimPresetId, string>> = {
@@ -403,6 +403,7 @@ const PRESET_LABELS: Partial<Record<AnimPresetId, string>> = {
   'slide-right': 'slide right',
   'fade-out': 'fade out',
   'scale-out': 'scale out',
+  'subtle-float': 'subtle float',
 }
 const presetLabel = (p: AnimPresetId): string => PRESET_LABELS[p] ?? (p as string)
 // Direction options for the 'lightray' reflection sweep (mapped to an angle in degrees).
@@ -955,6 +956,76 @@ function ScratchGridCells({ params, setParam, setParams, elementId, cardAspect }
   )
 }
 
+interface CatchPopupControlsProps {
+  params: Record<string, unknown>
+  setParam: (k: string, v: unknown) => void
+}
+
+function CatchPopupControls({ params, setParam }: CatchPopupControlsProps): JSX.Element | null {
+  const itemTypes = Number(params.itemTypes ?? 0)
+  if (itemTypes <= 0) return null
+
+  const popupConfigsStr = String(params.popupConfigs || '[]')
+  let popupConfigs: any[] = []
+  try {
+    popupConfigs = JSON.parse(popupConfigsStr)
+  } catch (e) {
+    popupConfigs = []
+  }
+  
+  const updateConfig = (idx: number, patch: any) => {
+    const next = [...popupConfigs]
+    next[idx] = { ...(next[idx] || {}), ...patch }
+    setParam('popupConfigs', JSON.stringify(next))
+  }
+
+  return (
+    <>
+      <div className="group-title2">Popup Actions (on unique item catch)</div>
+      {Array.from({ length: itemTypes }).map((_, i) => {
+        const conf = popupConfigs[i] || {}
+        return (
+          <Accordion key={i} id={`inspector.catchPopup${i}`} title={`Popup for Item ${i + 1}`} defaultOpen={false}>
+            <AssetPicker 
+              label={`Popup Image ${i + 1}`} 
+              value={((params.popupImages as string[]) || [])[i] || undefined} 
+              allowNone 
+              onChange={(aid) => {
+                const pImages = [...((params.popupImages as string[]) || [])]
+                pImages[i] = aid ?? ''
+                setParam('popupImages', pImages)
+              }} 
+            />
+            <NumField label="Position X (px)" value={conf.x ?? 540} step={10} onChange={n => updateConfig(i, { x: n })} />
+            <NumField label="Position Y (px)" value={conf.y ?? 960} step={10} onChange={n => updateConfig(i, { y: n })} />
+            <NumField label="Scale" value={conf.scale ?? 1} step={0.1} min={0.1} max={5} onChange={n => updateConfig(i, { scale: n })} />
+            <NumField label="Rotation Angle (°)" value={conf.angle ?? 0} step={5} onChange={n => updateConfig(i, { angle: n })} />
+            <NumField label="Z-Index" value={conf.zIndex ?? 10000} step={1} onChange={n => updateConfig(i, { zIndex: n })} />
+            <NumField label="Opacity" value={conf.opacity ?? 1} step={0.1} min={0} max={1} onChange={n => updateConfig(i, { opacity: n })} />
+            <Row label="Entrance Animation">
+              <Select 
+                value={conf.anim ?? 'pop'} 
+                onChange={v => updateConfig(i, { anim: v })} 
+                options={[
+                  {value: 'none', label: 'None'},
+                  {value: 'fade', label: 'Fade'},
+                  {value: 'slide-up', label: 'Slide Up'},
+                  {value: 'slide-down', label: 'Slide Down'},
+                  {value: 'slide-left', label: 'Slide Left'},
+                  {value: 'slide-right', label: 'Slide Right'},
+                  {value: 'pop', label: 'Pop'},
+                  {value: 'bounce', label: 'Bounce'},
+                  {value: 'spin', label: 'Spin'}
+                ]}
+              />
+            </Row>
+          </Accordion>
+        )
+      })}
+    </>
+  )
+}
+
 export function Inspector(props: { onProjectSettings: () => void }): JSX.Element {
   const state = useEditorState()
   const editLocale = useEditLocale()
@@ -1234,11 +1305,21 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
         {el.type === 'bar' && el.mode === 'fit' ? 'rectangle' : el.type} {landscape && <span className="badge">landscape</span>}
       </div>
 
-      <Row label="Name">
-        <input value={el.name} onChange={(e) => patchElement(id, { name: e.target.value })} />
+      <Row label="Name (layers)">
+        <input value={el.name ?? ''} onChange={(e) => patchElement(id, { name: e.target.value })} />
+      </Row>
+      <Row label="ID (Advanced)">
+        <input value={el.id} onChange={(e) => {
+          patchElement(id, { id: e.target.value })
+          // If you change the ID, you might need to re-select it on the canvas,
+          // but this allows recovering deleted predefined elements like score_counter.
+        }} />
       </Row>
       {!activeVariant && <Toggle label="Lock element" checked={!!el.locked} onChange={() => toggleLock(id)} />}
       <Toggle label="Show on game win" checked={!!el.showOnWin} onChange={(v) => patchElement(id, { showOnWin: v })} />
+      {el.type === 'text' && activeSceneDef(state)?.elements.some(e => e.game?.templateId === 'catch') && (
+        <Toggle label="Show after basket moved" checked={!!el.showAfterInteraction} onChange={(v) => patchElement(id, { showAfterInteraction: v })} />
+      )}
       {el.type !== 'cta' && (
         <Toggle label="Above overlays" checked={!!el.overlayImmune} onChange={(v) => patchElement(id, { overlayImmune: v || undefined })} />
       )}
@@ -1328,6 +1409,11 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
       ) : (
         <NumField label="Scale" value={g.scale} step={0.01} onChange={(n) => patchGeometry(id, { scale: n })} />
       )}
+      {(el.type === 'bar' || el.type === 'image') && (
+        <div className="grid2" style={{ marginTop: 4 }}>
+          <NumField label="Angle" value={el.rotation ?? 0} suffix="°" onChange={(n) => patchElement(id, { rotation: n === 0 ? undefined : n })} />
+        </div>
+      )}
       <div className="grid2">
         <Row label="Anchor">
           <Select value={g.anchor} onChange={(v) => patchGeometry(id, { anchor: v as Anchor })} options={ANCHORS.map((a) => ({ value: a, label: a }))} />
@@ -1343,6 +1429,30 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
           />
         </Row>
       </div>
+      {(el.type === 'cta' || el.type === 'image' || el.type === 'button' || el.type === 'handguide' || el.type === 'bar') && (
+        <Toggle
+          label="Relative to Basket Bar"
+          checked={!!el.relativeToBasketBar}
+          onChange={(v) => patchElement(id, { relativeToBasketBar: v })}
+        />
+      )}
+
+      {(el.type === 'image' || el.type === 'bar' || el.type === 'handguide') &&
+        (() => {
+          const idle = el.idle ?? (el.type === 'handguide' ? el.handguide : undefined) ?? {}
+          const setIdle = (patch: any): void => patchElement(id, { idle: { ...idle, ...patch } })
+          return (
+            <Accordion id="inspector.idle" title="Idle behavior">
+              <Toggle label="Hide on tap" checked={idle.hideOnInteract !== false} onChange={(v) => setIdle({ hideOnInteract: v })} />
+              <Toggle label="Reappear when idle" checked={idle.reappearOnIdle !== false} onChange={(v) => setIdle({ reappearOnIdle: v })} />
+              {idle.reappearOnIdle !== false && (
+                <NumField label="Reappear after (ms)" value={idle.idleMs ?? 4000} step={500} min={0} onChange={(n) => setIdle({ idleMs: n })} />
+              )}
+              <Toggle label="Show at start (before first tap)" checked={idle.showInitially !== false} onChange={(v) => setIdle({ showInitially: v })} />
+              <div className="hint pad">Animates in Preview and export. By default it hides on the player's first tap and reappears after {idle.idleMs ?? 4000}ms of no interaction.</div>
+            </Accordion>
+          )
+        })()}
 
       {el.type === 'game-mount' &&
         (() => {
@@ -1354,11 +1464,14 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
           // each read the same stale `params` snapshot and the second would clobber the first.
           const setParam = (k: string, v: unknown): void => setParams({ [k]: v })
           const cardAspect = el.w && el.h ? el.w / el.h : 1 // for the brush intro-path editor box
-          const renderField = (f: ParamField): JSX.Element => {
+          const renderField = (f: ParamField): JSX.Element | null => {
             const v = params[f.key]
+            if (f.key === 'randomAngles' && !params.randomizeAngle) return null
             if (f.type === 'number') return <NumField key={f.key} label={f.label} value={typeof v === 'number' ? v : 0} step={f.step ?? 1} min={f.min} max={f.max} onChange={(n) => setParam(f.key, n)} />
             if (f.type === 'color')
               return <ColorField key={f.key} label={f.label} value={typeof v === 'string' ? v : '#888888'} onChange={(c) => setParam(f.key, c ?? '#888888')} />
+            if (f.type === 'boolean')
+              return <Toggle key={f.key} label={f.label} checked={!!v} onChange={(b) => setParam(f.key, b)} />
             if (f.type === 'select')
               return (
                 <Row key={f.key} label={f.label}>
@@ -1434,26 +1547,54 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               {tpl.id === 'scratch' && params.fit === 'fit' && (
                 <div className="hint pad">Double-click the card on the canvas to position &amp; scale the reveal image: drag to move, corner handles to resize.</div>
               )}
-              {(tpl.assetSlots ?? []).filter((slot) => slot.key !== 'brushImage').map((slot) => {
+              {tpl.id === 'catch' && (
+                <CatchPopupControls params={params} setParam={setParam} />
+              )}
+              {(tpl.assetSlots ?? []).filter((slot) => slot.key !== 'brushImage' && slot.key !== 'popupImages').map((slot) => {
                 if (slot.list) {
-                  const n = Number(params[slot.countParam ?? '']) || 0
+                  const countKey = slot.countParam ?? ''
+                  const n = Number(params[countKey]) || 0
                   const arr = Array.isArray(params[slot.key]) ? (params[slot.key] as string[]) : []
                   return (
                     <div key={slot.key}>
-                      <div className="group-title2">{slot.label}</div>
+                      <div className="group-title2" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span>{slot.label}</span>
+                        <button
+                          className="btn"
+                          style={{ padding: '2px 8px', fontSize: 16, lineHeight: 1, minWidth: 28 }}
+                          title="Add another image slot"
+                          onClick={() => setParam(countKey, n + 1)}
+                        >+</button>
+                      </div>
                       {Array.from({ length: n }).map((_, i) => (
-                        <AssetPicker
-                          key={i}
-                          label={`${slot.label} ${i + 1}`}
-                          value={arr[i] || undefined}
-                          allowNone
-                          accept={slot.accept}
-                          onChange={(aid) => {
-                            const next = arr.slice()
-                            next[i] = aid ?? ''
-                            setParam(slot.key, next)
-                          }}
-                        />
+                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <div style={{ flex: 1 }}>
+                            <AssetPicker
+                              label={`${slot.label} ${i + 1}`}
+                              value={arr[i] || undefined}
+                              allowNone
+                              accept={slot.accept}
+                              onChange={(aid) => {
+                                const next = arr.slice()
+                                next[i] = aid ?? ''
+                                setParam(slot.key, next)
+                              }}
+                            />
+                          </div>
+                          {n > 1 && (
+                            <button
+                              className="btn"
+                              style={{ padding: '2px 6px', fontSize: 14, lineHeight: 1, minWidth: 24, color: '#e55' }}
+                              title="Remove this slot"
+                              onClick={() => {
+                                const next = arr.slice()
+                                next.splice(i, 1)
+                                setParam(slot.key, next)
+                                setParam(countKey, Math.max(1, n - 1))
+                              }}
+                            >×</button>
+                          )}
+                        </div>
                       ))}
                     </div>
                   )
@@ -1486,6 +1627,12 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
             </Accordion>
           )
         })()}
+      {el.type === 'bar' && (
+        <Accordion id="inspector.bar" title="Bar Background">
+          <AssetPicker label="Background Image" value={el.assetId} onChange={(aid) => patchElement(id, { assetId: aid })} allowNone />
+          <div className="hint pad">If set, this image stretches to fill the bar.</div>
+        </Accordion>
+      )}
 
       {el.type === 'image' && (
         <>
@@ -1704,15 +1851,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 />
               </Row>
               <NumField label="Loop speed (ms)" value={hg.periodMs ?? (hg.mode === 'tap' ? 900 : 1500)} step={100} min={300} onChange={(n) => setHg({ periodMs: n })} />
-              <div className="group-title2">Idle behavior</div>
-              <Toggle label="Hide on tap, reappear when idle" checked={hg.hideOnInteract !== false} onChange={(v) => setHg({ hideOnInteract: v })} />
-              {hg.hideOnInteract !== false && (
-                <>
-                  <NumField label="Reappear after (ms)" value={hg.idleMs ?? 4000} step={500} min={0} onChange={(n) => setHg({ idleMs: n })} />
-                  <Toggle label="Show at start (before first tap)" checked={hg.showInitially !== false} onChange={(v) => setHg({ showInitially: v })} />
-                </>
-              )}
-              <div className="hint pad">Animates in Preview and export. By default it hides on the player"s first tap and reappears after {hg.idleMs ?? 4000}ms of no interaction.</div>
+
             </Accordion>
           )
         })()}

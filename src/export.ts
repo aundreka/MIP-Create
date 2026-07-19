@@ -37,6 +37,7 @@ const toOpts = (p: CompressProfile | undefined): TranscodeOpts => ({
 // from the dev-server watcher). Use fetchRuntimeSrc() in export paths to always
 // pick up the latest rebuilt version without a page reload.
 import staticRuntimeSrc from '../runtime-dist/playable-runtime.js?raw'
+import staticRuntimeCss from '../runtime-dist/style.css?raw'
 
 export async function fetchRuntimeSrc(): Promise<string> {
   // Desktop: read the file directly via Electron IPC, bypassing Vite's server-side
@@ -51,8 +52,12 @@ export async function fetchRuntimeSrc(): Promise<string> {
   }
   // Web fallback: timestamp query param forces a fresh read even if Vite caches by path.
   try {
-    const r = await fetch(`./runtime-dist/playable-runtime.js?t=${Date.now()}`, { cache: 'no-store' })
-    if (r.ok) return await r.text()
+    const r = await fetch(`/runtime-dist/playable-runtime.js?t=${Date.now()}`, { cache: 'no-store' })
+    if (r.ok) {
+      const text = await r.text()
+      // Vite dev server returns index.html (SPA fallback) for unfound static routes
+      if (!text.trim().startsWith('<')) return text
+    }
   } catch { /* fallback to bundled copy */ }
   return staticRuntimeSrc
 }
@@ -422,10 +427,10 @@ export function buildBaseHtml(project: Project, assets: AssetMap, runtimeSrc = s
     `<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">` +
     // Title is always the brand (Client) name; fall back to the MIP name, then a generic label.
     `<title>${esc(project.meta.client || project.meta.name || 'playable')}</title>` +
-    `<style>html,body{margin:0;padding:0;background:${bg}!important;}</style>` +
+    `<style>html,body{margin:0;padding:0;background:${bg}!important;} ${staticRuntimeCss}</style>` +
     `</head><body>` +
     `<script>window.PA_PROJECT=${esc(JSON.stringify(project))};window.PA_ASSETS=${esc(JSON.stringify(assets))};</script>` +
-    `<script>${runtimeSrc}</script></body></html>`
+    `<script>${runtimeSrc.replace(/<\/script>/gi, '<\\/script>')}</script></body></html>`
   )
 }
 

@@ -49,6 +49,7 @@ const KEYFRAMES = `
 @keyframes pa-lightray-kf{0%{transform:rotate(var(--pa-lightray-ang,20deg)) translateX(var(--pa-lightray-from,-340%))}55%,100%{transform:rotate(var(--pa-lightray-ang,20deg)) translateX(var(--pa-lightray-to,340%))}}
 @keyframes pa-spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
 @keyframes pa-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+@keyframes pa-subtle-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
 @keyframes pa-pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.04)}}
 @keyframes pa-fade-out{from{opacity:1}to{opacity:0}}
 @keyframes pa-scale-out{from{transform:scale(1);opacity:1}to{transform:scale(.7);opacity:0}}

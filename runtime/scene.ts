@@ -53,6 +53,7 @@ export type AnimPresetId =
   | 'glow'
   | 'spin'
   | 'float'
+  | 'subtle-float'
   | 'pulse'
   | 'fade-out'
   | 'scale-out'
@@ -280,6 +281,13 @@ export interface HandguideNode {
 // game's suggested card (the element marked data-mm-hint — one card of a pair,
 // then its partner once the first is flipped). `toX/toY` is the legacy
 // single-waypoint form, still honored when `nodes` is empty.
+export interface IdleConfig {
+  idleMs?: number
+  hideOnInteract?: boolean
+  reappearOnIdle?: boolean
+  showInitially?: boolean
+}
+
 export interface HandguideConfig {
   // 'brush' points the hand at the scratch card's brush (appears only after the brush's intro).
   mode: 'smart' | 'tap' | 'slide' | 'scratch' | 'match' | 'brush'
@@ -295,9 +303,10 @@ export interface HandguideConfig {
   easing?: 'linear' | 'ease' | 'ease-in' | 'ease-out' | 'ease-in-out'
   // Idle visibility (interactive runs only): hide on the player's tap, then reappear
   // after `idleMs` of no interaction, repeating. Defaults: hideOnInteract=true,
-  // idleMs=4000, showInitially=true.
+  // idleMs=4000, showInitially=true, reappearOnIdle=true.
   idleMs?: number
   hideOnInteract?: boolean
+  reappearOnIdle?: boolean
   showInitially?: boolean
 }
 
@@ -515,6 +524,7 @@ export interface SceneElement {
   // Pin an EXTEND bar to a true screen edge (header→'top', footer→'bottom')
   // instead of tracking the FIT layout vertically. Width still uses coverScale.
   pin?: 'top' | 'bottom'
+  relativeToBasketBar?: boolean
 
   hidden?: boolean
   locked?: boolean // not selectable/movable on the editor canvas
@@ -523,6 +533,7 @@ export interface SceneElement {
   hideOnOverlay?: boolean // hidden while a floating overlay (win/lose card) is up over this scene
   groupId?: string // elements sharing a groupId select/move/scale together
   showOnWin?: boolean // revealed when the mounted game completes (endcard seed)
+  showAfterInteraction?: boolean // revealed only after the user's first interaction (e.g. dragging the basket)
   rotation?: number
   opacity?: number
   blur?: number // uniform layer blur radius in design px (CSS filter: blur)
@@ -532,6 +543,7 @@ export interface SceneElement {
   landscape?: OrientationOverride
   animations?: ElementAnimations
   sfx?: SfxBinding[]
+  idle?: IdleConfig
 
   scratch?: ScratchConfig // this element is a scratch cover (canvas coating at runtime)
   reveal?: RevealConfig // this element pops money + adds to a tally when uncovered
