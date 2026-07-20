@@ -1,5 +1,4 @@
-import type { GameContext, GameModule, GameTemplate, HintMove } from './types'
-import { num, str } from './types'
+import type { GameContext, GameModule, GameTemplate, HintMove, Pt } from './types'
 import { injectAnimStyles } from '../anim'
 import '../catch.css'
 
@@ -37,7 +36,6 @@ export function createCatch(): GameModule {
   let popupConfigs: any[] = []
   let requireUnique: boolean = true
 
-  let started = false
   let done = false
   let caught = 0
   let basketX = 540
@@ -45,11 +43,12 @@ export function createCatch(): GameModule {
   let rafRef = 0
   let spawnTimer = 0
   let completeCb: (() => void) | null = null
-  let hasSpawnedFirst = false
   let gameActive = true
   let spawnOnMove = false
   let hasMoved = false
   let gameParams: Record<string, unknown> = {}
+  let lastSpawnLane = -1
+  let visibilityHandler: (() => void) | null = null
 
   const uniqueItemSpots = new Map<string, HTMLElement>()
 
@@ -73,6 +72,9 @@ export function createCatch(): GameModule {
 
   let frontBasket: HTMLDivElement | null = null
   let backBasket: HTMLDivElement | null = null
+  let basketDragTarget: HTMLDivElement | null = null
+  let dragAttachedBasket: HTMLDivElement | null = null
+  let basketStartDrag: ((e: PointerEvent) => void) | null = null
   let caughtItemsContainer: HTMLDivElement | null = null
   let frontBasketAssetIdStr = ''
   let backBasketAssetIdStr = ''
@@ -95,6 +97,40 @@ export function createCatch(): GameModule {
     }
   }
 
+  const stopSpawning = () => {
+    window.clearInterval(spawnTimer)
+    spawnTimer = 0
+  }
+
+  const shouldSpawnNow = () => !done && !document.hidden && (!spawnOnMove || hasMoved)
+
+  const startSpawning = (spawnImmediately = false) => {
+    if (!shouldSpawnNow() || spawnTimer) return
+    spawnTimer = window.setInterval(spawn, spawnMs)
+    if (spawnImmediately) spawn()
+  }
+
+  const stopAnimation = () => {
+    cancelAnimationFrame(rafRef)
+    rafRef = 0
+  }
+
+  const startAnimation = () => {
+    if (done || rafRef) return
+    lastTime = performance.now()
+    rafRef = requestAnimationFrame(tick)
+  }
+
+  const handleVisibilityChange = () => {
+    if (document.hidden) {
+      stopSpawning()
+      stopAnimation()
+      return
+    }
+
+    startAnimation()
+    startSpawning(true)
+  }
   const createDropElement = (drop: Drop) => {
     const currentScale = s()
     const physicalItemSz = drop.sz * currentScale
@@ -104,10 +140,7 @@ export function createCatch(): GameModule {
     el.style.height = `${physicalItemSz}px`
     el.style.pointerEvents = 'none'
 
-    const cIdx = itemTypes > 0 ? drop.imgIdx : 0
-    const scale = caughtItemScales.length > 0 ? (caughtItemScales[cIdx % caughtItemScales.length] ?? 1) : 1
-    
-    el.style.transform = `rotate(${drop.angle}deg) scale(${scale})`
+    el.style.transform = `rotate(${drop.angle}deg)`
     el.style.willChange = 'transform, top, left'
 
     if (drop.imgSrc) {
@@ -135,7 +168,6 @@ export function createCatch(): GameModule {
 
   const spawn = () => {
     if (done || (!gameActive && !visibleFirstRender)) return
-    const currentScale = s()
     
     // Pick an image and a size (using the same random index if sizes array matches length, or just random)
     let imgIdx = itemImages.length > 0 ? Math.floor(ctx.rng() * itemImages.length) : 0
@@ -143,16 +175,29 @@ export function createCatch(): GameModule {
     const imgSrc = itemImages.length > 0 ? itemImages[imgIdx] : ''
     const sz = itemSizes[szIdx] || 120
 
-    // Spawn across the full pa-root width (1080 logical px)
-    let x = sz + ctx.rng() * (1080 - 2 * sz)
+    const minX = sz / 2
+    const maxX = 1080 - sz / 2
+    const lanes: Array<[number, number]> = [
+      [minX, 360],
+      [360, 720],
+      [720, maxX],
+    ].map(([a, b]) => [Math.max(minX, a), Math.min(maxX, b)] as [number, number])
+      .filter(([a, b]) => b > a)
+
+    let laneIdx = Math.floor(ctx.rng() * lanes.length)
+    if (lanes.length > 1 && laneIdx === lastSpawnLane) {
+      laneIdx = (laneIdx + 1 + Math.floor(ctx.rng() * (lanes.length - 1))) % lanes.length
+    }
+    lastSpawnLane = laneIdx
+
+    const [laneMin, laneMax] = lanes[laneIdx] ?? [minX, maxX]
+    let x = laneMin + ctx.rng() * (laneMax - laneMin)
 
     if (!gameActive && visibleFirstRender) {
       // Force x to be on the left or right edge
       const isLeft = ctx.rng() > 0.5
-      x = isLeft ? sz / 2 : 1080 - sz / 2 // strictly to the edges
+      x = isLeft ? minX : maxX // strictly to the edges
     }
-    
-
 
     const angle = randomizeAngle && randomAngleList.length > 0 ? randomAngleList[Math.floor(ctx.rng() * randomAngleList.length)] : 0
     const speed = speedParam * 1920 + (ctx.rng() * 200 - 100)
@@ -202,8 +247,7 @@ export function createCatch(): GameModule {
         const item_screen_x = (d.x - 540) * currentScale
         const basket_screen_x = (basketX + frontBasketOffsetX - 540) * currentScale
         
-        const cIdx = itemTypes > 0 ? d.imgIdx : 0
-        const scale = caughtItemScales.length > 0 ? (caughtItemScales[cIdx % caughtItemScales.length] ?? 1) : 1
+        const scale = 1
         
         const hit = Math.abs(item_screen_x - basket_screen_x) < (frontBasketLogicalW / 2 + d.sz * scale * 0.3) * currentScale
         if (hit) {
@@ -254,51 +298,13 @@ export function createCatch(): GameModule {
               uniqueItemSpots.set(d.imgSrc, d.el)
               
               const pIdx = d.imgIdx
-              const pAssetId = popupImages.length > 0 ? popupImages[pIdx % popupImages.length] : ''
               const pConfig = popupConfigs.length > pIdx ? popupConfigs[pIdx] : null
-              const pSrc = pAssetId ? ctx.assets.src(pAssetId) : ''
-              
-              if (pAssetId && paRoot && pSrc) {
-                const pEl = document.createElement('div')
-                pEl.dataset.id = `popup_image_${pIdx + 1}`
-                pEl.style.position = 'absolute'
-                pEl.style.pointerEvents = 'none'
-                pEl.style.zIndex = (pConfig?.zIndex ?? 10000).toString()
-                
-                const cx = pConfig?.x ?? 540
-                const cy = pConfig?.y ?? 960
-                const w = pConfig?.w ?? 400
-                const h = pConfig?.h ?? 400
-                const scale = pConfig?.scale ?? 1.0
-                const angle = pConfig?.angle ?? 0
-                
-                const pw = w * scale * currentScale
-                const ph = h * scale * currentScale
-                
-                const rootRect = root.getBoundingClientRect()
-                const rootCenterX = rootRect.left + rootRect.width / 2
-                
-                pEl.style.width = pw + 'px'
-                pEl.style.height = ph + 'px'
-                pEl.style.left = (rootCenterX - paRootRect.left + (cx - 540) * currentScale - pw / 2) + 'px'
-                pEl.style.top = (cy * currentScale - ph / 2) + 'px'
-                  
-                  pEl.style.backgroundImage = `url("${pSrc}")`
-                  pEl.style.backgroundSize = 'contain'
-                  pEl.style.backgroundPosition = 'center'
-                  pEl.style.backgroundRepeat = 'no-repeat'
-                  pEl.style.opacity = (pConfig?.opacity ?? 1).toString()
-                  
-                  if (angle) pEl.style.transform = `rotate(${angle}deg)`
-                  
-                  const anim = pConfig?.anim
-                  if (anim && anim !== 'none') {
-                    pEl.style.animation = `pa-${anim} 600ms cubic-bezier(0.34, 1.56, 0.64, 1) both`
-                  }
-                  
-                  paRoot.appendChild(pEl)
-                }
+              if ((pConfig?.trigger ?? 'unique') === 'unique') showCatchEffect(pIdx, currentScale, paRootRect)
             }
+
+            const anyIdx = itemTypes > 0 ? d.imgIdx : caught
+            const anyConfig = popupConfigs.length > anyIdx ? popupConfigs[anyIdx] : null
+            if (anyConfig?.trigger === 'any') showCatchEffect(anyIdx, currentScale, paRootRect)
           }
           continue
         }
@@ -328,6 +334,7 @@ export function createCatch(): GameModule {
       updateScoreUI()
       if (caught >= need) {
         done = true
+        stopSpawning()
         ctx.sfx.play('win')
         completeCb?.()
       }
@@ -358,6 +365,12 @@ export function createCatch(): GameModule {
   }
 
   const attachDrag = () => {
+    const dragTarget = basketDragTarget
+    if (!dragTarget || dragAttachedBasket === dragTarget) return
+    if (dragAttachedBasket && basketStartDrag) {
+      dragAttachedBasket.removeEventListener('pointerdown', basketStartDrag)
+    }
+
     let active = false
     const onMove = (e: PointerEvent) => {
       if (!active) return
@@ -373,36 +386,81 @@ export function createCatch(): GameModule {
       window.removeEventListener('pointerup', end)
       window.removeEventListener('pointercancel', end)
     }
-    const startDrag = (e: Event) => {
-      const pe = e as PointerEvent
+    const startDrag = (e: PointerEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
       active = true
-      
-      if (!hasMoved) {
-        hasMoved = true
-        if (paRoot) paRoot.classList.add('has-interacted')
-        if (spawnOnMove) {
-          spawnTimer = window.setInterval(spawn, spawnMs)
-          spawn()
-        }
-      }
       
       if (!gameActive) {
         gameActive = true
       }
       
+      if (!hasMoved) {
+        hasMoved = true
+        ctx.sfx.play('basketStart')
+        if (paRoot) paRoot.classList.add('has-interacted')
+        if (spawnOnMove) {
+          startSpawning(true)
+        }
+      }
+      
       window.addEventListener('pointermove', onMove)
       window.addEventListener('pointerup', end)
       window.addEventListener('pointercancel', end)
-      onMove(pe)
+      onMove(e)
     }
     
-    root.style.touchAction = 'none'
-    root.addEventListener('pointerdown', startDrag)
-    // Also attach to paRoot as a fallback in case the game mount is small
-    if (paRoot) {
-      paRoot.style.touchAction = 'none'
-      paRoot.addEventListener('pointerdown', startDrag)
+    dragTarget.style.touchAction = 'none'
+    dragTarget.style.pointerEvents = 'auto'
+    dragTarget.addEventListener('pointerdown', startDrag)
+    dragAttachedBasket = dragTarget
+    basketStartDrag = startDrag
+  }
+
+  const showCatchEffect = (idx: number, currentScale: number, paRootRect: DOMRect): void => {
+    const pAssetId = popupImages.length > 0 ? popupImages[idx % popupImages.length] : ''
+    const pConfig = popupConfigs.length > idx ? popupConfigs[idx] : null
+    const pSrc = pAssetId ? ctx.assets.src(pAssetId) : ''
+    if (!pAssetId || !paRoot || !pSrc) return
+
+    const pEl = document.createElement('div')
+    pEl.dataset.id = `popup_image_${idx + 1}`
+    pEl.style.position = 'absolute'
+    pEl.style.pointerEvents = 'none'
+    pEl.style.zIndex = (pConfig?.zIndex ?? 10000).toString()
+
+    const cx = pConfig?.x ?? 540
+    const cy = pConfig?.y ?? 960
+    const w = pConfig?.w ?? 400
+    const h = pConfig?.h ?? 400
+    const scale = pConfig?.scale ?? 1.0
+    const angle = pConfig?.angle ?? 0
+    const pw = w * scale * currentScale
+    const ph = h * scale * currentScale
+    const rootRect = root.getBoundingClientRect()
+    const rootCenterX = rootRect.left + rootRect.width / 2
+
+    pEl.style.width = pw + 'px'
+    pEl.style.height = ph + 'px'
+    pEl.style.left = (rootCenterX - paRootRect.left + (cx - 540) * currentScale - pw / 2) + 'px'
+    pEl.style.top = (cy * currentScale - ph / 2) + 'px'
+    pEl.style.backgroundImage = `url("${pSrc}")`
+    pEl.style.backgroundSize = 'contain'
+    pEl.style.backgroundPosition = 'center'
+    pEl.style.backgroundRepeat = 'no-repeat'
+    pEl.style.opacity = (pConfig?.opacity ?? 1).toString()
+    if (angle) pEl.style.transform = `rotate(${angle}deg)`
+
+    const anim = pConfig?.anim
+    if (anim && anim !== 'none') {
+      const duration = Number(pConfig?.durationMs ?? 600)
+      const delay = Number(pConfig?.delayMs ?? 0)
+      const easing = String(pConfig?.easing ?? 'cubic-bezier(0.34, 1.56, 0.64, 1)')
+      const iterations = pConfig?.iterations ?? 1
+      pEl.style.animation = `pa-${anim} ${duration}ms ${easing} ${delay}ms ${iterations} both`
     }
+
+    paRoot.appendChild(pEl)
   }
 
   const parseNumList = (strValue: unknown): number[] => {
@@ -470,7 +528,6 @@ export function createCatch(): GameModule {
       injectAnimStyles()
     },
     start() {
-      started = true
       gameActive = !visibleFirstRender
       
       paRoot = root.closest('.pa-root') as HTMLElement | null
@@ -493,16 +550,14 @@ export function createCatch(): GameModule {
         paRoot.appendChild(dropsContainer)
       }
       
-      attachDrag()
       
       hasMoved = false
       if (!spawnOnMove) {
-        spawnTimer = window.setInterval(spawn, spawnMs)
-        spawn()
+        startSpawning(true)
       }
-
-      lastTime = performance.now()
-      rafRef = requestAnimationFrame(tick)
+      startAnimation()
+      visibilityHandler = handleVisibilityChange
+      document.addEventListener('visibilitychange', visibilityHandler)
     },
     relayout() {
       // Find paRoot if we haven't already
@@ -526,9 +581,11 @@ export function createCatch(): GameModule {
         caughtItemsContainer.style.width = '100%'
         caughtItemsContainer.style.height = '100%'
         caughtItemsContainer.style.zIndex = '0'
+        caughtItemsContainer.style.pointerEvents = 'none'
         frontBasket.appendChild(caughtItemsContainer)
 
         const frontImgLayer = document.createElement('div')
+        frontImgLayer.dataset.id = 'basket_drag_target'
         frontImgLayer.style.position = 'absolute'
         frontImgLayer.style.left = '0'
         frontImgLayer.style.top = '0'
@@ -548,8 +605,10 @@ export function createCatch(): GameModule {
         }
         
         frontImgLayer.style.zIndex = '1'
-        frontImgLayer.style.pointerEvents = 'none'
+        frontImgLayer.style.pointerEvents = 'auto'
         frontBasket.appendChild(frontImgLayer)
+        basketDragTarget = frontImgLayer
+        attachDrag()
       }
 
       if (paRoot && backBasketAssetIdStr && !backBasket) {
@@ -723,15 +782,25 @@ export function createCatch(): GameModule {
       completeCb = cb
     },
     destroy() {
-      window.clearInterval(spawnTimer)
-      cancelAnimationFrame(rafRef)
+      stopSpawning()
+      stopAnimation()
+      if (visibilityHandler) {
+        document.removeEventListener('visibilitychange', visibilityHandler)
+        visibilityHandler = null
+      }
       if (dropsContainer && dropsContainer.parentNode) {
         dropsContainer.parentNode.removeChild(dropsContainer)
+      }
+      if (dragAttachedBasket && basketStartDrag) {
+        dragAttachedBasket.removeEventListener('pointerdown', basketStartDrag)
+        dragAttachedBasket = null
+        basketStartDrag = null
       }
       if (frontBasket && frontBasket.parentNode) {
         frontBasket.parentNode.removeChild(frontBasket)
         frontBasket = null
       }
+      basketDragTarget = null
       if (backBasket && backBasket.parentNode) {
         backBasket.parentNode.removeChild(backBasket)
         backBasket = null

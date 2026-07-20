@@ -1885,7 +1885,7 @@ button.icon {
   transition: transform var(--t-fast) var(--ease);
   flex: 0 0 auto;
 }
-.acc.open .acc-chevron {
+.acc.open > .acc-head .acc-chevron {
   transform: rotate(90deg);
 }
 .acc-body {
@@ -1893,7 +1893,7 @@ button.icon {
   grid-template-rows: 0fr;
   transition: grid-template-rows var(--t-mid) var(--ease);
 }
-.acc.open .acc-body {
+.acc.open > .acc-body {
   grid-template-rows: 1fr;
 }
 .acc-inner {
@@ -1901,7 +1901,7 @@ button.icon {
   transition: padding-bottom var(--t-mid) var(--ease);
   padding-bottom: 0;
 }
-.acc.open .acc-inner {
+.acc.open > .acc-body > .acc-inner {
   padding-bottom: 6px;
 }
 

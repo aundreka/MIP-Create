@@ -508,6 +508,7 @@ html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;overscroll-b
 .pa-textbox{margin:0;display:inline-block;box-sizing:border-box;pointer-events:none;}
 .pa-text-inner{display:block;}
 .pa-root:not(.has-interacted) .pa-show-after-interaction{opacity:0 !important;pointer-events:none !important;}
+.pa-root.has-interacted .pa-hide-after-basket-interaction{opacity:0 !important;pointer-events:none !important;}
 `.trim()
   document.head.appendChild(style)
 }
@@ -1415,6 +1416,7 @@ function layoutRec(rec: Rec): void {
   // scene-overlay handler queries this class and hides them for the overlay's life.
   outer.classList.toggle('pa-el--hide-on-overlay', !!rec.el.hideOnOverlay)
   outer.classList.toggle('pa-show-after-interaction', !!rec.el.showAfterInteraction)
+  outer.classList.toggle('pa-hide-after-basket-interaction', !!rec.el.hideAfterBasketInteraction)
   outer.style.opacity = e.opacity != null ? String(e.opacity) : ''
 
   if (e.hidden) {

@@ -97,7 +97,8 @@ export interface SfxBinding {
   // element animates in — at its entrance stagger delay — so staggered pop-ins each get their sound
   // (fires immediately if the element has no entrance). For scratch/reveal elements also:
   // 'whileScratching' (looped while the cover is being scratched) and
-  // 'onReveal' (one-shot when a reveal target is uncovered).
+  // 'onReveal' (one-shot when a reveal target is uncovered). Game mounts can also
+  // bind template-specific events such as 'catch' for the basket catch template.
   event: string
   assetId: string
   volume?: number
@@ -534,6 +535,7 @@ export interface SceneElement {
   groupId?: string // elements sharing a groupId select/move/scale together
   showOnWin?: boolean // revealed when the mounted game completes (endcard seed)
   showAfterInteraction?: boolean // revealed only after the user's first interaction (e.g. dragging the basket)
+  hideAfterBasketInteraction?: boolean // hidden after the user's first Catch basket tap/drag
   rotation?: number
   opacity?: number
   blur?: number // uniform layer blur radius in design px (CSS filter: blur)
