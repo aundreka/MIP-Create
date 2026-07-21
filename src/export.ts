@@ -8,7 +8,7 @@ import JSZip from 'jszip'
 import type { Project, SceneDef } from '../runtime/scene'
 import type { AssetMap, CompressProfile } from '../runtime/types'
 import { remoteToDataUrl } from './net'
-import { transcodeMedia, type TranscodeOpts } from './bridge'
+import { canTranscode, transcodeMedia, type TranscodeOpts } from './bridge'
 
 /** Global compression defaults chosen at export time; per-asset `compress`
  * overrides win field-by-field. */
@@ -68,6 +68,7 @@ function addSceneAssets(scene: SceneDef, assets: AssetMap, used: Set<string>, au
   }
   for (const el of scene.elements) {
     add(el.assetId)
+    if (el.background?.landscapeAssetId) add(el.background.landscapeAssetId)
     if (el.text?.fontFamily) add(el.text.fontFamily)
     if (el.container?.imageId) add(el.container.imageId)
     if (el.generate?.resultId) add(el.generate.resultId)
@@ -157,6 +158,11 @@ export const NETWORKS: Network[] = [
 
 // ---- helpers --------------------------------------------------------------
 const esc = (s: string): string => s.replace(/</g, '\\u003c')
+// Vite's dev server appends an INLINE SOURCE MAP (~1MB) when the runtime is fetched
+// through it (web/dev exports) — pure dead weight in a shipped playable that once
+// pushed a real export past the 5MB gate on its own. Stripped at the assembly choke
+// point so every export path AND every size measurement sees the real payload.
+export const stripSourceMap = (js: string): string => js.replace(/\/\/# sourceMappingURL=\S+/g, '')
 const bytesOfStr = (s: string): number => new Blob([s]).size
 function dataUrlBytes(src: string): number {
   if (!src.startsWith('data:')) return 0
@@ -228,6 +234,45 @@ async function encodeWebp(src: string, quality: number): Promise<string> {
     return toWebp(src, quality) // worker errored on this image → main-thread fallback
   }
 }
+// Browser fallback for when the desktop ffmpeg pipeline is unavailable (web editor /
+// dev): uncompressed WAVs are the one audio format pure JS can still shrink. Decode
+// via WebAudio and re-encode as mono 16-bit PCM at ≤22.05kHz — plenty for SFX and
+// typically 4–8× smaller than a stereo 44.1kHz source, while staying a WAV so
+// playback support is unchanged (no browser-side MP3/AAC encoder exists).
+async function compressWavInBrowser(src: string): Promise<string | null> {
+  if (!/^data:audio\/(x-)?wav/i.test(src)) return null
+  try {
+    const AC = window.AudioContext ?? (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    if (!AC || typeof OfflineAudioContext === 'undefined') return null
+    const buf = await (await fetch(src)).arrayBuffer()
+    const probe = new AC()
+    const decoded = await probe.decodeAudioData(buf)
+    void probe.close()
+    const rate = Math.min(22050, decoded.sampleRate)
+    const off = new OfflineAudioContext(1, Math.max(1, Math.ceil(decoded.duration * rate)), rate)
+    const node = off.createBufferSource()
+    node.buffer = decoded
+    node.connect(off.destination)
+    node.start()
+    const pcm = (await off.startRendering()).getChannelData(0)
+    const out = new DataView(new ArrayBuffer(44 + pcm.length * 2))
+    const wstr = (o: number, str: string): void => {
+      for (let i = 0; i < str.length; i++) out.setUint8(o + i, str.charCodeAt(i))
+    }
+    wstr(0, 'RIFF'); out.setUint32(4, 36 + pcm.length * 2, true); wstr(8, 'WAVE')
+    wstr(12, 'fmt '); out.setUint32(16, 16, true); out.setUint16(20, 1, true); out.setUint16(22, 1, true)
+    out.setUint32(24, rate, true); out.setUint32(28, rate * 2, true); out.setUint16(32, 2, true); out.setUint16(34, 16, true)
+    wstr(36, 'data'); out.setUint32(40, pcm.length * 2, true)
+    for (let i = 0; i < pcm.length; i++) {
+      const v = Math.max(-1, Math.min(1, pcm[i]))
+      out.setInt16(44 + i * 2, v < 0 ? v * 0x8000 : v * 0x7fff, true)
+    }
+    return 'data:audio/wav;base64,' + bufToBase64(out.buffer)
+  } catch {
+    return null
+  }
+}
+
 async function ensureDataUrl(src: string): Promise<string> {
   if (src.startsWith('data:')) return src
   return (await remoteToDataUrl(src)) ?? src
@@ -279,6 +324,14 @@ export async function processAssets(
       if (r && (dataUrlBytes(r) < dataUrlBytes(src) || forced)) {
         src = r
         optimized = true
+      } else if (!r) {
+        // No ffmpeg (browser / dev) — uncompressed WAVs used to ship at full size
+        // (a 500KB SFX in one real export). Shrink them with the WebAudio fallback.
+        const w = await compressWavInBrowser(src)
+        if (w && dataUrlBytes(w) < dataUrlBytes(src)) {
+          src = w
+          optimized = true
+        }
       }
     } else if (optimize && a.kind === 'html' && src.startsWith('data:text/html;base64,')) {
       try {
@@ -332,8 +385,18 @@ export async function processAssets(
 }
 
 // Quality steps tried in order when the first-pass result is still over budget.
-// Video/audio are NOT re-encoded — only images are re-compressed at lower quality.
+// Images are re-compressed first (cheap); if that can't reach the budget, the
+// video/audio encoding itself steps down (desktop ffmpeg only — see MEDIA_STEPS).
 const AUTO_FIT_STEPS = [0.70, 0.60, 0.50, 0.40, 0.30]
+
+// Last-resort media ladders: progressively smaller/rougher video + thinner audio.
+// Only used when the image ladder alone can't fit the budget, and only where the
+// ffmpeg pipeline exists (desktop). Per-asset `compress` overrides still win.
+const MEDIA_STEPS: MediaDefaults[] = [
+  { video: { scale: 640, crf: 32, audioKbps: 72 }, audio: { audioKbps: 72 } },
+  { video: { scale: 540, crf: 36, audioKbps: 56 }, audio: { audioKbps: 56 } },
+  { video: { scale: 480, crf: 40, audioKbps: 48 }, audio: { audioKbps: 48 } },
+]
 
 async function recompressImages(processed: AssetMap, raw: AssetMap, quality: number): Promise<AssetMap> {
   const out: AssetMap = {}
@@ -378,10 +441,36 @@ export async function processAssetsAutoFit(
     if (checkBytes(recomp) <= MAX_BYTES) return { assets: recomp, report: makeReport(recomp), quality: q }
   }
 
-  // Even at minimum quality it's still over — return the smallest we can produce.
+  // Images alone can't reach the budget — the overage is in video/audio. Step the
+  // media encoding down (desktop ffmpeg only): each rung re-transcodes, first with
+  // the requested image quality (media may be the whole problem), then squeezed to
+  // the minimum image quality before giving up on the rung.
   const minQ = AUTO_FIT_STEPS[AUTO_FIT_STEPS.length - 1]!
-  const last = await recompressImages(first.assets, rawAssets, minQ)
-  return { assets: last, report: makeReport(last), quality: minQ }
+  let best = await recompressImages(first.assets, rawAssets, minQ)
+  let bestBytes = checkBytes(best)
+  let bestQ = minQ
+  if (canTranscode && bestBytes > MAX_BYTES) {
+    for (const step of MEDIA_STEPS) {
+      const attempt = await processAssets(rawAssets, optimize, quality, step)
+      let a = attempt.assets
+      let q = quality
+      let bytes = checkBytes(a)
+      if (bytes > MAX_BYTES) {
+        a = await recompressImages(a, rawAssets, minQ)
+        q = minQ
+        bytes = checkBytes(a)
+      }
+      if (bytes <= MAX_BYTES) return { assets: a, report: makeReport(a), quality: q }
+      if (bytes < bestBytes) {
+        best = a
+        bestBytes = bytes
+        bestQ = q
+      }
+    }
+  }
+
+  // Still over even at the bottom of both ladders — return the smallest produced.
+  return { assets: best, report: makeReport(best), quality: bestQ }
 }
 
 /** Warn when an asset's intrinsic width is smaller than the design box it fills. */
@@ -409,6 +498,28 @@ export function blurWarnings(project: Project, assets: AssetMap): string[] {
         if (mb > 3) warns.push(`Embedded game "${el.name}" is ${mb.toFixed(1)}MB; a full playable will likely blow the 5MB export limit. Use a lighter / game-only build.`)
       }
     }
+  // Oversized fonts: a full TTF can be ~1MB — a huge slice of the 5MB budget for a
+  // handful of glyphs. Flags standalone font assets AND fonts embedded inside
+  // imported HTML (endcards) — the exporter intentionally keeps USED embedded fonts
+  // (their metrics are layout-critical), so shrinking them is on the author.
+  const FONT_WARN = 300 * 1024
+  const fontMb = (b: number): string => (b / 1048576).toFixed(1)
+  for (const [id, a] of Object.entries(assets)) {
+    if (a.kind === 'font') {
+      const b = dataUrlBytes(a.src)
+      if (b > FONT_WARN) warns.push(`Font "${id}" is ${fontMb(b)}MB. Subset it to the characters actually used, or convert it to WOFF2 — full TTFs eat the 5MB budget.`)
+    } else if (a.kind === 'html' && a.src.startsWith('data:text/html;base64,')) {
+      try {
+        const inner = atob(a.src.slice(a.src.indexOf(',') + 1))
+        const re = /data:(?:font\/[\w+-]+|application\/(?:octet-stream|x-font[\w-]*|font-[\w-]+));base64,([A-Za-z0-9+/=]+)/g
+        let m: RegExpExecArray | null
+        while ((m = re.exec(inner))) {
+          const b = Math.floor(m[1].length * 0.75)
+          if (b > FONT_WARN) warns.push(`Embedded HTML "${id}" carries a ${fontMb(b)}MB font. Subset/convert it (WOFF2) in the source HTML — it can't be auto-compressed without breaking its layout.`)
+        }
+      } catch { /* undecodable — skip */ }
+    }
+  }
   return warns
 }
 
@@ -422,10 +533,14 @@ export function buildBaseHtml(project: Project, assets: AssetMap, runtimeSrc = s
     `<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">` +
     // Title is always the brand (Client) name; fall back to the MIP name, then a generic label.
     `<title>${esc(project.meta.client || project.meta.name || 'playable')}</title>` +
-    `<style>html,body{margin:0;padding:0;background:${bg}!important;}</style>` +
+    // user-select guards mirror the runtime base styles: without them, a drag that
+    // lands on a bare container (text elements are pointer-events:none) starts a
+    // native selection and highlights the whole screen while scratching.
+    `<style>html,body{margin:0;padding:0;background:${bg}!important;` +
+    `user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;}</style>` +
     `</head><body>` +
     `<script>window.PA_PROJECT=${esc(JSON.stringify(project))};window.PA_ASSETS=${esc(JSON.stringify(assets))};</script>` +
-    `<script>${runtimeSrc}</script></body></html>`
+    `<script>${stripSourceMap(runtimeSrc)}</script></body></html>`
   )
 }
 

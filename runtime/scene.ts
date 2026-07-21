@@ -166,7 +166,14 @@ export interface ButtonConfig {
   // Target scene id to navigate to on click. Empty/unset = advance to the scene's
   // configured next scene (same as a tap), via the generic 'pa-advance' signal.
   targetSceneId?: string
+  // Visual tap feedback, applied while the element is held down (:active).
+  // Unset/'none' = no feedback. Also used by plain IMAGE elements marked as buttons.
+  tapEffect?: ButtonTapEffect
 }
+
+// 'press' = brief scale-down (the most readable "tap registered" signal on touch);
+// 'glow' = box-shadow bloom; 'outline' = a ring around the element.
+export type ButtonTapEffect = 'none' | 'press' | 'glow' | 'outline'
 
 export interface EndsceneConfig {
   /** 'video' (default) shows a video/image card; 'html' embeds an HTML asset in an iframe. */
@@ -464,6 +471,9 @@ export interface GameMountConfig {
 
 export interface BackgroundConfig {
   objectFit?: ObjectFit
+  // Alternate image shown in LANDSCAPE instead of the element's assetId (which is
+  // the portrait/default art). Unset = the same image is used in both orientations.
+  landscapeAssetId?: string
   // Cover-crop focal point for PORTRAIT, as % of the image (0-100; default 50 = center).
   // Picks which part of the image stays visible when 'cover' crops it to fill the
   // frame. Landscape ignores these and always centers, so the image just covers the

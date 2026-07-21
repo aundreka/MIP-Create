@@ -2,7 +2,7 @@
 // single-element editor with a visual Background-box section.
 
 import { useState, useEffect, useRef, useMemo, type PointerEvent as ReactPointerEvent } from 'react'
-import type { Anchor, AdvanceOn, AnimPresetId, AnimSpec, AnimTrigger, BackgroundConfig, BoxStyle, ConfettiConfig, CountdownConfig, CtaPulsePreset, EndsceneConfig, HandguideConfig, HandguideNode, KeyframeStep, LayoutMode, ObjectFit, SceneElement, SceneKind, SceneOverlay, SfxBinding, ShadowPreset, TextConfig, TransitionType, UnboxingConfig } from '../../runtime/scene'
+import type { Anchor, AdvanceOn, AnimPresetId, AnimSpec, AnimTrigger, BackgroundConfig, BoxStyle, ConfettiConfig, CountdownConfig, CtaPulsePreset, EndsceneConfig, HandguideConfig, HandguideNode, KeyframeStep, LayoutMode, ObjectFit, SceneDef, SceneElement, SceneKind, SceneOverlay, SfxBinding, ShadowPreset, TextConfig, TransitionType, UnboxingConfig } from '../../runtime/scene'
 import { GAME_TEMPLATES } from '../../runtime/games/registry'
 import type { ParamField } from '../../runtime/games/types'
 import { importFont } from '../bridge'
@@ -14,6 +14,7 @@ import {
   beginTransaction,
   endTransaction,
   convertElement,
+  copyElementsFromScene,
   copyStyle,
   duplicateSelected,
   groupSelected,
@@ -50,6 +51,14 @@ import {
   X,
 } from '../icons'
 import { AssetPicker } from './AssetPicker'
+
+// Tap feedback options, shared by the button element and images marked as buttons.
+const TAP_EFFECTS = [
+  { value: 'none', label: 'None' },
+  { value: 'press', label: 'Press (shrink)' },
+  { value: 'glow', label: 'Glow' },
+  { value: 'outline', label: 'Outline' },
+]
 import { SfxLibrary } from './SfxLibrary'
 import { startPathDraw } from '../drawMode'
 import { useEditLocale } from '../locale'
@@ -58,6 +67,59 @@ import { KeyframeEditor } from './KeyframeEditor'
 
 const ANCHORS: Anchor[] = ['center', 'top', 'bottom', 'left', 'right', 'top-left', 'top-right', 'bottom-left', 'bottom-right']
 
+
+// Reuse another scene's elements (background, images, text, …) in the current scene.
+// Copies are independent per scene — same asset underneath (packed once on export),
+// but each copy keeps its own position/animations, so a reused background or prop can
+// animate differently here. Shown in the scene settings view (nothing selected).
+function ReuseFromScene(props: { sceneId: string; scenes: SceneDef[] }): JSX.Element | null {
+  const [fromId, setFromId] = useState('')
+  const others = props.scenes.filter((s) => s.id !== props.sceneId)
+  if (!others.length) return null
+  const src = others.find((s) => s.id === fromId)
+  // Backgrounds first (the most common reuse), then normal stacking order.
+  const els = src ? [...src.elements].sort((a, b) => (a.type === 'background' ? -1 : 0) - (b.type === 'background' ? -1 : 0) || a.zIndex - b.zIndex) : []
+  return (
+    <Accordion id="inspector.reuse" title="Reuse from another scene" defaultOpen={false}>
+      <div className="hint pad">
+        Copy elements from another scene into this one. Copies share the same underlying assets (each asset is packed once on
+        export, so this barely grows the file) but are edited independently — give this scene's copy its own animations.
+      </div>
+      <Row label="Scene">
+        <Select
+          value={fromId}
+          onChange={setFromId}
+          options={[{ value: '', label: '(choose scene)' }, ...others.map((s) => ({ value: s.id, label: s.name }))]}
+        />
+      </Row>
+      {src && !els.length && <div className="hint pad">That scene has no elements.</div>}
+      {els.map((e) => (
+        <div key={e.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
+          <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {e.name} <span style={{ opacity: 0.55 }}>({e.type})</span>
+          </span>
+          <button onClick={() => copyElementsFromScene(src!.id, [e.id])}>Copy</button>
+        </div>
+      ))}
+      {src && els.length > 1 && (
+        <button className="wide" onClick={() => copyElementsFromScene(src.id, els.map((e) => e.id))}>
+          Copy all elements
+        </button>
+      )}
+      {src && (src.bgColor || src.bgColor2) && (
+        <button
+          className="wide"
+          onClick={() => {
+            setSceneBg(src.bgColor ?? '')
+            setSceneBg2(src.bgColor2)
+          }}
+        >
+          Copy scene BG colours
+        </button>
+      )}
+    </Accordion>
+  )
+}
 
 // Per-element sounds: bind a sound (built-in library or upload) to a trigger.
 // "Add sound" opens the sound library directly so the library is easy to find and
@@ -1157,6 +1219,9 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
           </Row>
           <NumField label="Duration" value={tr.durationMs} step={50} onChange={(n) => patchSceneDef(sd.id, { transition: { ...tr, durationMs: n } })} />
         </div>
+
+        <div className="group-title" />
+        <ReuseFromScene sceneId={sd.id} scenes={state.project.scenes} />
         </>
         )}
 
@@ -1533,6 +1598,45 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               )}
             </Accordion>
           )}
+          {(() => {
+            const cfg = el.button
+            const others = state.project.scenes.filter((s) => s.id !== activeSceneDef(state)?.id)
+            const patch = (p: Partial<NonNullable<typeof cfg>>): void => patchElement(id, { button: { ...(cfg ?? {}), ...p } })
+            return (
+              <Accordion id="inspector.imagebutton" title="Button" defaultOpen={false}>
+                <Toggle
+                  label="Tap this image to go to a screen"
+                  checked={!!cfg}
+                  onChange={(v) => patchElement(id, { button: v ? {} : undefined })}
+                />
+                {cfg && (
+                  <>
+                    <Row label="Go to screen">
+                      <Select
+                        value={cfg.targetSceneId ?? ''}
+                        onChange={(v) => patch({ targetSceneId: v || undefined })}
+                        options={[{ value: '', label: '(next screen / advance)' }, ...others.map((s) => ({ value: s.id, label: s.name || s.id }))]}
+                      />
+                    </Row>
+                    <Row label="Tap effect">
+                      <Select
+                        value={cfg.tapEffect ?? 'none'}
+                        onChange={(v) => patch({ tapEffect: v === 'none' ? undefined : (v as NonNullable<typeof cfg.tapEffect>) })}
+                        options={TAP_EFFECTS}
+                      />
+                    </Row>
+                    <div className="hint pad">Keeps the image’s own crop, mask &amp; animation — it just becomes tappable.</div>
+                  </>
+                )}
+                <button className="wide" onClick={() => patchElement(id, { type: 'button', button: el.button ?? {} })}>
+                  Convert to Button element
+                </button>
+                <div className="hint pad">
+                  Turns this into a full Button element in the same spot — position, size &amp; scale stay exactly the same. It gains the Button’s fill/corner styling; a crop or mask is dropped. Reversible from the Button’s panel.
+                </div>
+              </Accordion>
+            )
+          })()}
           <Accordion id="inspector.dragdrop" title="Drag & drop" defaultOpen={false}>
           <Toggle label="Draggable item" checked={!!el.drag} onChange={(v) => patchElement(id, { drag: v ? { group: el.slot?.group ?? 'a' } : undefined })} />
           {el.drag && (
@@ -1950,8 +2054,20 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 options={[{ value: '', label: '(next screen / advance)' }, ...others.map((s) => ({ value: s.id, label: s.name || s.id }))]}
               />
             </Row>
+            <Row label="Tap effect">
+              <Select
+                value={cfg.tapEffect ?? 'none'}
+                onChange={(v) => patch({ tapEffect: v === 'none' ? undefined : (v as NonNullable<typeof cfg.tapEffect>) })}
+                options={TAP_EFFECTS}
+              />
+            </Row>
             <AssetPicker label="Image (optional)" allowNone value={el.assetId} onChange={(aid) => patchElement(id, { assetId: aid ?? undefined })} />
             <div className="hint pad">Uses the image if set, otherwise the text label below. Style the fill &amp; corners in Background box. Animation is optional (Animation section). Toggle “Above overlays” at the top to float it over game win/lose cards.</div>
+            {el.assetId && (
+              <button className="wide" onClick={() => patchElement(id, { type: 'image' })}>
+                Convert back to Image
+              </button>
+            )}
           </Accordion>
         )
       })()}
@@ -1964,6 +2080,16 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
           return (
             <Accordion id="inspector.background" title="Background">
               <AssetPicker label="Image" value={el.assetId} onChange={(aid) => patchElement(id, { assetId: aid })} />
+              <AssetPicker
+                label="Landscape image (optional)"
+                value={bg.landscapeAssetId}
+                allowNone
+                onChange={(aid) => setBg({ landscapeAssetId: aid ?? undefined })}
+              />
+              <div className="hint pad">
+                Shown instead of the image above when the device is in <b>landscape</b>. Leave unset to reuse the same image in both
+                orientations.
+              </div>
               <Row label="Fit">
                 <Select
                   value={fit}

@@ -18,7 +18,7 @@ import { applyImageCrop, createContainerContent, createImageContent, styleContai
 import { applyBarFill, createBarContent } from './elements/bar'
 import { createTextContent } from './elements/text'
 import { createCtaContent } from './elements/cta'
-import { createButtonContent } from './elements/button'
+import { createButtonContent, wireSceneNav } from './elements/button'
 import { createChoiceContent } from './elements/choice'
 import { localize } from './i18n'
 import { getPicks, isPicked, togglePick } from './selection'
@@ -414,8 +414,10 @@ function injectBaseStyles(): void {
   const style = document.createElement('style')
   style.id = 'pa-base'
   style.textContent = `
-html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;overscroll-behavior:none;background:#000;}
+html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;overscroll-behavior:none;background:#000;
+  user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;}
 .pa-root{position:absolute;inset:0;overflow:hidden;overflow:clip;isolation:isolate;touch-action:none;
+  user-select:none;-webkit-user-select:none;
   font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
 .pa-el{position:absolute;left:0;top:0;transform-origin:center center;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-user-drag:none;}
 .pa-el-anim{width:100%;height:100%;touch-action:none;}
@@ -427,6 +429,16 @@ html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;overscroll-b
   -webkit-tap-highlight-color:transparent;transition:background .12s ease,transform .12s ease,box-shadow .12s ease;}
 .pa-choice:active{transform:scale(.985);}
 .pa-choice-sel{box-shadow:0 0 0 3px rgba(124,58,237,.45);}
+/* Tap feedback for buttons + images marked as buttons (el.button.tapEffect).
+   Driven by an explicit .pa-tap-on class toggled from pointer events rather than
+   :active — iOS Safari won't fire :active on non-<button> nodes (the image path),
+   and this stays predictable inside AppLovin's WebView.
+   These classes sit on the inner .pa-el-anim / content node, never the outer
+   .pa-el, so the press transform can't fight the positional layout transform. */
+.pa-tap-press,.pa-tap-glow,.pa-tap-outline{transition:transform .1s ease,box-shadow .1s ease;}
+.pa-tap-press.pa-tap-on{transform:scale(.94);}
+.pa-tap-glow.pa-tap-on{box-shadow:0 0 18px 6px rgba(255,255,255,.75);}
+.pa-tap-outline.pa-tap-on{box-shadow:0 0 0 4px rgba(255,255,255,.9);}
 .pa-textbox{margin:0;display:inline-block;box-sizing:border-box;pointer-events:none;}
 .pa-text-inner{display:block;}
 `.trim()
@@ -649,7 +661,9 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     anim.className = 'pa-el-anim'
     outer.appendChild(anim)
 
-    const content = mountContent(el, anim, ctx)
+    // Resolve through byId so handlers see live inspector edits, not the element
+    // as it was at build time (the update path swaps rec.el without rebuilding).
+    const content = mountContent(el, anim, ctx, () => byId.get(el.id)?.el ?? el)
     // Marker for the scene manager: background elements get a physical-gap cover
     // in pa-stage (see parkImmune in scenes.ts), found via this class.
     if (el.type === 'background') outer.classList.add('pa-el--background')
@@ -657,11 +671,12 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     // Non-interactive decorative elements must not absorb touches meant for the
     // game canvas or CTAs layered behind them in z-order. Scratch/reveal covers
     // keep their overlay canvas interactive; dim and the interactive widgets do too.
+    // An image marked as a button (el.button) is interactive by definition.
     const nonInteractive =
       el.type !== 'cta' && el.type !== 'choice' && el.type !== 'button' &&
       el.type !== 'game-mount' && el.type !== 'endscene' &&
       el.type !== 'unboxing' &&
-      el.type !== 'dim' && !el.scratch && !el.reveal
+      el.type !== 'dim' && !el.scratch && !el.reveal && !el.button
     if (nonInteractive) {
       outer.style.pointerEvents = 'none'
       anim.style.pointerEvents = 'none'
@@ -1159,6 +1174,11 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
         const nel = ordered[i]
         const rec = recs[i]
         const prev = rec.el
+        // Marking an image as a button (or unmarking it) changes pointer-events and
+        // adds/removes tap handlers — neither of which this in-place path can apply.
+        // The target scene + tap effect themselves are read live, so only the toggle
+        // needs the rebuild.
+        if (!nel.button !== !prev.button) return false
         rec.el = nel
         byId.set(nel.id, rec)
         if (nel.type === 'cta' || nel.type === 'choice') {
@@ -1168,6 +1188,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
           }
         } else if (nel.type === 'background' && rec.content) {
           rec.content.style.objectFit = nel.background?.objectFit ?? 'cover'
+          setBackgroundSources(rec.content, nel, ctx) // landscape-image edits apply on the layout pass below
         } else if (nel.type === 'bar' && rec.content) {
           applyBarFill(rec.content as HTMLDivElement, nel, ctx)
         } else if (nel.type === 'unboxing' && rec.content) {
@@ -1206,8 +1227,10 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
 
 // ---------------------------------------------------------------------------
 // Content creation per element type. Configures the anim node where needed.
+// `getEl` resolves the CURRENT element (rec.el is swapped in place by the editor's
+// live-update path) — handlers that outlive the build must read through it.
 // ---------------------------------------------------------------------------
-function mountContent(el: SceneElement, anim: HTMLDivElement, ctx: RuntimeCtx): HTMLElement | null {
+function mountContent(el: SceneElement, anim: HTMLDivElement, ctx: RuntimeCtx, getEl: () => SceneElement): HTMLElement | null {
   switch (el.type) {
     case 'dim':
       return null
@@ -1225,7 +1248,7 @@ function mountContent(el: SceneElement, anim: HTMLDivElement, ctx: RuntimeCtx): 
       return c
     }
     case 'button': {
-      const c = createButtonContent(el, ctx)
+      const c = createButtonContent(el, getEl, ctx)
       anim.appendChild(c) // no auto-pulse; animates only if el.animations is set
       return c
     }
@@ -1237,6 +1260,9 @@ function mountContent(el: SceneElement, anim: HTMLDivElement, ctx: RuntimeCtx): 
     case 'background': {
       const c = createImageContent(el, ctx)
       c.style.objectFit = el.background?.objectFit ?? 'cover'
+      // Stash both orientation sources; layoutBackground picks per orientation so a
+      // rotation swaps the art without a rebuild (and without needing ctx at layout time).
+      setBackgroundSources(c, el, ctx)
       anim.appendChild(c)
       return c
     }
@@ -1279,6 +1305,14 @@ function mountContent(el: SceneElement, anim: HTMLDivElement, ctx: RuntimeCtx): 
       if (!el.assetId) return null
       const c = el.container ? createContainerContent(el, ctx) : createImageContent(el, ctx)
       anim.appendChild(c)
+      // Opt-in: an image marked as a button navigates on tap, through the same
+      // handler the button element uses. Listen on `anim` because .pa-img (and the
+      // container's inner node) set pointer-events:none, so clicks land there —
+      // but play the tap effect on the content, which carries no animation.
+      if (el.button) {
+        anim.style.cursor = 'pointer'
+        wireSceneNav(anim, c, getEl, ctx)
+      }
       return c
     }
   }
@@ -1718,6 +1752,13 @@ function styleCta(btn: HTMLElement, el: SceneElement, s: number): void {
 
 // Background always covers the full viewport. Edge gaps on AppLovin are covered
 // by the pa-bleed element (outside pa-root) rather than overshooting here.
+// Record the portrait (element assetId) and optional landscape sources on the
+// background <img> so the layout pass can swap them without an asset resolver.
+function setBackgroundSources(img: HTMLElement, el: SceneElement, ctx: RuntimeCtx): void {
+  img.dataset.srcP = ctx.src(el.assetId) || ''
+  img.dataset.srcL = ctx.src(el.background?.landscapeAssetId) || ''
+}
+
 function layoutBackground(rec: Rec): void {
   const outer = rec.outer
   outer.style.position = ''
@@ -1735,6 +1776,10 @@ function layoutBackground(rec: Rec): void {
   const img = rec.content
   if (img) {
     const bg = rec.el.background
+    // Landscape can carry its own art (bg.landscapeAssetId); portrait uses the element
+    // asset. Compare via the attribute (the property returns an absolutized URL).
+    const want = (isLandscape() && img.dataset.srcL) || img.dataset.srcP
+    if (want && img.getAttribute('src') !== want) img.setAttribute('src', want)
     img.style.objectFit = bg?.objectFit ?? 'cover'
     img.style.objectPosition = isLandscape() ? '50% 50%' : `${bg?.focusX ?? 50}% ${bg?.focusY ?? 50}%`
     // Zoom pivots around the same focal point so zooming keeps the chosen subject

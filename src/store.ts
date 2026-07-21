@@ -342,6 +342,33 @@ export function addGameHint(gameId: string): void {
   addElement(hg)
 }
 
+// Reuse elements from another scene: plain copies (fresh ids) added to the ACTIVE
+// scene. Copies keep the source's geometry/asset/config but are fully independent —
+// so each scene can carry its own animations/tweaks. They reference the same asset
+// ids (every asset is inlined once on export), so reuse never duplicates image data.
+// `sync` is stripped: the cross-MIP sync invariant is one copy per scene/MIP, which
+// a manual second copy would silently break; groupId is remapped like duplicate.
+export function copyElementsFromScene(fromSceneId: string, elementIds: string[]): void {
+  if (fromSceneId === state.activeSceneId) return
+  const from = state.project.scenes.find((s) => s.id === fromSceneId)
+  if (!from) return
+  const wanted = new Set(elementIds)
+  const gmap = new Map<string, string>()
+  const clones: SceneElement[] = []
+  for (const e of from.elements) {
+    if (!wanted.has(e.id)) continue
+    const c = structuredClone(e)
+    c.id = nextId(e.type)
+    delete c.sync
+    if (c.groupId) {
+      if (!gmap.has(c.groupId)) gmap.set(c.groupId, nextId('grp'))
+      c.groupId = gmap.get(c.groupId)
+    }
+    clones.push(c)
+  }
+  if (clones.length) addElements(clones)
+}
+
 export function addElements(els: SceneElement[]): void {
   set({ dirty: true, selectedIds: els.map((e) => e.id), project: { ...state.project, scenes: state.project.scenes.map((s) => (s.id === state.activeSceneId ? { ...s, elements: [...s.elements, ...els] } : s)) } })
 }
