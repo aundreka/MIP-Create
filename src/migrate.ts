@@ -6,7 +6,7 @@
 // To evolve the model: bump CURRENT_SCHEMA, add a `from < N` block that transforms
 // the project, and the stamp at the end records the new version.
 
-import type { Project, ProjectMeta } from '../runtime/scene'
+import type { Project } from '../runtime/scene'
 
 export const CURRENT_SCHEMA = 2
 

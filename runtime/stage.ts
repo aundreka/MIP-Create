@@ -12,7 +12,7 @@
 
 import type { Anchor, Scene, SceneElement } from './scene'
 import type { AssetEntry, AssetMap, RuntimeCtx } from './types'
-import { isLandscape, scale, sx, sy, viewH, viewW } from './responsive'
+import { isLandscape, scale, sx, sy, viewH } from './responsive'
 import { composeElementAnim, entranceLeadDelayMs, entranceTriggers, exitCss, injectAnimStyles, lightraySpec } from './anim'
 import { applyImageCrop, createContainerContent, createImageContent, styleContainer } from './elements/image'
 import { applyBarFill, createBarContent } from './elements/bar'

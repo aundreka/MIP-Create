@@ -3,7 +3,7 @@
 // click (ctaClick sfx), reaching the scroll-depth threshold completes the game
 // once, and the pointer-drag fallback scrolls (standing down on pointercancel).
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { createScroll } from './scroll'
 import { mulberry32, type GameContext } from './types'
 

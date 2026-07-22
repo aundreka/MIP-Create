@@ -7,7 +7,7 @@
 // double as a CTA's default loop. Per-element entrance / loop / exit specs come
 // from element.animations (see scene.ts AnimSpec).
 
-import type { AnimSpec, CtaPulsePreset, KeyframeStep, SceneElement } from './scene'
+import type { AnimSpec, KeyframeStep, SceneElement } from './scene'
 
 let injected = false
 let styleEl: HTMLStyleElement | null = null

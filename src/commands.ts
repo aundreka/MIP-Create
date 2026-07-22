@@ -19,7 +19,6 @@ import {
   Gamepad2,
   MousePointerClick,
   Play,
-  Plus,
   RectangleHorizontal,
   Redo2,
   ScanSearch,

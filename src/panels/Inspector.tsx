@@ -1111,7 +1111,6 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
 
   const el = singleSelected(state)
   if (!el) {
-    const m = state.project.meta
     const sd = activeSceneDef(state)
     const adv = sd.advance
     const tr = sd.transition ?? { type: 'fade' as TransitionType, durationMs: 350 }

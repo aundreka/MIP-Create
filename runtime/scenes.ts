@@ -446,7 +446,6 @@ export function playProject(
       // bar above the promoted overlayDiv into its own compositor layer, and the
       // bar's layer edge anti-aliases against the same-colored cover instead of the
       // overlay's background.
-      const immuneEls = parkedByStage.get(current.stage)?.els ?? []
       syncCovers()
 
       // Elements opted into "hide on overlay" vanish for the overlay's lifetime, then
