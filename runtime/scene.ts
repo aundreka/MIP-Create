@@ -470,7 +470,9 @@ export interface GameMountConfig {
 }
 
 export interface BackgroundConfig {
-  objectFit?: ObjectFit
+  // 'fill' stretches the image to the exact screen width AND height (no crop, may
+  // distort) — for portrait-only art that should fill the screen without cropping.
+  objectFit?: ObjectFit | 'fill'
   // Alternate image shown in LANDSCAPE instead of the element's assetId (which is
   // the portrait/default art). Unset = the same image is used in both orientations.
   landscapeAssetId?: string

@@ -227,6 +227,10 @@ export function createScratchGrid(): GameModule {
   let brushScaleFrac = 0.4 // brush display width as a fraction of the cell's short side
   let brushSpawnX = 0.5 // resting spawn position, fraction of the card (0.5 = center)
   let brushSpawnY = 0.5
+  // Follow mode: instead of a persistent tool the player grabs, the brush stays hidden and
+  // appears CENTERED under the finger while scratching, then disappears on release. Any press
+  // on a cell starts a scratch (no grab required).
+  let brushFollow = false
   let brushIntro = false // play a demo "draw path" rub at the start (like the handguide hint)
   let brushIntroPath: { x: number; y: number }[] = [] // authored path, points as fractions 0..1 of the card
   let brushIntroDurationMs = 1600 // duration of ONE pass along the path (lower = faster)
@@ -336,6 +340,19 @@ export function createScratchGrid(): GameModule {
     sizeBrush(cells[0])
     const s = spawnClient()
     moveBrush(s.x, s.y)
+    if (brushFollow) {
+      // Follow mode: hidden at rest. The authored intro demo still plays (visible),
+      // then the brush fades away until the finger lands.
+      if (brushIntro) {
+        brushEl.style.opacity = '1'
+        playBrushIntro()
+      }
+      if (!brushIntroAnim) {
+        brushEl.style.opacity = '0'
+        markBrushReady()
+      }
+      return
+    }
     brushEl.style.opacity = '1'
     playBrushIntro()
     if (!brushIntroAnim) markBrushReady() // no intro playing → ready immediately
@@ -376,7 +393,13 @@ export function createScratchGrid(): GameModule {
     const kf: Keyframe[] = [spawnXf, ...mid, spawnXf].map((t) => ({ transform: t }))
     brushIntroAnim?.cancel()
     brushIntroAnim = brushEl.animate(kf, { duration: brushIntroDurationMs, iterations: brushIntroLoops, easing: 'ease-in-out' })
-    brushIntroAnim.onfinish = (): void => { brushIntroAnim = null; const p = spawnClient(); moveBrush(p.x, p.y); markBrushReady() }
+    brushIntroAnim.onfinish = (): void => {
+      brushIntroAnim = null
+      const p = spawnClient()
+      moveBrush(p.x, p.y)
+      if (brushFollow && brushEl) brushEl.style.opacity = '0' // follow mode: demo over — hide until the finger lands
+      markBrushReady()
+    }
   }
 
   // Fraction of cells revealed (won) out of the total — the shared progress metric
@@ -817,13 +840,15 @@ export function createScratchGrid(): GameModule {
     // Begin a stroke: require grabbing the brush (if any). Returns false if the press missed it, so
     // the caller can bail out and NOT scratch. Sets the grab offset + does the first erode.
     const beginStroke = (clientX: number, clientY: number): boolean => {
-      if (brushEl && !brushHit(clientX, clientY)) return false // must grab the brush, not tap anywhere
+      if (brushEl && !brushFollow && !brushHit(clientX, clientY)) return false // must grab the brush, not tap anywhere
       brushIntroAnim?.cancel()
       brushIntroAnim = null
       markBrushReady() // player took over — the (possibly interrupted) intro is done
-      grabDX = brushEl && brushCenter ? brushCenter.x - clientX : 0
-      grabDY = brushEl && brushCenter ? brushCenter.y - clientY : 0
+      // Follow mode: no grab offset — the brush centers on the finger and shows up now.
+      grabDX = brushEl && !brushFollow && brushCenter ? brushCenter.x - clientX : 0
+      grabDY = brushEl && !brushFollow && brushCenter ? brushCenter.y - clientY : 0
       if (brushEl) { brushRootRect = brushHostRect(); brushCardRect = ctx.root.getBoundingClientRect(); sizeBrush(cell) }
+      if (brushEl && brushFollow) brushEl.style.opacity = '1'
       const bx = clientX + grabDX
       const by = clientY + grabDY
       moveBrush(bx, by)
@@ -851,7 +876,9 @@ export function createScratchGrid(): GameModule {
     const onEnd = (): void => {
       ctx.sfx.loopStop?.('drag')
       lastPt = null
-      // NOTE: the brush stays on screen (persistent draggable tool) — no hideBrush() here.
+      // Grab mode: the brush stays on screen (persistent draggable tool). Follow
+      // mode: it only exists under the finger, so it fades out on release.
+      if (brushEl && brushFollow) brushEl.style.opacity = '0'
       if (!cell.won && measure(cell) >= threshold) revealCell(cell)
     }
 
@@ -885,7 +912,7 @@ export function createScratchGrid(): GameModule {
     canvas.addEventListener('pointerdown', (e) => {
       if (cell.won || touchActive || e.pointerType === 'touch' || scratchingLocked) return
       lastPt = null
-      if (!brushHit(e.clientX, e.clientY) && brushEl) return // must grab the brush, not tap anywhere
+      if (brushEl && !brushFollow && !brushHit(e.clientX, e.clientY)) return // must grab the brush, not tap anywhere
       e.preventDefault()
       try {
         canvas.setPointerCapture(e.pointerId)
@@ -929,6 +956,7 @@ export function createScratchGrid(): GameModule {
       brushScaleFrac = Math.max(5, Math.min(200, num(params.brushScale as unknown, 40))) / 100
       brushSpawnX = Math.max(0, Math.min(1, num(params.brushSpawnX as unknown, 50) / 100))
       brushSpawnY = Math.max(0, Math.min(1, num(params.brushSpawnY as unknown, 50) / 100))
+      brushFollow = params.brushFollow === true || params.brushFollow === 'on' || params.brushFollow === 1
       brushIntro = params.brushIntro === true || params.brushIntro === 'on' || params.brushIntro === 1
       brushIntroDurationMs = Math.max(200, num(params.brushIntroDurationMs as unknown, 1600))
       brushIntroLoops = Math.max(1, Math.min(20, Math.round(num(params.brushIntroLoops as unknown, 2))))
@@ -1300,7 +1328,9 @@ export function createScratchGrid(): GameModule {
     relayout: sizeAll,
 
     getHint(): HintMove | null {
-      if (brushEl) return null // the brush IS the on-screen tool; point-at-brush is a handguide mode
+      // A grab-mode brush is itself the on-screen tool (point-at-brush is a handguide
+      // mode); a follow-mode brush is invisible at rest, so the rub hint still helps.
+      if (brushEl && !brushFollow) return null
       const cell = cells.find((c) => !c.won)
       if (!cell) return null
       const r = cell.canvas.getBoundingClientRect()
@@ -1449,7 +1479,7 @@ export const SCRATCH_GRID_TEMPLATE: GameTemplate = {
     bgImage: '', bgScale: 100, bgX: 50, bgY: 50,
     threshold: 0.5,
     brushImage: '', brushRadius: 10, brushScale: 40, brushTipX: 50, brushTipY: 50,
-    brushSpawnX: 50, brushSpawnY: 50, brushIntro: false, brushIntroPath: '', brushIntroDurationMs: 1600, brushIntroLoops: 2,
+    brushSpawnX: 50, brushSpawnY: 50, brushFollow: false, brushIntro: false, brushIntroPath: '', brushIntroDurationMs: 1600, brushIntroLoops: 2,
     zoneX: 0, zoneY: 0, zoneW: 100, zoneH: 100,
     imageFit: 'cover',
     cover: '',

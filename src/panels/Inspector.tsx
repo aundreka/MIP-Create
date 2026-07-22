@@ -484,7 +484,7 @@ const LIGHTRAY_DIRECTIONS: { value: number; label: string }[] = [
   { value: 225, label: 'corner ↖ (bottom-right → top-left)' },
 ]
 // Brush params rendered by the custom <BrushControls> block instead of the generic field list.
-const BRUSH_PARAM_KEYS = new Set(['brushRadius', 'brushScale', 'brushTipX', 'brushTipY', 'brushSpawnX', 'brushSpawnY', 'brushIntro', 'brushIntroPath', 'brushIntroDurationMs', 'brushIntroLoops'])
+const BRUSH_PARAM_KEYS = new Set(['brushRadius', 'brushScale', 'brushTipX', 'brushTipY', 'brushSpawnX', 'brushSpawnY', 'brushFollow', 'brushIntro', 'brushIntroPath', 'brushIntroDurationMs', 'brushIntroLoops'])
 // seeded when switching a phase to 'custom' so there's something to edit
 const DEFAULT_CUSTOM: KeyframeStep[] = [
   { at: 0, opacity: 0, transform: 'scale(0.6)' },
@@ -711,6 +711,7 @@ function BrushControls(props: {
   const tipX = Number(params.brushTipX ?? 50)
   const tipY = Number(params.brushTipY ?? 50)
   const introOn = !!params.brushIntro && params.brushIntro !== 'off'
+  const followOn = !!params.brushFollow && params.brushFollow !== 'off'
   return (
     <>
       <div className="group-title2">Brush (drag to scratch)</div>
@@ -725,10 +726,22 @@ function BrushControls(props: {
           <NumField label="Brush tip Y — reveal point (%)" value={tipY} step={1} min={0} max={100} onChange={(n) => setParam('brushTipY', n)} />
         </>
       )}
-      <NumField label="Spawn X — resting spot (% of card)" value={Number(params.brushSpawnX ?? 50)} step={1} min={0} max={100} onChange={(n) => setParam('brushSpawnX', n)} />
-      <NumField label="Spawn Y — resting spot (% of card)" value={Number(params.brushSpawnY ?? 50)} step={1} min={0} max={100} onChange={(n) => setParam('brushSpawnY', n)} />
+      <Toggle label="Follow finger (appear only while scratching)" checked={followOn} onChange={(v) => setParam('brushFollow', v)} />
+      {(!followOn || introOn) && (
+        <>
+          <NumField label="Spawn X — resting spot (% of card)" value={Number(params.brushSpawnX ?? 50)} step={1} min={0} max={100} onChange={(n) => setParam('brushSpawnX', n)} />
+          <NumField label="Spawn Y — resting spot (% of card)" value={Number(params.brushSpawnY ?? 50)} step={1} min={0} max={100} onChange={(n) => setParam('brushSpawnY', n)} />
+        </>
+      )}
       <Toggle label="Intro animation (demo at start)" checked={introOn} onChange={(v) => setParam('brushIntro', v)} />
-      <div className="hint pad">The brush stays on screen and can overflow past the card edges. Spawn sets where it rests; the intro plays a demo motion (like the hint hand) until the player touches.</div>
+      {followOn ? (
+        <div className="hint pad">
+          The brush is hidden until the player scratches — it appears <b>centered under the finger</b>, follows it, and disappears on
+          release. Scratching starts anywhere on the card (no need to grab the brush).{introOn ? ' The intro demo still plays from the spawn point, then the brush hides.' : ''}
+        </div>
+      ) : (
+        <div className="hint pad">The brush stays on screen and can overflow past the card edges. Spawn sets where it rests; the intro plays a demo motion (like the hint hand) until the player touches.</div>
+      )}
       {introOn && (
         <>
           <NumField label="Intro speed — ms per pass (lower = faster)" value={Number(params.brushIntroDurationMs ?? 1600)} step={100} min={200} max={8000} onChange={(n) => setParam('brushIntroDurationMs', n)} />
@@ -2173,10 +2186,11 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               <Row label="Fit">
                 <Select
                   value={fit}
-                  onChange={(v) => setBg({ objectFit: v as ObjectFit })}
+                  onChange={(v) => setBg({ objectFit: v as BackgroundConfig['objectFit'] })}
                   options={[
                     { value: 'cover', label: 'cover (fill, may crop)' },
                     { value: 'contain', label: 'contain (fit, no crop)' },
+                    { value: 'fill', label: 'stretch (fill screen, may distort)' },
                   ]}
                 />
               </Row>

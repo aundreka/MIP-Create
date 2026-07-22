@@ -95,6 +95,10 @@ export function createScratch(): GameModule {
   let brushScaleFrac = 0.4 // brush display width as a fraction of the card's short side
   let brushSpawnX = 0.5 // resting spawn position, fraction of the card
   let brushSpawnY = 0.5
+  // Follow mode: instead of a persistent tool the player grabs, the brush stays hidden and
+  // appears CENTERED under the finger while scratching, then disappears on release. Any press
+  // on the card starts a scratch (no grab required).
+  let brushFollow = false
   let brushIntro = false // play a demo "draw path" rub at the start (like the handguide hint)
   let brushIntroPath: { x: number; y: number }[] = [] // authored path, points as fractions 0..1 of the card
   let brushIntroDurationMs = 1600 // duration of ONE pass along the path (lower = faster)
@@ -197,6 +201,19 @@ export function createScratch(): GameModule {
     sizeBrush()
     const s = spawnClient()
     moveBrush(s.x, s.y)
+    if (brushFollow) {
+      // Follow mode: hidden at rest. The authored intro demo still plays (visible),
+      // then the brush fades away until the finger lands.
+      if (brushIntro) {
+        brushEl.style.opacity = '1'
+        playBrushIntro()
+      }
+      if (!brushIntroAnim) {
+        brushEl.style.opacity = '0'
+        markBrushReady()
+      }
+      return
+    }
     brushEl.style.opacity = '1'
     playBrushIntro()
     if (!brushIntroAnim) markBrushReady() // no intro playing → ready immediately
@@ -236,7 +253,13 @@ export function createScratch(): GameModule {
     const kf: Keyframe[] = [spawnXf, ...mid, spawnXf].map((t) => ({ transform: t }))
     brushIntroAnim?.cancel()
     brushIntroAnim = brushEl.animate(kf, { duration: brushIntroDurationMs, iterations: brushIntroLoops, easing: 'ease-in-out' })
-    brushIntroAnim.onfinish = (): void => { brushIntroAnim = null; const p = spawnClient(); moveBrush(p.x, p.y); markBrushReady() }
+    brushIntroAnim.onfinish = (): void => {
+      brushIntroAnim = null
+      const p = spawnClient()
+      moveBrush(p.x, p.y)
+      if (brushFollow && brushEl) brushEl.style.opacity = '0' // follow mode: demo over — hide until the finger lands
+      markBrushReady()
+    }
   }
 
   // The cover image's 'contain' rect within the card, as fractions 0..1 (whole image fit inside,
@@ -417,6 +440,7 @@ export function createScratch(): GameModule {
       brushScaleFrac = Math.max(5, Math.min(200, num(params.brushScale, 40))) / 100
       brushSpawnX = Math.max(0, Math.min(1, num(params.brushSpawnX, 50) / 100))
       brushSpawnY = Math.max(0, Math.min(1, num(params.brushSpawnY, 50) / 100))
+      brushFollow = params.brushFollow === true || params.brushFollow === 'on' || params.brushFollow === 1
       brushIntro = params.brushIntro === true || params.brushIntro === 'on' || params.brushIntro === 1
       brushIntroDurationMs = Math.max(200, num(params.brushIntroDurationMs, 1600))
       brushIntroLoops = Math.max(1, Math.min(20, Math.round(num(params.brushIntroLoops, 2))))
@@ -579,13 +603,15 @@ export function createScratch(): GameModule {
       let grabDY = 0
       // Begin a stroke: require grabbing the brush (if any). Returns false if the press missed it.
       const beginStroke = (clientX: number, clientY: number): boolean => {
-        if (brushEl && !brushHit(clientX, clientY)) return false // must grab the brush, not tap anywhere
+        if (brushEl && !brushFollow && !brushHit(clientX, clientY)) return false // must grab the brush, not tap anywhere
         brushIntroAnim?.cancel()
         brushIntroAnim = null
         markBrushReady() // player took over — the (possibly interrupted) intro is done
-        grabDX = brushEl && brushCenter ? brushCenter.x - clientX : 0
-        grabDY = brushEl && brushCenter ? brushCenter.y - clientY : 0
+        // Follow mode: no grab offset — the brush centers on the finger and shows up now.
+        grabDX = brushEl && !brushFollow && brushCenter ? brushCenter.x - clientX : 0
+        grabDY = brushEl && !brushFollow && brushCenter ? brushCenter.y - clientY : 0
         if (brushEl) { brushRootRect = brushHostRect(); brushCardRect = ctx.root.getBoundingClientRect(); sizeBrush() }
+        if (brushEl && brushFollow) brushEl.style.opacity = '1'
         const bx = clientX + grabDX
         const by = clientY + grabDY
         moveBrush(bx, by)
@@ -615,7 +641,9 @@ export function createScratch(): GameModule {
       const onScratchEnd = (): void => {
         scratching = false
         ctx.sfx.loopStop?.('drag')
-        // Brush stays on screen (persistent draggable tool) — no hideBrush() here.
+        // Grab mode: the brush stays on screen (persistent draggable tool). Follow
+        // mode: it only exists under the finger, so it fades out on release.
+        if (brushEl && brushFollow) brushEl.style.opacity = '0'
         lastPt = null
         if (!won && measure() >= threshold) reveal()
       }
@@ -658,7 +686,7 @@ export function createScratch(): GameModule {
       canvas.addEventListener('pointerdown', (e) => {
         if (won || touchActive || e.pointerType === 'touch') return
         lastPt = null
-        if (brushEl && !brushHit(e.clientX, e.clientY)) return // must grab the brush, not tap anywhere
+        if (brushEl && !brushFollow && !brushHit(e.clientX, e.clientY)) return // must grab the brush, not tap anywhere
         e.preventDefault() // prevent native drag-start on the canvas element
         try { canvas.setPointerCapture(e.pointerId) } catch { /* ignore */ }
         scratching = true
@@ -678,7 +706,9 @@ export function createScratch(): GameModule {
     },
     relayout: sizeCanvas,
     getHint(): HintMove | null {
-      if (won || scratching || brushEl) return null // brush is the tool; point-at-brush is a handguide mode
+      // A grab-mode brush is itself the on-screen tool (point-at-brush is a handguide
+      // mode); a follow-mode brush is invisible at rest, so the slide hint still helps.
+      if (won || scratching || (brushEl && !brushFollow)) return null
       const r = canvas.getBoundingClientRect()
       const y = r.top + r.height / 2
       return { from: { x: r.left + r.width * 0.22, y }, to: { x: r.left + r.width * 0.78, y }, kind: 'slide' }
@@ -735,7 +765,7 @@ export const SCRATCH_TEMPLATE: GameTemplate = {
   ],
   // revealScale/X/Y are edited by double-clicking the card on the canvas (no inspector
   // field) — they only apply when fit = 'fit'.
-  defaultParams: { label: 'YOU WIN!', coverColor: '#9aa3b2', threshold: 0.6, zoneX: 0, zoneY: 0, zoneW: 100, zoneH: 100, fit: 'follow', revealScale: 1, revealX: 0, revealY: 0, revealBgColor: '', prize: '', cover: '', brushImage: '', brushRadius: 9, brushScale: 40, brushTipX: 50, brushTipY: 50, brushSpawnX: 50, brushSpawnY: 50, brushIntro: false, brushIntroPath: '', brushIntroDurationMs: 1600, brushIntroLoops: 2, cursor: 'inherit', cursorAsset: '', shadowBlur: 0, shadowX: 0, shadowY: 4, shadowColor: '#000000' },
+  defaultParams: { label: 'YOU WIN!', coverColor: '#9aa3b2', threshold: 0.6, zoneX: 0, zoneY: 0, zoneW: 100, zoneH: 100, fit: 'follow', revealScale: 1, revealX: 0, revealY: 0, revealBgColor: '', prize: '', cover: '', brushImage: '', brushRadius: 9, brushScale: 40, brushTipX: 50, brushTipY: 50, brushSpawnX: 50, brushSpawnY: 50, brushFollow: false, brushIntro: false, brushIntroPath: '', brushIntroDurationMs: 1600, brushIntroLoops: 2, cursor: 'inherit', cursorAsset: '', shadowBlur: 0, shadowX: 0, shadowY: 4, shadowColor: '#000000' },
   // Zig-zag scratch motion across the card (the editable hint's starting route).
   defaultHandguide: {
     nodes: [
