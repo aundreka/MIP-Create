@@ -533,6 +533,11 @@ export interface SceneElement {
   hideOnOverlay?: boolean // hidden while a floating overlay (win/lose card) is up over this scene
   groupId?: string // elements sharing a groupId select/move/scale together
   showOnWin?: boolean // revealed when the mounted game completes (endcard seed)
+  // Fade this element in/out based on the scratch game's live progress (0..100%). scratchShowAt:
+  // starts hidden and fades IN once progress ≥ the value. scratchHideAt: fades OUT once progress ≥
+  // the value. Set both for a visible window [showAt, hideAt). Unset = always visible (default).
+  scratchShowAt?: number
+  scratchHideAt?: number
   rotation?: number
   opacity?: number
   blur?: number // uniform layer blur radius in design px (CSS filter: blur)

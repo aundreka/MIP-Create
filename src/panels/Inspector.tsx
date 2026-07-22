@@ -12,6 +12,7 @@ import {
   addGameHint,
   alignSelected,
   beginTransaction,
+  clearLandscapeLayout,
   endTransaction,
   convertElement,
   copyElementsFromScene,
@@ -24,6 +25,8 @@ import {
   patchSceneDef,
   refreshScene,
   removeSelected,
+  seedLandscapeLayout,
+  setOrientation,
   setSceneBg,
   setSceneBg2,
   setSyncScope,
@@ -83,7 +86,8 @@ function ReuseFromScene(props: { sceneId: string; scenes: SceneDef[] }): JSX.Ele
     <Accordion id="inspector.reuse" title="Reuse from another scene" defaultOpen={false}>
       <div className="hint pad">
         Copy elements from another scene into this one. Copies share the same underlying assets (each asset is packed once on
-        export, so this barely grows the file) but are edited independently — give this scene's copy its own animations.
+        export, so this barely grows the file) but are edited independently — give this scene's copy its own animations. A copied
+        element keeps its landscape layout too.
       </div>
       <Row label="Scene">
         <Select
@@ -1220,6 +1224,45 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
           <NumField label="Duration" value={tr.durationMs} step={50} onChange={(n) => patchSceneDef(sd.id, { transition: { ...tr, durationMs: n } })} />
         </div>
 
+        <div className="group-title">Landscape layout</div>
+        {(() => {
+          const withLs = sd.elements.filter((e) => e.landscape && Object.keys(e.landscape).length > 0).length
+          return (
+            <>
+              <div className="hint pad">
+                Every element can hold its own <b>landscape</b> position &amp; size — same assets, same animations, only the layout
+                differs. Toggle <b>Landscape</b> in the top bar and drag/resize; those edits never touch portrait.{' '}
+                {withLs > 0 ? (
+                  <>
+                    <b>{withLs}/{sd.elements.length}</b> elements carry landscape overrides in this scene.
+                  </>
+                ) : (
+                  <>No overrides yet — landscape currently mirrors the portrait layout.</>
+                )}
+              </div>
+              <button
+                className="wide"
+                onClick={() => {
+                  seedLandscapeLayout()
+                  setOrientation('landscape')
+                }}
+              >
+                Create separate landscape layout (opens landscape)
+              </button>
+              <div className="hint pad">
+                Snapshots the current portrait layout into landscape for <b>every element</b>, so the two orientations become fully
+                independent — after this, moving things in portrait won’t shift landscape. Reused elements keep their landscape
+                layout when copied to another scene.
+              </div>
+              {withLs > 0 && (
+                <button className="wide danger" onClick={clearLandscapeLayout}>
+                  Reset landscape — follow portrait again
+                </button>
+              )}
+            </>
+          )
+        })()}
+
         <div className="group-title" />
         <ReuseFromScene sceneId={sd.id} scenes={state.project.scenes} />
         </>
@@ -1309,6 +1352,44 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
       )}
       <Toggle label="Above other overlays (top layer)" checked={!!el.overlayTop} onChange={(v) => patchElement(id, { overlayTop: v || undefined })} />
       <Toggle label="Hide on overlay" checked={!!el.hideOnOverlay} onChange={(v) => patchElement(id, { hideOnOverlay: v || undefined })} />
+
+      {/* Per-orientation visibility: base `hidden` + landscape override `landscape.hidden`.
+          The canvas reflects it live — the element only renders in the orientation(s) it
+          shows in (reselect a hidden one via the Layers panel). */}
+      {(() => {
+        const baseHidden = !!el.hidden
+        const lsHidden = el.landscape?.hidden ?? baseHidden
+        const mode: 'both' | 'portrait' | 'landscape' | 'none' =
+          !baseHidden && !lsHidden ? 'both' : !baseHidden && lsHidden ? 'portrait' : baseHidden && !lsHidden ? 'landscape' : 'none'
+        const setMode = (m: 'both' | 'portrait' | 'landscape'): void => {
+          const { hidden: _drop, ...restLs } = el.landscape ?? {}
+          if (m === 'both') patchElement(id, { hidden: undefined, landscape: el.landscape ? restLs : undefined })
+          else if (m === 'portrait') patchElement(id, { hidden: undefined, landscape: { ...restLs, hidden: true } })
+          else patchElement(id, { hidden: true, landscape: { ...restLs, hidden: false } })
+        }
+        return (
+          <>
+            <Row label="Show in">
+              <Chips
+                items={[
+                  { key: 'both', label: 'Both', active: mode === 'both', onClick: () => setMode('both') },
+                  { key: 'portrait', label: 'Portrait only', active: mode === 'portrait', onClick: () => setMode('portrait') },
+                  { key: 'landscape', label: 'Landscape only', active: mode === 'landscape', onClick: () => setMode('landscape') },
+                ]}
+              />
+            </Row>
+            {mode !== 'both' && (
+              <div className="hint pad">
+                {mode === 'none'
+                  ? 'Currently hidden in BOTH orientations (Layers eye + landscape override) — pick a mode above to show it again.'
+                  : mode === 'portrait'
+                    ? 'Only rendered while the ad is in portrait. On the canvas it disappears in landscape view; reselect it from the Layers panel.'
+                    : 'Only rendered while the ad is in landscape. On the canvas it disappears in portrait view; reselect it from the Layers panel.'}
+              </div>
+            )}
+          </>
+        )
+      })()}
 
       {!activeVariant && (
         <>
@@ -2368,6 +2449,24 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
 
       <Accordion id="inspector.effects" title="Effects" defaultOpen={false}>
         <Slider label="Layer blur" value={el.blur ?? 0} min={0} max={80} suffix="px" onChange={(n) => patchElement(id, { blur: n || undefined })} />
+        <div className="group-title2">Fade with scratch progress</div>
+        <div className="hint pad">Fade this element in/out based on how much of the scratch card/grid has been revealed (0–100%).</div>
+        <Toggle
+          label="Fade in at progress"
+          checked={el.scratchShowAt != null}
+          onChange={(v) => patchElement(id, { scratchShowAt: v ? (el.scratchShowAt ?? 30) : undefined })}
+        />
+        {el.scratchShowAt != null && (
+          <Slider label="Fade in at" value={el.scratchShowAt} min={0} max={100} suffix="%" onChange={(n) => patchElement(id, { scratchShowAt: n })} />
+        )}
+        <Toggle
+          label="Fade out at progress"
+          checked={el.scratchHideAt != null}
+          onChange={(v) => patchElement(id, { scratchHideAt: v ? (el.scratchHideAt ?? 80) : undefined })}
+        />
+        {el.scratchHideAt != null && (
+          <Slider label="Fade out at" value={el.scratchHideAt} min={0} max={100} suffix="%" onChange={(n) => patchElement(id, { scratchHideAt: n })} />
+        )}
       </Accordion>
 
       <Accordion id="inspector.animation" title="Animation" defaultOpen={false}>

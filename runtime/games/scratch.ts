@@ -3,6 +3,7 @@
 
 import type { GameContext, GameModule, GameTemplate, HintMove } from './types'
 import { num, str } from './types'
+import { emit } from '../emitter'
 
 // Parse an authored brush-intro path: a JSON list of {x,y} points, each a fraction 0..1 of the card.
 // Returns [] on anything malformed (the runtime then falls back to a default rub).
@@ -17,6 +18,25 @@ const parseBrushPath = (raw: string): { x: number; y: number }[] => {
   } catch {
     return []
   }
+}
+
+// Cover images decoded ahead of time, keyed by src. A scratch card's cover is painted onto a
+// canvas that starts transparent, so if the image is still decoding when the scene mounts, the
+// card shows through for a frame — a visible "cover pops in" flash (worst with a transparent
+// coverColor). Decoding covers before the scene mounts lets mount() paint the cover on the very
+// first frame. Shared across cards (covers are usually the same asset in a multi-card flow).
+const coverCache = new Map<string, HTMLImageElement>()
+
+/** Warm the decoded-image cache for a scratch cover so the card paints it flash-free on mount.
+ * Call ahead of navigating to the scratch scene (playProject preloads every scratch cover at boot). */
+export function preloadScratchCover(src: string): void {
+  if (!src || coverCache.has(src)) return
+  const img = new Image()
+  img.src = src
+  coverCache.set(src, img)
+  // decode() resolves once the bitmap is ready, so a later drawImage is immediate. Best-effort:
+  // older WebViews lack it (the onload path still covers them) and it can reject on detached imgs.
+  img.decode?.().catch(() => { /* fall back to onload timing */ })
 }
 
 export function createScratch(): GameModule {
@@ -37,6 +57,11 @@ export function createScratch(): GameModule {
   let moves = 0
   let coverImg: HTMLImageElement | null = null
   let coverReady = false
+  // The prize/reveal sits BENEATH the cover canvas. Until the cover has actually painted an
+  // occluding frame, showing the prize would let it flash through (e.g. a transparent-color
+  // cover whose image is still loading when the scene fades in). Keep the prize hidden until
+  // markCovered() confirms the cover is down.
+  let coverPainted = false
   // Reveal sizing. The COVER image is ALWAYS drawn 'contain' (whole image fit inside the card,
   // aspect-preserved). 'follow' (default) sizes the reveal to exactly the cover's contained rect and
   // stretches it to fill — so the prize sits directly under the cover and matches its shape. 'fit'
@@ -269,6 +294,14 @@ export function createScratch(): GameModule {
     c2d.fillText('Scratch to reveal', w / 2, h / 2)
   }
 
+  // Reveal the prize once the cover is confirmed on screen — hidden until now so it can't
+  // flash through a not-yet-painted (transparent / still-loading) cover during scene entry.
+  const markCovered = (): void => {
+    if (coverPainted) return
+    coverPainted = true
+    if (prize) prize.style.visibility = 'visible'
+  }
+
   const sizeCanvas = (): void => {
     relayoutBrush() // keep the brush pinned to its card-fraction across resize / orientation flips
     const cssW = Math.max(2, Math.round(ctx.root.clientWidth))
@@ -342,6 +375,7 @@ export function createScratch(): GameModule {
   const reveal = (): void => {
     if (won) return
     won = true
+    emit('scratch-progress', 1) // fully revealed → drive any threshold-based element fades
     if (winCb) winCb() // fires immediately at win — for SFX that should not be delayed
     ctx.sfx.loopStop?.('drag') // stop the scratching loop on win
     fadeBrush() // prize revealed — fade the brush out
@@ -405,7 +439,7 @@ export function createScratch(): GameModule {
       prize = document.createElement('div')
       prize.style.cssText =
         'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;overflow:hidden;' +
-        `background:${revealBg};color:#fff;font-weight:800;text-align:center;` +
+        `background:${revealBg};color:#fff;font-weight:800;text-align:center;visibility:hidden;` +
         'user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;'
       if (prizeSrc) {
         if (fitMode === 'fit') {
@@ -433,13 +467,27 @@ export function createScratch(): GameModule {
       positionReveal() // no cover image yet → full card; refined once the cover loads
 
       if (coverSrc) {
-        coverImg = new Image()
-        coverImg.onload = () => {
+        const cached = coverCache.get(coverSrc)
+        if (cached && cached.complete && (cached.naturalWidth || cached.width)) {
+          // Already decoded (preloaded ahead of mount): adopt it so sizeCanvas() paints the cover
+          // synchronously on the first frame — no transparent gap, no pop-in flash.
+          coverImg = cached
           coverReady = true
-          positionReveal() // now the cover aspect is known → size the reveal to its contain rect
-          if (!won) fillCover()
+        } else {
+          coverImg = new Image()
+          coverImg.onload = () => {
+            coverReady = true
+            positionReveal() // now the cover aspect is known → size the reveal to its contain rect
+            if (!won) fillCover()
+            markCovered() // opaque cover image is down → safe to show the prize beneath it
+          }
+          // Cover art failed to load: don't strand the prize hidden forever. If an opaque
+          // coverColor was filled it still hides the prize; otherwise the card is see-through
+          // by authoring and the prize is meant to show.
+          coverImg.onerror = () => markCovered()
+          coverImg.src = coverSrc
+          coverCache.set(coverSrc, coverImg) // warm the cache for any later card using this cover
         }
-        coverImg.src = coverSrc
       }
 
       // Optional brush: a floating image whose authored tip does the scratching. Created hidden;
@@ -480,7 +528,12 @@ export function createScratch(): GameModule {
       }
       ctx.root.appendChild(canvas)
       c2d = canvas.getContext('2d')!
-      sizeCanvas()
+      sizeCanvas() // paints the initial cover synchronously (coverColor + any preloaded image)
+      // Show the prize right away only when nothing async can uncover it: no cover image to wait
+      // for, an opaque coverColor already fills the canvas this frame, or the cover image was
+      // preloaded and just painted. A still-loading image over a transparent color stays hidden
+      // until its onload (handled above) so the reveal never flashes through.
+      if (!coverSrc || coverColor || coverReady) markCovered()
       ro = new ResizeObserver(() => sizeCanvas())
       ro.observe(ctx.root)
 
@@ -553,7 +606,11 @@ export function createScratch(): GameModule {
         const t = brushTip(c.x, c.y)
         const p = toCanvas(t.x, t.y)
         erodeAt(p.x, p.y)
-        if ((moves++ & 7) === 0 && measure() >= threshold) reveal()
+        if ((moves++ & 7) === 0) {
+          const m = measure()
+          emit('scratch-progress', m) // fade scene elements in/out at progress thresholds
+          if (m >= threshold) reveal()
+        }
       }
       const onScratchEnd = (): void => {
         scratching = false

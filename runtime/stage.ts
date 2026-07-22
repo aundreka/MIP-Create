@@ -708,6 +708,26 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     if (inner) inner.textContent = String(value)
   })
 
+  // Fade elements in/out as the scratch game progresses. scratchShowAt = fade IN once progress
+  // reaches it; scratchHideAt = fade OUT once progress reaches it; both = a visible window. The
+  // scratch games emit 'scratch-progress' (0..1). Activated in startGames (interactive playback only).
+  const revealEls = recs.filter((r) => r.el.scratchShowAt != null || r.el.scratchHideAt != null)
+  let offScratchProgress: (() => void) | null = null
+  let lastScratchP = 0 // re-applied after every layout pass (layoutRec resets outer opacity)
+  const applyScratchReveal = (p: number): void => {
+    lastScratchP = p
+    for (const r of revealEls) {
+      const showAt = r.el.scratchShowAt != null ? r.el.scratchShowAt / 100 : -Infinity
+      const hideAt = r.el.scratchHideAt != null ? r.el.scratchHideAt / 100 : Infinity
+      const visible = p >= showAt && p < hideAt
+      if (!r.outer.style.transition.includes('opacity')) {
+        r.outer.style.transition = (r.outer.style.transition ? r.outer.style.transition + ', ' : '') + 'opacity 350ms ease'
+      }
+      r.outer.style.opacity = visible ? String(r.el.opacity ?? 1) : '0'
+      r.outer.style.pointerEvents = visible ? '' : 'none'
+    }
+  }
+
   // Fire 'elementEnter' SFX bindings for an element as it animates in. Scheduled at the
   // entrance's own delay so staggered elements each pop with their sound in sync with the
   // visual (delay 0 = element has no entrance → fires immediately). Used for staggered pop-ins.
@@ -749,8 +769,19 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       for (const rec of recs) if (rec.host) rec.host.relayout()
       for (const rec of recs) if (rec.confetti) rec.confetti.resize()
       for (const fn of postLayout) fn() // re-anchor imperatively-positioned mechanics (drag, …)
+      // layoutRec resets outer opacity from el.opacity — re-impose the scratch-progress
+      // fade state so a resize/rotation can't pop threshold-hidden elements back in.
+      if (offScratchProgress) applyScratchReveal(lastScratchP)
     },
     startGames(interactive) {
+      // Scratch-progress element fades (scratchShowAt/scratchHideAt) run in interactive
+      // playback only — the editor canvas keeps them visible so they stay placeable.
+      // Applying progress 0 here (same frame as mount, before first paint) hides
+      // "fade in later" elements from the start without a visible fade-out flash.
+      if (interactive && revealEls.length && !offScratchProgress) {
+        applyScratchReveal(0)
+        offScratchProgress = on('scratch-progress', (p: unknown) => applyScratchReveal(Number(p) || 0))
+      }
       for (const rec of recs) {
         if (rec.el.type === 'game-mount' && !rec.host && rec.content) {
           rec.host = createGameHost({
@@ -801,6 +832,12 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
             rec.confetti.renderStatic()
           }
         }
+      }
+      // Threshold-based element fades: set the initial (progress 0) state and start listening for
+      // the scratch game's progress. Interactive playback only, and once.
+      if (interactive && revealEls.length && !offScratchProgress) {
+        applyScratchReveal(0) // hides any scratchShowAt elements before the first paint
+        offScratchProgress = on('scratch-progress', (p: number) => applyScratchReveal(typeof p === 'number' ? p : 0))
       }
       // quiz/survey choices: options select (mutually exclusive within a group);
       // in feedback mode the correct option turns green and a wrong pick red. An
@@ -1209,6 +1246,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     get: (id) => byId.get(id),
     destroy() {
       offSetText()
+      offScratchProgress?.()
       for (const t of enterSfxTimers) window.clearTimeout(t)
       enterSfxTimers.length = 0
       for (const dispose of scratchDisposers) dispose()
@@ -1672,7 +1710,12 @@ function layoutText(rec: Rec, e: Effective): void {
   const inner = box.firstElementChild as HTMLElement | null
   if (!inner) return
   const attached = attachedTextPos(rec, e)
-  const s = attached ? attached.k : scale()
+  // e.scale multiplies the whole text box (font, spacing, stroke, box padding).
+  // Text has no other per-orientation size channel — fontSizePx is shared config —
+  // so a landscape override's `scale` is how landscape resizes text independently.
+  // (Historically ignored for text, but the editor never exposed scale on text
+  // elements, so honoring it changes nothing for existing scenes.)
+  const s = (attached ? attached.k : scale()) * (e.scale || 1)
 
   // inner text styling (re-applied each layout so edits stay reactive).
   // Countdown elements show the live formatted time, not the static value.

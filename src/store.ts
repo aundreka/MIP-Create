@@ -342,6 +342,43 @@ export function addGameHint(gameId: string): void {
   addElement(hg)
 }
 
+// ---- per-scene landscape layout -------------------------------------------
+// Landscape geometry lives per element in `el.landscape` (OrientationOverride) and
+// falls back to the portrait value PER FIELD — so until a field is touched, a
+// portrait edit silently moves landscape too. "Seeding" snapshots the current
+// portrait geometry into a FULL landscape override for every element in the active
+// scene, decoupling the two layouts: same assets + animations, but from then on
+// each orientation is positioned/scaled independently. Fields an element already
+// overrode keep their landscape value; w/h stay unset when portrait auto-sizes.
+// Writes the BASE scene elements directly (one set, one undo step) — NOT via
+// patchElement, which reroutes into variant patches while a variant is being
+// edited (the seed would then never reach the base elements, the canvas banner's
+// override count would stay 0, and the button would appear to do nothing).
+// Like scene settings, the landscape layout is base-only.
+export function seedLandscapeLayout(): void {
+  if (!activeSceneDef().elements.length) return
+  beginTransaction()
+  mapActiveScene((s) => ({
+    ...s,
+    elements: s.elements.map((e) => {
+      const seed: OrientationOverride = { x: e.x, y: e.y, scale: e.scale ?? 1, anchor: e.anchor, mode: e.mode, zIndex: e.zIndex }
+      if (e.w != null) seed.w = e.w
+      if (e.h != null) seed.h = e.h
+      if (e.hidden != null) seed.hidden = e.hidden
+      return { ...e, landscape: { ...seed, ...(e.landscape ?? {}) } }
+    }),
+  }))
+  endTransaction()
+}
+
+// Drop every landscape override in the active scene — landscape follows portrait again.
+export function clearLandscapeLayout(): void {
+  if (!activeSceneDef().elements.some((e) => e.landscape)) return
+  beginTransaction()
+  mapActiveScene((s) => ({ ...s, elements: s.elements.map((e) => (e.landscape ? { ...e, landscape: undefined } : e)) }))
+  endTransaction()
+}
+
 // Reuse elements from another scene: plain copies (fresh ids) added to the ACTIVE
 // scene. Copies keep the source's geometry/asset/config but are fully independent —
 // so each scene can carry its own animations/tweaks. They reference the same asset
@@ -542,22 +579,26 @@ export function alignSelected(op: AlignOp): void {
   const ids = state.selectedIds
   if (!ids.length) return
   const m = state.project.meta
-  // Route each write through patchElement so alignment respects variant edit-mode
-  // (writes a variant override) instead of silently editing the base element.
+  // Route each write through patchGeometry so alignment lands in the right place:
+  // a variant override in variant edit-mode, the LANDSCAPE override in landscape
+  // orientation (aligning there must never move the portrait layout), else the base.
+  const landscape = state.orientation === 'landscape'
   beginTransaction()
   for (const id of ids) {
     const e = state.scene.elements.find((x) => x.id === id)
     if (!e) continue
-    const [h, v] = A_DECOMP[e.anchor] ?? ['center', 'center']
-    let { x, y } = e
-    let anchor = e.anchor
+    const ov = landscape ? e.landscape ?? {} : {}
+    const [h, v] = A_DECOMP[ov.anchor ?? e.anchor] ?? ['center', 'center']
+    let x = ov.x ?? e.x
+    let y = ov.y ?? e.y
+    let anchor = ov.anchor ?? e.anchor
     if (op === 'left') ((x = 0), (anchor = recompose('left', v)))
     else if (op === 'centerH') ((x = Math.round(m.baseW / 2)), (anchor = recompose('center', v)))
     else if (op === 'right') ((x = m.baseW), (anchor = recompose('right', v)))
     else if (op === 'top') ((y = 0), (anchor = recompose(h, 'top')))
     else if (op === 'middleV') ((y = Math.round(m.baseH / 2)), (anchor = recompose(h, 'center')))
     else ((y = m.baseH), (anchor = recompose(h, 'bottom')))
-    patchElement(id, { x, y, anchor })
+    patchGeometry(id, { x, y, anchor })
   }
   endTransaction()
 }

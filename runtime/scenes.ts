@@ -9,6 +9,7 @@ import { buildScene, type StageHandle } from './stage'
 import { notifyGameClose, notifyGameEnd, triggerCTA } from './networks'
 import { createSfxManager, type SfxManager } from './sfx'
 import { mountHeader } from './header'
+import { preloadScratchCover } from './games/scratch'
 import type { Project, Scene, SceneDef, Transition } from './scene'
 import type { AssetMap } from './types'
 
@@ -76,6 +77,19 @@ export function playProject(
   // covers engines/old WebViews that ignore user-select on plain divs.
   container.addEventListener('selectstart', (e) => e.preventDefault())
   opts.mount.appendChild(container)
+
+  // Decode every scratch cover up front so the card paints its cover on the first frame it
+  // mounts — no transparent gap where the reveal/background flashes through (a scratch scene
+  // is usually reached mid-flow, so there's ample time to decode before the player gets there).
+  if (opts.interactive) {
+    for (const s of project.scenes)
+      for (const e of s.elements)
+        if (e.type === 'game-mount' && e.game?.templateId === 'scratch') {
+          const coverId = e.game.params?.cover
+          const src = typeof coverId === 'string' ? assets[coverId]?.src : ''
+          if (src) preloadScratchCover(src)
+        }
+  }
 
   // The pinned date header is opt-in: only mount it when the project explicitly
   // configures `meta.header`. Projects without it export with no date band.
@@ -277,7 +291,11 @@ export function playProject(
         if (def.kind === 'endscene' || gameWon) {
           window.sessionStorage.removeItem('pa:resume-scene')
         } else {
-          window.sessionStorage.setItem('pa:resume-scene', JSON.stringify({ id: def.id, t: Date.now() }))
+          // Record the orientation too: resume is meant ONLY for AppLovin's reload-on-
+          // orientation-change. boot() resumes solely when the orientation differs from
+          // this record — so a plain refresh (same orientation) restarts the flow.
+          const o = window.innerWidth >= window.innerHeight ? 'l' : 'p'
+          window.sessionStorage.setItem('pa:resume-scene', JSON.stringify({ id: def.id, t: Date.now(), o }))
         }
       } catch { /* storage unavailable — rotation reloads restart the flow */ }
       stage.playEntrances() // onMount entrances (skipped on the static editor canvas)
@@ -343,7 +361,7 @@ export function playProject(
           unsubGameDone()
           unsubGameDone = null
         }
-        advanceTimer = window.setTimeout(go, rule.delayMs ?? 700)
+        advanceTimer = window.setTimeout(go, rule.delayMs ?? 0)
       })
     } else if (rule.on === 'timer') {
       advanceTimer = window.setTimeout(go, rule.delayMs ?? 2000)

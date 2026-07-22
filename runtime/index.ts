@@ -48,17 +48,22 @@ export async function boot(project: Project, assets: AssetMap, opts: { mount?: H
   const first = viewport()
   computeMetrics(first.w, first.h)
 
-  // Resume after a container-forced page reload (e.g. AppLovin reloads the
-  // creative on orientation change): scenes.ts records the active scene as the
-  // player moves; a fresh boot within a short TTL re-enters that scene instead
-  // of restarting the flow. A genuinely new impression (stale/no record) starts
-  // from the beginning as usual. Export runtime only — the editor never resumes.
+  // Resume after a container-forced page reload (specifically AppLovin reloading the
+  // creative on ORIENTATION CHANGE): scenes.ts records the active scene + orientation as
+  // the player moves; a fresh boot within a short TTL re-enters that scene ONLY when the
+  // orientation has flipped. A plain refresh (same orientation) — or a genuinely new
+  // impression (stale/no record) — starts from the beginning. Export runtime only.
   let resumeSceneId: string | undefined
   try {
     const raw = window.sessionStorage.getItem('pa:resume-scene')
     if (raw) {
-      const s = JSON.parse(raw) as { id?: string; t?: number }
-      if (s && typeof s.id === 'string' && Date.now() - (s.t ?? 0) < 30_000) resumeSceneId = s.id
+      const s = JSON.parse(raw) as { id?: string; t?: number; o?: string }
+      const curO = window.innerWidth >= window.innerHeight ? 'l' : 'p'
+      // Resume only on an orientation-change reload — a same-orientation reload (manual
+      // refresh) is treated as a restart. Records without an orientation (legacy) never resume.
+      if (s && typeof s.id === 'string' && Date.now() - (s.t ?? 0) < 30_000 && s.o && s.o !== curO) {
+        resumeSceneId = s.id
+      }
     }
   } catch { /* storage unavailable */ }
 

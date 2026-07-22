@@ -4,7 +4,7 @@
 // scene), and remap groupId so a copied group doesn't couple to the source group.
 import { describe, expect, it, beforeEach } from 'vitest'
 import type { Project, SceneElement } from '../runtime/scene'
-import { activeSceneDef, copyElementsFromScene, loadProject, setActiveScene } from './store'
+import { activeSceneDef, alignSelected, clearLandscapeLayout, copyElementsFromScene, loadProject, patchElement, seedLandscapeLayout, setActiveScene, setOrientation, setSelection } from './store'
 
 const el = (id: string, extra: Partial<SceneElement> = {}): SceneElement =>
   ({
@@ -91,5 +91,98 @@ describe('copyElementsFromScene', () => {
     copyElementsFromScene('s2', ['bg1'])
     copyElementsFromScene('nope', ['bg1'])
     expect(activeSceneDef().elements).toHaveLength(0)
+  })
+
+  it('carries an element landscape layout across to the copy', () => {
+    setActiveScene('s1')
+    seedLandscapeLayout()
+    setActiveScene('s2')
+    copyElementsFromScene('s1', ['a2'])
+    const copy = activeSceneDef().elements[0]
+    expect(copy.landscape).toBeDefined()
+    expect(copy.landscape?.x).toBe(100)
+    expect(copy.landscape?.y).toBe(200)
+  })
+})
+
+describe('per-scene landscape layout', () => {
+  beforeEach(() => {
+    loadProject(makeProject(), {}, null)
+    setActiveScene('s1')
+  })
+
+  it('seeding snapshots portrait geometry into full landscape overrides', () => {
+    seedLandscapeLayout()
+    for (const e of activeSceneDef().elements) {
+      expect(e.landscape).toBeDefined()
+      expect(e.landscape?.x).toBe(e.x)
+      expect(e.landscape?.y).toBe(e.y)
+      expect(e.landscape?.anchor).toBe(e.anchor)
+      expect(e.landscape?.mode).toBe(e.mode)
+    }
+  })
+
+  it('after seeding, a portrait move no longer shifts landscape', () => {
+    seedLandscapeLayout()
+    const before = { ...activeSceneDef().elements.find((e) => e.id === 'a2')!.landscape }
+    patchElement('a2', { x: 999, y: 888 })
+    const after = activeSceneDef().elements.find((e) => e.id === 'a2')!
+    expect(after.x).toBe(999)
+    expect(after.landscape?.x).toBe(before.x) // landscape pinned to the snapshot
+    expect(after.landscape?.y).toBe(before.y)
+  })
+
+  it('seeding preserves fields the user already overrode', () => {
+    patchElement('a2', { landscape: { x: 55 } }) // a prior manual landscape tweak
+    seedLandscapeLayout()
+    const after = activeSceneDef().elements.find((e) => e.id === 'a2')!
+    expect(after.landscape?.x).toBe(55) // manual value kept
+    expect(after.landscape?.y).toBe(after.y) // gap filled from portrait
+  })
+
+  it('clearLandscapeLayout drops every override', () => {
+    seedLandscapeLayout()
+    clearLandscapeLayout()
+    for (const e of activeSceneDef().elements) expect(e.landscape).toBeUndefined()
+  })
+
+  it('aligning in landscape writes ONLY the landscape override, never portrait', () => {
+    setSelection(['a2'])
+    setOrientation('landscape')
+    try {
+      alignSelected('left')
+    } finally {
+      setOrientation('portrait')
+    }
+    const el = activeSceneDef().elements.find((e) => e.id === 'a2')!
+    expect(el.x).toBe(100) // portrait untouched
+    expect(el.anchor).toBe('center')
+    expect(el.landscape?.x).toBe(0) // landscape aligned to the left edge
+    expect(el.landscape?.anchor).toBe('left')
+  })
+
+  it('aligning in portrait leaves an existing landscape layout untouched', () => {
+    seedLandscapeLayout()
+    setSelection(['a2'])
+    alignSelected('right')
+    const el = activeSceneDef().elements.find((e) => e.id === 'a2')!
+    expect(el.x).toBe(1080) // portrait aligned
+    expect(el.landscape?.x).toBe(100) // landscape pinned to its snapshot
+  })
+
+  it('seeds the BASE elements even while a variant is being edited', async () => {
+    // patchElement reroutes into variant patches during variant editing — the seed
+    // must bypass that, or the canvas banner never clears (count stays 0).
+    const { setActiveVariant } = await import('./variantMode')
+    setActiveVariant('v1')
+    try {
+      seedLandscapeLayout()
+    } finally {
+      setActiveVariant(null)
+    }
+    for (const e of activeSceneDef().elements) {
+      expect(e.landscape).toBeDefined()
+      expect(e.landscape?.x).toBe(e.x)
+    }
   })
 })

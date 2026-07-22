@@ -390,6 +390,7 @@ export function createScratchGrid(): GameModule {
 
   const updateRevealAssets = (): void => {
     const p = gridProgress()
+    emit('scratch-progress', p) // let scene elements fade in/out at progress thresholds
     for (const ra of revealAssetsState) {
       const shouldShow = p >= ra.showAt && p < ra.hideAt
       if (shouldShow !== ra.visible) {

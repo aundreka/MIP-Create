@@ -10,8 +10,12 @@ import { getGroupCollapsed, pruneGroupCollapsed, setGroupCollapsed } from '../ui
 import { ChevronRight, Eye, EyeOff, Folder, FolderOpen, GripVertical, Icon, LAYER_TYPE_ICON, LayoutGrid, Lock, LockOpen, X } from '../icons'
 
 export function LayersPanel(): JSX.Element {
-  const { scene, selectedIds } = useEditorState()
+  const { scene, selectedIds, orientation } = useEditorState()
   const ordered = [...scene.elements].sort((a, b) => b.zIndex - a.zIndex) // front first
+  // Visibility as the CURRENT canvas orientation renders it (landscape override wins
+  // in landscape) — so a landscape-only element isn't dimmed while editing landscape.
+  const effHidden = (el: SceneElement): boolean =>
+    orientation === 'landscape' ? !!(el.landscape?.hidden ?? el.hidden) : !!el.hidden
   const tree = buildLayerTree(ordered)
   const [dragId, setDragId] = useState<string | null>(null)
   const [over, setOver] = useState<{ id: string; pos: 'before' | 'after' } | null>(null)
@@ -42,7 +46,7 @@ export function LayersPanel(): JSX.Element {
         'layer-row' +
         (selectedIds.includes(el.id) ? ' sel' : '') +
         (over?.id === el.id ? (over.pos === 'before' ? ' drop-before' : ' drop-after') : '') +
-        (el.hidden ? ' is-hidden' : '') +
+        (effHidden(el) ? ' is-hidden' : '') +
         (el.locked ? ' locked' : '') +
         (child ? ' child' : '')
       }
@@ -73,6 +77,13 @@ export function LayersPanel(): JSX.Element {
         <Icon icon={LAYER_TYPE_ICON[el.type] ?? LayoutGrid} size={14} />
       </span>
       <span className="layer-name">{el.name || el.id}</span>
+      {/* Orientation-limited elements (Inspector "Show in"): P = portrait only, L = landscape only. */}
+      {!el.hidden && el.landscape?.hidden === true && (
+        <span className="layer-orient" title="Shows in portrait only (hidden in landscape)">P</span>
+      )}
+      {el.hidden && el.landscape?.hidden === false && (
+        <span className="layer-orient" title="Shows in landscape only (hidden in portrait)">L</span>
+      )}
       <button
         className={'layer-btn' + (el.locked ? ' on' : '')}
         title={el.locked ? 'Unlock' : 'Lock'}
@@ -91,7 +102,7 @@ export function LayersPanel(): JSX.Element {
           patchElement(el.id, { hidden: !el.hidden })
         }}
       >
-        <Icon icon={el.hidden ? EyeOff : Eye} size={14} />
+        <Icon icon={effHidden(el) ? EyeOff : Eye} size={14} />
       </button>
       <button
         className="layer-btn"
