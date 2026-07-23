@@ -585,6 +585,105 @@ export function createScratchGrid(): GameModule {
     return total > 0 ? clear / total : 0
   }
 
+  // Deepest point of the still-COVERED (unscratched) area inside a cell's reveal zone.
+  // Reads the same analytic coverGrid as measure(). A multi-source BFS treats every
+  // scratched cell AND the zone border as distance 0, so the returned point is the one
+  // furthest from anything already scratched — i.e. squarely in unscratched cover, never
+  // on a scratched pixel like a centroid can be. `clearance` is that distance (in 0..1
+  // cell units) so the caller can size the rub to stay inside the covered region.
+  // Returns null if the whole zone is already clear.
+  const unscratchedTarget = (
+    cell: CellState,
+  ): { x: number; y: number; clearance: number } | null => {
+    const S = COVERAGE_S
+    const grid = cell.coverGrid
+    const x0 = Math.max(0, Math.floor(zoneX * S))
+    const y0 = Math.max(0, Math.floor(zoneY * S))
+    const x1 = Math.min(S, Math.ceil((zoneX + zoneW) * S))
+    const y1 = Math.min(S, Math.ceil((zoneY + zoneH) * S))
+    const w = x1 - x0
+    const h = y1 - y0
+    if (w <= 0 || h <= 0) return null
+    // dist over the zone sub-grid: 0 = scratched (BFS source), -1 = unvisited cover.
+    const dist = new Int16Array(w * h).fill(-1)
+    let head = 0
+    const qx: number[] = []
+    const qy: number[] = []
+    let coverCount = 0
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        const li = (y - y0) * w + (x - x0)
+        if (grid[y * S + x]) {
+          dist[li] = 0
+          qx.push(x - x0); qy.push(y - y0)
+        } else {
+          coverCount++
+        }
+      }
+    }
+    if (coverCount === 0) return null
+    // Border cells that touch the zone edge also seed the BFS, so the hand stays away
+    // from the very edge (where the cover is thinnest) and aims at the interior.
+    for (let ly = 0; ly < h; ly++) {
+      for (let lx = 0; lx < w; lx++) {
+        if (dist[ly * w + lx] !== -1) continue
+        if (lx === 0 || ly === 0 || lx === w - 1 || ly === h - 1) {
+          dist[ly * w + lx] = 0
+          qx.push(lx); qy.push(ly)
+        }
+      }
+    }
+    // 4-neighbour BFS → each cover cell gets its (approx) distance to the nearest source.
+    let bestD = -1
+    let bx = x0 + w / 2
+    let by = y0 + h / 2
+    while (head < qx.length) {
+      const cx = qx[head]
+      const cy = qy[head]
+      head++
+      const d = dist[cy * w + cx]
+      if (d > bestD) { bestD = d; bx = x0 + cx; by = y0 + cy }
+      const nb = [[cx - 1, cy], [cx + 1, cy], [cx, cy - 1], [cx, cy + 1]]
+      for (const [nx, ny] of nb) {
+        if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue
+        const ni = ny * w + nx
+        if (dist[ni] !== -1) continue
+        dist[ni] = d + 1
+        qx.push(nx); qy.push(ny)
+      }
+    }
+    return { x: (bx + 0.5) / S, y: (by + 0.5) / S, clearance: Math.max(0, bestD) / S }
+  }
+
+  // Keep the cell's data-hint-* rub path (read by the handguide's scratch animator in
+  // stage.ts) aimed at what's still COVERED, and stamp data-scratch-cov so that animator
+  // can pick the most-scratched (closest-to-winning) cell. Until the player has actually
+  // scratched this cell we leave the AUTHORED path — that's the initial hand placement;
+  // once scratching starts the path becomes dynamic and chases the remaining cover.
+  const refreshHintPath = (cell: CellState, cov: number = measure(cell)): void => {
+    cell.el.dataset.scratchCov = cov.toFixed(3)
+    if (cov <= 0.05) {
+      // Untouched (or fully re-covered) → keep pointing along the authored path.
+      cell.el.dataset.hintFx = String(cell.hintFrom.x)
+      cell.el.dataset.hintFy = String(cell.hintFrom.y)
+      cell.el.dataset.hintTx = String(cell.hintTo.x)
+      cell.el.dataset.hintTy = String(cell.hintTo.y)
+      return
+    }
+    const target = unscratchedTarget(cell)
+    if (!target) return
+    // A short rub centered on the deepest covered point, kept within that covered pocket
+    // (clearance) and the reveal zone, so the hand rubs over cover — never cleared area.
+    const half = Math.max(0.03, Math.min(0.16, target.clearance * 0.8))
+    const fx = Math.max(zoneX, Math.min(zoneX + zoneW, target.x - half))
+    const tx = Math.max(zoneX, Math.min(zoneX + zoneW, target.x + half))
+    const y = Math.max(zoneY, Math.min(zoneY + zoneH, target.y))
+    cell.el.dataset.hintFx = fx.toFixed(4)
+    cell.el.dataset.hintFy = y.toFixed(4)
+    cell.el.dataset.hintTx = tx.toFixed(4)
+    cell.el.dataset.hintTy = y.toFixed(4)
+  }
+
   const sizeAll = (): void => {
     if (gridEl) {
       // Padding + gaps are authored in DESIGN px — the same space as the element's w/h and
@@ -870,7 +969,11 @@ export function createScratchGrid(): GameModule {
       const t = brushTip(c.x, c.y)
       const p = toCanvas(t.x, t.y)
       erodeAt(p.x, p.y)
-      if ((moves++ & 7) === 0 && measure(cell) >= threshold) revealCell(cell)
+      if ((moves++ & 7) === 0) {
+        const cov = measure(cell)
+        if (cov >= threshold) revealCell(cell)
+        else refreshHintPath(cell, cov) // keep the hint hand chasing the remaining cover
+      }
     }
 
     const onEnd = (): void => {
@@ -1331,18 +1434,44 @@ export function createScratchGrid(): GameModule {
       // A grab-mode brush is itself the on-screen tool (point-at-brush is a handguide
       // mode); a follow-mode brush is invisible at rest, so the rub hint still helps.
       if (brushEl && !brushFollow) return null
-      const cell = cells.find((c) => !c.won)
-      if (!cell) return null
+      // Reappear in the cell the player has scratched the MOST (closest to winning),
+      // not just the first unwon cell — so the hand nudges them to finish what they
+      // already started. A fully-fresh grid (all coverage 0) falls back to the first
+      // unwon cell, keeping the original left-to-right behaviour.
+      const unwon = cells.filter((c) => !c.won)
+      if (!unwon.length) return null
+      let cell = unwon[0]
+      let best = -1
+      for (const c of unwon) {
+        const cov = measure(c)
+        if (cov > best) { best = cov; cell = c }
+      }
       const r = cell.canvas.getBoundingClientRect()
       // Shrink the hint hand so it fits the cell (the hand is a fixed ~46×56px). Short,
       // wide cells in a 1-column / 4-row grid would otherwise get an oversized hand that
       // looks off-center; cap at 1 so normal cells keep the natural size.
       const fit = Math.max(0.45, Math.min(1, Math.min((r.height * 0.62) / 56, (r.width * 0.62) / 46)))
-      // The hand rubs along this cell's configured start→end path (defaults to a
-      // centered horizontal rub). Points are a 0..1 fraction of the cell.
+      // Default to this cell's configured start→end path (a centered horizontal rub).
+      // Points are a 0..1 fraction of the cell.
+      let fx = cell.hintFrom.x
+      let fy = cell.hintFrom.y
+      let tx = cell.hintTo.x
+      let ty = cell.hintTo.y
+      // Once the player has actually started scratching this cell, steer the rub onto
+      // the part of the reveal zone that's still covered instead of the authored path.
+      if (best > 0.05) {
+        const target = unscratchedTarget(cell)
+        if (target) {
+          // Short horizontal rub centered on the unscratched mass, clamped to the zone.
+          const half = Math.min(0.18, zoneW * 0.35)
+          fx = Math.max(zoneX, Math.min(zoneX + zoneW, target.x - half))
+          tx = Math.max(zoneX, Math.min(zoneX + zoneW, target.x + half))
+          fy = ty = Math.max(zoneY, Math.min(zoneY + zoneH, target.y))
+        }
+      }
       return {
-        from: { x: r.left + r.width * cell.hintFrom.x, y: r.top + r.height * cell.hintFrom.y },
-        to: { x: r.left + r.width * cell.hintTo.x, y: r.top + r.height * cell.hintTo.y },
+        from: { x: r.left + r.width * fx, y: r.top + r.height * fy },
+        to: { x: r.left + r.width * tx, y: r.top + r.height * ty },
         kind: 'scratch',
         scale: fit,
       }

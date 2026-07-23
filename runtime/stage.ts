@@ -271,9 +271,16 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
       return
     }
     if (kind === 'scratch') {
-      // Target the first unscratched cell; query every frame so the hand
-      // automatically shifts to the next cell once the current one is won.
-      const cellEl = root.querySelector<HTMLElement>('[data-scratch-cell]:not([data-won])')
+      // Target the MOST-scratched unwon cell (closest to winning), not just the first,
+      // so the hand reappears on the cell the player already started. The scratch grid
+      // stamps data-scratch-cov per cell; ties / a fresh grid (all 0) fall back to the
+      // first cell in DOM order. Queried every frame so it re-targets live as they play.
+      let cellEl: HTMLElement | null = null
+      let bestCov = -1
+      for (const el of root.querySelectorAll<HTMLElement>('[data-scratch-cell]:not([data-won])')) {
+        const cov = parseFloat(el.dataset.scratchCov ?? '0') || 0
+        if (cov > bestCov) { bestCov = cov; cellEl = el }
+      }
       if (cellEl) {
         const cellRect = cellEl.getBoundingClientRect()
         const guideRect = rec.outer.getBoundingClientRect()
