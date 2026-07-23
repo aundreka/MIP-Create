@@ -118,7 +118,6 @@ export function createUnboxingContent(el: SceneElement, ctx: RuntimeCtx): HTMLDi
 
   const wrap = document.createElement('div')
   wrap.style.cssText = 'position:relative;width:100%;height:100%;'
-  let selectedCellIdx = -1
 
   // ── container background ─────────────────────────────────────────────────
   let bgEl: HTMLImageElement | null = null
@@ -299,7 +298,6 @@ export function createUnboxingContent(el: SceneElement, ctx: RuntimeCtx): HTMLDi
     if (state !== 'idle') return
 
     const isWin = resolveWin(idx)
-    selectedCellIdx = idx
 
     if (!isWin) {
       revealLoseInPlace(idx)

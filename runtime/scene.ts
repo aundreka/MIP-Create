@@ -168,7 +168,14 @@ export interface ButtonConfig {
   // Target scene id to navigate to on click. Empty/unset = advance to the scene's
   // configured next scene (same as a tap), via the generic 'pa-advance' signal.
   targetSceneId?: string
+  // Visual tap feedback, applied while the element is held down (:active).
+  // Unset/'none' = no feedback. Also used by plain IMAGE elements marked as buttons.
+  tapEffect?: ButtonTapEffect
 }
+
+// 'press' = brief scale-down (the most readable "tap registered" signal on touch);
+// 'glow' = box-shadow bloom; 'outline' = a ring around the element.
+export type ButtonTapEffect = 'none' | 'press' | 'glow' | 'outline'
 
 export interface EndsceneConfig {
   /** 'video' (default) shows a video/image card; 'html' embeds an HTML asset in an iframe. */
@@ -473,7 +480,12 @@ export interface GameMountConfig {
 }
 
 export interface BackgroundConfig {
-  objectFit?: ObjectFit
+  // 'fill' stretches the image to the exact screen width AND height (no crop, may
+  // distort) — for portrait-only art that should fill the screen without cropping.
+  objectFit?: ObjectFit | 'fill'
+  // Alternate image shown in LANDSCAPE instead of the element's assetId (which is
+  // the portrait/default art). Unset = the same image is used in both orientations.
+  landscapeAssetId?: string
   // Cover-crop focal point for PORTRAIT, as % of the image (0-100; default 50 = center).
   // Picks which part of the image stays visible when 'cover' crops it to fill the
   // frame. Landscape ignores these and always centers, so the image just covers the
@@ -536,6 +548,11 @@ export interface SceneElement {
   showOnWin?: boolean // revealed when the mounted game completes (endcard seed)
   showAfterInteraction?: boolean // revealed only after the user's first interaction (e.g. dragging the basket)
   hideAfterBasketInteraction?: boolean // hidden after the user's first Catch basket tap/drag
+  // Fade this element in/out based on the scratch game's live progress (0..100%). scratchShowAt:
+  // starts hidden and fades IN once progress >= the value. scratchHideAt: fades OUT once progress >=
+  // the value. Set both for a visible window [showAt, hideAt). Unset = always visible (default).
+  scratchShowAt?: number
+  scratchHideAt?: number
   rotation?: number
   opacity?: number
   blur?: number // uniform layer blur radius in design px (CSS filter: blur)

@@ -12,6 +12,7 @@ import { ContextMenu, type MenuItem } from '../panels/ContextMenu'
 import { getFramePos, setFramePos } from '../canvasLayout'
 import { resizeBox } from './geometry'
 import { isSceneHidden, useCanvasView } from '../canvasView'
+import { useActiveVariant } from '../variantMode'
 import { endPathDraw, pathDrawTarget, usePathDraw } from '../drawMode'
 import { useEditLocale } from '../locale'
 import { sceneAssetIds } from '../export'
@@ -33,11 +34,13 @@ import {
   pasteStyle,
   redo,
   removeSelected,
+  seedLandscapeLayout,
   selectOnly,
   selectWithGroups,
   sendToBack,
   bringToFront,
   setActiveScene,
+  setOrientation,
   setSelection,
   toggleLock,
   undo,
@@ -65,6 +68,10 @@ const EDGES: Handle[] = [
   { k: 'w', hx: -1, hy: 0 },
   { k: 'e', hx: 1, hy: 0 },
 ]
+
+// How many elements in a scene carry their own landscape geometry (any override field).
+const landscapeCount = (sd: SceneDef): number =>
+  sd.elements.filter((e) => e.landscape && Object.keys(e.landscape).length > 0).length
 
 function effGeom(el: SceneElement, landscape: boolean) {
   const ov = landscape ? el.landscape : undefined
@@ -179,7 +186,7 @@ interface Props {
 type Drag =
   | { mode: 'move'; start: { px: number; py: number }; base: Record<string, { x: number; y: number }>; bbox: { x: number; y: number; w: number; h: number } }
   | { mode: 'resize'; id: string; h: Handle; start: { px: number; py: number }; kind: 'wh' | 'scale' | 'font'; sw: number; sh: number; sScale: number; sFont: number; nativeW: number; sx: number; sy: number; anchor: SceneElement['anchor']; cx: number; cy: number; sDist: number }
-  | { mode: 'group-scale'; start: { px: number; py: number }; cx: number; cy: number; sDist: number; members: { id: string; x: number; y: number; w?: number; h?: number; scale?: number; font?: number }[] }
+  | { mode: 'group-scale'; start: { px: number; py: number }; cx: number; cy: number; sDist: number; members: { id: string; x: number; y: number; w?: number; h?: number; scale?: number; font?: number; isText?: boolean }[] }
   | { mode: 'marquee'; start: { px: number; py: number } }
   | { mode: 'pan'; start: { x: number; y: number }; pan0: { x: number; y: number } }
   | null
@@ -189,7 +196,10 @@ export function EditorCanvas(props: Props): JSX.Element {
   const { project, scene, assets, selectedIds, orientation, trace, activeSceneId } = useEditorState()
   useCanvasView() // re-render when canvas scene visibility changes
   const editLocale = useEditLocale()
+  const activeVariant = useActiveVariant() // landscape seeding is base-only — banner hides in variant mode
   const landscape = orientation === 'landscape'
+  // Scenes whose "landscape mirrors portrait" banner the user closed (session-only).
+  const [lsBannerClosed, setLsBannerClosed] = useState<Record<string, boolean>>({})
   const traceSrc = trace.visible && trace.assetId ? assets[trace.assetId]?.src : undefined
   // Frames shown on the canvas: visible scenes + always the active one.
   const visibleScenes = project.scenes.filter((s) => s.id === activeSceneId || !isSceneHidden(s.id))
@@ -717,7 +727,10 @@ export function EditorCanvas(props: Props): JSX.Element {
         .filter(Boolean)
         .map((el) => {
           const ge = effGeom(el as SceneElement, liveRef.current.landscape)
-          return { id: (el as SceneElement).id, x: ge.x, y: ge.y, w: ge.w, h: ge.h, scale: (el as SceneElement).scale, font: (el as SceneElement).text?.fontSizePx }
+          // scale: the EFFECTIVE value (landscape override included) so scaling in
+          // landscape multiplies the landscape size, not the portrait one.
+          const baseScale = liveRef.current.landscape ? ge.scale : (el as SceneElement).scale
+          return { id: (el as SceneElement).id, x: ge.x, y: ge.y, w: ge.w, h: ge.h, scale: baseScale, font: (el as SceneElement).text?.fontSizePx, isText: (el as SceneElement).type === 'text' }
         })
       beginTransaction()
       drag.current = { mode: 'group-scale', start: { px, py }, cx, cy, sDist: Math.hypot(px - cxI, py - cyI) || 1, members }
@@ -740,7 +753,9 @@ export function EditorCanvas(props: Props): JSX.Element {
       sh = g.h ?? sh
       if (g.w == null || g.h == null) patchGeometry(id, { w: Math.round(sw), h: Math.round(sh) })
     } else if (el.type === 'text') {
-      kind = 'font'
+      // fontSizePx is SHARED config (both orientations) — resizing text in landscape
+      // must go through the landscape `scale` override instead, or portrait moves too.
+      kind = liveRef.current.landscape ? 'scale' : 'font'
     } else {
       kind = 'scale'
       sScale = g.scale
@@ -795,19 +810,37 @@ export function EditorCanvas(props: Props): JSX.Element {
       sendToActiveFrame()
     } else if (d.mode === 'group-scale') {
       const f = Math.max(0.1, Math.hypot(px - (d.cx * metricsRef.current.s + metricsRef.current.offX), py - (d.cy * metricsRef.current.s + metricsRef.current.offY)) / d.sDist)
-      const patches: Record<string, Partial<SceneElement>> = {}
-      for (const m of d.members) {
-        const p: Partial<SceneElement> = { x: Math.round(d.cx + (m.x - d.cx) * f), y: Math.round(d.cy + (m.y - d.cy) * f) }
-        if (m.w != null) p.w = Math.max(8, Math.round(m.w * f))
-        if (m.h != null) p.h = Math.max(8, Math.round(m.h * f))
-        if (m.scale != null) p.scale = Math.max(0.05, +(m.scale * f).toFixed(3))
-        if (m.font != null) {
-          const el = liveRef.current.scene.elements.find((x) => x.id === m.id)
-          if (el?.text) p.text = { ...el.text, fontSizePx: Math.max(8, Math.round(m.font * f)) }
+      if (liveRef.current.landscape) {
+        // Landscape group-scale writes ONLY landscape overrides — never the base
+        // (portrait) fields. Text has no per-orientation font size, so its size is
+        // driven by the landscape `scale` override instead (w/h skipped: the runtime
+        // multiplies a text box by scale already, patching both would double-scale).
+        for (const m of d.members) {
+          const p: Partial<SceneElement> = { x: Math.round(d.cx + (m.x - d.cx) * f), y: Math.round(d.cy + (m.y - d.cy) * f) }
+          if (m.isText) {
+            p.scale = Math.max(0.05, +((m.scale ?? 1) * f).toFixed(3))
+          } else {
+            if (m.w != null) p.w = Math.max(8, Math.round(m.w * f))
+            if (m.h != null) p.h = Math.max(8, Math.round(m.h * f))
+            if (m.scale != null) p.scale = Math.max(0.05, +(m.scale * f).toFixed(3))
+          }
+          patchGeometry(m.id, p)
         }
-        patches[m.id] = p
+      } else {
+        const patches: Record<string, Partial<SceneElement>> = {}
+        for (const m of d.members) {
+          const p: Partial<SceneElement> = { x: Math.round(d.cx + (m.x - d.cx) * f), y: Math.round(d.cy + (m.y - d.cy) * f) }
+          if (m.w != null) p.w = Math.max(8, Math.round(m.w * f))
+          if (m.h != null) p.h = Math.max(8, Math.round(m.h * f))
+          if (m.scale != null) p.scale = Math.max(0.05, +(m.scale * f).toFixed(3))
+          if (m.font != null) {
+            const el = liveRef.current.scene.elements.find((x) => x.id === m.id)
+            if (el?.text) p.text = { ...el.text, fontSizePx: Math.max(8, Math.round(m.font * f)) }
+          }
+          patches[m.id] = p
+        }
+        bulkPatch(patches)
       }
-      bulkPatch(patches)
       sendToActiveFrame()
     } else if (d.mode === 'marquee') {
       setMarquee({ x: Math.min(d.start.px, px), y: Math.min(d.start.py, py), w: Math.abs(px - d.start.px), h: Math.abs(py - d.start.py) })
@@ -1477,6 +1510,7 @@ export function EditorCanvas(props: Props): JSX.Element {
         {visibleScenes.map((sd) => {
           const pos = positions[sd.id] ?? { x: 0, y: 0 }
           const active = sd.id === activeSceneId
+          const lsN = landscapeCount(sd)
           return (
             <div key={sd.id} className={'frame' + (active ? ' active' : '') + (dropTarget === sd.id ? ' drop-target' : '')} style={{ left: pos.x, top: pos.y, width: box.w, height: box.h }}>
               <div
@@ -1487,7 +1521,43 @@ export function EditorCanvas(props: Props): JSX.Element {
                 onPointerCancel={onFrameLabelUp}
               >
                 {sd.name}
+                {active && (
+                  <button
+                    className="frame-chip"
+                    title={landscape ? 'Switch the canvas to portrait' : 'Switch the canvas to landscape'}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={() => setOrientation(landscape ? 'portrait' : 'landscape')}
+                  >
+                    {landscape ? '▯ portrait' : '▭ landscape'}
+                  </button>
+                )}
+                {lsN > 0 && (
+                  <span
+                    className="frame-chip frame-chip-ls"
+                    title={`${lsN}/${sd.elements.length} elements in this scene have their own landscape layout`}
+                  >
+                    ▭ {lsN}
+                  </span>
+                )}
               </div>
+              {/* One-click entry into a separate landscape layout, right where you edit:
+                  shown only on the active frame, in landscape, while the scene still
+                  mirrors portrait. Seeding snapshots portrait geometry per element and
+                  the banner disappears (overrides now exist). */}
+              {active && landscape && lsN === 0 && sd.elements.length > 0 && !activeVariant && !lsBannerClosed[sd.id] &&
+                !revealEdit && !zoneEdit && !cropEdit && (
+                <div className="ls-banner" onPointerDown={(e) => e.stopPropagation()}>
+                  <span>Landscape mirrors portrait</span>
+                  <button onClick={() => seedLandscapeLayout()}>Create separate landscape layout</button>
+                  <button
+                    className="ls-banner-close"
+                    title="Hide for this scene"
+                    onClick={() => setLsBannerClosed((m) => ({ ...m, [sd.id]: true }))}
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
               <div className="stage-wrap">
                 <CanvasFrame sceneId={sd.id} def={sd} meta={project.meta} assets={assets} renderKey={renderKey} locale={editLocale} onLayout={handleLayout} iframeRef={active ? (el) => { activeIframeRef.current = el } : undefined} />
                 {active && traceSrc && <img className="trace-backdrop" src={traceSrc} alt="" style={{ opacity: trace.opacity }} />}
@@ -1507,7 +1577,12 @@ export function EditorCanvas(props: Props): JSX.Element {
                   {!revealEdit && !zoneEdit && !cropEdit &&
                     selectedIds.map((id) => {
                       const r = rects.find((x) => x.id === id)
-                      return r ? <div key={id} className="sel-box" style={{ left: r.x, top: r.y, width: r.w, height: r.h }} /> : null
+                      if (!r) return null
+                      // In landscape, a dashed box marks an element still mirroring its
+                      // portrait geometry (no landscape override yet) — drag it (or seed
+                      // the scene layout) and the box turns solid.
+                      const mirrors = landscape && !sd.elements.some((x) => x.id === id && x.landscape && Object.keys(x.landscape).length > 0)
+                      return <div key={id} className={'sel-box' + (mirrors ? ' mirrors-portrait' : '')} style={{ left: r.x, top: r.y, width: r.w, height: r.h }} />
                     })}
                   {/* Scratch / reveal markers (editor-only; the coating runs in Preview/export). */}
                   {rects.map((r) => {

@@ -3,6 +3,7 @@
 
 import type { GameContext, GameModule, GameTemplate, HintMove } from './types'
 import { num, str } from './types'
+import { emit } from '../emitter'
 
 // Parse an authored brush-intro path: a JSON list of {x,y} points, each a fraction 0..1 of the card.
 // Returns [] on anything malformed (the runtime then falls back to a default rub).
@@ -17,6 +18,25 @@ const parseBrushPath = (raw: string): { x: number; y: number }[] => {
   } catch {
     return []
   }
+}
+
+// Cover images decoded ahead of time, keyed by src. A scratch card's cover is painted onto a
+// canvas that starts transparent, so if the image is still decoding when the scene mounts, the
+// card shows through for a frame — a visible "cover pops in" flash (worst with a transparent
+// coverColor). Decoding covers before the scene mounts lets mount() paint the cover on the very
+// first frame. Shared across cards (covers are usually the same asset in a multi-card flow).
+const coverCache = new Map<string, HTMLImageElement>()
+
+/** Warm the decoded-image cache for a scratch cover so the card paints it flash-free on mount.
+ * Call ahead of navigating to the scratch scene (playProject preloads every scratch cover at boot). */
+export function preloadScratchCover(src: string): void {
+  if (!src || coverCache.has(src)) return
+  const img = new Image()
+  img.src = src
+  coverCache.set(src, img)
+  // decode() resolves once the bitmap is ready, so a later drawImage is immediate. Best-effort:
+  // older WebViews lack it (the onload path still covers them) and it can reject on detached imgs.
+  img.decode?.().catch(() => { /* fall back to onload timing */ })
 }
 
 export function createScratch(): GameModule {
@@ -37,6 +57,11 @@ export function createScratch(): GameModule {
   let moves = 0
   let coverImg: HTMLImageElement | null = null
   let coverReady = false
+  // The prize/reveal sits BENEATH the cover canvas. Until the cover has actually painted an
+  // occluding frame, showing the prize would let it flash through (e.g. a transparent-color
+  // cover whose image is still loading when the scene fades in). Keep the prize hidden until
+  // markCovered() confirms the cover is down.
+  let coverPainted = false
   // Reveal sizing. The COVER image is ALWAYS drawn 'contain' (whole image fit inside the card,
   // aspect-preserved). 'follow' (default) sizes the reveal to exactly the cover's contained rect and
   // stretches it to fill — so the prize sits directly under the cover and matches its shape. 'fit'
@@ -70,6 +95,10 @@ export function createScratch(): GameModule {
   let brushScaleFrac = 0.4 // brush display width as a fraction of the card's short side
   let brushSpawnX = 0.5 // resting spawn position, fraction of the card
   let brushSpawnY = 0.5
+  // Follow mode: instead of a persistent tool the player grabs, the brush stays hidden and
+  // appears CENTERED under the finger while scratching, then disappears on release. Any press
+  // on the card starts a scratch (no grab required).
+  let brushFollow = false
   let brushIntro = false // play a demo "draw path" rub at the start (like the handguide hint)
   let brushIntroPath: { x: number; y: number }[] = [] // authored path, points as fractions 0..1 of the card
   let brushIntroDurationMs = 1600 // duration of ONE pass along the path (lower = faster)
@@ -172,6 +201,19 @@ export function createScratch(): GameModule {
     sizeBrush()
     const s = spawnClient()
     moveBrush(s.x, s.y)
+    if (brushFollow) {
+      // Follow mode: hidden at rest. The authored intro demo still plays (visible),
+      // then the brush fades away until the finger lands.
+      if (brushIntro) {
+        brushEl.style.opacity = '1'
+        playBrushIntro()
+      }
+      if (!brushIntroAnim) {
+        brushEl.style.opacity = '0'
+        markBrushReady()
+      }
+      return
+    }
     brushEl.style.opacity = '1'
     playBrushIntro()
     if (!brushIntroAnim) markBrushReady() // no intro playing → ready immediately
@@ -211,7 +253,13 @@ export function createScratch(): GameModule {
     const kf: Keyframe[] = [spawnXf, ...mid, spawnXf].map((t) => ({ transform: t }))
     brushIntroAnim?.cancel()
     brushIntroAnim = brushEl.animate(kf, { duration: brushIntroDurationMs, iterations: brushIntroLoops, easing: 'ease-in-out' })
-    brushIntroAnim.onfinish = (): void => { brushIntroAnim = null; const p = spawnClient(); moveBrush(p.x, p.y); markBrushReady() }
+    brushIntroAnim.onfinish = (): void => {
+      brushIntroAnim = null
+      const p = spawnClient()
+      moveBrush(p.x, p.y)
+      if (brushFollow && brushEl) brushEl.style.opacity = '0' // follow mode: demo over — hide until the finger lands
+      markBrushReady()
+    }
   }
 
   // The cover image's 'contain' rect within the card, as fractions 0..1 (whole image fit inside,
@@ -267,6 +315,14 @@ export function createScratch(): GameModule {
     c2d.textAlign = 'center'
     c2d.textBaseline = 'middle'
     c2d.fillText('Scratch to reveal', w / 2, h / 2)
+  }
+
+  // Reveal the prize once the cover is confirmed on screen — hidden until now so it can't
+  // flash through a not-yet-painted (transparent / still-loading) cover during scene entry.
+  const markCovered = (): void => {
+    if (coverPainted) return
+    coverPainted = true
+    if (prize) prize.style.visibility = 'visible'
   }
 
   const sizeCanvas = (): void => {
@@ -342,6 +398,7 @@ export function createScratch(): GameModule {
   const reveal = (): void => {
     if (won) return
     won = true
+    emit('scratch-progress', 1) // fully revealed → drive any threshold-based element fades
     if (winCb) winCb() // fires immediately at win — for SFX that should not be delayed
     ctx.sfx.loopStop?.('drag') // stop the scratching loop on win
     fadeBrush() // prize revealed — fade the brush out
@@ -383,6 +440,7 @@ export function createScratch(): GameModule {
       brushScaleFrac = Math.max(5, Math.min(200, num(params.brushScale, 40))) / 100
       brushSpawnX = Math.max(0, Math.min(1, num(params.brushSpawnX, 50) / 100))
       brushSpawnY = Math.max(0, Math.min(1, num(params.brushSpawnY, 50) / 100))
+      brushFollow = params.brushFollow === true || params.brushFollow === 'on' || params.brushFollow === 1
       brushIntro = params.brushIntro === true || params.brushIntro === 'on' || params.brushIntro === 1
       brushIntroDurationMs = Math.max(200, num(params.brushIntroDurationMs, 1600))
       brushIntroLoops = Math.max(1, Math.min(20, Math.round(num(params.brushIntroLoops, 2))))
@@ -405,7 +463,7 @@ export function createScratch(): GameModule {
       prize = document.createElement('div')
       prize.style.cssText =
         'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;overflow:hidden;' +
-        `background:${revealBg};color:#fff;font-weight:800;text-align:center;` +
+        `background:${revealBg};color:#fff;font-weight:800;text-align:center;visibility:hidden;` +
         'user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;'
       if (prizeSrc) {
         if (fitMode === 'fit') {
@@ -433,13 +491,27 @@ export function createScratch(): GameModule {
       positionReveal() // no cover image yet → full card; refined once the cover loads
 
       if (coverSrc) {
-        coverImg = new Image()
-        coverImg.onload = () => {
+        const cached = coverCache.get(coverSrc)
+        if (cached && cached.complete && (cached.naturalWidth || cached.width)) {
+          // Already decoded (preloaded ahead of mount): adopt it so sizeCanvas() paints the cover
+          // synchronously on the first frame — no transparent gap, no pop-in flash.
+          coverImg = cached
           coverReady = true
-          positionReveal() // now the cover aspect is known → size the reveal to its contain rect
-          if (!won) fillCover()
+        } else {
+          coverImg = new Image()
+          coverImg.onload = () => {
+            coverReady = true
+            positionReveal() // now the cover aspect is known → size the reveal to its contain rect
+            if (!won) fillCover()
+            markCovered() // opaque cover image is down → safe to show the prize beneath it
+          }
+          // Cover art failed to load: don't strand the prize hidden forever. If an opaque
+          // coverColor was filled it still hides the prize; otherwise the card is see-through
+          // by authoring and the prize is meant to show.
+          coverImg.onerror = () => markCovered()
+          coverImg.src = coverSrc
+          coverCache.set(coverSrc, coverImg) // warm the cache for any later card using this cover
         }
-        coverImg.src = coverSrc
       }
 
       // Optional brush: a floating image whose authored tip does the scratching. Created hidden;
@@ -480,7 +552,12 @@ export function createScratch(): GameModule {
       }
       ctx.root.appendChild(canvas)
       c2d = canvas.getContext('2d')!
-      sizeCanvas()
+      sizeCanvas() // paints the initial cover synchronously (coverColor + any preloaded image)
+      // Show the prize right away only when nothing async can uncover it: no cover image to wait
+      // for, an opaque coverColor already fills the canvas this frame, or the cover image was
+      // preloaded and just painted. A still-loading image over a transparent color stays hidden
+      // until its onload (handled above) so the reveal never flashes through.
+      if (!coverSrc || coverColor || coverReady) markCovered()
       ro = new ResizeObserver(() => sizeCanvas())
       ro.observe(ctx.root)
 
@@ -526,13 +603,15 @@ export function createScratch(): GameModule {
       let grabDY = 0
       // Begin a stroke: require grabbing the brush (if any). Returns false if the press missed it.
       const beginStroke = (clientX: number, clientY: number): boolean => {
-        if (brushEl && !brushHit(clientX, clientY)) return false // must grab the brush, not tap anywhere
+        if (brushEl && !brushFollow && !brushHit(clientX, clientY)) return false // must grab the brush, not tap anywhere
         brushIntroAnim?.cancel()
         brushIntroAnim = null
         markBrushReady() // player took over — the (possibly interrupted) intro is done
-        grabDX = brushEl && brushCenter ? brushCenter.x - clientX : 0
-        grabDY = brushEl && brushCenter ? brushCenter.y - clientY : 0
+        // Follow mode: no grab offset — the brush centers on the finger and shows up now.
+        grabDX = brushEl && !brushFollow && brushCenter ? brushCenter.x - clientX : 0
+        grabDY = brushEl && !brushFollow && brushCenter ? brushCenter.y - clientY : 0
         if (brushEl) { brushRootRect = brushHostRect(); brushCardRect = ctx.root.getBoundingClientRect(); sizeBrush() }
+        if (brushEl && brushFollow) brushEl.style.opacity = '1'
         const bx = clientX + grabDX
         const by = clientY + grabDY
         moveBrush(bx, by)
@@ -553,12 +632,18 @@ export function createScratch(): GameModule {
         const t = brushTip(c.x, c.y)
         const p = toCanvas(t.x, t.y)
         erodeAt(p.x, p.y)
-        if ((moves++ & 7) === 0 && measure() >= threshold) reveal()
+        if ((moves++ & 7) === 0) {
+          const m = measure()
+          emit('scratch-progress', m) // fade scene elements in/out at progress thresholds
+          if (m >= threshold) reveal()
+        }
       }
       const onScratchEnd = (): void => {
         scratching = false
         ctx.sfx.loopStop?.('drag')
-        // Brush stays on screen (persistent draggable tool) — no hideBrush() here.
+        // Grab mode: the brush stays on screen (persistent draggable tool). Follow
+        // mode: it only exists under the finger, so it fades out on release.
+        if (brushEl && brushFollow) brushEl.style.opacity = '0'
         lastPt = null
         if (!won && measure() >= threshold) reveal()
       }
@@ -601,7 +686,7 @@ export function createScratch(): GameModule {
       canvas.addEventListener('pointerdown', (e) => {
         if (won || touchActive || e.pointerType === 'touch') return
         lastPt = null
-        if (brushEl && !brushHit(e.clientX, e.clientY)) return // must grab the brush, not tap anywhere
+        if (brushEl && !brushFollow && !brushHit(e.clientX, e.clientY)) return // must grab the brush, not tap anywhere
         e.preventDefault() // prevent native drag-start on the canvas element
         try { canvas.setPointerCapture(e.pointerId) } catch { /* ignore */ }
         scratching = true
@@ -621,7 +706,9 @@ export function createScratch(): GameModule {
     },
     relayout: sizeCanvas,
     getHint(): HintMove | null {
-      if (won || scratching || brushEl) return null // brush is the tool; point-at-brush is a handguide mode
+      // A grab-mode brush is itself the on-screen tool (point-at-brush is a handguide
+      // mode); a follow-mode brush is invisible at rest, so the slide hint still helps.
+      if (won || scratching || (brushEl && !brushFollow)) return null
       const r = canvas.getBoundingClientRect()
       const y = r.top + r.height / 2
       return { from: { x: r.left + r.width * 0.22, y }, to: { x: r.left + r.width * 0.78, y }, kind: 'slide' }
@@ -678,7 +765,7 @@ export const SCRATCH_TEMPLATE: GameTemplate = {
   ],
   // revealScale/X/Y are edited by double-clicking the card on the canvas (no inspector
   // field) — they only apply when fit = 'fit'.
-  defaultParams: { label: 'YOU WIN!', coverColor: '#9aa3b2', threshold: 0.6, zoneX: 0, zoneY: 0, zoneW: 100, zoneH: 100, fit: 'follow', revealScale: 1, revealX: 0, revealY: 0, revealBgColor: '', prize: '', cover: '', brushImage: '', brushRadius: 9, brushScale: 40, brushTipX: 50, brushTipY: 50, brushSpawnX: 50, brushSpawnY: 50, brushIntro: false, brushIntroPath: '', brushIntroDurationMs: 1600, brushIntroLoops: 2, cursor: 'inherit', cursorAsset: '', shadowBlur: 0, shadowX: 0, shadowY: 4, shadowColor: '#000000' },
+  defaultParams: { label: 'YOU WIN!', coverColor: '#9aa3b2', threshold: 0.6, zoneX: 0, zoneY: 0, zoneW: 100, zoneH: 100, fit: 'follow', revealScale: 1, revealX: 0, revealY: 0, revealBgColor: '', prize: '', cover: '', brushImage: '', brushRadius: 9, brushScale: 40, brushTipX: 50, brushTipY: 50, brushSpawnX: 50, brushSpawnY: 50, brushFollow: false, brushIntro: false, brushIntroPath: '', brushIntroDurationMs: 1600, brushIntroLoops: 2, cursor: 'inherit', cursorAsset: '', shadowBlur: 0, shadowX: 0, shadowY: 4, shadowColor: '#000000' },
   // Zig-zag scratch motion across the card (the editable hint's starting route).
   defaultHandguide: {
     nodes: [

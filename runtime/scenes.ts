@@ -9,6 +9,7 @@ import { buildScene, type StageHandle } from './stage'
 import { notifyGameClose, notifyGameEnd, triggerCTA } from './networks'
 import { createSfxManager, type SfxManager } from './sfx'
 import { mountHeader } from './header'
+import { preloadScratchCover } from './games/scratch'
 import type { Project, Scene, SceneDef, Transition } from './scene'
 import type { AssetMap } from './types'
 
@@ -69,7 +70,26 @@ export function playProject(
   // artifact when immune elements (translateZ bars) live directly in pa-stage.
   // Falls back to overflow:hidden on WebViews that predate overflow:clip support.
   container.style.cssText = 'position:fixed;inset:0;overflow:hidden;overflow:clip;'
+  // Text elements are pointer-events:none, so drags over them land on the scene
+  // ROOT — which used to fire an unprevented selectstart: the browser entered
+  // selection mode and painted a "whole screen selected" highlight while players
+  // scratched/dragged. The base CSS sets user-select:none everywhere; this guard
+  // covers engines/old WebViews that ignore user-select on plain divs.
+  container.addEventListener('selectstart', (e) => e.preventDefault())
   opts.mount.appendChild(container)
+
+  // Decode every scratch cover up front so the card paints its cover on the first frame it
+  // mounts — no transparent gap where the reveal/background flashes through (a scratch scene
+  // is usually reached mid-flow, so there's ample time to decode before the player gets there).
+  if (opts.interactive) {
+    for (const s of project.scenes)
+      for (const e of s.elements)
+        if (e.type === 'game-mount' && e.game?.templateId === 'scratch') {
+          const coverId = e.game.params?.cover
+          const src = typeof coverId === 'string' ? assets[coverId]?.src : ''
+          if (src) preloadScratchCover(src)
+        }
+  }
 
   // The pinned date header is opt-in: only mount it when the project explicitly
   // configures `meta.header`. Projects without it export with no date band.
@@ -84,6 +104,15 @@ export function playProject(
   let unsubGameDone: (() => void) | null = null
   let unsubAdvance: (() => void) | null = null
   let unsubGoto: (() => void) | null = null
+  let unsubWinPersist: (() => void) | null = null
+  // True once the (current) game has been completed. From that point the flow is
+  // post-win (win overlay / next scene / end card) and a reload must RESTART the ad,
+  // not resume — so the resume record stays cleared until another game scene mounts.
+  let gameWon = false
+  // Does this scene contain something winnable? (game mount, unboxing, or scratch/reveal
+  // cells — everything that can emit 'game-complete'.) Mounting one re-arms resume.
+  const hasGame = (def: SceneDef): boolean =>
+    def.elements.some((e) => e.type === 'game-mount' || e.type === 'unboxing' || !!e.scratch || !!e.reveal)
   // Set to true when a scene-overlay is emitted for the current game scene (e.g. by scratch_grid).
   // Prevents go() from emitting a second scene-overlay when game-complete fires after dismiss.
   let overlayShownThisScene = false
@@ -254,11 +283,19 @@ export function playProject(
       // any reload (a manual refresh, or AppLovin reopening the creative after the
       // player taps Exit) should start the ad over — not drop straight back onto the
       // end card. So entering an end card CLEARS the resume record instead of saving it.
+      // The same applies to every scene AFTER a game win (win overlay redirect target,
+      // "next" scene, …): the play-through is over, so a reload restarts the flow.
+      // A scene that carries its own game re-arms resume (multi-game flows).
+      if (hasGame(def)) gameWon = false
       try {
-        if (def.kind === 'endscene') {
+        if (def.kind === 'endscene' || gameWon) {
           window.sessionStorage.removeItem('pa:resume-scene')
         } else {
-          window.sessionStorage.setItem('pa:resume-scene', JSON.stringify({ id: def.id, t: Date.now() }))
+          // Record the orientation too: resume is meant ONLY for AppLovin's reload-on-
+          // orientation-change. boot() resumes solely when the orientation differs from
+          // this record — so a plain refresh (same orientation) restarts the flow.
+          const o = window.innerWidth >= window.innerHeight ? 'l' : 'p'
+          window.sessionStorage.setItem('pa:resume-scene', JSON.stringify({ id: def.id, t: Date.now(), o }))
         }
       } catch { /* storage unavailable — rotation reloads restart the flow */ }
       stage.playEntrances() // onMount entrances (skipped on the static editor canvas)
@@ -325,7 +362,7 @@ export function playProject(
           unsubGameDone()
           unsubGameDone = null
         }
-        advanceTimer = window.setTimeout(go, rule.delayMs ?? 700)
+        advanceTimer = window.setTimeout(go, rule.delayMs ?? 0)
       })
     } else if (rule.on === 'timer') {
       advanceTimer = window.setTimeout(go, rule.delayMs ?? 2000)
@@ -356,6 +393,14 @@ export function playProject(
 
   // Game-driven navigation (e.g. scratch-grid lose cell → lose scene, then back).
   if (opts.interactive) {
+    // The moment the game is won the resume record dies: a refresh during the win
+    // celebration (win overlay floating over the still-mounted game scene) must
+    // restart the ad, not resume into an already-completed game. Persistent — unlike
+    // armAdvance's one-shot subscription — so it fires no matter how the win happens.
+    unsubWinPersist = on('game-complete', () => {
+      gameWon = true
+      try { window.sessionStorage.removeItem('pa:resume-scene') } catch { /* ignore */ }
+    })
     unsubGoto = on('scene-goto', (id: string) => {
       if (transitioning) return
       const target = project.scenes.find((s) => s.id === id)
@@ -402,7 +447,6 @@ export function playProject(
       // bar above the promoted overlayDiv into its own compositor layer, and the
       // bar's layer edge anti-aliases against the same-colored cover instead of the
       // overlay's background.
-      const immuneEls = parkedByStage.get(current.stage)?.els ?? []
       syncCovers()
 
       // Elements opted into "hide on overlay" vanish for the overlay's lifetime, then
@@ -527,6 +571,7 @@ export function playProject(
     destroy() {
       clearTriggers()
       if (unsubGoto) { unsubGoto(); unsubGoto = null }
+      if (unsubWinPersist) { unsubWinPersist(); unsubWinPersist = null }
       for (const ov of overlayStages) ov.destroy()
       overlayStages.clear()
       overlayCovers.clear() // cover divs are torn down with the container below

@@ -1186,6 +1186,95 @@ button.icon {
 .frame-label:active {
   cursor: grabbing;
 }
+/* Small chips in the frame label row: orientation flip (active frame) + a
+   per-scene "has landscape layout" count. Stop frame-drag via stopPropagation. */
+.frame-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 6px;
+  height: 16px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+}
+button.frame-chip:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.frame-chip-ls {
+  cursor: default;
+  color: var(--accent-2);
+  border-color: color-mix(in srgb, var(--accent-2) 55%, transparent);
+}
+/* Landscape-mirrors-portrait banner: floats at the top of the active frame while
+   the scene has no landscape overrides; one click seeds the separate layout. */
+.ls-banner {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px 6px 12px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  backdrop-filter: blur(6px);
+  box-shadow: var(--sh-2);
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.ls-banner button {
+  border: 0;
+  border-radius: 999px;
+  padding: 4px 10px;
+  background: var(--accent);
+  color: #fff;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.ls-banner button:hover {
+  filter: brightness(1.08);
+}
+.ls-banner .ls-banner-close {
+  background: transparent;
+  color: var(--muted);
+  padding: 4px 6px;
+  font-weight: 500;
+}
+.ls-banner .ls-banner-close:hover {
+  color: var(--ink);
+  filter: none;
+}
+/* Landscape mode: a selected element that still MIRRORS portrait (no landscape
+   override yet) gets a dashed amber box; it turns solid once it has its own
+   landscape geometry. */
+.sel-box.mirrors-portrait {
+  border-style: dashed;
+  border-color: #d9930d;
+}
+/* Layers panel: orientation-limited marker (Inspector "Show in" → P/L only). */
+.layer-orient {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent-2) 18%, transparent);
+  color: var(--accent-2);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  cursor: default;
+}
 .frame-activate {
   position: absolute;
   inset: 0;

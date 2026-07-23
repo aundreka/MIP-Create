@@ -2,7 +2,7 @@
 // single-element editor with a visual Background-box section.
 
 import { useState, useEffect, useRef, useMemo, type PointerEvent as ReactPointerEvent } from 'react'
-import type { Anchor, AdvanceOn, AnimPresetId, AnimSpec, AnimTrigger, BackgroundConfig, BoxStyle, ConfettiConfig, CountdownConfig, CtaPulsePreset, EndsceneConfig, HandguideConfig, HandguideNode, KeyframeStep, LayoutMode, ObjectFit, SceneElement, SceneKind, SceneOverlay, SfxBinding, ShadowPreset, TextConfig, TransitionType, UnboxingConfig } from '../../runtime/scene'
+import type { Anchor, AdvanceOn, AnimPresetId, AnimSpec, AnimTrigger, BackgroundConfig, BoxStyle, ConfettiConfig, CountdownConfig, CtaPulsePreset, EndsceneConfig, HandguideConfig, HandguideNode, KeyframeStep, LayoutMode, ObjectFit, SceneDef, SceneElement, SceneKind, SceneOverlay, SfxBinding, ShadowPreset, TextConfig, TransitionType, UnboxingConfig } from '../../runtime/scene'
 import { GAME_TEMPLATES } from '../../runtime/games/registry'
 import type { ParamField } from '../../runtime/games/types'
 import { importFont } from '../bridge'
@@ -12,8 +12,10 @@ import {
   addGameHint,
   alignSelected,
   beginTransaction,
+  clearLandscapeLayout,
   endTransaction,
   convertElement,
+  copyElementsFromScene,
   copyStyle,
   duplicateSelected,
   groupSelected,
@@ -23,6 +25,8 @@ import {
   patchSceneDef,
   refreshScene,
   removeSelected,
+  seedLandscapeLayout,
+  setOrientation,
   setSceneBg,
   setSceneBg2,
   setSyncScope,
@@ -52,6 +56,14 @@ import {
   X,
 } from '../icons'
 import { AssetPicker } from './AssetPicker'
+
+// Tap feedback options, shared by the button element and images marked as buttons.
+const TAP_EFFECTS = [
+  { value: 'none', label: 'None' },
+  { value: 'press', label: 'Press (shrink)' },
+  { value: 'glow', label: 'Glow' },
+  { value: 'outline', label: 'Outline' },
+]
 import { SfxLibrary } from './SfxLibrary'
 import { startPathDraw } from '../drawMode'
 import { useEditLocale } from '../locale'
@@ -60,6 +72,60 @@ import { KeyframeEditor } from './KeyframeEditor'
 
 const ANCHORS: Anchor[] = ['center', 'top', 'bottom', 'left', 'right', 'top-left', 'top-right', 'bottom-left', 'bottom-right']
 
+
+// Reuse another scene's elements (background, images, text, …) in the current scene.
+// Copies are independent per scene — same asset underneath (packed once on export),
+// but each copy keeps its own position/animations, so a reused background or prop can
+// animate differently here. Shown in the scene settings view (nothing selected).
+function ReuseFromScene(props: { sceneId: string; scenes: SceneDef[] }): JSX.Element | null {
+  const [fromId, setFromId] = useState('')
+  const others = props.scenes.filter((s) => s.id !== props.sceneId)
+  if (!others.length) return null
+  const src = others.find((s) => s.id === fromId)
+  // Backgrounds first (the most common reuse), then normal stacking order.
+  const els = src ? [...src.elements].sort((a, b) => (a.type === 'background' ? -1 : 0) - (b.type === 'background' ? -1 : 0) || a.zIndex - b.zIndex) : []
+  return (
+    <Accordion id="inspector.reuse" title="Reuse from another scene" defaultOpen={false}>
+      <div className="hint pad">
+        Copy elements from another scene into this one. Copies share the same underlying assets (each asset is packed once on
+        export, so this barely grows the file) but are edited independently — give this scene's copy its own animations. A copied
+        element keeps its landscape layout too.
+      </div>
+      <Row label="Scene">
+        <Select
+          value={fromId}
+          onChange={setFromId}
+          options={[{ value: '', label: '(choose scene)' }, ...others.map((s) => ({ value: s.id, label: s.name }))]}
+        />
+      </Row>
+      {src && !els.length && <div className="hint pad">That scene has no elements.</div>}
+      {els.map((e) => (
+        <div key={e.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
+          <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {e.name} <span style={{ opacity: 0.55 }}>({e.type})</span>
+          </span>
+          <button onClick={() => copyElementsFromScene(src!.id, [e.id])}>Copy</button>
+        </div>
+      ))}
+      {src && els.length > 1 && (
+        <button className="wide" onClick={() => copyElementsFromScene(src.id, els.map((e) => e.id))}>
+          Copy all elements
+        </button>
+      )}
+      {src && (src.bgColor || src.bgColor2) && (
+        <button
+          className="wide"
+          onClick={() => {
+            setSceneBg(src.bgColor ?? '')
+            setSceneBg2(src.bgColor2)
+          }}
+        >
+          Copy scene BG colours
+        </button>
+      )}
+    </Accordion>
+  )
+}
 
 // Per-element sounds: bind a sound (built-in library or upload) to a trigger.
 // "Add sound" opens the sound library directly so the library is easy to find and
@@ -426,7 +492,7 @@ const LIGHTRAY_DIRECTIONS: { value: number; label: string }[] = [
   { value: 225, label: 'corner ↖ (bottom-right → top-left)' },
 ]
 // Brush params rendered by the custom <BrushControls> block instead of the generic field list.
-const BRUSH_PARAM_KEYS = new Set(['brushRadius', 'brushScale', 'brushTipX', 'brushTipY', 'brushSpawnX', 'brushSpawnY', 'brushIntro', 'brushIntroPath', 'brushIntroDurationMs', 'brushIntroLoops'])
+const BRUSH_PARAM_KEYS = new Set(['brushRadius', 'brushScale', 'brushTipX', 'brushTipY', 'brushSpawnX', 'brushSpawnY', 'brushFollow', 'brushIntro', 'brushIntroPath', 'brushIntroDurationMs', 'brushIntroLoops'])
 // seeded when switching a phase to 'custom' so there's something to edit
 const DEFAULT_CUSTOM: KeyframeStep[] = [
   { at: 0, opacity: 0, transform: 'scale(0.6)' },
@@ -653,6 +719,7 @@ function BrushControls(props: {
   const tipX = Number(params.brushTipX ?? 50)
   const tipY = Number(params.brushTipY ?? 50)
   const introOn = !!params.brushIntro && params.brushIntro !== 'off'
+  const followOn = !!params.brushFollow && params.brushFollow !== 'off'
   return (
     <>
       <div className="group-title2">Brush (drag to scratch)</div>
@@ -667,10 +734,22 @@ function BrushControls(props: {
           <NumField label="Brush tip Y — reveal point (%)" value={tipY} step={1} min={0} max={100} onChange={(n) => setParam('brushTipY', n)} />
         </>
       )}
-      <NumField label="Spawn X — resting spot (% of card)" value={Number(params.brushSpawnX ?? 50)} step={1} min={0} max={100} onChange={(n) => setParam('brushSpawnX', n)} />
-      <NumField label="Spawn Y — resting spot (% of card)" value={Number(params.brushSpawnY ?? 50)} step={1} min={0} max={100} onChange={(n) => setParam('brushSpawnY', n)} />
+      <Toggle label="Follow finger (appear only while scratching)" checked={followOn} onChange={(v) => setParam('brushFollow', v)} />
+      {(!followOn || introOn) && (
+        <>
+          <NumField label="Spawn X — resting spot (% of card)" value={Number(params.brushSpawnX ?? 50)} step={1} min={0} max={100} onChange={(n) => setParam('brushSpawnX', n)} />
+          <NumField label="Spawn Y — resting spot (% of card)" value={Number(params.brushSpawnY ?? 50)} step={1} min={0} max={100} onChange={(n) => setParam('brushSpawnY', n)} />
+        </>
+      )}
       <Toggle label="Intro animation (demo at start)" checked={introOn} onChange={(v) => setParam('brushIntro', v)} />
-      <div className="hint pad">The brush stays on screen and can overflow past the card edges. Spawn sets where it rests; the intro plays a demo motion (like the hint hand) until the player touches.</div>
+      {followOn ? (
+        <div className="hint pad">
+          The brush is hidden until the player scratches — it appears <b>centered under the finger</b>, follows it, and disappears on
+          release. Scratching starts anywhere on the card (no need to grab the brush).{introOn ? ' The intro demo still plays from the spawn point, then the brush hides.' : ''}
+        </div>
+      ) : (
+        <div className="hint pad">The brush stays on screen and can overflow past the card edges. Spawn sets where it rests; the intro plays a demo motion (like the hint hand) until the player touches.</div>
+      )}
       {introOn && (
         <>
           <NumField label="Intro speed — ms per pass (lower = faster)" value={Number(params.brushIntroDurationMs ?? 1600)} step={100} min={200} max={8000} onChange={(n) => setParam('brushIntroDurationMs', n)} />
@@ -1286,7 +1365,6 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
 
   const el = singleSelected(state)
   if (!el) {
-    const m = state.project.meta
     const sd = activeSceneDef(state)
     const adv = sd.advance
     const tr = sd.transition ?? { type: 'fade' as TransitionType, durationMs: 350 }
@@ -1398,6 +1476,48 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
           </Row>
           <NumField label="Duration" value={tr.durationMs} step={50} onChange={(n) => patchSceneDef(sd.id, { transition: { ...tr, durationMs: n } })} />
         </div>
+
+        <div className="group-title">Landscape layout</div>
+        {(() => {
+          const withLs = sd.elements.filter((e) => e.landscape && Object.keys(e.landscape).length > 0).length
+          return (
+            <>
+              <div className="hint pad">
+                Every element can hold its own <b>landscape</b> position &amp; size — same assets, same animations, only the layout
+                differs. Toggle <b>Landscape</b> in the top bar and drag/resize; those edits never touch portrait.{' '}
+                {withLs > 0 ? (
+                  <>
+                    <b>{withLs}/{sd.elements.length}</b> elements carry landscape overrides in this scene.
+                  </>
+                ) : (
+                  <>No overrides yet — landscape currently mirrors the portrait layout.</>
+                )}
+              </div>
+              <button
+                className="wide"
+                onClick={() => {
+                  seedLandscapeLayout()
+                  setOrientation('landscape')
+                }}
+              >
+                Create separate landscape layout (opens landscape)
+              </button>
+              <div className="hint pad">
+                Snapshots the current portrait layout into landscape for <b>every element</b>, so the two orientations become fully
+                independent — after this, moving things in portrait won’t shift landscape. Reused elements keep their landscape
+                layout when copied to another scene.
+              </div>
+              {withLs > 0 && (
+                <button className="wide danger" onClick={clearLandscapeLayout}>
+                  Reset landscape — follow portrait again
+                </button>
+              )}
+            </>
+          )
+        })()}
+
+        <div className="group-title" />
+        <ReuseFromScene sceneId={sd.id} scenes={state.project.scenes} />
         </>
         )}
 
@@ -1490,6 +1610,44 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
       )}
       <Toggle label="Above other overlays (top layer)" checked={!!el.overlayTop} onChange={(v) => patchElement(id, { overlayTop: v || undefined })} />
       <Toggle label="Hide on overlay" checked={!!el.hideOnOverlay} onChange={(v) => patchElement(id, { hideOnOverlay: v || undefined })} />
+
+      {/* Per-orientation visibility: base `hidden` + landscape override `landscape.hidden`.
+          The canvas reflects it live — the element only renders in the orientation(s) it
+          shows in (reselect a hidden one via the Layers panel). */}
+      {(() => {
+        const baseHidden = !!el.hidden
+        const lsHidden = el.landscape?.hidden ?? baseHidden
+        const mode: 'both' | 'portrait' | 'landscape' | 'none' =
+          !baseHidden && !lsHidden ? 'both' : !baseHidden && lsHidden ? 'portrait' : baseHidden && !lsHidden ? 'landscape' : 'none'
+        const setMode = (m: 'both' | 'portrait' | 'landscape'): void => {
+          const { hidden: _drop, ...restLs } = el.landscape ?? {}
+          if (m === 'both') patchElement(id, { hidden: undefined, landscape: el.landscape ? restLs : undefined })
+          else if (m === 'portrait') patchElement(id, { hidden: undefined, landscape: { ...restLs, hidden: true } })
+          else patchElement(id, { hidden: true, landscape: { ...restLs, hidden: false } })
+        }
+        return (
+          <>
+            <Row label="Show in">
+              <Chips
+                items={[
+                  { key: 'both', label: 'Both', active: mode === 'both', onClick: () => setMode('both') },
+                  { key: 'portrait', label: 'Portrait only', active: mode === 'portrait', onClick: () => setMode('portrait') },
+                  { key: 'landscape', label: 'Landscape only', active: mode === 'landscape', onClick: () => setMode('landscape') },
+                ]}
+              />
+            </Row>
+            {mode !== 'both' && (
+              <div className="hint pad">
+                {mode === 'none'
+                  ? 'Currently hidden in BOTH orientations (Layers eye + landscape override) — pick a mode above to show it again.'
+                  : mode === 'portrait'
+                    ? 'Only rendered while the ad is in portrait. On the canvas it disappears in landscape view; reselect it from the Layers panel.'
+                    : 'Only rendered while the ad is in landscape. On the canvas it disappears in portrait view; reselect it from the Layers panel.'}
+              </div>
+            )}
+          </>
+        )
+      })()}
 
       {!activeVariant && (
         <>
@@ -1849,6 +2007,45 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               )}
             </Accordion>
           )}
+          {(() => {
+            const cfg = el.button
+            const others = state.project.scenes.filter((s) => s.id !== activeSceneDef(state)?.id)
+            const patch = (p: Partial<NonNullable<typeof cfg>>): void => patchElement(id, { button: { ...(cfg ?? {}), ...p } })
+            return (
+              <Accordion id="inspector.imagebutton" title="Button" defaultOpen={false}>
+                <Toggle
+                  label="Tap this image to go to a screen"
+                  checked={!!cfg}
+                  onChange={(v) => patchElement(id, { button: v ? {} : undefined })}
+                />
+                {cfg && (
+                  <>
+                    <Row label="Go to screen">
+                      <Select
+                        value={cfg.targetSceneId ?? ''}
+                        onChange={(v) => patch({ targetSceneId: v || undefined })}
+                        options={[{ value: '', label: '(next screen / advance)' }, ...others.map((s) => ({ value: s.id, label: s.name || s.id }))]}
+                      />
+                    </Row>
+                    <Row label="Tap effect">
+                      <Select
+                        value={cfg.tapEffect ?? 'none'}
+                        onChange={(v) => patch({ tapEffect: v === 'none' ? undefined : (v as NonNullable<typeof cfg.tapEffect>) })}
+                        options={TAP_EFFECTS}
+                      />
+                    </Row>
+                    <div className="hint pad">Keeps the image’s own crop, mask &amp; animation — it just becomes tappable.</div>
+                  </>
+                )}
+                <button className="wide" onClick={() => patchElement(id, { type: 'button', button: el.button ?? {} })}>
+                  Convert to Button element
+                </button>
+                <div className="hint pad">
+                  Turns this into a full Button element in the same spot — position, size &amp; scale stay exactly the same. It gains the Button’s fill/corner styling; a crop or mask is dropped. Reversible from the Button’s panel.
+                </div>
+              </Accordion>
+            )
+          })()}
           <Accordion id="inspector.dragdrop" title="Drag & drop" defaultOpen={false}>
           <Toggle label="Draggable item" checked={!!el.drag} onChange={(v) => patchElement(id, { drag: v ? { group: el.slot?.group ?? 'a' } : undefined })} />
           {el.drag && (
@@ -2258,8 +2455,20 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 options={[{ value: '', label: '(next screen / advance)' }, ...others.map((s) => ({ value: s.id, label: s.name || s.id }))]}
               />
             </Row>
+            <Row label="Tap effect">
+              <Select
+                value={cfg.tapEffect ?? 'none'}
+                onChange={(v) => patch({ tapEffect: v === 'none' ? undefined : (v as NonNullable<typeof cfg.tapEffect>) })}
+                options={TAP_EFFECTS}
+              />
+            </Row>
             <AssetPicker label="Image (optional)" allowNone value={el.assetId} onChange={(aid) => patchElement(id, { assetId: aid ?? undefined })} />
             <div className="hint pad">Uses the image if set, otherwise the text label below. Style the fill &amp; corners in Background box. Animation is optional (Animation section). Toggle “Above overlays” at the top to float it over game win/lose cards.</div>
+            {el.assetId && (
+              <button className="wide" onClick={() => patchElement(id, { type: 'image' })}>
+                Convert back to Image
+              </button>
+            )}
           </Accordion>
         )
       })()}
@@ -2272,13 +2481,24 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
           return (
             <Accordion id="inspector.background" title="Background">
               <AssetPicker label="Image" value={el.assetId} onChange={(aid) => patchElement(id, { assetId: aid })} />
+              <AssetPicker
+                label="Landscape image (optional)"
+                value={bg.landscapeAssetId}
+                allowNone
+                onChange={(aid) => setBg({ landscapeAssetId: aid ?? undefined })}
+              />
+              <div className="hint pad">
+                Shown instead of the image above when the device is in <b>landscape</b>. Leave unset to reuse the same image in both
+                orientations.
+              </div>
               <Row label="Fit">
                 <Select
                   value={fit}
-                  onChange={(v) => setBg({ objectFit: v as ObjectFit })}
+                  onChange={(v) => setBg({ objectFit: v as BackgroundConfig['objectFit'] })}
                   options={[
                     { value: 'cover', label: 'cover (fill, may crop)' },
                     { value: 'contain', label: 'contain (fit, no crop)' },
+                    { value: 'fill', label: 'stretch (fill screen, may distort)' },
                   ]}
                 />
               </Row>
@@ -2550,6 +2770,24 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
 
       <Accordion id="inspector.effects" title="Effects" defaultOpen={false}>
         <Slider label="Layer blur" value={el.blur ?? 0} min={0} max={80} suffix="px" onChange={(n) => patchElement(id, { blur: n || undefined })} />
+        <div className="group-title2">Fade with scratch progress</div>
+        <div className="hint pad">Fade this element in/out based on how much of the scratch card/grid has been revealed (0–100%).</div>
+        <Toggle
+          label="Fade in at progress"
+          checked={el.scratchShowAt != null}
+          onChange={(v) => patchElement(id, { scratchShowAt: v ? (el.scratchShowAt ?? 30) : undefined })}
+        />
+        {el.scratchShowAt != null && (
+          <Slider label="Fade in at" value={el.scratchShowAt} min={0} max={100} suffix="%" onChange={(n) => patchElement(id, { scratchShowAt: n })} />
+        )}
+        <Toggle
+          label="Fade out at progress"
+          checked={el.scratchHideAt != null}
+          onChange={(v) => patchElement(id, { scratchHideAt: v ? (el.scratchHideAt ?? 80) : undefined })}
+        />
+        {el.scratchHideAt != null && (
+          <Slider label="Fade out at" value={el.scratchHideAt} min={0} max={100} suffix="%" onChange={(n) => patchElement(id, { scratchHideAt: n })} />
+        )}
       </Accordion>
 
       <Accordion id="inspector.animation" title="Animation" defaultOpen={false}>
