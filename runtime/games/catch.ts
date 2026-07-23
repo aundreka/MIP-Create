@@ -68,7 +68,8 @@ export function createCatch(): GameModule {
   let caughtItemYs: number[] = []
   let caughtItemAngles: number[] = []
   let caughtItemScales: number[] = []
-  let caughtItemZIndex = 1
+  let caughtItemZIndexes: number[] = [1]
+  let caughtItemUseItemSizes: boolean[] = []
 
   let frontBasket: HTMLDivElement | null = null
   let backBasket: HTMLDivElement | null = null
@@ -285,14 +286,17 @@ export function createCatch(): GameModule {
             const offsetX = caughtItemXs.length > 0 ? (caughtItemXs[cIdx % caughtItemXs.length] ?? defaultOffsetX) : defaultOffsetX
             const offsetY = caughtItemYs.length > 0 ? (caughtItemYs[cIdx % caughtItemYs.length] ?? (ctx.rng() * 20 - 10)) : (ctx.rng() * 20 - 10)
             const angle = caughtItemAngles.length > 0 ? (caughtItemAngles[cIdx % caughtItemAngles.length] ?? d.angle) : d.angle
-            const scale = caughtItemScales.length > 0 ? (caughtItemScales[cIdx % caughtItemScales.length] ?? 0.7) : 0.7
+            const authoredScale = caughtItemScales.length > 0 ? (caughtItemScales[cIdx % caughtItemScales.length] ?? 0.7) : 0.7
+            const useItemSize = caughtItemUseItemSizes.length > 0 ? (caughtItemUseItemSizes[cIdx % caughtItemUseItemSizes.length] ?? false) : false
+            const scale = useItemSize ? 1 : authoredScale
+            const zIndex = caughtItemZIndexes.length > 0 ? (caughtItemZIndexes[cIdx % caughtItemZIndexes.length] ?? 1) : 1
 
             d.el.style.left = `${(frontBasketLogicalW / 2) * currentScale + offsetX * currentScale - physicalItemSz / 2}px`
             d.el.style.top = `${offsetY * currentScale}px`
             d.el.style.transform = `rotate(${angle}deg) scale(${scale})`
             d.el.style.transformOrigin = 'bottom center'
             d.el.style.opacity = '1'
-            d.el.style.zIndex = `${caughtItemZIndex}`
+            d.el.style.zIndex = `${zIndex}`
 
             if (requireUnique && itemTypes > 0) {
               uniqueItemSpots.set(d.imgSrc, d.el)
@@ -467,6 +471,10 @@ export function createCatch(): GameModule {
     return String(strValue ?? '').split(',').map(s => Number(s.trim())).filter(n => !isNaN(n))
   }
 
+  const parseBoolList = (strValue: unknown): boolean[] => {
+    return String(strValue ?? '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean).map(s => s === '1' || s === 'true' || s === 'yes')
+  }
+
   return {
     mount(c, params) {
       gameParams = params
@@ -497,7 +505,12 @@ export function createCatch(): GameModule {
       caughtItemYs = parseNumList(params.caughtItemYs)
       caughtItemAngles = parseNumList(params.caughtItemAngles)
       caughtItemScales = parseNumList(params.caughtItemScales)
-      caughtItemZIndex = Number(params.caughtItemZIndex ?? 1)
+      caughtItemZIndexes = parseNumList(params.caughtItemZIndexes)
+      if (caughtItemZIndexes.length === 0) {
+        const legacyZIndex = Number(params.caughtItemZIndex ?? 1)
+        caughtItemZIndexes = Number.isFinite(legacyZIndex) ? [legacyZIndex] : [1]
+      }
+      caughtItemUseItemSizes = parseBoolList(params.caughtItemUseItemSizes)
       
       frontBasketLogicalW = Number(params.frontBasketWidth ?? params.basketWidth ?? 300)
       frontBasketLogicalH = Number(params.frontBasketHeight ?? params.basketHeight ?? 150)
@@ -668,8 +681,14 @@ export function createCatch(): GameModule {
         
         // Also render preview items if needed
         if (showCaughtItemsPreview && caughtItemsContainer && caughtItemsContainer.childElementCount <= 0) {
-          const numItems = itemTypes > 0 ? itemTypes : Math.max(1, caughtItemXs.length)
-          for (let i = 0; i < numItems; i++) {
+          const previewIndex = Number(gameParams.caughtItemPreviewIndex)
+          const previewIndexes = parseNumList(gameParams.caughtItemPreviewIndexes).map((idx) => Math.floor(idx))
+          const layoutCount = Math.max(1, caughtItemXs.length, caughtItemYs.length, caughtItemAngles.length, caughtItemScales.length, caughtItemZIndexes.length, caughtItemUseItemSizes.length)
+          const numItems = itemTypes > 0 ? Math.max(itemTypes, layoutCount) : layoutCount
+          const previewMode = String(gameParams.caughtItemPreviewMode ?? 'all')
+          const selectedPreviewItems = previewIndexes.length > 0 ? previewIndexes : (Number.isFinite(previewIndex) ? [previewIndex] : [])
+          const previewItems = previewMode === 'selected' && selectedPreviewItems.length > 0 ? selectedPreviewItems.map((idx) => Math.max(0, Math.min(numItems - 1, idx))) : Array.from({ length: numItems }, (_, idx) => idx)
+          for (const i of previewItems) {
             const el = document.createElement('div')
             el.style.position = 'absolute'
             const sz = itemSizes[i % itemSizes.length] || 120
@@ -681,14 +700,17 @@ export function createCatch(): GameModule {
             const offsetX = caughtItemXs.length > 0 ? (caughtItemXs[i % caughtItemXs.length] ?? defaultOffsetX) : defaultOffsetX
             const offsetY = caughtItemYs.length > 0 ? (caughtItemYs[i % caughtItemYs.length] ?? -5) : -5
             const angle = caughtItemAngles.length > 0 ? (caughtItemAngles[i % caughtItemAngles.length] ?? 0) : 0
-            const scale = caughtItemScales.length > 0 ? (caughtItemScales[i % caughtItemScales.length] ?? 0.7) : 0.7
+            const authoredScale = caughtItemScales.length > 0 ? (caughtItemScales[i % caughtItemScales.length] ?? 0.7) : 0.7
+            const useItemSize = caughtItemUseItemSizes.length > 0 ? (caughtItemUseItemSizes[i % caughtItemUseItemSizes.length] ?? false) : false
+            const scale = useItemSize ? 1 : authoredScale
+            const zIndex = caughtItemZIndexes.length > 0 ? (caughtItemZIndexes[i % caughtItemZIndexes.length] ?? 1) : 1
             
             el.style.left = `${(frontBasketLogicalW / 2) * currentScale + offsetX * currentScale - physicalItemSz / 2}px`
             el.style.top = `${offsetY * currentScale}px`
             el.style.transform = `rotate(${angle}deg) scale(${scale})`
             el.style.transformOrigin = 'bottom center'
             el.style.opacity = '1'
-            el.style.zIndex = `${caughtItemZIndex}`
+            el.style.zIndex = `${zIndex}`
             
             const src = itemImages.length > 0 ? itemImages[i % itemImages.length] : ''
             if (src) {
@@ -837,7 +859,11 @@ export const CATCH_TEMPLATE: GameTemplate = {
     { key: 'caughtItemYs', label: 'Caught Ys (px, comma sep)', type: 'text' },
     { key: 'caughtItemAngles', label: 'Caught Angles (deg, comma sep)', type: 'text' },
     { key: 'caughtItemScales', label: 'Caught Scales (comma sep, e.g. 0.7)', type: 'text' },
-    { key: 'caughtItemZIndex', label: 'Caught Z-Index (relative to basket)', type: 'number', min: -10, max: 10, step: 1 },
+    { key: 'caughtItemZIndexes', label: 'Caught Layers (comma sep)', type: 'text' },
+    { key: 'caughtItemUseItemSizes', label: 'Caught Use Item Sizes (1/0 comma sep)', type: 'text' },
+    { key: 'caughtItemPreviewIndexes', label: 'Caught Preview Indexes', type: 'text' },
+    { key: 'caughtItemPreviewIndex', label: 'Caught Preview Index', type: 'number', min: 0, max: 50, step: 1 },
+    { key: 'caughtItemPreviewMode', label: 'Caught Preview Mode', type: 'select', options: ['all', 'selected'] },
     { key: 'showCaughtItemsPreview', label: 'Preview caught items (Editor only)', type: 'boolean' },
     { key: 'showPopupPreview', label: 'Preview popups (Editor only)', type: 'boolean' },
   ],
@@ -856,8 +882,8 @@ export const CATCH_TEMPLATE: GameTemplate = {
     backBasketWidth: 300, backBasketHeight: 150, backBasketOffsetX: 0, backBasketOffsetY: 0,
     frontBasketImage: '', backBasketImage: '',
     basketLocked: 'Locked',
-    caughtItemXs: '', caughtItemYs: '', caughtItemAngles: '', caughtItemScales: '', caughtItemZIndex: 1,
-    showCaughtItemsPreview: false, popupConfigs: '[]'
+    caughtItemXs: '', caughtItemYs: '', caughtItemAngles: '', caughtItemScales: '', caughtItemZIndexes: '1', caughtItemUseItemSizes: '0', caughtItemZIndex: 1,
+    showCaughtItemsPreview: false, caughtItemPreviewMode: 'all', popupConfigs: '[]'
   },
   defaultHandguide: {
     nodes: [

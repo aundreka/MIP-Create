@@ -102,13 +102,13 @@ export function Slider(props: {
 }
 
 // ---- Toggle ----------------------------------------------------------------
-export function Toggle(props: { label: string; checked: boolean; onChange: (v: boolean) => void }): JSX.Element {
+export function Toggle(props: { label: string; checked: boolean; onChange: (v: boolean) => void; stopPropagation?: boolean }): JSX.Element {
   return (
     <label className="field toggle-field">
       <span>{props.label}</span>
       <button
         className={'toggle' + (props.checked ? ' on' : '')}
-        onClick={() => props.onChange(!props.checked)}
+        onClick={(e) => { if (props.stopPropagation) e.stopPropagation(); props.onChange(!props.checked) }}
         type="button"
         role="switch"
         aria-checked={props.checked}
@@ -290,7 +290,7 @@ export function Tooltip(props: { label: string; side?: 'top' | 'bottom' | 'left'
 }
 
 // ---- Accordion (collapsible inspector section, persisted open state) --------
-export function Accordion(props: { id: string; title: React.ReactNode; defaultOpen?: boolean; children: React.ReactNode }): JSX.Element {
+export function Accordion(props: { id: string; title: React.ReactNode; defaultOpen?: boolean; headerExtra?: React.ReactNode; children: React.ReactNode }): JSX.Element {
   const [open, setOpen] = useState(() => getAccordion(props.id, props.defaultOpen ?? true))
   const toggle = (): void => {
     const v = !open
@@ -299,10 +299,13 @@ export function Accordion(props: { id: string; title: React.ReactNode; defaultOp
   }
   return (
     <div className={'acc' + (open ? ' open' : '')}>
-      <button className="acc-head" onClick={toggle} aria-expanded={open}>
-        <Icon icon={ChevronRight} size={14} className="acc-chevron" />
-        <span>{props.title}</span>
-      </button>
+      <div className="acc-head-row">
+        <button className="acc-head" onClick={toggle} aria-expanded={open}>
+          <Icon icon={ChevronRight} size={14} className="acc-chevron" />
+          <span>{props.title}</span>
+        </button>
+        {props.headerExtra && <div className="acc-head-extra">{props.headerExtra}</div>}
+      </div>
       <div className="acc-body">
         <div className="acc-inner">{props.children}</div>
       </div>

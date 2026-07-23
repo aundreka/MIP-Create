@@ -573,19 +573,28 @@ function applyMountAnim(rec: Rec): void {
 // The 'lightray' loop preset is a pseudo-element glare sweep (see anim.ts). Toggle the
 // driving class + feed its timing via CSS vars whenever the element's loop is re-applied.
 function applyLightray(rec: Rec): void {
-  const ray = lightraySpec(rec.el) // a lightray in ANY phase (entrance / loop / exit), primary or extra
-  if (ray) {
-    rec.anim.classList.add('pa-lightray')
-    rec.anim.style.setProperty('--pa-lightray-dur', (ray.durationMs ?? 2400) + 'ms')
-    rec.anim.style.setProperty('--pa-lightray-delay', (ray.delayMs ?? 0) + 'ms')
-    rec.anim.style.setProperty('--pa-lightray-ease', ray.easing ?? 'ease-in-out')
-    rec.anim.style.setProperty('--pa-lightray-ang', (ray.angleDeg ?? 20) + 'deg') // sweep direction
-  } else {
+  const clear = (): void => {
     rec.anim.classList.remove('pa-lightray')
     rec.anim.style.removeProperty('--pa-lightray-dur')
     rec.anim.style.removeProperty('--pa-lightray-delay')
     rec.anim.style.removeProperty('--pa-lightray-ease')
     rec.anim.style.removeProperty('--pa-lightray-ang')
+  }
+
+  if (rec.el.type === 'game-mount' && rec.el.game?.templateId === 'catch') {
+    clear()
+    return
+  }
+
+  const ray = lightraySpec(rec.el) // a lightray in ANY phase (entrance / loop / exit), primary or extra
+  if (ray) {
+    rec.anim.classList.add('pa-lightray')
+    rec.anim.style.setProperty('--pa-lightray-dur', ((ray.durationMs ?? 2400) + (ray.delayMs ?? 0)) + 'ms')
+    rec.anim.style.setProperty('--pa-lightray-delay', '0ms')
+    rec.anim.style.setProperty('--pa-lightray-ease', ray.easing ?? 'ease-in-out')
+    rec.anim.style.setProperty('--pa-lightray-ang', (ray.angleDeg ?? 20) + 'deg') // sweep direction
+  } else {
+    clear()
   }
 }
 function restartAnim(node: HTMLElement, css: string): void {

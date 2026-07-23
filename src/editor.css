@@ -764,7 +764,8 @@ button.icon {
 }
 .scene-picker-item {
   display: block;
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   text-align: left;
   padding: 5px 9px;
   border-radius: var(--r-sm);
@@ -1922,7 +1923,8 @@ button.frame-chip:hover {
   display: flex;
   align-items: center;
   gap: 10px;
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   text-align: left;
   justify-content: flex-start;
   background: transparent;
@@ -1950,11 +1952,16 @@ button.frame-chip:hover {
 .acc {
   border-top: 1px solid var(--line);
 }
+.acc-head-row {
+  display: flex;
+  align-items: center;
+}
 .acc-head {
   display: flex;
   align-items: center;
   gap: 6px;
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   text-align: left;
   background: transparent;
   border: 0;
@@ -1970,11 +1977,20 @@ button.frame-chip:hover {
 .acc-head:hover {
   color: var(--ink);
 }
+.acc-head-extra {
+  flex: 0 0 auto;
+  padding-right: 10px;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+.acc-head-extra .toggle {
+  margin: 0;
+}
 .acc-chevron {
   transition: transform var(--t-fast) var(--ease);
   flex: 0 0 auto;
 }
-.acc.open > .acc-head .acc-chevron {
+.acc.open .acc-head .acc-chevron {
   transform: rotate(90deg);
 }
 .acc-body {
@@ -2332,7 +2348,8 @@ svg {
 }
 .ctx-item {
   display: block;
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   text-align: left;
   background: transparent;
   border: 0;
@@ -3421,7 +3438,8 @@ svg {
   flex-direction: column;
   align-items: flex-start;
   gap: 3px;
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   text-align: left;
   padding: 10px 12px;
   margin-bottom: 6px;
@@ -4004,7 +4022,8 @@ svg {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   text-align: left;
   padding: 8px 10px;
   border: 1px solid var(--line);

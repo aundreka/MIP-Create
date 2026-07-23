@@ -1046,6 +1046,7 @@ function ScratchGridCells({ params, setParam, setParams, elementId, cardAspect }
 interface CatchInspectorProps {
   params: Record<string, unknown>
   setParam: (k: string, v: unknown) => void
+  setParams: (patch: Record<string, unknown>) => void
 }
 
 const numList = (value: unknown): number[] => String(value ?? '').split(',').map((v) => Number(v.trim())).filter(Number.isFinite)
@@ -1078,46 +1079,147 @@ function NumberListEditor(props: { label: string; value: unknown; defaultValue: 
   )
 }
 
-function CatchAssetList(props: { params: Record<string, unknown>; setParam: (k: string, v: unknown) => void }): JSX.Element {
+const boolList = (value: unknown): boolean[] => String(value ?? '').split(',').map((v) => v.trim().toLowerCase()).filter(Boolean).map((v) => v === '1' || v === 'true' || v === 'yes')
+const writeBoolList = (items: boolean[]): string => items.map((v) => (v ? '1' : '0')).join(', ')
+const listValue = <T,>(items: T[], idx: number, fallback: T): T => items[idx] ?? fallback
+
+function CatchFallingItemsCards(props: { params: Record<string, unknown>; setParam: (k: string, v: unknown) => void }): JSX.Element {
   const arr = Array.isArray(props.params.itemImages) ? (props.params.itemImages as string[]) : []
-  const n = Math.max(1, Number(props.params.itemTypes ?? arr.length ?? 1))
+  const sizes = numList(props.params.itemSizes)
+  const n = Math.max(1, Number(props.params.itemTypes ?? arr.length ?? sizes.length ?? 1))
   const setCount = (count: number): void => props.setParam('itemTypes', Math.max(1, count))
+  const setSize = (idx: number, size: number): void => {
+    const next = Array.from({ length: n }, (_, i) => listValue(sizes, i, 120))
+    next[idx] = size
+    props.setParam('itemSizes', writeNumList(next))
+  }
+  const remove = (idx: number): void => {
+    const nextImages = arr.slice(); nextImages.splice(idx, 1)
+    const nextSizes = Array.from({ length: n }, (_, i) => listValue(sizes, i, 120)); nextSizes.splice(idx, 1)
+    props.setParam('itemImages', nextImages)
+    props.setParam('itemSizes', writeNumList(nextSizes))
+    setCount(n - 1)
+  }
   return (
-    <div>
-      <div className="group-title2" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span>Falling item images</span>
-        <button className="icon-btn" title="Add falling item" onClick={() => setCount(n + 1)}>
-          <Icon icon={Plus} size={13} />
-        </button>
-      </div>
+    <div className="kf-list">
       {Array.from({ length: n }).map((_, i) => (
-        <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 4, alignItems: 'center' }}>
-          <AssetPicker
-            label={`Item ${i + 1}`}
-            value={arr[i] || undefined}
-            allowNone
-            onChange={(aid) => {
-              const next = arr.slice()
-              next[i] = aid ?? ''
-              props.setParam('itemImages', next)
-            }}
-          />
-          {n > 1 && (
-            <button className="icon-btn" title="Remove item" onClick={() => {
-              const next = arr.slice(); next.splice(i, 1)
-              props.setParam('itemImages', next)
-              setCount(n - 1)
-            }}>
-              <Icon icon={Trash2} size={13} />
-            </button>
-          )}
+        <div key={i} className="kf-step">
+          <div className="kf-row">
+            <div style={{ flex: 1 }}>
+              <AssetPicker
+                label={`Item ${i + 1} image`}
+                value={arr[i] || undefined}
+                allowNone
+                onChange={(aid) => {
+                  const next = arr.slice()
+                  next[i] = aid ?? ''
+                  props.setParam('itemImages', next)
+                }}
+              />
+            </div>
+            {n > 1 && (
+              <button className="kf-remove" title="Remove falling item" onClick={() => remove(i)}>
+                <Icon icon={X} size={14} />
+              </button>
+            )}
+          </div>
+          <NumField label="Size" value={listValue(sizes, i, 120)} step={5} min={1} onChange={(size) => setSize(i, size)} />
         </div>
       ))}
+      <button className="wide" onClick={() => setCount(n + 1)}>
+        <Icon icon={Plus} size={14} /> Add falling item
+      </button>
     </div>
   )
 }
 
-function CatchTemplateInspector({ params, setParam }: CatchInspectorProps): JSX.Element {
+function CatchCaughtItemsCards(props: { params: Record<string, unknown>; setParam: (k: string, v: unknown) => void; setParams: (patch: Record<string, unknown>) => void }): JSX.Element {
+  const xs = numList(props.params.caughtItemXs)
+  const ys = numList(props.params.caughtItemYs)
+  const angles = numList(props.params.caughtItemAngles)
+  const scales = numList(props.params.caughtItemScales)
+  const zIndexes = numList(props.params.caughtItemZIndexes ?? props.params.caughtItemZIndex)
+  const useItemSizes = boolList(props.params.caughtItemUseItemSizes)
+  const previewIndexes = numList(props.params.caughtItemPreviewIndexes ?? props.params.caughtItemPreviewIndex)
+  const previewSet = new Set(previewIndexes.map((idx) => Math.floor(idx)))
+  const n = Math.max(1, xs.length, ys.length, angles.length, scales.length, zIndexes.length, useItemSizes.length)
+  const writeAt = (key: string, source: number[], idx: number, value: number, fallback: number): void => {
+    const next = Array.from({ length: n }, (_, i) => listValue(source, i, fallback))
+    next[idx] = value
+    props.setParam(key, writeNumList(next))
+  }
+  const setUseItemSize = (idx: number, value: boolean): void => {
+    const next = Array.from({ length: n }, (_, i) => listValue(useItemSizes, i, false))
+    next[idx] = value
+    props.setParam('caughtItemUseItemSizes', writeBoolList(next))
+  }
+  const remove = (idx: number): void => {
+    const removeFrom = (source: number[], fallback: number): number[] => {
+      const next = Array.from({ length: n }, (_, i) => listValue(source, i, fallback))
+      next.splice(idx, 1)
+      return next
+    }
+    const nextUse = Array.from({ length: n }, (_, i) => listValue(useItemSizes, i, false)); nextUse.splice(idx, 1)
+    props.setParam('caughtItemXs', writeNumList(removeFrom(xs, 0)))
+    props.setParam('caughtItemYs', writeNumList(removeFrom(ys, 0)))
+    props.setParam('caughtItemAngles', writeNumList(removeFrom(angles, 0)))
+    props.setParam('caughtItemScales', writeNumList(removeFrom(scales, 0.7)))
+    props.setParam('caughtItemZIndexes', writeNumList(removeFrom(zIndexes, 1)))
+    props.setParam('caughtItemUseItemSizes', writeBoolList(nextUse))
+    props.setParam('caughtItemPreviewIndexes', writeNumList(Array.from(previewSet).filter((previewIdx) => previewIdx !== idx).map((previewIdx) => previewIdx > idx ? previewIdx - 1 : previewIdx).sort((a, b) => a - b)))
+  }
+  const add = (): void => {
+    props.setParam('caughtItemXs', writeNumList([...Array.from({ length: n }, (_, i) => listValue(xs, i, 0)), 0]))
+    props.setParam('caughtItemYs', writeNumList([...Array.from({ length: n }, (_, i) => listValue(ys, i, 0)), 0]))
+    props.setParam('caughtItemAngles', writeNumList([...Array.from({ length: n }, (_, i) => listValue(angles, i, 0)), 0]))
+    props.setParam('caughtItemScales', writeNumList([...Array.from({ length: n }, (_, i) => listValue(scales, i, 0.7)), 0.7]))
+    props.setParam('caughtItemZIndexes', writeNumList([...Array.from({ length: n }, (_, i) => listValue(zIndexes, i, 1)), 1]))
+    props.setParam('caughtItemUseItemSizes', writeBoolList([...Array.from({ length: n }, (_, i) => listValue(useItemSizes, i, false)), false]))
+    props.setParam('caughtItemPreviewIndexes', writeNumList(Array.from(previewSet).sort((a, b) => a - b)))
+  }
+  return (
+    <div className="kf-list">
+      {Array.from({ length: n }).map((_, i) => {
+        const useSize = listValue(useItemSizes, i, false)
+        return (
+          <div key={i} className="kf-step">
+            <div className="kf-row">
+              <div className="group-title2" style={{ flex: 1, margin: 0 }}>Caught item {i + 1}</div>
+              {n > 1 && (
+                <button className="kf-remove" title="Remove caught item" onClick={() => remove(i)}>
+                  <Icon icon={X} size={14} />
+                </button>
+              )}
+            </div>
+            <div className="grid2">
+              <NumField label="X position" value={listValue(xs, i, 0)} step={5} onChange={(v) => writeAt('caughtItemXs', xs, i, v, 0)} />
+              <NumField label="Y position" value={listValue(ys, i, 0)} step={5} onChange={(v) => writeAt('caughtItemYs', ys, i, v, 0)} />
+            </div>
+            <div className="grid2">
+              <NumField label="Rotation" value={listValue(angles, i, 0)} step={5} onChange={(v) => writeAt('caughtItemAngles', angles, i, v, 0)} />
+              <NumField label="Layer" value={listValue(zIndexes, i, 1)} step={1} min={-10} max={10} onChange={(v) => writeAt('caughtItemZIndexes', zIndexes, i, v, 1)} />
+            </div>
+            <Toggle
+              label="Preview this item"
+              checked={!!props.params.showCaughtItemsPreview && String(props.params.caughtItemPreviewMode ?? 'all') === 'selected' && previewSet.has(i)}
+              onChange={(v) => {
+                props.setParams({ showCaughtItemsPreview: v || previewSet.size > 1, caughtItemPreviewMode: v || previewSet.size > 1 ? 'selected' : 'all', caughtItemPreviewIndexes: writeNumList(v ? Array.from(new Set([...previewSet, i])).sort((a, b) => a - b) : Array.from(previewSet).filter((idx) => idx !== i).sort((a, b) => a - b)), caughtItemPreviewIndex: undefined })
+              }}
+            />
+            <Toggle label="Use falling item size" checked={useSize} onChange={(v) => setUseItemSize(i, v)} />
+            {!useSize && (
+              <NumField label="Scale" value={listValue(scales, i, 0.7)} step={0.05} min={0.05} max={5} onChange={(v) => writeAt('caughtItemScales', scales, i, v, 0.7)} />
+            )}
+          </div>
+        )
+      })}
+      <button className="wide" onClick={add}>
+        <Icon icon={Plus} size={14} /> Add caught item
+      </button>
+    </div>
+  )
+}
+function CatchTemplateInspector({ params, setParam, setParams }: CatchInspectorProps): JSX.Element {
   const uniqueMode = params.requireUnique !== false
   return (
     <>
@@ -1146,7 +1248,6 @@ function CatchTemplateInspector({ params, setParam }: CatchInspectorProps): JSX.
             { key: 'count', label: 'Catch a total amount', active: !uniqueMode, onClick: () => setParam('requireUnique', false) },
           ]} />
         </Row>
-        <NumField label="Unique item types" value={Number(params.itemTypes ?? 3)} step={1} min={1} max={20} onChange={(n) => setParam('itemTypes', n)} />
         {uniqueMode ? (
           <div className="hint pad">The player wins after collecting one of each unique item. Total catches is ignored in this mode.</div>
         ) : (
@@ -1155,8 +1256,7 @@ function CatchTemplateInspector({ params, setParam }: CatchInspectorProps): JSX.
       </Accordion>
 
       <Accordion id="inspector.catch.items" title="Falling Items">
-        <CatchAssetList params={params} setParam={setParam} />
-        <NumberListEditor label="Item sizes" value={params.itemSizes} defaultValue={120} step={5} min={1} onChange={(v) => setParam('itemSizes', v)} />
+        <CatchFallingItemsCards params={params} setParam={setParam} />
       </Accordion>
 
       <Accordion id="inspector.catch.basketImages" title="Basket Images" defaultOpen={false}>
@@ -1176,18 +1276,24 @@ function CatchTemplateInspector({ params, setParam }: CatchInspectorProps): JSX.
         </Row>
       </Accordion>
 
-      <Accordion id="inspector.catch.caughtLayout" title="Caught Item Layout" defaultOpen={false}>
-        <NumberListEditor label="X positions" value={params.caughtItemXs} defaultValue={0} step={5} onChange={(v) => setParam('caughtItemXs', v)} />
-        <NumberListEditor label="Y positions" value={params.caughtItemYs} defaultValue={0} step={5} onChange={(v) => setParam('caughtItemYs', v)} />
-        <NumberListEditor label="Rotations" value={params.caughtItemAngles} defaultValue={0} step={5} onChange={(v) => setParam('caughtItemAngles', v)} />
-        <NumberListEditor label="Scales" value={params.caughtItemScales} defaultValue={0.7} step={0.05} min={0.05} max={5} onChange={(v) => setParam('caughtItemScales', v)} />
-        <NumField label="Layer" value={Number(params.caughtItemZIndex ?? 1)} step={1} min={-10} max={10} onChange={(n) => setParam('caughtItemZIndex', n)} />
+      <Accordion
+        id="inspector.catch.caughtLayout"
+        title="Caught Item Layout"
+        defaultOpen={false}
+      >
+        <Toggle
+          label="Preview all caught items on basket"
+          checked={!!params.showCaughtItemsPreview && String(params.caughtItemPreviewMode ?? 'all') === 'all'}
+          onChange={(v) => {
+            setParams({ showCaughtItemsPreview: v, caughtItemPreviewMode: 'all', caughtItemPreviewIndexes: '', caughtItemPreviewIndex: undefined })
+          }}
+        />
+        <CatchCaughtItemsCards params={params} setParam={setParam} setParams={setParams} />
       </Accordion>
 
       <CatchPopupControls params={params} setParam={setParam} />
 
       <Accordion id="inspector.catch.preview" title="Editor Preview" defaultOpen={false}>
-        <Toggle label="Show caught items" checked={!!params.showCaughtItemsPreview} onChange={(v) => setParam('showCaughtItemsPreview', v)} />
         <Toggle label="Show catch effects" checked={!!params.showPopupPreview} onChange={(v) => setParam('showPopupPreview', v)} />
       </Accordion>
     </>
@@ -1364,6 +1470,13 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
   }
 
   const el = singleSelected(state)
+  const withoutLightray = (presets: AnimPresetId[]): AnimPresetId[] => presets.filter((preset) => preset !== 'lightray')
+  const animationEntrancePresets = el?.type === 'game-mount' ? withoutLightray(ENTRANCE_PRESETS) : ENTRANCE_PRESETS
+  const animationLoopPresets = el?.type === 'game-mount' ? withoutLightray(LOOP_PRESETS) : LOOP_PRESETS
+  const animationExitPresets = el?.type === 'game-mount' ? withoutLightray(EXIT_PRESETS) : EXIT_PRESETS
+  const animationExtraPresets = el?.type === 'game-mount' ? withoutLightray(NODE_PRESETS) : NODE_PRESETS
+  const animationLoopExtraPresets = el?.type === 'game-mount' ? withoutLightray(LOOP_EXTRA_PRESETS) : LOOP_EXTRA_PRESETS 
+  const animationLoopDefaultExtraSpec = el?.type === 'game-mount' ? { preset: 'shine' as const, durationMs: 900, delayMs: 0, easing: 'ease-in-out' } : { preset: 'lightray' as const, durationMs: 2400, delayMs: 0, easing: 'ease-in-out', iterations: 'infinite' as const }
   if (!el) {
     const sd = activeSceneDef(state)
     const adv = sd.advance
@@ -1824,7 +1937,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               ) : (
               <>
               {tpl.id === 'catch' ? (
-                <CatchTemplateInspector params={params} setParam={setParam} />
+                <CatchTemplateInspector params={params} setParam={setParam} setParams={setParams} />
               ) : (
                 tpl.paramFields.filter((f) => !BRUSH_PARAM_KEYS.has(f.key) && !(tpl.id === 'scratch' && (f.key === 'coverColor' || f.key === 'shadowColor'))).map(renderField)
               )}
@@ -2797,8 +2910,8 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
           trigger
           primary={el.animations?.entrance}
           extra={el.animations?.entranceExtra}
-          presets={ENTRANCE_PRESETS}
-          extraPresets={NODE_PRESETS}
+          presets={animationEntrancePresets}
+          extraPresets={animationExtraPresets}
           defaultSpec={{ preset: 'fade', durationMs: 520, delayMs: 0, easing: 'ease-out', trigger: 'onMount' }}
           defaultExtraSpec={{ preset: 'shine', durationMs: 900, delayMs: 0, easing: 'ease-in-out' }}
           onChange={(primary, ex) => patchElement(id, { animations: { ...(el.animations ?? {}), entrance: primary, entranceExtra: ex.length ? ex : undefined } })}
@@ -2807,18 +2920,18 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
           title="Loop"
           primary={el.animations?.loop}
           extra={el.animations?.loopExtra}
-          presets={LOOP_PRESETS}
-          extraPresets={LOOP_EXTRA_PRESETS}
+          presets={animationLoopPresets}
+          extraPresets={animationLoopExtraPresets}
           defaultSpec={{ preset: 'float', durationMs: 2200, delayMs: 0, easing: 'ease-in-out', iterations: 'infinite' }}
-          defaultExtraSpec={{ preset: 'lightray', durationMs: 2400, delayMs: 0, easing: 'ease-in-out', iterations: 'infinite' }}
+          defaultExtraSpec={animationLoopDefaultExtraSpec}
           onChange={(primary, ex) => patchElement(id, { animations: { ...(el.animations ?? {}), loop: primary, loopExtra: ex.length ? ex : undefined } })}
         />
         <AnimPhase
           title="Exit"
           primary={el.animations?.exit}
           extra={el.animations?.exitExtra}
-          presets={EXIT_PRESETS}
-          extraPresets={NODE_PRESETS}
+          presets={animationExitPresets}
+          extraPresets={animationExtraPresets}
           defaultSpec={{ preset: 'fade-out', durationMs: 300, delayMs: 0, easing: 'ease-in' }}
           defaultExtraSpec={{ preset: 'scale-out', durationMs: 300, delayMs: 0, easing: 'ease-in' }}
           onChange={(primary, ex) => patchElement(id, { animations: { ...(el.animations ?? {}), exit: primary, exitExtra: ex.length ? ex : undefined } })}
