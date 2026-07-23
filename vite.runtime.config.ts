@@ -1,6 +1,5 @@
 import { readFileSync } from 'node:fs'
 import { defineConfig } from 'vite'
-import tailwindcss from '@tailwindcss/vite'
 
 // Builds the DOM/CSS runtime as a single self-contained IIFE that the editor
 // inlines into exported playables. CSS is injected by the runtime at boot, so
@@ -13,7 +12,6 @@ const build = process.env.PA_BUILD || 'dev'
 const banner = `/*! playable-runtime v${version} (${build}) */`
 
 export default defineConfig({
-  plugins: [tailwindcss()],
   build: {
     target: 'es2018',
     outDir: 'runtime-dist',
