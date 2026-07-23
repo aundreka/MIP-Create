@@ -1602,7 +1602,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
       </Row>
       {!activeVariant && <Toggle label="Lock element" checked={!!el.locked} onChange={() => toggleLock(id)} />}
       <Toggle label="Show on game win" checked={!!el.showOnWin} onChange={(v) => patchElement(id, { showOnWin: v })} />
-      {el.type === 'text' && sceneHasCatch && (
+      {(el.type === 'text' || el.type === 'image' || (el.type === 'bar' && el.mode === 'fit')) && sceneHasCatch && (
         <Toggle label="Show after basket moved" checked={!!el.showAfterInteraction} onChange={(v) => patchElement(id, { showAfterInteraction: v || undefined })} />
       )}
       {el.type !== 'cta' && (

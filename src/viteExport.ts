@@ -10,7 +10,7 @@ import { downloadBlob, pruneAssets } from './export'
 
 // Every runtime source file, pulled in as raw text at the editor's build time.
 // Keys look like '../runtime/index.ts'; we re-root them under src/runtime/.
-const runtimeFiles = import.meta.glob('../runtime/**/*.{ts,tsx,css}', { query: '?raw', import: 'default', eager: true }) as Record<string, string>
+const runtimeFiles = import.meta.glob('../runtime/**/*.ts', { query: '?raw', import: 'default', eager: true }) as Record<string, string>
 
 const PACKAGE_JSON = `{
   "name": "NAME",
@@ -22,17 +22,9 @@ const PACKAGE_JSON = `{
     "build": "vite build",
     "preview": "vite preview"
   },
-  "dependencies": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "framer-motion": "^12.4.1"
-  },
   "devDependencies": {
     "typescript": "^5.6.0",
-    "vite": "^5.4.0",
-    "@vitejs/plugin-react": "^4.3.4",
-    "tailwindcss": "^4.0.0",
-    "@tailwindcss/vite": "^4.0.0"
+    "vite": "^5.4.0"
   }
 }
 `
@@ -54,12 +46,9 @@ const TSCONFIG = `{
 `
 
 const VITE_CONFIG = `import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-import tailwindcss from '@tailwindcss/vite'
 
 // Plain Vite app. The playable boots from src/main.ts and mounts full-screen.
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
   server: { open: true },
 })
 `

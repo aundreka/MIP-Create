@@ -51,12 +51,8 @@ export async function fetchRuntimeSrc(): Promise<string> {
   }
   // Web fallback: timestamp query param forces a fresh read even if Vite caches by path.
   try {
-    const r = await fetch(`/runtime-dist/playable-runtime.js?t=${Date.now()}`, { cache: 'no-store' })
-    if (r.ok) {
-      const text = await r.text()
-      // Vite dev server returns index.html (SPA fallback) for unfound static routes
-      if (!text.trim().startsWith('<')) return text
-    }
+    const r = await fetch(`./runtime-dist/playable-runtime.js?t=${Date.now()}`, { cache: 'no-store' })
+    if (r.ok) return await r.text()
   } catch { /* fallback to bundled copy */ }
   return staticRuntimeSrc
 }
