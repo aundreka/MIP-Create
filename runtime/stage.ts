@@ -12,7 +12,7 @@
 
 import type { Anchor, Scene, SceneElement } from './scene'
 import type { AssetEntry, AssetMap, RuntimeCtx } from './types'
-import { isLandscape, scale, sx, sy, viewH } from './responsive'
+import { designH, isLandscape, scale, sx, sy, viewH } from './responsive'
 import { composeElementAnim, entranceLeadDelayMs, entranceTriggers, exitCss, injectAnimStyles, lightraySpec } from './anim'
 import { applyImageCrop, createContainerContent, createImageContent, styleContainer } from './elements/image'
 import { applyBarFill, createBarContent } from './elements/bar'
@@ -42,6 +42,78 @@ interface Rec {
   ticker?: number // countdown setInterval id
   hg?: { stop(): void } // handguide animator
   confetti?: ConfettiController // confetti particle system
+  idle?: { stop(): void } // generic idle visibility animator
+}
+
+function startIdleBehavior(rec: Rec, root: HTMLElement): { stop(): void } {
+  const cfg = rec.el.idle
+  if (!cfg) return { stop() {} }
+  const idleMs = Math.max(0, cfg.idleMs ?? 4000)
+  const hideOnInteract = cfg.hideOnInteract !== false
+  const reappearOnIdle = cfg.reappearOnIdle !== false
+  let idleTimer = 0
+  let interacting = false
+
+  const show = (): void => {
+    if (rec.anim) {
+      rec.anim.style.transition = 'opacity 0.2s ease-in-out'
+      rec.anim.style.opacity = '1'
+    }
+  }
+  const hide = (): void => {
+    if (rec.anim) {
+      rec.anim.style.transition = 'opacity 0.1s ease-in-out'
+      rec.anim.style.opacity = '0'
+    }
+  }
+
+  const scheduleShow = (): void => {
+    window.clearTimeout(idleTimer)
+    if (reappearOnIdle) {
+      idleTimer = window.setTimeout(() => { if (!interacting) show() }, idleMs)
+    }
+  }
+
+  const onInteractStart = (): void => {
+    interacting = true
+    if (hideOnInteract) hide()
+    scheduleShow()
+  }
+  const onInteractEnd = (): void => {
+    interacting = false
+    scheduleShow()
+  }
+
+  if (hideOnInteract) {
+    root.addEventListener('pointerdown', onInteractStart, true)
+    root.addEventListener('pointerup', onInteractEnd, true)
+    root.addEventListener('pointercancel', onInteractEnd, true)
+    root.addEventListener('touchstart', onInteractStart, { capture: true, passive: true })
+    root.addEventListener('touchend', onInteractEnd, { capture: true, passive: true })
+    root.addEventListener('touchcancel', onInteractEnd, { capture: true, passive: true })
+  }
+  if (cfg.showInitially === false) {
+    hide()
+    scheduleShow()
+  }
+
+  return {
+    stop() {
+      window.clearTimeout(idleTimer)
+      root.removeEventListener('pointerdown', onInteractStart, true)
+      root.removeEventListener('pointerup', onInteractEnd, true)
+      root.removeEventListener('pointercancel', onInteractEnd, true)
+      // Note: touch listeners with {passive: true} should technically be removed with matching options,
+      // but standard removeEventListener handles it if the function reference matches.
+      root.removeEventListener('touchstart', onInteractStart, true)
+      root.removeEventListener('touchend', onInteractEnd, true)
+      root.removeEventListener('touchcancel', onInteractEnd, true)
+      if (rec.anim) {
+        rec.anim.style.transition = ''
+        rec.anim.style.opacity = ''
+      }
+    }
+  }
 }
 
 // Animate a handguide element's image: loop a tap-bounce in place, or slide from
@@ -49,6 +121,7 @@ interface Rec {
 // with a press dip at the ends. Self-contained; only runs when interactive.
 function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): void } {
   const cfg = rec.el.handguide ?? { mode: 'smart' as const }
+  console.log('[handguide] startHandguide called', { mode: cfg.mode, hasContent: !!rec.content, elId: rec.el.id, nodes: cfg.nodes })
   const content = rec.content
   const sx = rec.el.x
   const sy = rec.el.y
@@ -107,6 +180,7 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
   if (content) {
     content.style.transformOrigin = '22% 12%'
     content.style.transition = 'opacity 200ms ease'
+    rec.outer.style.zIndex = '99999' // Force handguide to be always on top
   }
   // 'brush' mode: render the hand on the STAGE layer so it sits in front of the brush (the brush is
   // itself above the scene), positioned absolutely. Remember how to put it back on stop().
@@ -287,17 +361,21 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
   }
   // Idle visibility: hide on the player's tap, reappear after idleMs of stillness,
   // repeating. hideOnInteract=false keeps the old always-looping behavior.
-  const idleMs = Math.max(0, cfg.idleMs ?? 4000)
-  const hideOnInteract = cfg.hideOnInteract !== false
+  const idleCfg = rec.el.idle ?? cfg
+  const idleMs = Math.max(0, idleCfg.idleMs ?? 4000)
+  const hideOnInteract = idleCfg.hideOnInteract !== false
+  const reappearOnIdle = idleCfg.reappearOnIdle !== false
   let idleTimer = 0
   let interacting = false
   const scheduleShow = (): void => {
     window.clearTimeout(idleTimer)
-    idleTimer = window.setTimeout(() => { if (!interacting) show() }, idleMs)
+    if (reappearOnIdle) {
+      idleTimer = window.setTimeout(() => { if (!interacting) show() }, idleMs)
+    }
   }
   const onInteractStart = (): void => {
     interacting = true
-    hide()
+    if (hideOnInteract) hide()
     scheduleShow()
   }
   const onInteractEnd = (): void => {
@@ -312,7 +390,7 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     root.addEventListener('touchend', onInteractEnd, { capture: true, passive: true })
     root.addEventListener('touchcancel', onInteractEnd, { capture: true, passive: true })
   }
-  if (cfg.showInitially === false) {
+  if (idleCfg.showInitially === false) {
     if (content) content.style.opacity = '0'
     scheduleShow()
   } else {
@@ -441,6 +519,8 @@ html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;overscroll-b
 .pa-tap-outline.pa-tap-on{box-shadow:0 0 0 4px rgba(255,255,255,.9);}
 .pa-textbox{margin:0;display:inline-block;box-sizing:border-box;pointer-events:none;}
 .pa-text-inner{display:block;}
+.pa-root:not(.has-interacted) .pa-show-after-interaction{opacity:0 !important;pointer-events:none !important;}
+.pa-root.has-interacted .pa-hide-after-basket-interaction{opacity:0 !important;pointer-events:none !important;}
 `.trim()
   document.head.appendChild(style)
 }
@@ -675,7 +755,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     const nonInteractive =
       el.type !== 'cta' && el.type !== 'choice' && el.type !== 'button' &&
       el.type !== 'game-mount' && el.type !== 'endscene' &&
-      el.type !== 'unboxing' &&
+      el.type !== 'unboxing' && el.type !== 'bar' &&
       el.type !== 'dim' && !el.scratch && !el.reveal && !el.button
     if (nonInteractive) {
       outer.style.pointerEvents = 'none'
@@ -821,8 +901,12 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
               revealOnWin()
             },
           })
-        } else if (rec.el.type === 'handguide' && interactive && !rec.hg && rec.content) {
-          rec.hg = startHandguide(rec, recs, root)
+          rec.host?.relayout()
+        } else if (rec.el.type === 'handguide') {
+          console.log('[handguide] found handguide in startGames', { interactive, hasHg: !!rec.hg, hasContent: !!rec.content, elId: rec.el.id, assetId: rec.el.assetId })
+          if (interactive && !rec.hg && rec.content) {
+            rec.hg = startHandguide(rec, recs, root)
+          }
         } else if (rec.el.type === 'confetti' && rec.confetti) {
           // Interactive: fire sceneEnter now (onGameWin waits for revealOnWin).
           // Editor (non-interactive): paint one static frame so it's visible/placeable.
@@ -831,6 +915,10 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
           } else {
             rec.confetti.renderStatic()
           }
+        }
+        
+        if (interactive && rec.el.idle && !rec.idle && rec.el.type !== 'handguide') {
+          rec.idle = startIdleBehavior(rec, root)
         }
       }
       // Threshold-based element fades: set the initial (progress 0) state and start listening for
@@ -1254,6 +1342,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       for (const rec of recs) {
         rec.host?.destroy()
         rec.hg?.stop()
+        rec.idle?.stop()
         rec.confetti?.destroy()
         if (rec.ticker) window.clearInterval(rec.ticker)
       }
@@ -1391,13 +1480,15 @@ function layoutRec(rec: Rec): void {
   const floatedImmune = !outer.closest('.pa-root') && !!outer.closest('.pa-stage')
   // overlayTop is a higher immune tier (z:10050) that floats above ordinary
   // "above overlays" elements (z:10000); keep it in sync with scenes.ts.
-  outer.style.zIndex = floatedImmune ? (rec.el.overlayTop ? '10050' : '10000') : String(e.zIndex)
+  outer.style.zIndex = floatedImmune ? (rec.el.overlayTop ? '10050' : '10000') : (rec.el.type === 'handguide' && rec.hg ? '99999' : String(e.zIndex))
   // CTA is always immune; other elements opt in via overlayImmune / overlayTop (top tier).
   outer.classList.toggle('pa-el--immune', rec.el.type === 'cta' || !!rec.el.overlayImmune || !!rec.el.overlayTop)
   outer.classList.toggle('pa-el--immune-top', !!rec.el.overlayTop)
   // Elements that should disappear while a floating overlay is up (opt-in). The
   // scene-overlay handler queries this class and hides them for the overlay's life.
   outer.classList.toggle('pa-el--hide-on-overlay', !!rec.el.hideOnOverlay)
+  outer.classList.toggle('pa-show-after-interaction', !!rec.el.showAfterInteraction)
+  outer.classList.toggle('pa-hide-after-basket-interaction', !!rec.el.hideAfterBasketInteraction)
   outer.style.opacity = e.opacity != null ? String(e.opacity) : ''
 
   if (e.hidden) {
@@ -1601,10 +1692,27 @@ function layoutAsset(rec: Rec, e: Effective, mode: 'fit' | 'extend'): void {
         document.documentElement.style.background = barBgColor
       }
     } else if (pin === 'bottom') {
-      outer.style.background = ''
-      outer.style.top = round(naturalTop) + 'px'
-      // Extend 4px past the reported viewport to cover AppLovin's 1-2px physical edge gap.
-      outer.style.height = Math.max(0, viewH() - naturalTop + 4) + 'px'
+      outer.style.position = 'fixed'
+      outer.style.top = 'auto'
+      outer.style.bottom = '0'
+      outer.style.height = h + 'px'
+      outer.style.left = '0'
+      outer.style.width = '100%'
+      
+      // translateZ(0) forces a GPU compositing layer to avoid clip issues
+      const inImmune = !outer.closest('.pa-root') && !!outer.closest('.pa-stage')
+      if (!inImmune) {
+        outer.style.transform = e.rotation ? `rotate(${e.rotation}deg) translateZ(0)` : 'translateZ(0)'
+      }
+
+      if (isBarDiv) {
+        const barDiv = rec.content as HTMLDivElement
+        barDiv.style.backgroundColor = barBgColor
+        if (barDiv.style.backgroundImage && barDiv.style.backgroundImage !== 'none') {
+          barDiv.style.backgroundSize = `100% ${Math.max(1, Math.round(h))}px`
+          barDiv.style.backgroundPosition = 'center top'
+        }
+      }
     } else {
       outer.style.background = ''
       outer.style.top = round(naturalTop) + 'px'
@@ -1618,8 +1726,17 @@ function layoutAsset(rec: Rec, e: Effective, mode: 'fit' | 'extend'): void {
   }
 
   // FIT
-  const px = sx(e.x)
-  const py = sy(e.y)
+  let px = sx(e.x)
+  let py = sy(e.y)
+
+  if (rec.el.relativeToBasketBar) {
+    // The design is anchored to the top (offY=0), so any extra vertical screen space
+    // falls to the bottom. Elements pinned to the bottom (like the basket_bar) move
+    // down into this gap. To keep this element mathematically locked to the bottom
+    // bar, we shift it down by that exact same physical gap.
+    const bottomGap = viewH() - designH() * s
+    if (bottomGap > 0) py += bottomGap
+  }
   let w: number
   let h: number
   if (e.w != null && e.h != null) {
@@ -1634,6 +1751,10 @@ function layoutAsset(rec: Rec, e: Effective, mode: 'fit' | 'extend'): void {
   // Plain images: place the source behind the box window for a Canva-style crop
   // (no-op when el.crop is unset). Uses the box px + the asset's natural size.
   if (rec.el.type === 'image' && rec.content) applyImageCrop(rec.content, rec.anim, rec.el, w, h, a.w, a.h)
+
+  if (rec.el.type === 'handguide') {
+    outer.style.zIndex = '9999'
+  }
 }
 
 function sceneBgCss(c1?: string, c2?: string): string {

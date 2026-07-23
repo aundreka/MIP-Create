@@ -327,13 +327,14 @@ export function playProject(
       if (!nid) return
       const nextDef = project.scenes.find((s) => s.id === nid)
       if (nextDef?.kind === 'overlay' && !overlayShownThisScene) {
+        const afterId = nextId(nextDef)
         // Float overlay scene on top of the running game so the dim is visible over game content.
         emit('scene-overlay', {
           sceneId: nid,
-          onDone: () => {
-            const afterId = nextId(nextDef)
-            if (afterId) transitionTo(afterId)
-          },
+          // When the overlay continues to an endscene/next scene, keep it visible until
+          // the destination has faded fully over it. This avoids a one-frame flash back
+          // to the game between the win overlay and end card.
+          ...(afterId ? { redirectTo: afterId } : {}),
         })
       } else if (nextDef?.kind === 'overlay' && overlayShownThisScene) {
         // Game (e.g. scratch_grid) already showed the overlay via scene-overlay; skip past it.

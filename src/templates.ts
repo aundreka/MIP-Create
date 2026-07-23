@@ -173,6 +173,11 @@ export function gameTemplateStarters(): Starter[] {
     description: `Start a game → win → endscene flow with the ${t.label} mini-game.`,
     build: (): ProjectData => {
       const isScratch = t.id === 'scratch' || t.id === 'scratch_grid'
+      const isCatch = t.id === 'catch'
+      const catchElements: SceneElement[] = isCatch ? [
+        { id: 'score_counter', type: 'text', name: 'Score Counter', x: C, y: 150, anchor: 'center', zIndex: 13, mode: 'fit', text: { value: '0', fontSizePx: 48, fontWeight: 800, color: '#ffffff', align: 'center' } },
+        { id: 'basket_bar', type: 'bar', name: 'Footer bar', x: C, y: 1920, h: 170, anchor: 'bottom', zIndex: 10, mode: 'extend', pin: 'bottom', bar: { color: '#1b2a4a' } },
+      ] : []
       return {
         assets: {
           sfx_f_correctBright: sfxAsset('f_correctBright'),
@@ -191,7 +196,8 @@ export function gameTemplateStarters(): Starter[] {
               transition: { type: 'fade', durationMs: 250 },
               elements: [
                 ...headerBlock('hdr'),
-                { id: 'game_title', type: 'text', name: 'Prompt', x: C, y: 320, anchor: 'center', zIndex: 12, mode: 'fit', text: { value: 'Tap to play!', fontSizePx: 72, fontWeight: 800, color: '#ffffff', align: 'center' } },
+                { id: 'game_title', type: 'text', name: 'Prompt', x: C, y: 320, anchor: 'center', zIndex: 12, mode: 'fit', text: { value: isCatch ? 'Catch them all!' : 'Tap to play!', fontSizePx: 72, fontWeight: 800, color: '#ffffff', align: 'center' } },
+                ...catchElements,
                 { id: 'game_mount', type: 'game-mount', name: t.label, x: C, y: 1080, w: 980, h: 1100, anchor: 'center', zIndex: 5, mode: 'fit', game: { templateId: t.id, params: { ...t.defaultParams }, hintEnabled: true, hintIdleMs: 4000 }, sfx: isScratch ? [{ event: 'whileScratching', assetId: 'sfx_f_scratch' }, { event: 'onReveal', assetId: 'sfx_f_correctBright' }] : undefined },
               ],
             },

@@ -1,4 +1,4 @@
-﻿// Inspector — project meta (no selection), a multi-select panel, or the full
+// Inspector — project meta (no selection), a multi-select panel, or the full
 // single-element editor with a visual Background-box section.
 
 import { useState, useEffect, useRef, useMemo, type PointerEvent as ReactPointerEvent } from 'react'
@@ -48,7 +48,9 @@ import {
   AlignStartHorizontal,
   AlignStartVertical,
   Icon,
+  Plus,
   type LucideIcon,
+  Trash2,
   Upload,
   Volume2,
   X,
@@ -138,6 +140,7 @@ function ElementSound(props: { el: SceneElement }): JSX.Element {
   // scratching" sound; reveal targets add a "when revealed" one-shot.
   const isScratching = el.scratch || el.game?.templateId === 'scratch' || el.game?.templateId === 'scratch_grid'
   const isFlipping = el.game?.templateId === 'memorymatch' || el.game?.templateId === 'flipmatch'
+  const isCatchBasket = el.game?.templateId === 'catch'
   const eventOptions = [
     { value: 'tap', label: 'On tap' },
     { value: 'sceneEnter', label: 'On scene enter' },
@@ -149,6 +152,10 @@ function ElementSound(props: { el: SceneElement }): JSX.Element {
           { value: 'wrong', label: 'Incorrect pair' },
         ]
       : []),
+    ...(isCatchBasket ? [
+      { value: 'basketStart', label: 'When basket first tap / drag starts' },
+      { value: 'catch', label: 'When basket catches a falling item' },
+    ] : []),
     ...(isScratching ? [{ value: 'whileScratching', label: 'While scratching (loop)' }] : []),
     ...(isScratching || el.reveal ? [{ value: 'onReveal', label: 'When revealed / win' }] : []),
     ...(el.type === 'unboxing' ? [
@@ -157,7 +164,7 @@ function ElementSound(props: { el: SceneElement }): JSX.Element {
       { value: 'onLose', label: 'On lose' },
     ] : []),
   ]
-  const defaultEvent = el.reveal ? 'onReveal' : isScratching ? 'whileScratching' : isFlipping ? 'flip' : 'tap'
+  const defaultEvent = el.reveal ? 'onReveal' : isScratching ? 'whileScratching' : isFlipping ? 'flip' : isCatchBasket ? 'catch' : 'tap'
   const pick = (assetId: string): void => {
     if (chooser == null) return
     if (chooser >= binds.length) setBinds([...binds, { event: defaultEvent, assetId }])
@@ -453,10 +460,10 @@ const EASINGS: { value: string; label: string }[] = [
 // 'lightray' (the moving reflection) is a class-driven pseudo effect, so it can be picked in ANY
 // phase — entrance, loop, or exit — not just as a loop.
 const ENTRANCE_PRESETS: AnimPresetId[] = ['fade', 'slide-up', 'slide-down', 'slide-left', 'slide-right', 'pop', 'bounce', 'spin', 'lightray']
-const LOOP_PRESETS: AnimPresetId[] = ['pulse', 'float', 'bounce', 'shake', 'wave', 'shine', 'lightray', 'glow', 'spin']
+const LOOP_PRESETS: AnimPresetId[] = ['pulse', 'float', 'subtle-float', 'bounce', 'shake', 'wave', 'shine', 'lightray', 'glow', 'spin']
 const EXIT_PRESETS: AnimPresetId[] = ['fade-out', 'scale-out', 'lightray']
 // Presets offered for STACKED (extra) animations: every node-driven preset + the reflection.
-const NODE_PRESETS: AnimPresetId[] = ['fade', 'slide-up', 'slide-down', 'slide-left', 'slide-right', 'pop', 'bounce', 'shake', 'wave', 'shine', 'glow', 'spin', 'float', 'pulse', 'fade-out', 'scale-out', 'lightray']
+const NODE_PRESETS: AnimPresetId[] = ['fade', 'slide-up', 'slide-down', 'slide-left', 'slide-right', 'pop', 'bounce', 'shake', 'wave', 'shine', 'glow', 'spin', 'float', 'subtle-float', 'pulse', 'fade-out', 'scale-out', 'lightray']
 const LOOP_EXTRA_PRESETS: AnimPresetId[] = NODE_PRESETS
 // Friendly labels so effects are findable in the dropdown (the raw ids are terse).
 const PRESET_LABELS: Partial<Record<AnimPresetId, string>> = {
@@ -469,6 +476,7 @@ const PRESET_LABELS: Partial<Record<AnimPresetId, string>> = {
   'slide-right': 'slide right',
   'fade-out': 'fade out',
   'scale-out': 'scale out',
+  'subtle-float': 'subtle float',
 }
 const presetLabel = (p: AnimPresetId): string => PRESET_LABELS[p] ?? (p as string)
 // Direction options for the 'lightray' reflection sweep (mapped to an angle in degrees).
@@ -1034,6 +1042,239 @@ function ScratchGridCells({ params, setParam, setParams, elementId, cardAspect }
   )
 }
 
+
+interface CatchInspectorProps {
+  params: Record<string, unknown>
+  setParam: (k: string, v: unknown) => void
+}
+
+const numList = (value: unknown): number[] => String(value ?? '').split(',').map((v) => Number(v.trim())).filter(Number.isFinite)
+const writeNumList = (items: number[]): string => items.join(', ')
+
+function NumberListEditor(props: { label: string; value: unknown; defaultValue: number; step?: number; min?: number; max?: number; onChange: (value: string) => void }): JSX.Element {
+  const items = numList(props.value)
+  const nextItems = items.length ? items : [props.defaultValue]
+  const setItem = (idx: number, value: number): void => props.onChange(writeNumList(nextItems.map((n, i) => (i === idx ? value : n))))
+  const remove = (idx: number): void => props.onChange(writeNumList(nextItems.filter((_, i) => i !== idx)))
+  return (
+    <div>
+      <div className="group-title2" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span>{props.label}</span>
+        <button className="icon-btn" title="Add value" onClick={() => props.onChange(writeNumList([...nextItems, props.defaultValue]))}>
+          <Icon icon={Plus} size={13} />
+        </button>
+      </div>
+      {nextItems.map((value, i) => (
+        <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 4, alignItems: 'center' }}>
+          <NumField label={`Item ${i + 1}`} value={value} step={props.step ?? 1} min={props.min} max={props.max} onChange={(n) => setItem(i, n)} />
+          {nextItems.length > 1 && (
+            <button className="icon-btn" title="Remove value" onClick={() => remove(i)}>
+              <Icon icon={Trash2} size={13} />
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function CatchAssetList(props: { params: Record<string, unknown>; setParam: (k: string, v: unknown) => void }): JSX.Element {
+  const arr = Array.isArray(props.params.itemImages) ? (props.params.itemImages as string[]) : []
+  const n = Math.max(1, Number(props.params.itemTypes ?? arr.length ?? 1))
+  const setCount = (count: number): void => props.setParam('itemTypes', Math.max(1, count))
+  return (
+    <div>
+      <div className="group-title2" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span>Falling item images</span>
+        <button className="icon-btn" title="Add falling item" onClick={() => setCount(n + 1)}>
+          <Icon icon={Plus} size={13} />
+        </button>
+      </div>
+      {Array.from({ length: n }).map((_, i) => (
+        <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 4, alignItems: 'center' }}>
+          <AssetPicker
+            label={`Item ${i + 1}`}
+            value={arr[i] || undefined}
+            allowNone
+            onChange={(aid) => {
+              const next = arr.slice()
+              next[i] = aid ?? ''
+              props.setParam('itemImages', next)
+            }}
+          />
+          {n > 1 && (
+            <button className="icon-btn" title="Remove item" onClick={() => {
+              const next = arr.slice(); next.splice(i, 1)
+              props.setParam('itemImages', next)
+              setCount(n - 1)
+            }}>
+              <Icon icon={Trash2} size={13} />
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function CatchTemplateInspector({ params, setParam }: CatchInspectorProps): JSX.Element {
+  const uniqueMode = params.requireUnique !== false
+  return (
+    <>
+      <Accordion id="inspector.catch.gameplay" title="Gameplay">
+        <div className="grid2">
+          <NumField label="Fall speed" value={Number(params.speed ?? 0.55)} step={0.05} min={0.2} max={3} onChange={(n) => setParam('speed', n)} />
+          <NumField label="Spawn every ms" value={Number(params.spawnMs ?? 900)} step={50} min={100} max={10000} onChange={(n) => setParam('spawnMs', n)} />
+        </div>
+        <Toggle label="Random fall angles" checked={!!params.randomizeAngle} onChange={(v) => setParam('randomizeAngle', v)} />
+        {!!params.randomizeAngle && <NumberListEditor label="Angle choices" value={params.randomAngles} defaultValue={0} step={5} onChange={(v) => setParam('randomAngles', v)} />}
+        <Row label="Before first play">
+          <Select value={params.visibleFirstRender ? 'side' : 'hidden'} onChange={(v) => setParam('visibleFirstRender', v === 'side')} options={[{ value: 'hidden', label: 'Hide falling item' }, { value: 'side', label: 'Show item at side' }]} />
+        </Row>
+        <Row label="Start spawning">
+          <Select value={params.spawnOnMove ? 'firstMove' : 'sceneStart'} onChange={(v) => setParam('spawnOnMove', v === 'firstMove')} options={[{ value: 'sceneStart', label: 'When scene starts' }, { value: 'firstMove', label: 'After first basket move' }]} />
+        </Row>
+        <Row label="Score display">
+          <Select value={String(params.scoreMode ?? 'Increment')} onChange={(v) => setParam('scoreMode', v)} options={[{ value: 'Increment', label: 'Count up caught items' }, { value: 'Decrement', label: 'Count down remaining items' }]} />
+        </Row>
+      </Accordion>
+
+      <Accordion id="inspector.catch.win" title="Winning Condition">
+        <Row label="Win when">
+          <Chips items={[
+            { key: 'unique', label: 'Collect each unique item', active: uniqueMode, onClick: () => setParam('requireUnique', true) },
+            { key: 'count', label: 'Catch a total amount', active: !uniqueMode, onClick: () => setParam('requireUnique', false) },
+          ]} />
+        </Row>
+        <NumField label="Unique item types" value={Number(params.itemTypes ?? 3)} step={1} min={1} max={20} onChange={(n) => setParam('itemTypes', n)} />
+        {uniqueMode ? (
+          <div className="hint pad">The player wins after collecting one of each unique item. Total catches is ignored in this mode.</div>
+        ) : (
+          <NumField label="Catches to win" value={Number(params.catches ?? 5)} step={1} min={1} max={50} onChange={(n) => setParam('catches', n)} />
+        )}
+      </Accordion>
+
+      <Accordion id="inspector.catch.items" title="Falling Items">
+        <CatchAssetList params={params} setParam={setParam} />
+        <NumberListEditor label="Item sizes" value={params.itemSizes} defaultValue={120} step={5} min={1} onChange={(v) => setParam('itemSizes', v)} />
+      </Accordion>
+
+      <Accordion id="inspector.catch.basketImages" title="Basket Images" defaultOpen={false}>
+        <AssetPicker label="Front image" value={(params.frontBasketImage as string) || undefined} allowNone onChange={(aid) => setParam('frontBasketImage', aid ?? '')} />
+        <AssetPicker label="Back image" value={(params.backBasketImage as string) || undefined} allowNone onChange={(aid) => setParam('backBasketImage', aid ?? '')} />
+      </Accordion>
+
+      <Accordion id="inspector.catch.basket" title="Basket" defaultOpen={false}>
+        <div className="group-title2">Front layer</div>
+        <div className="grid2"><NumField label="Width" value={Number(params.frontBasketWidth ?? 300)} step={10} min={50} max={3000} onChange={(n) => setParam('frontBasketWidth', n)} /><NumField label="Height" value={Number(params.frontBasketHeight ?? 150)} step={10} min={50} max={3000} onChange={(n) => setParam('frontBasketHeight', n)} /></div>
+        <div className="grid2"><NumField label="Offset X" value={Number(params.frontBasketOffsetX ?? 0)} step={10} min={-2000} max={2000} onChange={(n) => setParam('frontBasketOffsetX', n)} /><NumField label="Offset Y" value={Number(params.frontBasketOffsetY ?? 0)} step={10} min={-2000} max={2000} onChange={(n) => setParam('frontBasketOffsetY', n)} /></div>
+        <div className="group-title2">Back layer</div>
+        <div className="grid2"><NumField label="Width" value={Number(params.backBasketWidth ?? 300)} step={10} min={50} max={3000} onChange={(n) => setParam('backBasketWidth', n)} /><NumField label="Height" value={Number(params.backBasketHeight ?? 150)} step={10} min={50} max={3000} onChange={(n) => setParam('backBasketHeight', n)} /></div>
+        <div className="grid2"><NumField label="Offset X" value={Number(params.backBasketOffsetX ?? 0)} step={10} min={-2000} max={2000} onChange={(n) => setParam('backBasketOffsetX', n)} /><NumField label="Offset Y" value={Number(params.backBasketOffsetY ?? 0)} step={10} min={-2000} max={2000} onChange={(n) => setParam('backBasketOffsetY', n)} /></div>
+        <Row label="Back layer follows">
+          <Select value={String(params.basketLocked ?? 'Locked')} onChange={(v) => setParam('basketLocked', v)} options={[{ value: 'Locked', label: 'Basket movement' }, { value: 'Unlocked', label: 'Footer center' }]} />
+        </Row>
+      </Accordion>
+
+      <Accordion id="inspector.catch.caughtLayout" title="Caught Item Layout" defaultOpen={false}>
+        <NumberListEditor label="X positions" value={params.caughtItemXs} defaultValue={0} step={5} onChange={(v) => setParam('caughtItemXs', v)} />
+        <NumberListEditor label="Y positions" value={params.caughtItemYs} defaultValue={0} step={5} onChange={(v) => setParam('caughtItemYs', v)} />
+        <NumberListEditor label="Rotations" value={params.caughtItemAngles} defaultValue={0} step={5} onChange={(v) => setParam('caughtItemAngles', v)} />
+        <NumberListEditor label="Scales" value={params.caughtItemScales} defaultValue={0.7} step={0.05} min={0.05} max={5} onChange={(v) => setParam('caughtItemScales', v)} />
+        <NumField label="Layer" value={Number(params.caughtItemZIndex ?? 1)} step={1} min={-10} max={10} onChange={(n) => setParam('caughtItemZIndex', n)} />
+      </Accordion>
+
+      <CatchPopupControls params={params} setParam={setParam} />
+
+      <Accordion id="inspector.catch.preview" title="Editor Preview" defaultOpen={false}>
+        <Toggle label="Show caught items" checked={!!params.showCaughtItemsPreview} onChange={(v) => setParam('showCaughtItemsPreview', v)} />
+        <Toggle label="Show catch effects" checked={!!params.showPopupPreview} onChange={(v) => setParam('showPopupPreview', v)} />
+      </Accordion>
+    </>
+  )
+}
+
+interface CatchPopupControlsProps {
+  params: Record<string, unknown>
+  setParam: (k: string, v: unknown) => void
+}
+
+function CatchPopupControls({ params, setParam }: CatchPopupControlsProps): JSX.Element | null {
+  const rawItemTypes = Number(params.itemTypes)
+  const popupImages = Array.isArray(params.popupImages) ? (params.popupImages as string[]) : []
+
+  const popupConfigsStr = String(params.popupConfigs || '[]')
+  let popupConfigs: any[] = []
+  try {
+    popupConfigs = JSON.parse(popupConfigsStr)
+  } catch (e) {
+    popupConfigs = []
+  }
+  
+  const itemTypes = Number.isFinite(rawItemTypes) && rawItemTypes > 0 ? rawItemTypes : 0
+  const effectCount = Math.max(1, itemTypes, popupImages.length, popupConfigs.length)
+
+  const updateConfig = (idx: number, patch: any) => {
+    const next = [...popupConfigs]
+    next[idx] = { ...(next[idx] || {}), ...patch }
+    setParam('popupConfigs', JSON.stringify(next))
+  }
+
+  return (
+    <>
+      <Accordion id="inspector.catch.effects" title="Catch Effects" defaultOpen={false}>
+      {Array.from({ length: effectCount }).map((_, i) => {
+        const conf = popupConfigs[i] || {}
+        return (
+          <Accordion key={i} id={`inspector.catchPopup${i}`} title={`Effect ${i + 1}`} defaultOpen={false}>
+            <AssetPicker 
+              label="Image" 
+              value={popupImages[i] || undefined} 
+              allowNone 
+              onChange={(aid) => {
+                const pImages = [...popupImages]
+                pImages[i] = aid ?? ''
+                setParam('popupImages', pImages)
+              }} 
+            />
+            <Row label="Trigger">
+              <Select
+                value={conf.trigger ?? 'unique'}
+                onChange={v => updateConfig(i, { trigger: v })}
+                options={[{ value: 'any', label: 'On any catch' }, { value: 'unique', label: 'On unique item catch' }]}
+              />
+            </Row>
+            <div className="grid2"><NumField label="X" value={conf.x ?? 540} step={10} onChange={n => updateConfig(i, { x: n })} /><NumField label="Y" value={conf.y ?? 960} step={10} onChange={n => updateConfig(i, { y: n })} /></div>
+            <div className="grid2"><NumField label="Scale" value={conf.scale ?? 1} step={0.1} min={0.1} max={5} onChange={n => updateConfig(i, { scale: n })} /><NumField label="Rotation" value={conf.angle ?? 0} step={5} onChange={n => updateConfig(i, { angle: n })} /></div>
+            <div className="grid2"><NumField label="Layer" value={conf.zIndex ?? 10000} step={1} onChange={n => updateConfig(i, { zIndex: n })} /><NumField label="Opacity" value={conf.opacity ?? 1} step={0.1} min={0} max={1} onChange={n => updateConfig(i, { opacity: n })} /></div>
+            <Row label="Animation">
+              <Select 
+                value={conf.anim ?? 'pop'} 
+                onChange={v => updateConfig(i, { anim: v })} 
+                options={[
+                  {value: 'none', label: 'None'},
+                  {value: 'fade', label: 'Fade'},
+                  {value: 'slide-up', label: 'Slide up'},
+                  {value: 'slide-down', label: 'Slide down'},
+                  {value: 'slide-left', label: 'Slide left'},
+                  {value: 'slide-right', label: 'Slide right'},
+                  {value: 'pop', label: 'Pop'},
+                  {value: 'bounce', label: 'Bounce'},
+                  {value: 'spin', label: 'Spin'}
+                ]}
+              />
+            </Row>
+            <div className="grid2"><NumField label="Duration ms" value={conf.durationMs ?? 600} step={50} min={0} onChange={n => updateConfig(i, { durationMs: n })} /><NumField label="Delay ms" value={conf.delayMs ?? 0} step={50} min={0} onChange={n => updateConfig(i, { delayMs: n })} /></div>
+            <Row label="Easing"><Select value={conf.easing ?? 'cubic-bezier(.34,1.56,.64,1)'} onChange={v => updateConfig(i, { easing: v })} options={EASINGS.map((e) => ({ value: e.value, label: e.label }))} /></Row>
+            <Row label="Repeat"><Select value={String(conf.iterations ?? 1)} onChange={v => updateConfig(i, { iterations: v === 'infinite' ? 'infinite' : Number(v) })} options={[{ value: '1', label: 'Once' }, { value: '2', label: 'Twice' }, { value: '3', label: '3 times' }, { value: 'infinite', label: 'Loop' }]} /></Row>
+          </Accordion>
+        )
+      })}
+      </Accordion>
+    </>
+  )
+}
+
 export function Inspector(props: { onProjectSettings: () => void }): JSX.Element {
   const state = useEditorState()
   const editLocale = useEditLocale()
@@ -1316,6 +1557,8 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
   const canStroke = el.type === 'image' || el.type === 'bar' || el.type === 'game-mount' || el.type === 'handguide'
   // content elements can be a scratch cover and/or a reveal target
   const canScratch = el.type === 'image' || el.type === 'bar' || el.type === 'text' || el.type === 'cta' || el.type === 'handguide'
+  const sceneHasCatch = activeSceneDef(state)?.elements.some((e) => e.game?.templateId === 'catch') ?? false
+  const canIdleBehavior = el.type === 'image' || el.type === 'handguide' || (el.type === 'bar' && el.mode === 'fit')
   const setScratch = (patch: Partial<NonNullable<SceneElement['scratch']>>): void =>
     patchElement(id, { scratch: { ...(el.scratch ?? {}), ...patch } })
   const setReveal = (patch: Partial<NonNullable<SceneElement['reveal']>>): void =>
@@ -1354,11 +1597,14 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
         {el.type === 'bar' && el.mode === 'fit' ? 'rectangle' : el.type} {landscape && <span className="badge">landscape</span>}
       </div>
 
-      <Row label="Name">
-        <input value={el.name} onChange={(e) => patchElement(id, { name: e.target.value })} />
+      <Row label="Name (layers)">
+        <input value={el.name ?? ''} onChange={(e) => patchElement(id, { name: e.target.value })} />
       </Row>
       {!activeVariant && <Toggle label="Lock element" checked={!!el.locked} onChange={() => toggleLock(id)} />}
       <Toggle label="Show on game win" checked={!!el.showOnWin} onChange={(v) => patchElement(id, { showOnWin: v })} />
+      {(el.type === 'text' || el.type === 'image' || (el.type === 'bar' && el.mode === 'fit')) && sceneHasCatch && (
+        <Toggle label="Show after basket moved" checked={!!el.showAfterInteraction} onChange={(v) => patchElement(id, { showAfterInteraction: v || undefined })} />
+      )}
       {el.type !== 'cta' && (
         <Toggle label="Above overlays" checked={!!el.overlayImmune} onChange={(v) => patchElement(id, { overlayImmune: v || undefined })} />
       )}
@@ -1486,6 +1732,11 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
       ) : (
         <NumField label="Scale" value={g.scale} step={0.01} onChange={(n) => patchGeometry(id, { scale: n })} />
       )}
+      {(el.type === 'bar' || el.type === 'image') && (
+        <div className="grid2" style={{ marginTop: 4 }}>
+          <NumField label="Angle" value={el.rotation ?? 0} suffix="°" onChange={(n) => patchElement(id, { rotation: n === 0 ? undefined : n })} />
+        </div>
+      )}
       <div className="grid2">
         <Row label="Anchor">
           <Select value={g.anchor} onChange={(v) => patchGeometry(id, { anchor: v as Anchor })} options={ANCHORS.map((a) => ({ value: a, label: a }))} />
@@ -1501,6 +1752,33 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
           />
         </Row>
       </div>
+      {(el.type === 'cta' || el.type === 'image' || el.type === 'button' || el.type === 'handguide' || el.type === 'bar') && (
+        <Toggle
+          label="Relative to footer"
+          checked={!!el.relativeToBasketBar}
+          onChange={(v) => patchElement(id, { relativeToBasketBar: v })}
+        />
+      )}
+
+      {canIdleBehavior &&
+        (() => {
+          const idle = el.idle ?? (el.type === 'handguide' ? el.handguide : undefined) ?? {}
+          const setIdle = (patch: any): void => patchElement(id, { idle: { ...idle, ...patch } })
+          return (
+            <Accordion id="inspector.idle" title="Idle behavior">
+              <Toggle label="Hide on tap" checked={idle.hideOnInteract !== false} onChange={(v) => setIdle({ hideOnInteract: v })} />
+              <Toggle label="Reappear when idle" checked={idle.reappearOnIdle !== false} onChange={(v) => setIdle({ reappearOnIdle: v })} />
+              {idle.reappearOnIdle !== false && (
+                <NumField label="Reappear after (ms)" value={idle.idleMs ?? 4000} step={500} min={0} onChange={(n) => setIdle({ idleMs: n })} />
+              )}
+              <Toggle label="Show at start (before first tap)" checked={idle.showInitially !== false} onChange={(v) => setIdle({ showInitially: v })} />
+              {sceneHasCatch && (
+                <Toggle label="Hide after basket tap / drag" checked={!!el.hideAfterBasketInteraction} onChange={(v) => patchElement(id, { hideAfterBasketInteraction: v || undefined })} />
+              )}
+              <div className="hint pad">Animates in Preview and export. By default it hides on the player's first tap and reappears after {idle.idleMs ?? 4000}ms of no interaction.</div>
+            </Accordion>
+          )
+        })()}
 
       {el.type === 'game-mount' &&
         (() => {
@@ -1512,11 +1790,14 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
           // each read the same stale `params` snapshot and the second would clobber the first.
           const setParam = (k: string, v: unknown): void => setParams({ [k]: v })
           const cardAspect = el.w && el.h ? el.w / el.h : 1 // for the brush intro-path editor box
-          const renderField = (f: ParamField): JSX.Element => {
+          const renderField = (f: ParamField): JSX.Element | null => {
             const v = params[f.key]
+            if (f.key === 'randomAngles' && !params.randomizeAngle) return null
             if (f.type === 'number') return <NumField key={f.key} label={f.label} value={typeof v === 'number' ? v : 0} step={f.step ?? 1} min={f.min} max={f.max} onChange={(n) => setParam(f.key, n)} />
             if (f.type === 'color')
               return <ColorField key={f.key} label={f.label} value={typeof v === 'string' ? v : '#888888'} onChange={(c) => setParam(f.key, c ?? '#888888')} />
+            if (f.type === 'boolean')
+              return <Toggle key={f.key} label={f.label} checked={!!v} onChange={(b) => setParam(f.key, b)} />
             if (f.type === 'select')
               return (
                 <Row key={f.key} label={f.label}>
@@ -1542,7 +1823,11 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 <ScratchGridCells params={params} setParam={setParam} setParams={setParams} elementId={id} cardAspect={cardAspect} />
               ) : (
               <>
-              {tpl.paramFields.filter((f) => !BRUSH_PARAM_KEYS.has(f.key) && !(tpl.id === 'scratch' && (f.key === 'coverColor' || f.key === 'shadowColor'))).map(renderField)}
+              {tpl.id === 'catch' ? (
+                <CatchTemplateInspector params={params} setParam={setParam} />
+              ) : (
+                tpl.paramFields.filter((f) => !BRUSH_PARAM_KEYS.has(f.key) && !(tpl.id === 'scratch' && (f.key === 'coverColor' || f.key === 'shadowColor'))).map(renderField)
+              )}
               {tpl.id === 'scratch' && (
                 <ColorField
                   label="Cover color (none = transparent)"
@@ -1592,26 +1877,51 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               {tpl.id === 'scratch' && params.fit === 'fit' && (
                 <div className="hint pad">Double-click the card on the canvas to position &amp; scale the reveal image: drag to move, corner handles to resize.</div>
               )}
-              {(tpl.assetSlots ?? []).filter((slot) => slot.key !== 'brushImage').map((slot) => {
+              {tpl.id !== 'catch' && (tpl.assetSlots ?? []).filter((slot) => slot.key !== 'brushImage' && slot.key !== 'popupImages').map((slot) => {
                 if (slot.list) {
-                  const n = Number(params[slot.countParam ?? '']) || 0
+                  const countKey = slot.countParam ?? ''
+                  const n = Number(params[countKey]) || 0
                   const arr = Array.isArray(params[slot.key]) ? (params[slot.key] as string[]) : []
                   return (
                     <div key={slot.key}>
-                      <div className="group-title2">{slot.label}</div>
+                      <div className="group-title2" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span>{slot.label}</span>
+                        <button
+                          className="btn"
+                          style={{ padding: '2px 8px', fontSize: 16, lineHeight: 1, minWidth: 28 }}
+                          title="Add another image slot"
+                          onClick={() => setParam(countKey, n + 1)}
+                        >+</button>
+                      </div>
                       {Array.from({ length: n }).map((_, i) => (
-                        <AssetPicker
-                          key={i}
-                          label={`${slot.label} ${i + 1}`}
-                          value={arr[i] || undefined}
-                          allowNone
-                          accept={slot.accept}
-                          onChange={(aid) => {
-                            const next = arr.slice()
-                            next[i] = aid ?? ''
-                            setParam(slot.key, next)
-                          }}
-                        />
+                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <div style={{ flex: 1 }}>
+                            <AssetPicker
+                              label={`${slot.label} ${i + 1}`}
+                              value={arr[i] || undefined}
+                              allowNone
+                              accept={slot.accept}
+                              onChange={(aid) => {
+                                const next = arr.slice()
+                                next[i] = aid ?? ''
+                                setParam(slot.key, next)
+                              }}
+                            />
+                          </div>
+                          {n > 1 && (
+                            <button
+                              className="btn"
+                              style={{ padding: '2px 6px', fontSize: 14, lineHeight: 1, minWidth: 24, color: '#e55' }}
+                              title="Remove this slot"
+                              onClick={() => {
+                                const next = arr.slice()
+                                next.splice(i, 1)
+                                setParam(slot.key, next)
+                                setParam(countKey, Math.max(1, n - 1))
+                              }}
+                            >×</button>
+                          )}
+                        </div>
                       ))}
                     </div>
                   )
@@ -1644,6 +1954,12 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
             </Accordion>
           )
         })()}
+      {el.type === 'bar' && (
+        <Accordion id="inspector.bar" title="Bar Background">
+          <AssetPicker label="Background Image" value={el.assetId} onChange={(aid) => patchElement(id, { assetId: aid })} allowNone />
+          <div className="hint pad">If set, this image stretches to fill the bar.</div>
+        </Accordion>
+      )}
 
       {el.type === 'image' && (
         <>
@@ -1901,15 +2217,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 />
               </Row>
               <NumField label="Loop speed (ms)" value={hg.periodMs ?? (hg.mode === 'tap' ? 900 : 1500)} step={100} min={300} onChange={(n) => setHg({ periodMs: n })} />
-              <div className="group-title2">Idle behavior</div>
-              <Toggle label="Hide on tap, reappear when idle" checked={hg.hideOnInteract !== false} onChange={(v) => setHg({ hideOnInteract: v })} />
-              {hg.hideOnInteract !== false && (
-                <>
-                  <NumField label="Reappear after (ms)" value={hg.idleMs ?? 4000} step={500} min={0} onChange={(n) => setHg({ idleMs: n })} />
-                  <Toggle label="Show at start (before first tap)" checked={hg.showInitially !== false} onChange={(v) => setHg({ showInitially: v })} />
-                </>
-              )}
-              <div className="hint pad">Animates in Preview and export. By default it hides on the player"s first tap and reappears after {hg.idleMs ?? 4000}ms of no interaction.</div>
+
             </Accordion>
           )
         })()}

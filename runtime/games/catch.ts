@@ -1,177 +1,810 @@
-// Catch: drag the basket along the bottom to catch items falling from the top.
-// Catch the required number to win. Items spawn at random x and fall via the rAF
-// timestamp; one that reaches the basket line is caught if it overlaps, else
-// missed. Hint: move the basket toward the lowest falling item.
-
 import type { GameContext, GameModule, GameTemplate, HintMove, Pt } from './types'
-import { num } from './types'
+import { injectAnimStyles } from '../anim'
+import '../catch.css'
 
 interface Drop {
-  el: HTMLDivElement
+  id: number
   x: number
   y: number
+  speed: number
+  angle: number
+  imgSrc: string
+  imgIdx: number
+  captured: boolean
+  sz: number
+  el?: HTMLElement
 }
 
 export function createCatch(): GameModule {
   let ctx: GameContext
-  let need = 5
-  let fallPxPerSec = 0
-  let spawnMs = 900
-  let basket: HTMLDivElement
-  let label: HTMLDivElement
-  const drops: Drop[] = []
-  let basketX = 150
-  let basketY = 360
-  let basketW = 110
-  let itemSz = 56
-  let w = 300
-  let h = 400
-  let raf = 0
-  let last = -1
-  let spawnTimer = 0
-  let caught = 0
-  let started = false
+  let root: HTMLElement
+  let dropsContainer: HTMLDivElement
+  let drops: Drop[] = []
+  
+  let scoreMode: string
+  let need: number
+  let speedParam: number
+  let spawnMs: number
+  let randomizeAngle: boolean
+  let randomAngleList: number[] = [0, 45, -45, 90]
+  let visibleFirstRender: boolean
+  let basketLocked: boolean
+  let itemTypes: number = 0
+  let showCaughtItemsPreview: boolean = false
+  let itemImages: string[] = []
+  let popupImages: string[] = []
+  let popupConfigs: any[] = []
+  let requireUnique: boolean = true
+
   let done = false
-  let itemImg = ''
+  let caught = 0
+  let basketX = 540
+  let lastTime = 0
+  let rafRef = 0
+  let spawnTimer = 0
   let completeCb: (() => void) | null = null
+  let gameActive = true
+  let spawnOnMove = false
+  let hasMoved = false
+  let gameParams: Record<string, unknown> = {}
+  let lastSpawnLane = -1
+  let visibilityHandler: (() => void) | null = null
 
-  const layout = (): void => {
-    w = ctx.root.clientWidth || 300
-    h = ctx.root.clientHeight || 400
-    basketW = Math.max(70, w * 0.22)
-    itemSz = Math.max(36, w * 0.12)
-    basketY = h - basketW * 0.7
-    if (basketX === 150) basketX = w / 2
-    basket.style.width = basketW + 'px'
-    basket.style.height = basketW * 0.7 + 'px'
-    basket.style.top = basketY + 'px'
-    basket.style.left = basketX - basketW / 2 + 'px'
-    label.style.fontSize = Math.max(14, w * 0.05) + 'px'
-    fallPxPerSec = h * fallFrac
-    drops.forEach((d) => {
-      d.el.style.width = itemSz + 'px'
-      d.el.style.height = itemSz + 'px'
-      d.el.style.left = d.x - itemSz / 2 + 'px'
-      d.el.style.top = d.y - itemSz / 2 + 'px'
-    })
-  }
+  const uniqueItemSpots = new Map<string, HTMLElement>()
 
-  let fallFrac = 0.55
+  let frontBasketLogicalW = 300
+  let frontBasketLogicalH = 150
+  let frontBasketOffsetY = 0
+  let frontBasketOffsetX = 0
+  
+  let backBasketLogicalW = 300
+  let backBasketLogicalH = 150
+  let backBasketOffsetY = 0
+  let backBasketOffsetX = 0
+  
+  let itemSizes: number[] = [120]
+  
+  let caughtItemXs: number[] = []
+  let caughtItemYs: number[] = []
+  let caughtItemAngles: number[] = []
+  let caughtItemScales: number[] = []
+  let caughtItemZIndex = 1
 
-  const spawn = (): void => {
-    if (done) return
-    const el = document.createElement('div')
-    el.style.cssText = 'position:absolute;border-radius:50%;box-shadow:0 3px 8px rgba(0,0,0,.3);'
-    el.style.background = itemImg ? `center/contain no-repeat url("${itemImg}")` : 'radial-gradient(circle at 38% 32%,#fff8,#f43f5e)'
-    ctx.root.appendChild(el)
-    const x = itemSz + ctx.rng() * (w - 2 * itemSz)
-    const d: Drop = { el, x, y: -itemSz }
-    el.style.width = itemSz + 'px'
-    el.style.height = itemSz + 'px'
-    el.style.left = d.x - itemSz / 2 + 'px'
-    el.style.top = d.y - itemSz / 2 + 'px'
-    drops.push(d)
-  }
+  let frontBasket: HTMLDivElement | null = null
+  let backBasket: HTMLDivElement | null = null
+  let basketDragTarget: HTMLDivElement | null = null
+  let dragAttachedBasket: HTMLDivElement | null = null
+  let basketStartDrag: ((e: PointerEvent) => void) | null = null
+  let caughtItemsContainer: HTMLDivElement | null = null
+  let frontBasketAssetIdStr = ''
+  let backBasketAssetIdStr = ''
+  let paRoot: HTMLElement | null = null
 
-  const removeDrop = (i: number): void => {
-    drops[i].el.remove()
-    drops.splice(i, 1)
-  }
+  const s = (): number => ctx.scale?.() ?? 1
 
-  const tick = (t: number): void => {
-    if (done) return
-    if (last < 0) last = t
-    const dt = Math.min(64, t - last) / 1000
-    last = t
-    for (let i = drops.length - 1; i >= 0; i--) {
-      const d = drops[i]
-      d.y += fallPxPerSec * dt
-      d.el.style.top = d.y - itemSz / 2 + 'px'
-      if (d.y >= basketY) {
-        const hit = Math.abs(d.x - basketX) < basketW / 2 + itemSz * 0.3
-        removeDrop(i)
-        if (hit) {
-          caught++
-          ctx.sfx.play('collect')
-          label.textContent = caught + ' / ' + need
-          if (caught >= need && !done) {
-            done = true
-            cancelAnimationFrame(raf)
-            window.clearInterval(spawnTimer)
-            ctx.sfx.play('gameWin')
-            completeCb?.()
-            return
-          }
-        } else {
-          ctx.sfx.play('wrong')
-        }
+  const displayScore = () => scoreMode === 'Decrement' ? Math.max(0, need - caught) : caught
+
+  const updateScoreUI = () => {
+    if (!paRoot) return
+    const scoreCounter = paRoot.querySelector('[data-id="score_counter"]') as HTMLElement | null
+    if (scoreCounter) {
+      const inner = scoreCounter.querySelector('.pa-text-inner')
+      if (inner) {
+        inner.textContent = `${displayScore()}`
+      } else {
+        scoreCounter.textContent = `${displayScore()}`
       }
     }
-    raf = requestAnimationFrame(tick)
+  }
+
+  const stopSpawning = () => {
+    window.clearInterval(spawnTimer)
+    spawnTimer = 0
+  }
+
+  const shouldSpawnNow = () => !done && !document.hidden && (!spawnOnMove || hasMoved)
+
+  const startSpawning = (spawnImmediately = false) => {
+    if (!shouldSpawnNow() || spawnTimer) return
+    spawnTimer = window.setInterval(spawn, spawnMs)
+    if (spawnImmediately) spawn()
+  }
+
+  const stopAnimation = () => {
+    cancelAnimationFrame(rafRef)
+    rafRef = 0
+  }
+
+  const startAnimation = () => {
+    if (done || rafRef) return
+    lastTime = performance.now()
+    rafRef = requestAnimationFrame(tick)
+  }
+
+  const handleVisibilityChange = () => {
+    if (document.hidden) {
+      stopSpawning()
+      stopAnimation()
+      return
+    }
+
+    startAnimation()
+    startSpawning(true)
+  }
+  const createDropElement = (drop: Drop) => {
+    const currentScale = s()
+    const physicalItemSz = drop.sz * currentScale
+    const el = document.createElement('div')
+    el.style.position = 'absolute'
+    el.style.width = `${physicalItemSz}px`
+    el.style.height = `${physicalItemSz}px`
+    el.style.pointerEvents = 'none'
+
+    el.style.transform = `rotate(${drop.angle}deg)`
+    el.style.willChange = 'transform, top, left'
+
+    if (drop.imgSrc) {
+      const img = document.createElement('img')
+      img.src = drop.imgSrc
+      img.style.width = '100%'
+      img.style.height = '100%'
+      img.style.objectFit = 'contain'
+      img.draggable = false
+      el.appendChild(img)
+    } else {
+      const circle = document.createElement('div')
+      circle.style.width = '100%'
+      circle.style.height = '100%'
+      circle.style.borderRadius = '50%'
+      circle.style.backgroundColor = '#f43f5e'
+      circle.style.boxShadow = '0 10px 15px -3px rgb(0 0 0 / 0.1)'
+      el.appendChild(circle)
+    }
+
+    drop.el = el
+    dropsContainer.appendChild(el)
+    drops.push(drop)
+  }
+
+  const spawn = () => {
+    if (done || (!gameActive && !visibleFirstRender)) return
+    
+    // Pick an image and a size (using the same random index if sizes array matches length, or just random)
+    let imgIdx = itemImages.length > 0 ? Math.floor(ctx.rng() * itemImages.length) : 0
+    let szIdx = imgIdx % itemSizes.length
+    const imgSrc = itemImages.length > 0 ? itemImages[imgIdx] : ''
+    const sz = itemSizes[szIdx] || 120
+
+    const minX = sz / 2
+    const maxX = 1080 - sz / 2
+    const lanes: Array<[number, number]> = [
+      [minX, 360],
+      [360, 720],
+      [720, maxX],
+    ].map(([a, b]) => [Math.max(minX, a), Math.min(maxX, b)] as [number, number])
+      .filter(([a, b]) => b > a)
+
+    let laneIdx = Math.floor(ctx.rng() * lanes.length)
+    if (lanes.length > 1 && laneIdx === lastSpawnLane) {
+      laneIdx = (laneIdx + 1 + Math.floor(ctx.rng() * (lanes.length - 1))) % lanes.length
+    }
+    lastSpawnLane = laneIdx
+
+    const [laneMin, laneMax] = lanes[laneIdx] ?? [minX, maxX]
+    let x = laneMin + ctx.rng() * (laneMax - laneMin)
+
+    if (!gameActive && visibleFirstRender) {
+      // Force x to be on the left or right edge
+      const isLeft = ctx.rng() > 0.5
+      x = isLeft ? minX : maxX // strictly to the edges
+    }
+
+    const angle = randomizeAngle && randomAngleList.length > 0 ? randomAngleList[Math.floor(ctx.rng() * randomAngleList.length)] : 0
+    const speed = speedParam * 1920 + (ctx.rng() * 200 - 100)
+    
+    // y is in logical pa-root coordinates (0 = top of pa-root)
+    const drop: Drop = { id: Date.now() + Math.random(), x, y: -sz, speed, angle, imgSrc, imgIdx, captured: false, sz }
+    createDropElement(drop)
+  }
+
+  const tick = (t: number) => {
+    if (done) return
+    const dt = Math.min(64, t - lastTime) / 1000
+    lastTime = t
+    
+    const footerBar = document.querySelector('[data-id="basket_bar"]') as HTMLElement | null
+    const currentScale = s()
+    
+    if (!paRoot) {
+      rafRef = requestAnimationFrame(tick)
+      return
+    }
+
+    const paRootRect = paRoot.getBoundingClientRect()
+    // Fallback to the bottom of pa-root if basket_bar is not found
+    const footerTop = footerBar ? footerBar.getBoundingClientRect().top : paRootRect.bottom
+    const paRootCenterX = paRootRect.left + paRootRect.width / 2
+
+    // Hit detection line (the rim of the basket). 
+    // The bottom of the basket is at footerTop, so we subtract height to get the rim.
+    // We catch when it's about 20% deep into the basket, so we subtract 0.8 * height.
+    const basketScreenY = footerTop - paRootRect.top - (frontBasketLogicalH * 0.8 * currentScale) - (frontBasketOffsetY * currentScale)
+
+    let anyCaught = false
+    
+    for (let i = drops.length - 1; i >= 0; i--) {
+      const d = drops[i]
+      if (d.captured) continue
+      
+      const prevY = d.y * currentScale
+      
+      d.y += d.speed * dt
+      const newY = d.y * currentScale
+      
+      // Hit detection: item crossed the basket line this frame
+      if (gameActive && prevY < basketScreenY && newY >= basketScreenY) {
+        // item screen X relative to pa-root center
+        const item_screen_x = (d.x - 540) * currentScale
+        const basket_screen_x = (basketX + frontBasketOffsetX - 540) * currentScale
+        
+        const scale = 1
+        
+        const hit = Math.abs(item_screen_x - basket_screen_x) < (frontBasketLogicalW / 2 + d.sz * scale * 0.3) * currentScale
+        if (hit) {
+          d.captured = true
+          
+          if (requireUnique && itemTypes > 0 && uniqueItemSpots.has(d.imgSrc)) {
+            // Duplicate caught! Animate existing and destroy falling item
+            ctx.sfx.play('catch')
+            const existingEl = uniqueItemSpots.get(d.imgSrc)!
+            const originalTransform = existingEl.style.transform
+            existingEl.style.transition = 'transform 0.15s ease-out'
+            // Append scale(1.3) to existing transform (which might contain rotate/scale)
+            existingEl.style.transform = `${originalTransform} scale(1.3)`
+            setTimeout(() => {
+              existingEl.style.transform = originalTransform
+              setTimeout(() => { existingEl.style.transition = '' }, 150)
+            }, 150)
+            
+            if (d.el && d.el.parentNode) d.el.parentNode.removeChild(d.el)
+            continue
+          }
+
+          anyCaught = true
+          
+          // Attach caught item to basket
+          if (d.el && caughtItemsContainer) {
+            caughtItemsContainer.appendChild(d.el)
+            const physicalItemSz = d.sz * currentScale
+            d.el.style.width = physicalItemSz + 'px'
+            d.el.style.height = physicalItemSz + 'px'
+            
+            const defaultOffsetX = (item_screen_x - basket_screen_x) / currentScale
+            const cIdx = itemTypes > 0 ? d.imgIdx : caught
+            
+            const offsetX = caughtItemXs.length > 0 ? (caughtItemXs[cIdx % caughtItemXs.length] ?? defaultOffsetX) : defaultOffsetX
+            const offsetY = caughtItemYs.length > 0 ? (caughtItemYs[cIdx % caughtItemYs.length] ?? (ctx.rng() * 20 - 10)) : (ctx.rng() * 20 - 10)
+            const angle = caughtItemAngles.length > 0 ? (caughtItemAngles[cIdx % caughtItemAngles.length] ?? d.angle) : d.angle
+            const scale = caughtItemScales.length > 0 ? (caughtItemScales[cIdx % caughtItemScales.length] ?? 0.7) : 0.7
+
+            d.el.style.left = `${(frontBasketLogicalW / 2) * currentScale + offsetX * currentScale - physicalItemSz / 2}px`
+            d.el.style.top = `${offsetY * currentScale}px`
+            d.el.style.transform = `rotate(${angle}deg) scale(${scale})`
+            d.el.style.transformOrigin = 'bottom center'
+            d.el.style.opacity = '1'
+            d.el.style.zIndex = `${caughtItemZIndex}`
+
+            if (requireUnique && itemTypes > 0) {
+              uniqueItemSpots.set(d.imgSrc, d.el)
+              
+              const pIdx = d.imgIdx
+              const pConfig = popupConfigs.length > pIdx ? popupConfigs[pIdx] : null
+              if ((pConfig?.trigger ?? 'unique') === 'unique') showCatchEffect(pIdx, currentScale, paRootRect)
+            }
+
+            const anyIdx = itemTypes > 0 ? d.imgIdx : caught
+            const anyConfig = popupConfigs.length > anyIdx ? popupConfigs[anyIdx] : null
+            if (anyConfig?.trigger === 'any') showCatchEffect(anyIdx, currentScale, paRootRect)
+          }
+          continue
+        }
+      }
+      
+      // Update position (physical px relative to dropsContainer which is on pa-root)
+      if (d.el && !d.captured) {
+        const physicalItemSz = d.sz * currentScale
+        const physX = paRootCenterX - paRootRect.left + (d.x - 540) * currentScale - physicalItemSz / 2
+        const physY = d.y * currentScale - physicalItemSz / 2
+        d.el.style.left = `${physX}px`
+        d.el.style.top = `${physY}px`
+        d.el.style.width = `${physicalItemSz}px`
+        d.el.style.height = `${physicalItemSz}px`
+      }
+      
+      // Cleanup offscreen (past bottom of logical screen)
+      if (d.y > 1920 + d.sz + 100) {
+        if (d.el && d.el.parentNode) d.el.parentNode.removeChild(d.el)
+        drops.splice(i, 1)
+      }
+    }
+
+    if (anyCaught) {
+      caught++
+      ctx.sfx.play('catch')
+      updateScoreUI()
+      if (caught >= need) {
+        done = true
+        stopSpawning()
+        ctx.sfx.play('win')
+        completeCb?.()
+      }
+    }
+    if (frontBasket) {
+      frontBasket.style.width = (frontBasketLogicalW * currentScale) + 'px'
+      frontBasket.style.height = (frontBasketLogicalH * currentScale) + 'px'
+      const frontBasketPhysicalH = frontBasketLogicalH * currentScale
+      frontBasket.style.top = `${footerTop - paRootRect.top - frontBasketPhysicalH - (frontBasketOffsetY * currentScale)}px`
+      frontBasket.style.bottom = ''
+      frontBasket.style.marginLeft = `-${(frontBasketLogicalW / 2) * currentScale}px`
+      const fx = basketX + frontBasketOffsetX
+      frontBasket.style.transform = `translateX(${(fx - 540) * currentScale}px)`
+    }
+    
+    if (backBasket) {
+      backBasket.style.width = (backBasketLogicalW * currentScale) + 'px'
+      backBasket.style.height = (backBasketLogicalH * currentScale) + 'px'
+      const backBasketPhysicalH = backBasketLogicalH * currentScale
+      backBasket.style.top = `${footerTop - paRootRect.top - backBasketPhysicalH - (backBasketOffsetY * currentScale)}px`
+      backBasket.style.bottom = ''
+      backBasket.style.marginLeft = `-${(backBasketLogicalW / 2) * currentScale}px`
+      const bx = basketLocked ? basketX + backBasketOffsetX : 540 + backBasketOffsetX
+      backBasket.style.transform = `translateX(${(bx - 540) * currentScale}px)`
+    }
+    
+    rafRef = requestAnimationFrame(tick)
+  }
+
+  const attachDrag = () => {
+    const dragTarget = basketDragTarget
+    if (!dragTarget || dragAttachedBasket === dragTarget) return
+    if (dragAttachedBasket && basketStartDrag) {
+      dragAttachedBasket.removeEventListener('pointerdown', basketStartDrag)
+    }
+
+    let active = false
+    const onMove = (e: PointerEvent) => {
+      if (!active) return
+      const currentScale = s()
+      const physicalOffsetFromCenter = e.clientX - window.innerWidth / 2
+      let lx = 540 + (physicalOffsetFromCenter / currentScale)
+      // Constrain basketX based on frontBasket width
+      basketX = Math.max(frontBasketLogicalW / 2, Math.min(1080 - frontBasketLogicalW / 2, lx))
+    }
+    const end = () => {
+      active = false
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', end)
+      window.removeEventListener('pointercancel', end)
+    }
+    const startDrag = (e: PointerEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      active = true
+      
+      if (!gameActive) {
+        gameActive = true
+      }
+      
+      if (!hasMoved) {
+        hasMoved = true
+        ctx.sfx.play('basketStart')
+        if (paRoot) paRoot.classList.add('has-interacted')
+        if (spawnOnMove) {
+          startSpawning(true)
+        }
+      }
+      
+      window.addEventListener('pointermove', onMove)
+      window.addEventListener('pointerup', end)
+      window.addEventListener('pointercancel', end)
+      onMove(e)
+    }
+    
+    dragTarget.style.touchAction = 'none'
+    dragTarget.style.pointerEvents = 'auto'
+    dragTarget.addEventListener('pointerdown', startDrag)
+    dragAttachedBasket = dragTarget
+    basketStartDrag = startDrag
+  }
+
+  const showCatchEffect = (idx: number, currentScale: number, paRootRect: DOMRect): void => {
+    const pAssetId = popupImages.length > 0 ? popupImages[idx % popupImages.length] : ''
+    const pConfig = popupConfigs.length > idx ? popupConfigs[idx] : null
+    const pSrc = pAssetId ? ctx.assets.src(pAssetId) : ''
+    if (!pAssetId || !paRoot || !pSrc) return
+
+    const pEl = document.createElement('div')
+    pEl.dataset.id = `popup_image_${idx + 1}`
+    pEl.style.position = 'absolute'
+    pEl.style.pointerEvents = 'none'
+    pEl.style.zIndex = (pConfig?.zIndex ?? 10000).toString()
+
+    const cx = pConfig?.x ?? 540
+    const cy = pConfig?.y ?? 960
+    const w = pConfig?.w ?? 400
+    const h = pConfig?.h ?? 400
+    const scale = pConfig?.scale ?? 1.0
+    const angle = pConfig?.angle ?? 0
+    const pw = w * scale * currentScale
+    const ph = h * scale * currentScale
+    const rootRect = root.getBoundingClientRect()
+    const rootCenterX = rootRect.left + rootRect.width / 2
+
+    pEl.style.width = pw + 'px'
+    pEl.style.height = ph + 'px'
+    pEl.style.left = (rootCenterX - paRootRect.left + (cx - 540) * currentScale - pw / 2) + 'px'
+    pEl.style.top = (cy * currentScale - ph / 2) + 'px'
+    pEl.style.backgroundImage = `url("${pSrc}")`
+    pEl.style.backgroundSize = 'contain'
+    pEl.style.backgroundPosition = 'center'
+    pEl.style.backgroundRepeat = 'no-repeat'
+    pEl.style.opacity = (pConfig?.opacity ?? 1).toString()
+    if (angle) pEl.style.transform = `rotate(${angle}deg)`
+
+    const anim = pConfig?.anim
+    if (anim && anim !== 'none') {
+      const duration = Number(pConfig?.durationMs ?? 600)
+      const delay = Number(pConfig?.delayMs ?? 0)
+      const easing = String(pConfig?.easing ?? 'cubic-bezier(0.34, 1.56, 0.64, 1)')
+      const iterations = pConfig?.iterations ?? 1
+      pEl.style.animation = `pa-${anim} ${duration}ms ${easing} ${delay}ms ${iterations} both`
+    }
+
+    paRoot.appendChild(pEl)
+  }
+
+  const parseNumList = (strValue: unknown): number[] => {
+    return String(strValue ?? '').split(',').map(s => Number(s.trim())).filter(n => !isNaN(n))
   }
 
   return {
     mount(c, params) {
+      gameParams = params
       ctx = c
-      need = Math.max(1, Math.min(20, num(params.catches, 5)))
-      fallFrac = Math.max(0.2, Math.min(1.5, num(params.speed, 0.55)))
-      spawnMs = Math.max(300, num(params.spawnMs, 900))
-      itemImg = ctx.assets.src(params.itemImage as string)
-      ctx.root.style.touchAction = 'none'
+      root = ctx.root
 
-      basket = document.createElement('div')
-      basket.style.cssText = 'position:absolute;border-radius:0 0 16px 16px;z-index:3;display:flex;align-items:flex-end;justify-content:center;'
-      const basketImg = ctx.assets.src(params.basketImage as string)
-      basket.style.background = basketImg ? `bottom/contain no-repeat url("${basketImg}")` : 'linear-gradient(#a16207,#7c4a12)'
-      if (!basketImg) basket.style.border = '3px solid #5a3410'
-      ctx.root.appendChild(basket)
+      itemTypes = Number(params.itemTypes ?? 3)
+      requireUnique = params.requireUnique !== false
+      need = (requireUnique && itemTypes > 0) ? itemTypes : Number(params.catches ?? 5)
+      scoreMode = String(params.scoreMode ?? 'Increment')
+      speedParam = Number(params.speed ?? 0.55)
+      spawnMs = Number(params.spawnMs ?? 900)
+      randomizeAngle = !!params.randomizeAngle
+      randomAngleList = parseNumList(params.randomAngles)
+      if (randomAngleList.length === 0) randomAngleList = [0, 45, -45, 90]
+      visibleFirstRender = !!params.visibleFirstRender
+      spawnOnMove = !!params.spawnOnMove
+      basketLocked = params.basketLocked === 'Locked'
+      showCaughtItemsPreview = !!params.showCaughtItemsPreview
 
-      label = document.createElement('div')
-      label.style.cssText = 'position:absolute;left:50%;top:10px;transform:translateX(-50%);color:#fff;font-weight:800;pointer-events:none;text-shadow:0 1px 3px rgba(0,0,0,.5);'
-      label.textContent = '0 / ' + need
-      ctx.root.appendChild(label)
-      layout()
+      const ids = Array.isArray(params.itemImages) ? (params.itemImages as string[]) : (params.itemImage ? [String(params.itemImage)] : [])
+      itemImages = ids.map((id) => ctx.assets.src(id)).filter(Boolean)
+
+      itemSizes = parseNumList(params.itemSizes)
+      if (itemSizes.length === 0) itemSizes = [120]
+      
+      caughtItemXs = parseNumList(params.caughtItemXs)
+      caughtItemYs = parseNumList(params.caughtItemYs)
+      caughtItemAngles = parseNumList(params.caughtItemAngles)
+      caughtItemScales = parseNumList(params.caughtItemScales)
+      caughtItemZIndex = Number(params.caughtItemZIndex ?? 1)
+      
+      frontBasketLogicalW = Number(params.frontBasketWidth ?? params.basketWidth ?? 300)
+      frontBasketLogicalH = Number(params.frontBasketHeight ?? params.basketHeight ?? 150)
+      frontBasketOffsetX = Number(params.frontBasketOffsetX ?? 0)
+      frontBasketOffsetY = Number(params.frontBasketOffsetY ?? params.basketOffsetY ?? 0)
+      frontBasketAssetIdStr = params.frontBasketImage ? String(params.frontBasketImage) : (params.basketImage ? String(params.basketImage) : (params.basketAssetId ? String(params.basketAssetId) : ''))
+
+      backBasketLogicalW = Number(params.backBasketWidth ?? 300)
+      backBasketLogicalH = Number(params.backBasketHeight ?? 150)
+      backBasketOffsetX = Number(params.backBasketOffsetX ?? 0)
+      backBasketOffsetY = Number(params.backBasketOffsetY ?? 0)
+      backBasketAssetIdStr = params.backBasketImage ? String(params.backBasketImage) : ''
+
+      popupImages = (Array.isArray(params.popupImages) ? params.popupImages : []).map(a => String(a))
+      try {
+        popupConfigs = JSON.parse(String(params.popupConfigs || '[]'))
+      } catch (e) {
+        popupConfigs = []
+      }
+
+      paRoot = root.closest('.pa-root') as HTMLElement | null
+      if (!paRoot) paRoot = root.parentElement
+      
+      // Note: Basket DOM creation is deferred to relayout() because paRoot 
+      // is not reliably available during mount() before injection.
+
+      updateScoreUI()
+      injectAnimStyles()
     },
     start() {
-      if (started) return
-      started = true
-      const moveTo = (clientX: number): void => {
-        const r = ctx.root.getBoundingClientRect()
-        basketX = Math.max(basketW / 2, Math.min(w - basketW / 2, clientX - r.left))
-        basket.style.left = basketX - basketW / 2 + 'px'
+      gameActive = !visibleFirstRender
+      
+      paRoot = root.closest('.pa-root') as HTMLElement | null
+      if (!paRoot) {
+        paRoot = root.parentElement
       }
-      let dragging = false
-      ctx.root.addEventListener('pointerdown', (e) => {
-        dragging = true
-        ctx.root.setPointerCapture?.(e.pointerId)
-        moveTo(e.clientX)
-      })
-      ctx.root.addEventListener('pointermove', (e) => dragging && moveTo(e.clientX))
-      ctx.root.addEventListener('pointerup', () => (dragging = false))
-      last = -1
-      raf = requestAnimationFrame(tick)
-      spawn()
-      spawnTimer = window.setInterval(spawn, spawnMs)
+
+      // Create dropsContainer on pa-root so items span the full screen
+      // z-index 31 = behind basket (z:32) but in front of CTA (z:30)
+      if (paRoot) {
+        dropsContainer = document.createElement('div')
+        dropsContainer.style.position = 'absolute'
+        dropsContainer.style.left = '0'
+        dropsContainer.style.top = '0'
+        dropsContainer.style.width = '100%'
+        dropsContainer.style.height = '100%'
+        dropsContainer.style.overflow = 'visible'
+        dropsContainer.style.pointerEvents = 'none'
+        dropsContainer.style.zIndex = '31'
+        paRoot.appendChild(dropsContainer)
+      }
+      
+      
+      hasMoved = false
+      if (!spawnOnMove) {
+        startSpawning(true)
+      }
+      startAnimation()
+      visibilityHandler = handleVisibilityChange
+      document.addEventListener('visibilitychange', visibilityHandler)
     },
-    relayout: layout,
+    relayout() {
+      // Find paRoot if we haven't already
+      if (!paRoot) paRoot = root.closest('.pa-root') as HTMLElement | null
+      if (!paRoot) paRoot = root.parentElement
+
+      // Create baskets if needed
+      if (paRoot && !frontBasket) {
+        frontBasket = document.createElement('div')
+        frontBasket.dataset.id = 'basket'
+        frontBasket.style.position = 'fixed'
+        frontBasket.style.zIndex = '32'
+        frontBasket.style.pointerEvents = 'none'
+        frontBasket.style.overflow = 'visible'
+        paRoot.appendChild(frontBasket)
+        
+        caughtItemsContainer = document.createElement('div')
+        caughtItemsContainer.style.position = 'absolute'
+        caughtItemsContainer.style.left = '0'
+        caughtItemsContainer.style.top = '0'
+        caughtItemsContainer.style.width = '100%'
+        caughtItemsContainer.style.height = '100%'
+        caughtItemsContainer.style.zIndex = '0'
+        caughtItemsContainer.style.pointerEvents = 'none'
+        frontBasket.appendChild(caughtItemsContainer)
+
+        const frontImgLayer = document.createElement('div')
+        frontImgLayer.dataset.id = 'basket_drag_target'
+        frontImgLayer.style.position = 'absolute'
+        frontImgLayer.style.left = '0'
+        frontImgLayer.style.top = '0'
+        frontImgLayer.style.width = '100%'
+        frontImgLayer.style.height = '100%'
+        
+        if (frontBasketAssetIdStr) {
+          frontImgLayer.style.backgroundImage = `url(${ctx.assets.src(frontBasketAssetIdStr)})`
+          frontImgLayer.style.backgroundSize = '100% 100%'
+          frontImgLayer.style.backgroundPosition = 'center bottom'
+          frontImgLayer.style.backgroundRepeat = 'no-repeat'
+        } else if (!backBasketAssetIdStr) {
+          // Fallback placeholder rectangle if no image is set at all
+          frontImgLayer.style.background = 'linear-gradient(#a16207,#7c4a12)'
+          frontImgLayer.style.border = '3px solid #5a3410'
+          frontImgLayer.style.borderRadius = '0 0 16px 16px'
+        }
+        
+        frontImgLayer.style.zIndex = '1'
+        frontImgLayer.style.pointerEvents = 'auto'
+        frontBasket.appendChild(frontImgLayer)
+        basketDragTarget = frontImgLayer
+        attachDrag()
+      }
+
+      if (paRoot && backBasketAssetIdStr && !backBasket) {
+        backBasket = document.createElement('div')
+        backBasket.dataset.id = 'back_basket'
+        backBasket.style.position = 'fixed'
+        backBasket.style.zIndex = '30'
+        backBasket.style.pointerEvents = 'none'
+        backBasket.style.overflow = 'visible'
+        paRoot.appendChild(backBasket)
+        
+        const backImgLayer = document.createElement('div')
+        backImgLayer.style.position = 'absolute'
+        backImgLayer.style.left = '0'
+        backImgLayer.style.top = '0'
+        backImgLayer.style.width = '100%'
+        backImgLayer.style.height = '100%'
+        
+        backImgLayer.style.backgroundImage = `url(${ctx.assets.src(backBasketAssetIdStr)})`
+        backImgLayer.style.backgroundSize = '100% 100%'
+        backImgLayer.style.backgroundPosition = 'center bottom'
+        backImgLayer.style.backgroundRepeat = 'no-repeat'
+        
+        backImgLayer.style.zIndex = '1'
+        backImgLayer.style.pointerEvents = 'none'
+        backBasket.appendChild(backImgLayer)
+      }
+
+      if (paRoot && frontBasket) {
+        const currentScale = s()
+        frontBasket.style.left = '50%'
+        frontBasket.style.width = (frontBasketLogicalW * currentScale) + 'px'
+        frontBasket.style.height = (frontBasketLogicalH * currentScale) + 'px'
+        frontBasket.style.marginLeft = `-${(frontBasketLogicalW / 2) * currentScale}px`
+        const fx = basketX + frontBasketOffsetX
+        frontBasket.style.transform = `translateX(${(fx - 540) * currentScale}px)`
+        
+        // Compute vertical position now that elements are injected in the DOM
+        const footerBar = paRoot.querySelector('[data-id="basket_bar"]') as HTMLElement | null
+        const paRootRect = paRoot.getBoundingClientRect()
+        const footerTop = footerBar ? footerBar.getBoundingClientRect().top : paRootRect.bottom
+        const frontBasketPhysicalH = frontBasketLogicalH * currentScale
+        frontBasket.style.top = `${footerTop - paRootRect.top - frontBasketPhysicalH - (frontBasketOffsetY * currentScale)}px`
+        frontBasket.style.bottom = ''
+        
+        if (backBasket) {
+          backBasket.style.left = '50%'
+          backBasket.style.width = (backBasketLogicalW * currentScale) + 'px'
+          backBasket.style.height = (backBasketLogicalH * currentScale) + 'px'
+          backBasket.style.marginLeft = `-${(backBasketLogicalW / 2) * currentScale}px`
+          const bx = basketLocked ? basketX + backBasketOffsetX : 540 + backBasketOffsetX
+          backBasket.style.transform = `translateX(${(bx - 540) * currentScale}px)`
+          const backBasketPhysicalH = backBasketLogicalH * currentScale
+          backBasket.style.top = `${footerTop - paRootRect.top - backBasketPhysicalH - (backBasketOffsetY * currentScale)}px`
+          backBasket.style.bottom = ''
+        }
+        
+        // Also render preview items if needed
+        if (showCaughtItemsPreview && caughtItemsContainer && caughtItemsContainer.childElementCount <= 0) {
+          const numItems = itemTypes > 0 ? itemTypes : Math.max(1, caughtItemXs.length)
+          for (let i = 0; i < numItems; i++) {
+            const el = document.createElement('div')
+            el.style.position = 'absolute'
+            const sz = itemSizes[i % itemSizes.length] || 120
+            const physicalItemSz = sz * currentScale
+            el.style.width = physicalItemSz + 'px'
+            el.style.height = physicalItemSz + 'px'
+            
+            const defaultOffsetX = 0
+            const offsetX = caughtItemXs.length > 0 ? (caughtItemXs[i % caughtItemXs.length] ?? defaultOffsetX) : defaultOffsetX
+            const offsetY = caughtItemYs.length > 0 ? (caughtItemYs[i % caughtItemYs.length] ?? -5) : -5
+            const angle = caughtItemAngles.length > 0 ? (caughtItemAngles[i % caughtItemAngles.length] ?? 0) : 0
+            const scale = caughtItemScales.length > 0 ? (caughtItemScales[i % caughtItemScales.length] ?? 0.7) : 0.7
+            
+            el.style.left = `${(frontBasketLogicalW / 2) * currentScale + offsetX * currentScale - physicalItemSz / 2}px`
+            el.style.top = `${offsetY * currentScale}px`
+            el.style.transform = `rotate(${angle}deg) scale(${scale})`
+            el.style.transformOrigin = 'bottom center'
+            el.style.opacity = '1'
+            el.style.zIndex = `${caughtItemZIndex}`
+            
+            const src = itemImages.length > 0 ? itemImages[i % itemImages.length] : ''
+            if (src) {
+              const img = document.createElement('img')
+              img.src = src
+              img.style.width = '100%'
+              img.style.height = '100%'
+              img.style.objectFit = 'contain'
+              img.draggable = false
+              el.appendChild(img)
+            }
+            caughtItemsContainer.appendChild(el)
+          }
+        }
+        
+        // Render popup preview if toggle is true
+        let showPopupPreview = !!gameParams.showPopupPreview
+        if (showPopupPreview && itemTypes > 0) {
+          // Clear old ones first
+          paRoot.querySelectorAll('[data-id^="popup_image_"]').forEach(el => el.remove())
+
+          const numItems = itemTypes
+          for (let i = 0; i < numItems; i++) {
+            const pAssetId = popupImages.length > 0 ? popupImages[i % popupImages.length] : ''
+            const pConfig = popupConfigs.length > i ? popupConfigs[i] : null
+            const pSrc = pAssetId ? ctx.assets.src(pAssetId) : ''
+            
+            if (pAssetId && paRoot && pSrc) {
+              const pEl = document.createElement('div')
+              pEl.dataset.id = `popup_image_${i + 1}`
+              pEl.style.position = 'absolute'
+              pEl.style.pointerEvents = 'none'
+              pEl.style.zIndex = (pConfig?.zIndex ?? 10000).toString()
+              
+              const cx = pConfig?.x ?? 540
+              const cy = pConfig?.y ?? 960
+              const w = pConfig?.w ?? 400
+              const h = pConfig?.h ?? 400
+              const scale = pConfig?.scale ?? 1.0
+              const angle = pConfig?.angle ?? 0
+              
+              const pw = w * scale * currentScale
+              const ph = h * scale * currentScale
+              
+              const rootRect = root.getBoundingClientRect()
+              const zoomX = paRootRect.width / (paRoot.offsetWidth || 1080)
+              const logicalRootCenterX = (rootRect.left + rootRect.width / 2 - paRootRect.left) / zoomX
+              
+              pEl.style.width = pw + 'px'
+              pEl.style.height = ph + 'px'
+              pEl.style.left = (logicalRootCenterX + (cx - 540) * currentScale - pw / 2) + 'px'
+              pEl.style.top = (cy * currentScale - ph / 2) + 'px'
+              
+              pEl.style.backgroundImage = `url("${pSrc}")`
+              pEl.style.backgroundSize = 'contain'
+              pEl.style.backgroundPosition = 'center'
+              pEl.style.backgroundRepeat = 'no-repeat'
+              pEl.style.opacity = (pConfig?.opacity ?? 1).toString()
+              
+              if (angle) pEl.style.transform = `rotate(${angle}deg)`
+              
+              paRoot.appendChild(pEl)
+            }
+          }
+        }
+      }
+      
+      // Update UI on layout (e.g. initial render)
+      updateScoreUI()
+    },
     getHint(): HintMove | null {
-      if (done || !drops.length) return null
-      const lowest = drops.reduce((a, b) => (b.y > a.y ? b : a))
+      if (done || !drops.length || !frontBasket || !paRoot) return null
+      // Get the lowest uncaptured drop
+      const lowest = drops.reduce((a, b) => (!b.captured && b.y > a.y ? b : a))
+      if (lowest.captured) return null
+      
       const from: Pt = { x: 0, y: 0 }
-      const r = basket.getBoundingClientRect()
+      const r = frontBasket.getBoundingClientRect()
+      const paRootRect = paRoot.getBoundingClientRect()
+      
       from.x = r.left + r.width / 2
       from.y = r.top + r.height / 2
-      const root = ctx.root.getBoundingClientRect()
-      return { from, to: { x: root.left + lowest.x, y: from.y }, kind: 'slide' }
+      
+      // Calculate where the basket needs to move to catch it
+      const currentScale = s()
+      const item_screen_x = paRootRect.left + paRootRect.width / 2 + (lowest.x - 540) * currentScale
+      
+      return { from, to: { x: item_screen_x, y: from.y }, kind: 'slide' }
     },
     onComplete(cb) {
       completeCb = cb
     },
     destroy() {
-      cancelAnimationFrame(raf)
-      window.clearInterval(spawnTimer)
-      ctx.root.innerHTML = ''
-      drops.length = 0
+      stopSpawning()
+      stopAnimation()
+      if (visibilityHandler) {
+        document.removeEventListener('visibilitychange', visibilityHandler)
+        visibilityHandler = null
+      }
+      if (dropsContainer && dropsContainer.parentNode) {
+        dropsContainer.parentNode.removeChild(dropsContainer)
+      }
+      if (dragAttachedBasket && basketStartDrag) {
+        dragAttachedBasket.removeEventListener('pointerdown', basketStartDrag)
+        dragAttachedBasket = null
+        basketStartDrag = null
+      }
+      if (frontBasket && frontBasket.parentNode) {
+        frontBasket.parentNode.removeChild(frontBasket)
+        frontBasket = null
+      }
+      basketDragTarget = null
+      if (backBasket && backBasket.parentNode) {
+        backBasket.parentNode.removeChild(backBasket)
+        backBasket = null
+      }
     },
   }
 }
@@ -180,16 +813,52 @@ export const CATCH_TEMPLATE: GameTemplate = {
   id: 'catch',
   label: 'Catch (drag basket)',
   paramFields: [
-    { key: 'catches', label: 'Catches to win', type: 'number', min: 1, max: 20, step: 1 },
-    { key: 'speed', label: 'Fall speed (screens/sec)', type: 'number', min: 0.2, max: 1.5, step: 0.05 },
-    { key: 'spawnMs', label: 'Spawn interval (ms)', type: 'number', min: 300, max: 2500, step: 100 },
+    { key: 'catches', label: 'Catches to win', type: 'number', min: 1, max: 50, step: 1 },
+    { key: 'speed', label: 'Fall speed (screens/sec)', type: 'number', min: 0.2, max: 3.0, step: 0.05 },
+    { key: 'spawnMs', label: 'Spawn interval (ms)', type: 'number', min: 100, max: 10000, step: 50 },
+    { key: 'randomizeAngle', label: 'Randomize fall angle', type: 'boolean' },
+    { key: 'randomAngles', label: 'Random angles (deg, comma sep)', type: 'text' },
+    { key: 'visibleFirstRender', label: 'Display falling item at the side', type: 'boolean' },
+    { key: 'spawnOnMove', label: 'Start spawning on first move', type: 'boolean' },
+    { key: 'scoreMode', label: 'Scoring Mode', type: 'select', options: ['Increment', 'Decrement'] },
+    { key: 'requireUnique', label: 'Require 1 of each unique item', type: 'boolean' },
+    { key: 'itemTypes', label: 'Unique item types', type: 'number', min: 1, max: 20, step: 1 },
+    { key: 'itemSizes', label: 'Item Sizes (comma separated px)', type: 'text' },
+    { key: 'frontBasketWidth', label: 'Front Basket Width (px)', type: 'number', min: 50, max: 3000, step: 10 },
+    { key: 'frontBasketHeight', label: 'Front Basket Height (px)', type: 'number', min: 50, max: 3000, step: 10 },
+    { key: 'frontBasketOffsetX', label: 'Front Basket Horizontal Offset (px)', type: 'number', min: -2000, max: 2000, step: 10 },
+    { key: 'frontBasketOffsetY', label: 'Front Basket Vertical Offset (px)', type: 'number', min: -2000, max: 2000, step: 10 },
+    { key: 'backBasketWidth', label: 'Back Basket Width (px)', type: 'number', min: 50, max: 3000, step: 10 },
+    { key: 'backBasketHeight', label: 'Back Basket Height (px)', type: 'number', min: 50, max: 3000, step: 10 },
+    { key: 'backBasketOffsetX', label: 'Back Basket Horizontal Offset (px)', type: 'number', min: -2000, max: 2000, step: 10 },
+    { key: 'backBasketOffsetY', label: 'Back Basket Vertical Offset (px)', type: 'number', min: -2000, max: 2000, step: 10 },
+    { key: 'basketLocked', label: 'Basket Lock', type: 'select', options: ['Locked', 'Unlocked'] },
+    { key: 'caughtItemXs', label: 'Caught Xs (px, comma sep)', type: 'text' },
+    { key: 'caughtItemYs', label: 'Caught Ys (px, comma sep)', type: 'text' },
+    { key: 'caughtItemAngles', label: 'Caught Angles (deg, comma sep)', type: 'text' },
+    { key: 'caughtItemScales', label: 'Caught Scales (comma sep, e.g. 0.7)', type: 'text' },
+    { key: 'caughtItemZIndex', label: 'Caught Z-Index (relative to basket)', type: 'number', min: -10, max: 10, step: 1 },
+    { key: 'showCaughtItemsPreview', label: 'Preview caught items (Editor only)', type: 'boolean' },
+    { key: 'showPopupPreview', label: 'Preview popups (Editor only)', type: 'boolean' },
   ],
   assetSlots: [
-    { key: 'basketImage', label: 'Basket image' },
-    { key: 'itemImage', label: 'Falling item image' },
+    { key: 'itemImages', label: 'Falling item images', list: true, countParam: 'itemTypes' },
+    { key: 'popupImages', label: 'Popup Images (1 per unique item)', list: true, countParam: 'itemTypes' },
+    { key: 'frontBasketImage', label: 'Front Basket Image', accept: 'image' },
+    { key: 'backBasketImage', label: 'Back Basket Image', accept: 'image' },
   ],
-  defaultParams: { catches: 5, speed: 0.55, spawnMs: 900, basketImage: '', itemImage: '' },
-  // Slide the basket left-right along the bottom to line up with falling items.
+  defaultParams: {
+    catches: 5, speed: 0.55, spawnMs: 900,
+    randomizeAngle: false, randomAngles: '0, 45, -45, 90', visibleFirstRender: false, spawnOnMove: false,
+    scoreMode: 'Increment', requireUnique: true, itemTypes: 3,
+    itemSizes: '120', 
+    frontBasketWidth: 300, frontBasketHeight: 150, frontBasketOffsetX: 0, frontBasketOffsetY: 0,
+    backBasketWidth: 300, backBasketHeight: 150, backBasketOffsetX: 0, backBasketOffsetY: 0,
+    frontBasketImage: '', backBasketImage: '',
+    basketLocked: 'Locked',
+    caughtItemXs: '', caughtItemYs: '', caughtItemAngles: '', caughtItemScales: '', caughtItemZIndex: 1,
+    showCaughtItemsPreview: false, popupConfigs: '[]'
+  },
   defaultHandguide: {
     nodes: [
       { x: 0.3, y: 0.85 },
