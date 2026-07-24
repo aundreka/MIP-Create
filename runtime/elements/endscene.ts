@@ -158,7 +158,8 @@ export function createEndsceneContent(el: SceneElement, ctx: RuntimeCtx): HTMLEl
   wrap.dataset.fhP = cfg?.fullHeight ? '1' : ''
   wrap.dataset.fitL = cfg?.objectFitL ?? cfg?.objectFit ?? 'cover'
   wrap.dataset.fhL = (cfg?.fullHeightL ?? cfg?.fullHeight) ? '1' : ''
-  wrap.dataset.zoom = String(cfg?.zoom ?? 1)
+  wrap.dataset.zoomP = String(cfg?.zoom ?? 1)
+  wrap.dataset.zoomL = String(cfg?.zoomL ?? cfg?.zoom ?? 1)
   const mediaCss = 'display:none;'
 
   // resolve sources; landscape falls back to portrait so a single clip works both ways
@@ -234,7 +235,7 @@ function applyEndsceneMediaFit(el: HTMLElement, wrap: HTMLElement): void {
   const landscape = d.land === '1'
   const fullH = landscape ? d.fhL === '1' : d.fhP === '1'
   const fit = (landscape ? d.fitL : d.fitP) || 'cover'
-  const zoom = d.zoom || '1'
+  const zoom = (landscape ? d.zoomL : d.zoomP) || '1'
   el.style.position = 'absolute'
   el.style.transformOrigin = 'center'
   if (fullH) {

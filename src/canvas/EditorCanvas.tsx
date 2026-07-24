@@ -242,6 +242,15 @@ export function EditorCanvas(props: Props): JSX.Element {
     | null
   >(null)
   const curZoneRef = useRef<{ x: number; y: number; w: number; h: number }>({ x: 0, y: 0, w: 100, h: 100 })
+  // Memory-match tracker symbol editor: double-click the game → per-symbol boxes to
+  // drag (X nudge) / resize (uniform scale, bottoms stay on the shared baseline).
+  const [trackerEdit, setTrackerEdit] = useState<string | null>(null)
+  const [trackerLive, setTrackerLive] = useState<{ scales: number[]; dxs: number[] } | null>(null)
+  const trackerDrag = useRef<
+    | { mode: 'move' | 'resize'; idx: number; ox: number; oy: number; s: number; symSz: number; bottomY: number; start: { scales: number[]; dxs: number[] }; last: { scales: number[]; dxs: number[] } | null }
+    | null
+  >(null)
+  const curTrackerRef = useRef<{ scales: number[]; dxs: number[] }>({ scales: [], dxs: [] })
   // Scratch-grid dynamic-date position editor: which game-mount's date marker is being
   // dragged, and the live position (percent of the cell — shared by every cell).
   const [dateEdit, setDateEdit] = useState<string | null>(null)
@@ -364,6 +373,24 @@ export function EditorCanvas(props: Props): JSX.Element {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [zoneEdit])
+  useEffect(() => {
+    if (trackerEdit && !scene.elements.some((e) => e.id === trackerEdit)) {
+      setTrackerEdit(null)
+      setTrackerLive(null)
+    }
+  }, [trackerEdit, scene])
+  useEffect(() => {
+    if (!trackerEdit) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        trackerDrag.current = null
+        setTrackerEdit(null)
+        setTrackerLive(null)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [trackerEdit])
 
   // Dynamic-date position edit (scratch grid) is entered from the inspector too.
   useEffect(() => {
@@ -676,6 +703,12 @@ export function EditorCanvas(props: Props): JSX.Element {
       setDateLive(null)
       return
     }
+    if (trackerEdit) {
+      // Clicking outside a symbol box (boxes stop their own events) exits the editor.
+      setTrackerEdit(null)
+      setTrackerLive(null)
+      return
+    }
     const { px, py } = toIntrinsic(e.clientX, e.clientY)
     if (pathDrawTarget()) {
       // each click drops a waypoint; double-click / Enter finishes (handled below)
@@ -941,6 +974,12 @@ export function EditorCanvas(props: Props): JSX.Element {
     const el = liveRef.current.scene.elements.find((x) => x.id === hit.id)
     if (el && el.type === 'image' && el.assetId && !el.container) {
       enterCrop(el.id)
+      return
+    }
+    // Double-click a memory match → edit its tracker symbols on the canvas.
+    if (el && el.type === 'game-mount' && el.game?.templateId === 'memorymatch') {
+      setTrackerLive(null)
+      setTrackerEdit(hit.id)
       return
     }
     // Double-click a scratch card that has a prize image → edit the reveal transform.
@@ -1460,6 +1499,134 @@ export function EditorCanvas(props: Props): JSX.Element {
     }
   }
 
+  // ---- memory-match tracker symbol editor -----------------------------------
+  // Mirrors runtime/games/memorymatch.ts tracker layout (baseline model): symbols
+  // left-to-right, bottoms on a shared baseline; per-symbol scale + X nudge.
+  const trackerEl = trackerEdit ? scene.elements.find((e) => e.id === trackerEdit) ?? null : null
+  const trackerRect = trackerEdit ? rects.find((r) => r.id === trackerEdit) ?? null : null
+  const tP: Record<string, unknown> = trackerEl?.game?.params ?? {}
+  const tPairs = Math.max(2, Math.min(10, Number(tP.pairs ?? 5)))
+  const parseNums = (v: unknown): number[] => String(v ?? '').split(',').map((x) => parseFloat(x.trim()))
+  const curTracker = trackerLive ?? {
+    scales: Array.from({ length: tPairs }, (_, i) => {
+      const n = parseNums(tP.trackerScales)[i]
+      return n > 0 ? n : 1
+    }),
+    dxs: Array.from({ length: tPairs }, (_, i) => {
+      const n = parseNums(tP.trackerDx)[i]
+      return isFinite(n) ? n : 0
+    }),
+  }
+  curTrackerRef.current = curTracker
+  // Per-symbol boxes in overlay space (pre-zoom), plus the design→overlay scale
+  // and base symbol size needed by the drag handlers.
+  const trackerGeom = (() => {
+    if (!trackerEl || !trackerRect) return null
+    const pos = tP.tracker === 'off' ? 'off' : tP.tracker === 'bottom' ? 'bottom' : 'top'
+    if (pos === 'off') return null
+    const ew = trackerEl.w ?? 900
+    const s = trackerRect.w / ew
+    const symSz = Math.max(10, Number(tP.trackerSize ?? 34)) * s
+    const gap = Math.max(0, Number(tP.trackerGap ?? 18)) * s
+    const shiftX = Number(tP.trackerShiftX ?? 0) * s
+    const shiftY = Number(tP.trackerShiftY ?? 0) * s
+    // Mirror the runtime baseline anchoring: bottom tracker = fixed pad above the
+    // element's bottom; top tracker = fixed top pad, grows downward. While a drag
+    // is in flight the baseline FREEZES at its drag-start value so the bottoms
+    // stay glued under the pointer (it settles on release).
+    const maxTs = Math.max(1, ...curTracker.scales.filter((v) => v > 0))
+    const maxH = symSz * maxTs
+    const pad = Math.max(8 * s, symSz * 0.35)
+    const baseline = trackerDrag.current
+      ? trackerDrag.current.bottomY
+      : trackerRect.y + (pos === 'bottom' ? trackerRect.h - pad / 2 : pad / 2 + maxH) + shiftY
+    const sizes = curTracker.scales.map((v) => symSz * (v > 0 ? v : 1))
+    const totalW = sizes.reduce((a, b) => a + b, 0) + gap * (tPairs - 1)
+    let x = trackerRect.x + (trackerRect.w - totalW) / 2 + shiftX
+    const boxes = sizes.map((sz, i) => {
+      const b = { x: x + curTracker.dxs[i] * s, y: baseline - sz, w: sz, h: sz }
+      x += sz + gap
+      return b
+    })
+    return { boxes, s, symSz, baseline }
+  })()
+  const onTrackerBodyDown = (e: React.PointerEvent, idx: number): void => {
+    e.stopPropagation()
+    if (!trackerGeom) return
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    const o = overlayRef.current!.getBoundingClientRect()
+    const z = liveRef.current.zoom
+    trackerDrag.current = {
+      mode: 'move',
+      idx,
+      ox: (e.clientX - o.left) / z,
+      oy: (e.clientY - o.top) / z,
+      s: trackerGeom.s,
+      symSz: trackerGeom.symSz,
+      bottomY: trackerGeom.baseline,
+      start: curTrackerRef.current,
+      last: null,
+    }
+  }
+  const onTrackerHandleDown = (e: React.PointerEvent, idx: number): void => {
+    e.stopPropagation()
+    if (!trackerGeom) return
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    const o = overlayRef.current!.getBoundingClientRect()
+    const z = liveRef.current.zoom
+    trackerDrag.current = {
+      mode: 'resize',
+      idx,
+      ox: (e.clientX - o.left) / z,
+      oy: (e.clientY - o.top) / z,
+      s: trackerGeom.s,
+      symSz: trackerGeom.symSz,
+      bottomY: trackerGeom.baseline,
+      start: curTrackerRef.current,
+      last: null,
+    }
+  }
+  const onTrackerMove = (e: React.PointerEvent): void => {
+    const d = trackerDrag.current
+    if (!d) return
+    e.stopPropagation()
+    const o = overlayRef.current!.getBoundingClientRect()
+    const z = liveRef.current.zoom
+    const ox = (e.clientX - o.left) / z
+    const oy = (e.clientY - o.top) / z
+    let next: { scales: number[]; dxs: number[] }
+    if (d.mode === 'move') {
+      // Horizontal nudge only — bottoms stay glued to the shared baseline.
+      const dx = Math.round(d.start.dxs[d.idx] + (ox - d.ox) / d.s)
+      next = { scales: d.start.scales, dxs: d.start.dxs.map((v, i) => (i === d.idx ? dx : v)) }
+    } else {
+      // Resize upward from the baseline; the box is square so aspect is locked.
+      const size = Math.max(6, d.bottomY - oy)
+      const sc = Math.max(0.2, Math.min(4, Math.round((size / d.symSz) * 100) / 100))
+      next = { scales: d.start.scales.map((v, i) => (i === d.idx ? sc : v)), dxs: d.start.dxs }
+    }
+    d.last = next
+    setTrackerLive(next)
+  }
+  const onTrackerUp = (e: React.PointerEvent): void => {
+    e.stopPropagation()
+    const d = trackerDrag.current
+    trackerDrag.current = null
+    const g = trackerEl?.game
+    if (d?.last && trackerEl && g) {
+      patchElement(trackerEl.id, {
+        game: {
+          ...g,
+          params: {
+            ...(g.params ?? {}),
+            trackerScales: d.last.scales.map((v) => Math.round(v * 100) / 100).join(', '),
+            trackerDx: d.last.dxs.map((v) => Math.round(v)).join(', '),
+          },
+        },
+      })
+    }
+  }
+
   const menuItems = (): MenuItem[] => {
     const multi = selectedIds.length > 1
     const locked = single?.locked
@@ -1545,7 +1712,7 @@ export function EditorCanvas(props: Props): JSX.Element {
                   mirrors portrait. Seeding snapshots portrait geometry per element and
                   the banner disappears (overrides now exist). */}
               {active && landscape && lsN === 0 && sd.elements.length > 0 && !activeVariant && !lsBannerClosed[sd.id] &&
-                !revealEdit && !zoneEdit && !cropEdit && (
+                !revealEdit && !zoneEdit && !cropEdit && !trackerEdit && (
                 <div className="ls-banner" onPointerDown={(e) => e.stopPropagation()}>
                   <span>Landscape mirrors portrait</span>
                   <button onClick={() => seedLandscapeLayout()}>Create separate landscape layout</button>
@@ -1574,7 +1741,7 @@ export function EditorCanvas(props: Props): JSX.Element {
                   onDoubleClick={onDoubleClick}
                   onContextMenu={onContextMenu}
                 >
-                  {!revealEdit && !zoneEdit && !cropEdit &&
+                  {!revealEdit && !zoneEdit && !cropEdit && !trackerEdit &&
                     selectedIds.map((id) => {
                       const r = rects.find((x) => x.id === id)
                       if (!r) return null
@@ -1599,7 +1766,7 @@ export function EditorCanvas(props: Props): JSX.Element {
                       </div>
                     )
                   })}
-                  {!revealEdit && !zoneEdit && !cropEdit && single && singleRect && singleHandles.map((h) => (
+                  {!revealEdit && !zoneEdit && !cropEdit && !trackerEdit && single && singleRect && singleHandles.map((h) => (
                     <div
                       key={h.k}
                       className={'handle h-' + h.k}
@@ -1607,7 +1774,7 @@ export function EditorCanvas(props: Props): JSX.Element {
                       onPointerDown={(e) => onHandlePointerDown(e, h, 'single')}
                     />
                   ))}
-                  {!revealEdit && !zoneEdit && !cropEdit && single && singleRect && (
+                  {!revealEdit && !zoneEdit && !cropEdit && !trackerEdit && single && singleRect && (
                     <div
                       className="dim-badge"
                       style={{ left: singleRect.x + singleRect.w / 2, top: singleRect.y + singleRect.h, transform: `translate(-50%, 6px) scale(${1 / zoom})` }}
@@ -1831,6 +1998,43 @@ export function EditorCanvas(props: Props): JSX.Element {
                           </div>
                         )
                       })()}
+                    </>
+                  )}
+                  {trackerEdit && trackerGeom && (
+                    <>
+                      {/* Shared baseline every symbol's bottom sits on. */}
+                      <div
+                        style={{
+                          position: 'absolute',
+                          left: trackerGeom.boxes[0] ? Math.min(...trackerGeom.boxes.map((b) => b.x)) - 14 : 0,
+                          top: trackerGeom.baseline,
+                          width: trackerGeom.boxes[0] ? Math.max(...trackerGeom.boxes.map((b) => b.x + b.w)) - Math.min(...trackerGeom.boxes.map((b) => b.x)) + 28 : 0,
+                          height: 0,
+                          borderTop: '1px dashed var(--accent)',
+                          opacity: 0.6,
+                          pointerEvents: 'none',
+                        }}
+                      />
+                      {trackerGeom.boxes.map((b, i) => (
+                        <div
+                          key={'trk' + i}
+                          style={{ position: 'absolute', left: b.x, top: b.y, width: b.w, height: b.h, border: '1.5px solid var(--accent)', background: 'rgba(80,140,255,0.10)', boxSizing: 'border-box', cursor: 'ew-resize', touchAction: 'none' }}
+                          onPointerDown={(e) => onTrackerBodyDown(e, i)}
+                          onPointerMove={onTrackerMove}
+                          onPointerUp={onTrackerUp}
+                          onPointerCancel={onTrackerUp}
+                        >
+                          {/* one top-right handle: resize upward from the baseline, aspect locked */}
+                          <div
+                            className="handle"
+                            style={{ left: b.w, top: 0, cursor: 'nesw-resize' }}
+                            onPointerDown={(e) => onTrackerHandleDown(e, i)}
+                            onPointerMove={onTrackerMove}
+                            onPointerUp={onTrackerUp}
+                            onPointerCancel={onTrackerUp}
+                          />
+                        </div>
+                      ))}
                     </>
                   )}
                   {dateEdit && dateCellRects.length > 0 && dateCellRects.map((b, i) => {

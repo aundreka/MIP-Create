@@ -27,7 +27,7 @@ function makeBoard(params: Record<string, unknown> = {}, stageScale = 1): Board 
   const played: string[] = []
   const ctx: GameContext = {
     root,
-    assets: { src: () => '' },
+    assets: { src: (id?: string) => id ?? '' }, // echo ids so tests can see which asset landed where
     sfx: { play: (e) => played.push(e) },
     rng: mulberry32(42),
     scale: () => stageScale,
@@ -124,6 +124,21 @@ describe('memory match', () => {
     expect(a.style.pointerEvents).toBe('none')
   })
 
+  it('flips during a match reveal are ignored — no wrong sfx over the correct one', () => {
+    const b = makeBoard({ pairs: 2, cols: 3, rows: 2 })
+    const pair = b.cards.filter((c) => b.pairOf(c) === '1').slice(0, 2)
+    flip(pair[0])
+    flip(pair[1]) // match — reveal pending
+    const others = b.cards.filter((c) => b.pairOf(c) !== '1').slice(0, 2)
+    flip(others[0]) // spam during the reveal window…
+    flip(others[1])
+    vi.advanceTimersByTime(400)
+    expect(b.played).toContain('correct')
+    expect(b.played).not.toContain('wrong') // …must not resolve a second pair
+    vi.runAllTimers()
+    expect(b.played).not.toContain('wrong')
+  })
+
   it('mismatches flip back and play the wrong sfx', () => {
     const b = makeBoard()
     const [a] = b.cards
@@ -137,6 +152,45 @@ describe('memory match', () => {
     expect(b.isFlipped(a)).toBe(false)
     expect(b.isFlipped(other)).toBe(false)
     expect(a.style.opacity).not.toBe('0')
+  })
+
+  it('the outline appears only on a successful pair, after the flip settles', () => {
+    const b = makeBoard({ flipGlowColor: '#00c8ff' })
+    const glowOf = (card: HTMLElement): HTMLElement => card.children[1] as HTMLElement
+    const a = b.cards[0]
+    flip(a)
+    expect(glowOf(a).style.opacity).toBe('0') // flipping alone earns no outline
+    const other = b.cards.find((c) => b.pairOf(c) !== b.pairOf(a))!
+    flip(other)
+    vi.runAllTimers() // mismatch — still nothing
+    expect(glowOf(a).style.opacity).toBe('0')
+    const pair = b.cards.filter((c) => b.pairOf(c) === b.pairOf(a)).slice(0, 2)
+    flip(pair[0])
+    flip(pair[1])
+    expect(glowOf(pair[0]).style.opacity).toBe('0') // not on click…
+    vi.advanceTimersByTime(400)
+    expect(glowOf(pair[0]).style.opacity).toBe('1') // …only once the pair is revealed
+    expect(glowOf(pair[0]).style.boxShadow).toContain('#00c8ff')
+    expect(glowOf(pair[0]).style.transition).toContain('opacity') // smooth entrance
+    vi.runAllTimers()
+  })
+
+  it('two covers alternate like a chessboard', () => {
+    const b = makeBoard({ pairs: 2, cols: 2, rows: 2, cover: 'covA', cover2: 'covB' })
+    const backOf = (c: HTMLElement): string => (c.querySelector('div')!.children[0] as HTMLElement).style.backgroundImage
+    expect(backOf(b.cards[0])).toContain('covA')
+    expect(backOf(b.cards[1])).toContain('covB')
+    expect(backOf(b.cards[2])).toContain('covB') // next row starts swapped — checkerboard
+    expect(backOf(b.cards[3])).toContain('covA')
+  })
+
+  it('dimmed-lit tracker mode reuses the lit art at custom opacity', () => {
+    const b = makeBoard({ symbolsLit: ['litA', 'litB'], trackerUnlit: 'dimmed-lit', trackerUnlitOpacity: 0.2 })
+    const row = Array.from(b.root.children).find((e) => !(e as HTMLElement).dataset.mmCard) as HTMLElement
+    const unlit = row.children[0].children[0] as HTMLElement
+    expect(unlit.style.backgroundImage).toContain('litA') // same art as the lit layer
+    expect(unlit.style.opacity).toBe('0.2')
+    expect(unlit.style.filter).toBe('') // plain opacity, no grayscale
   })
 
   it('deals a different random board each fresh game', () => {

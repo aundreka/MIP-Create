@@ -34,6 +34,15 @@ interface Card {
   inner: HTMLDivElement
   back: HTMLDivElement
   front: HTMLDivElement
+  /** Success outline layer — sized to the face art's ACTUAL contain-box. */
+  glow: HTMLDivElement
+  glowing: boolean
+  /** True = the outline covers the whole cell (opaque fill / stretch fit). */
+  glowFull: boolean
+  /** Pair-image inset multiplier when the glow hugs the pair art. */
+  glowPs: number
+  /** Natural aspect (w/h) of the art the outline hugs, once loaded. */
+  artAr?: number
   pairId: number
   matched: boolean
   flipped: boolean
@@ -63,7 +72,9 @@ export function createMemoryMatch(): GameModule {
   let pairCount = 5
   let cols = 4
   let rows = 3
-  let gapPx = 8
+  let colGapPx = 8
+  let rowGapPx = 8
+  let gridScale = 1 // uniform shrink/grow of the whole grid inside its area
   let radius = 12
   let aspect = 0.75
   let flipMs = 400
@@ -73,8 +84,16 @@ export function createMemoryMatch(): GameModule {
   let trackerGap = 18
   let trackerShiftX = 0
   let trackerShiftY = 0
+  let trackerScales: number[] = [] // per-symbol size multiplier (lit + unlit share the box, so they stay synced)
+  let trackerDx: number[] = [] // per-symbol horizontal nudge in design px (edited on the canvas)
   let coverOpaque = true // false = transparent cover fill (no colour/shadow leaking past transparent art)
   let faceOpaque = true
+  let glowOn = true // outline glow on a face-up card
+  let glowColor = '#3fd8ff'
+  let overlayFace = false // 'overlay' face style: flipped card keeps its cover, symbol sits on top
+  let entranceMode = 'diagonal' // cards' staggered pop-in order ('off' = none)
+  let entranceStagger = 70
+  let entranceDur = 380
   const cards: Card[] = []
   const tracker: TrackerItem[] = []
   let trackerRow: HTMLDivElement | null = null
@@ -152,6 +171,34 @@ export function createMemoryMatch(): GameModule {
     }
   }
 
+  // The face's drop shadow (only under an opaque fill).
+  const frontShadow = (k: number): string => ((overlayFace ? coverOpaque : faceOpaque) ? `0 ${4 * k}px ${10 * k}px rgba(0,0,0,.3)` : 'none')
+
+  // Size + style the success outline to the face art's ACTUAL bounds: the
+  // contain-box of the art inside the cell (via its natural aspect), or the
+  // whole cell for opaque fills / stretch fit. Neon-tube look: a thin crisp
+  // line, a soft outer bloom, and a faint inner bleed.
+  const positionGlow = (c: Card, k: number): void => {
+    const cw = parseFloat(c.el.style.width) || c.el.clientWidth || 0
+    const ch = parseFloat(c.el.style.height) || c.el.clientHeight || 0
+    let rw = cw
+    let rh = ch
+    if (!c.glowFull && c.artAr) {
+      const bw = cw * c.glowPs
+      const bh = ch * c.glowPs
+      rw = Math.min(bw, bh * c.artAr)
+      rh = rw / c.artAr
+    }
+    c.glow.style.left = (cw - rw) / 2 + 'px'
+    c.glow.style.top = (ch - rh) / 2 + 'px'
+    c.glow.style.width = rw + 'px'
+    c.glow.style.height = rh + 'px'
+    c.glow.style.borderRadius = radius * k * gridScale + 'px'
+    c.glow.style.boxShadow = glowOn
+      ? `0 0 0 ${Math.max(1, 1.6 * k)}px ${glowColor}, 0 0 ${12 * k}px ${Math.max(1, k)}px ${glowColor}, inset 0 0 ${7 * k}px ${glowColor}`
+      : 'none'
+  }
+
   // --- layout ------------------------------------------------------------------
   // All px params (gap, radius, tracker size/spacing/offsets, shadows) are DESIGN
   // px and get multiplied by the stage scale every layout, so the whole minigame
@@ -162,31 +209,46 @@ export function createMemoryMatch(): GameModule {
     const h = ctx.root.clientHeight || 400
     const k = ctx.scale?.() ?? 1 // screen px per design px
     const rows = Math.ceil(cards.length / cols)
-    const gap = Math.max(0, gapPx * k)
     const symSz = trackerSize * k
+    // The band must fit the TALLEST symbol (per-symbol scales can exceed 1) —
+    // sized off the base symbol it would clip scaled-up tops.
+    let maxTs = 1
+    for (let i = 0; i < pairCount; i++) if (trackerScales[i] > maxTs) maxTs = trackerScales[i]
+    const maxH = symSz * maxTs
+    const pad = Math.max(8 * k, symSz * 0.35)
 
-    // Reserve a band for the tracker row (its own size + breathing room).
-    const band = trackerPos === 'off' ? 0 : symSz + Math.max(8 * k, symSz * 0.35)
+    // Reserve a band for the tracker row (tallest symbol + breathing room).
+    const band = trackerPos === 'off' ? 0 : maxH + pad
     const gridTop = trackerPos === 'top' ? band : 0
     const gridH = h - band
 
-    // Cards keep the cover's aspect (w/h) so same-size art never distorts/leaks.
-    const cw = Math.min((w - gap * (cols - 1)) / cols, ((gridH - gap * (rows - 1)) / rows) * aspect)
+    // Cards keep the cover's aspect (w/h) so art never distorts. Fit the grid to
+    // the area with the configured row/column gaps, then apply gridScale as a
+    // uniform shrink/grow of the whole block (cards AND gaps), still centered.
+    // Gaps may go NEGATIVE — rows/columns overlap, pulling the grid tighter
+    // than zero (useful when the fit is height-constrained and a smaller gap
+    // would otherwise just grow the cards to refill the same space).
+    let gx = colGapPx * k
+    let gy = rowGapPx * k
+    let cw = Math.min((w - gx * (cols - 1)) / cols, ((gridH - gy * (rows - 1)) / rows) * aspect)
+    cw *= gridScale
+    gx *= gridScale
+    gy *= gridScale
     const ch = cw / aspect
-    const x0 = (w - (cw * cols + gap * (cols - 1))) / 2
-    const y0 = gridTop + (gridH - (ch * rows + gap * (rows - 1))) / 2
+    const x0 = (w - (cw * cols + gx * (cols - 1))) / 2
+    const y0 = gridTop + (gridH - (ch * rows + gy * (rows - 1))) / 2
     const lastRowCount = cards.length - (rows - 1) * cols
-    const rad = radius * k + 'px'
+    const rad = radius * k * gridScale + 'px'
     const shadow = `0 ${4 * k}px ${10 * k}px rgba(0,0,0,.3)`
     cards.forEach((card, i) => {
       const r = Math.floor(i / cols)
       const inRow = r === rows - 1 ? lastRowCount : cols
       const c = i % cols
-      const rowX0 = x0 + ((cols - inRow) * (cw + gap)) / 2 // center a partial last row
+      const rowX0 = x0 + ((cols - inRow) * (cw + gx)) / 2 // center a partial last row
       card.el.style.width = cw + 'px'
       card.el.style.height = ch + 'px'
-      card.el.style.left = rowX0 + c * (cw + gap) + 'px'
-      card.el.style.top = y0 + r * (ch + gap) + 'px'
+      card.el.style.left = rowX0 + c * (cw + gx) + 'px'
+      card.el.style.top = y0 + r * (ch + gy) + 'px'
       for (const face of [card.back, card.front]) {
         face.style.borderRadius = rad
         face.style.fontSize = cw * 0.4 + 'px'
@@ -194,19 +256,38 @@ export function createMemoryMatch(): GameModule {
       // Shadows only under opaque fills — on a transparent fill the rectangular
       // shadow would outline the cell and leak past the actual card art.
       card.back.style.boxShadow = coverOpaque ? shadow : 'none'
-      card.front.style.boxShadow = faceOpaque ? shadow : 'none'
+      card.front.style.boxShadow = frontShadow(k)
+      positionGlow(card, k)
     })
 
     if (trackerRow) {
-      trackerRow.style.gap = trackerGap * k + 'px'
-      trackerRow.style.left = '50%'
-      trackerRow.style.top = trackerPos === 'bottom' ? '' : trackerShiftY * k + (band - symSz) / 2 + 'px'
-      trackerRow.style.bottom = trackerPos === 'bottom' ? -trackerShiftY * k + (band - symSz) / 2 + 'px' : ''
-      trackerRow.style.transform = `translateX(calc(-50% + ${trackerShiftX * k}px))`
-      for (const t of tracker) {
-        t.el.style.width = symSz + 'px'
-        t.el.style.height = symSz + 'px'
-      }
+      // Baseline layout, mirrored 1:1 by the editor's on-canvas symbol editor:
+      // symbols sit left-to-right (each with its own scale and X nudge) with
+      // their BOTTOMS on a shared baseline — differently-sized symbols always
+      // align, and resizing grows a symbol upward from that line.
+      const n = tracker.length
+      const sizes = tracker.map((_, i) => symSz * (trackerScales[i] > 0 ? trackerScales[i] : 1))
+      const totalW = sizes.reduce((a, b) => a + b, 0) + trackerGap * k * Math.max(0, n - 1)
+      // Baseline anchoring: resizing must follow the BOTTOM. A bottom tracker
+      // pins the baseline a fixed pad above the element's bottom edge — fully
+      // scale-independent, symbols grow upward into the reserved band. A top
+      // tracker pins the top pad and grows strictly downward (the only
+      // direction with room), so the baseline sits just under the tallest.
+      // Unclamped: the slot doesn't clip (overflow visible), so shift-Y moves
+      // the row freely in both directions without anything getting cut.
+      const baseline = (trackerPos === 'bottom' ? h - pad / 2 : pad / 2 + maxH) + trackerShiftY * k
+      trackerRow.style.width = totalW + 'px'
+      trackerRow.style.height = maxH + 'px'
+      trackerRow.style.left = (w - totalW) / 2 + trackerShiftX * k + 'px'
+      trackerRow.style.top = baseline - maxH + 'px'
+      let tx = 0
+      tracker.forEach((t, i) => {
+        t.el.style.left = tx + (trackerDx[i] || 0) * k + 'px'
+        t.el.style.bottom = '0'
+        t.el.style.width = sizes[i] + 'px'
+        t.el.style.height = sizes[i] + 'px'
+        tx += sizes[i] + trackerGap * k
+      })
     }
   }
 
@@ -332,7 +413,10 @@ export function createMemoryMatch(): GameModule {
     if (a.pairId === b.pairId) {
       a.matched = b.matched = true
       first = null
-      busy = false
+      // busy stays TRUE through the reveal: releasing it at click time let fast
+      // players start (and mis-resolve) the NEXT pair before this one's delayed
+      // 'correct' had even played — a mismatch there dropped its 'wrong' right
+      // on top of this pair's 'correct'. Input reopens once the pair vanishes.
       markHint()
       // The pair-found sound, symbol light-up and vanish all wait for the second
       // card's flip to settle — the reward lands when the face is visible, not on
@@ -346,10 +430,19 @@ export function createMemoryMatch(): GameModule {
           lightSymbol(a.pairId)
         }
         saveState() // progress survives a rotation-forced page reload
+        // Success outline: only a MATCHED pair earns it, and only now — after
+        // the flip has revealed the faces. Fades in smoothly (opacity transition).
+        const kk = ctx.scale?.() ?? 1
+        for (const m of [a, b]) {
+          m.glowing = true
+          positionGlow(m, kk)
+          m.glow.style.opacity = '1'
+        }
         // Let the player see the pair, then the cards disappear (empty space stays).
         later(() => {
           vanish(a, 1)
           vanish(b, -1)
+          busy = false // judgment fully delivered — next flips may begin
         }, 250)
         if (litCount >= pairCount && !done) {
           done = true
@@ -406,7 +499,9 @@ export function createMemoryMatch(): GameModule {
       pairCount = Math.max(2, Math.min(10, num(params.pairs, 5)))
       cols = Math.max(2, Math.min(6, num(params.cols, 4)))
       rows = Math.max(2, Math.min(8, num(params.rows, 3)))
-      gapPx = num(params.gap, 8)
+      colGapPx = num(params.colGap, num(params.gap, 8)) // legacy single `gap` still honored
+      rowGapPx = num(params.rowGap, num(params.gap, 8))
+      gridScale = Math.max(0.2, Math.min(1.5, num(params.gridScale, 1)))
       radius = num(params.radius, 12)
       aspect = Math.max(0.3, Math.min(3, num(params.cardAspect, 0.75)))
       flipMs = Math.max(120, num(params.flipMs, 400))
@@ -417,16 +512,52 @@ export function createMemoryMatch(): GameModule {
       trackerGap = Math.max(0, num(params.trackerGap, 18))
       trackerShiftX = num(params.trackerShiftX, 0)
       trackerShiftY = num(params.trackerShiftY, 0)
+      // "1, 0.8, 1.2" — one multiplier per symbol, in pair order; blanks/junk → 1
+      trackerScales = str(params.trackerScales, '')
+        .split(',')
+        .map((s) => parseFloat(s.trim()))
+      trackerDx = str(params.trackerDx, '')
+        .split(',')
+        .map((s) => parseFloat(s.trim()) || 0)
+      const unlitDimmed = str(params.trackerUnlit, 'image') === 'dimmed-lit'
+      const unlitOpacity = Math.max(0.05, Math.min(1, num(params.trackerUnlitOpacity, 0.35)))
       const coverImg = ctx.assets.src(params.cover as string)
+      const coverImg2 = ctx.assets.src(params.cover2 as string)
+      const coverPattern = str(params.coverPattern, 'checker')
       const coverColor = str(params.coverColor, '#f26430')
       const faceImg = ctx.assets.src(params.face as string)
       const faceColor = str(params.faceColor, '#ffffff')
-      coverOpaque = str(params.coverFill, 'color') !== 'transparent'
-      faceOpaque = str(params.faceFill, 'color') !== 'transparent'
+      // Transparent two ways: the "Cover fill"/"Face fill" dropdown, OR simply
+      // clearing the colour picker (empty colour = no fill, no shadow, no "?").
+      coverOpaque = str(params.coverFill, 'color') !== 'transparent' && coverColor !== ''
+      faceOpaque = str(params.faceFill, 'color') !== 'transparent' && faceColor !== ''
+      // 'contain' keeps each image's own shape/aspect centred in the cell;
+      // 'stretch' is the old same-size-art edge-to-edge fill.
+      const bgSize = str(params.cardImageFit, 'contain') === 'stretch' ? '100% 100%' : 'contain'
+      const artAspects = new Map<string, number>() // natural w/h per art src, for outline fitting
+      glowOn = str(params.flipGlow, 'on') !== 'off'
+      glowColor = str(params.flipGlowColor, '#3fd8ff')
+      overlayFace = str(params.faceStyle, 'card') === 'overlay'
+      // Card pair-image sizing: per-pair it can MATCH the tracker's per-symbol
+      // scales (same relative proportions on cards and in the tracker), and the
+      // global "Pair image scale" multiplies ON TOP — shrink/grow all of them
+      // together while keeping their relative sizes intact.
+      const pairScale = Math.max(0.1, Math.min(3, num(params.pairImageScale, 1)))
+      const pairMatchTracker = str(params.pairScaleMode, 'match-tracker') === 'match-tracker'
+      // Floor: no symbol on a card ever renders below this scale — symbols whose
+      // computed scale is above it are untouched, keeping the set proportions.
+      const pairMinScale = Math.max(0, Math.min(3, num(params.pairMinScale, 0)))
+      entranceMode = str(params.entrance, 'diagonal')
+      entranceStagger = Math.max(0, num(params.entranceStaggerMs, 70))
+      entranceDur = Math.max(100, num(params.entranceMs, 380))
       const images = Array.isArray(params.images) ? (params.images as string[]) : []
       const unlitImgs = Array.isArray(params.symbolsUnlit) ? (params.symbolsUnlit as string[]) : []
       const litImgs = Array.isArray(params.symbolsLit) ? (params.symbolsLit as string[]) : []
       ctx.root.style.touchAction = 'none'
+      // The slot ships with overflow:hidden; this game manages its own bounds.
+      // Visible overflow lets shifted/scaled tracker symbols (and glow bloom)
+      // render fully instead of being cut at the slot edge.
+      ctx.root.style.overflow = 'visible'
 
       // A page reload (AppLovin rotates = reloads) restores the saved game; an
       // in-page remount (preview restart, replaying the scene) deals fresh. The
@@ -455,17 +586,18 @@ export function createMemoryMatch(): GameModule {
         ;[order[i], order[j]] = [order[j], order[i]]
       }
 
-      // Both faces paint edge-to-edge (100% 100%, same radius) so equal-size
-      // cover/face/pair art can never leak past the cell during the flip. Radius,
-      // shadow, font and perspective are applied per-layout (they scale with the
-      // stage). A 'transparent' fill leaves only the art itself — no colour block
-      // or shadow bleeding past transparent regions of the image.
+      // Faces clip to the cell (overflow hidden, shared radius) so art can never
+      // leak past it during the flip. `bgSize` picks how images sit in the cell:
+      // 'contain' keeps each image's own shape/aspect centred; 'stretch' fills
+      // edge-to-edge. A 'transparent' fill leaves only the art itself — no
+      // colour block or shadow behind it. Radius, shadow, font and perspective
+      // are applied per-layout (they scale with the stage).
       // No backface-visibility here — setFlipped() adds/removes it around the
       // animation; statically it forces a composited layer (blurry on zoom).
       const faceCss =
-        'position:absolute;inset:0;background-repeat:no-repeat;background-size:100% 100%;' +
+        `position:absolute;inset:0;background-repeat:no-repeat;background-size:${bgSize};background-position:center;` +
         'display:flex;align-items:center;justify-content:center;overflow:hidden;'
-      for (const pid of order) {
+      order.forEach((pid, idx) => {
         const el = document.createElement('div')
         el.dataset.mmCard = '1'
         el.style.cssText = 'position:absolute;box-sizing:border-box;cursor:pointer;'
@@ -473,56 +605,109 @@ export function createMemoryMatch(): GameModule {
         inner.style.cssText = 'position:relative;width:100%;height:100%;' // flat at rest; setFlipped arms the 3D flip
         const back = document.createElement('div') // cover — shown face-down
         back.style.cssText = faceCss + 'color:rgba(255,255,255,.9);font-weight:800;'
-        if (coverOpaque) back.style.background = coverColor
-        if (coverImg) {
-          back.style.backgroundImage = `url("${coverImg}")`
-          back.style.backgroundSize = '100% 100%'
+        if (coverOpaque) back.style.backgroundColor = coverColor // NOT the shorthand — it would reset the fit
+        // With a second cover, cells alternate between the two by grid position:
+        // 'checker' = chessboard, 'columns'/'rows' = striped. Cell (r,c) is fixed
+        // at deal time, so the pattern is stable across relayouts.
+        const gr = Math.floor(idx / cols)
+        const gc = idx % cols
+        const alt = coverPattern === 'rows' ? gr % 2 === 1 : coverPattern === 'columns' ? gc % 2 === 1 : (gr + gc) % 2 === 1
+        const cov = alt && coverImg2 ? coverImg2 : coverImg
+        if (cov) {
+          back.style.backgroundImage = `url("${cov}")`
         } else if (coverOpaque) back.textContent = '?'
         const front = document.createElement('div') // face background + pair image — hidden until flipped
         front.style.cssText = faceCss + 'visibility:hidden;font-weight:800;color:#fff;'
-        if (faceOpaque) front.style.background = faceColor
-        if (faceImg) {
-          front.style.backgroundImage = `url("${faceImg}")`
-          front.style.backgroundSize = '100% 100%'
+        if (overlayFace) {
+          // overlay style: the flipped card keeps ITS OWN cover (pattern included)
+          // as the backdrop — the pair image simply appears on top of it.
+          if (cov) front.style.backgroundImage = `url("${cov}")`
+          else if (coverOpaque) front.style.backgroundColor = coverColor
+        } else {
+          if (faceOpaque) front.style.backgroundColor = faceColor
+          if (faceImg) front.style.backgroundImage = `url("${faceImg}")`
         }
         const img = images[pid] ? ctx.assets.src(images[pid]) : ''
+        const ps = Math.max(pairMinScale, pairScale * (pairMatchTracker && trackerScales[pid] > 0 ? trackerScales[pid] : 1))
         if (img) {
           const pic = document.createElement('div')
-          // no own radius — the front face clips it (overflow:hidden + radius)
-          pic.style.cssText = `position:absolute;inset:0;background:url("${img}") no-repeat;background-size:100% 100%;`
+          // no own radius — the front face clips it (overflow:hidden + radius).
+          // The inset stays proportional, so it tracks every resize for free.
+          pic.style.cssText = `position:absolute;inset:${((1 - ps) * 50).toFixed(2)}%;background:url("${img}") no-repeat center;background-size:${bgSize};`
           front.appendChild(pic)
         } else {
-          front.style.background = PALETTE[pid % PALETTE.length]
+          front.style.backgroundColor = PALETTE[pid % PALETTE.length]
           front.textContent = String(pid + 1)
         }
+        // Success outline layer — lives on the card (not inside the clipped
+        // face) so its bloom isn't cut; shown only when this card's pair lands.
+        const glow = document.createElement('div')
+        glow.style.cssText = 'position:absolute;pointer-events:none;opacity:0;transition:opacity .35s ease;'
         inner.appendChild(back)
         inner.appendChild(front)
         el.appendChild(inner)
+        el.appendChild(glow)
         ctx.root.appendChild(el)
-        cards.push({ el, inner, back, front, pairId: pid, matched: false, flipped: false, gone: false })
-      }
+        // The outline hugs the ART the player actually sees when flipped: the
+        // whole cell for opaque fills / stretch fit, else the contain-box of the
+        // face art (overlay = this card's cover; card = face image, else the
+        // pair image at its inset scale) — measured from its natural size.
+        const artSrc = overlayFace ? cov : faceImg || img
+        const glowFull = bgSize === '100% 100%' || (overlayFace ? coverOpaque : faceOpaque) || !artSrc
+        const card: Card = {
+          el, inner, back, front, glow,
+          glowing: false,
+          glowFull,
+          glowPs: !glowFull && !overlayFace && !faceImg && img ? ps : 1,
+          pairId: pid, matched: false, flipped: false, gone: false,
+        }
+        if (!glowFull) {
+          const cached = artAspects.get(artSrc)
+          if (cached) card.artAr = cached
+          else {
+            const probe = new Image()
+            probe.onload = () => {
+              if (probe.naturalWidth > 0 && probe.naturalHeight > 0) {
+                artAspects.set(artSrc, probe.naturalWidth / probe.naturalHeight)
+                card.artAr = artAspects.get(artSrc)
+                layout() // re-fit outlines now that the art's true shape is known
+              }
+            }
+            probe.src = artSrc
+          }
+        }
+        cards.push(card)
+      })
 
       // Tracker row — one symbol per pair, unlit until its pair is matched.
       if (trackerPos !== 'off') {
         trackerRow = document.createElement('div')
-        trackerRow.style.cssText = 'position:absolute;display:flex;align-items:center;pointer-events:none;'
+        trackerRow.style.cssText = 'position:absolute;pointer-events:none;'
         for (let pid = 0; pid < pairCount; pid++) {
           const cell = document.createElement('div')
-          cell.style.cssText = 'position:relative;flex:0 0 auto;transition:transform .22s ease;'
+          cell.style.cssText = 'position:absolute;transition:transform .22s ease;'
           const pairImg = images[pid] ? ctx.assets.src(images[pid]) : ''
           const mk = (src: string, fallback: string): HTMLDivElement => {
             const d = document.createElement('div')
-            d.style.cssText = 'position:absolute;inset:0;transition:opacity .25s ease;background-repeat:no-repeat;background-size:contain;background-position:center;'
+            // bottom-anchored so the ART of differently-shaped symbols shares the baseline
+            d.style.cssText = 'position:absolute;inset:0;transition:opacity .25s ease;background-repeat:no-repeat;background-size:contain;background-position:center bottom;'
             if (src) d.style.backgroundImage = `url("${src}")`
             else d.style.cssText += fallback
             return d
           }
-          const unlitSrc = unlitImgs[pid] ? ctx.assets.src(unlitImgs[pid]) : pairImg
           const litSrc = litImgs[pid] ? ctx.assets.src(litImgs[pid]) : pairImg
+          // 'dimmed-lit' needs only the LIT images: unlit is the same art at a
+          // configurable opacity (no grayscale). 'image' keeps the separate
+          // unlit slot, falling back to a GRAYSCALED lit image when empty.
+          const unlitSrc = unlitDimmed ? litSrc : unlitImgs[pid] ? ctx.assets.src(unlitImgs[pid]) : litSrc
           const unlit = mk(unlitSrc, `border-radius:50%;background:${PALETTE[pid % PALETTE.length]};`)
-          // No custom unlit image: dim the pair image (or dot) until it lights up.
-          if (!unlitImgs[pid]) unlit.style.filter = 'grayscale(1) brightness(.55)'
-          if (!unlitImgs[pid]) unlit.style.opacity = '.45'
+          if (unlitDimmed) {
+            unlit.style.opacity = String(unlitOpacity)
+          } else if (!unlitImgs[pid]) {
+            // No custom unlit image: grayscale the lit art until it lights up.
+            unlit.style.filter = 'grayscale(1) brightness(.55)'
+            unlit.style.opacity = '.45'
+          }
           const lit = mk(litSrc, `border-radius:50%;background:${PALETTE[pid % PALETTE.length]};box-shadow:0 0 12px ${PALETTE[pid % PALETTE.length]};`)
           lit.style.opacity = '0'
           cell.appendChild(unlit)
@@ -565,6 +750,36 @@ export function createMemoryMatch(): GameModule {
     start() {
       if (started) return
       started = true
+      // Entrance: cards pop in with a staggered wave whose order is a param —
+      // 'diagonal' sweeps from the top-left cell to the bottom-right (each
+      // row+col diagonal 1 stagger after the last), 'rows'/'columns' stripe,
+      // 'random' scatters (seeded — the restored board replays identically),
+      // 'off' skips it. Each card overshoots slightly then settles.
+      // fill:'backwards' keeps a card invisible through its delay, and nothing
+      // is filled after it lands (no lingering compositor layer — stays crisp).
+      // Restored-gone cards and environments without animate() skip it.
+      if (entranceMode !== 'off') {
+        const scatter = cards.map((_, i) => i)
+        const rnd = mulberry32(seed ^ 0x9e3779b9)
+        for (let i = scatter.length - 1; i > 0; i--) {
+          const j = Math.floor(rnd() * (i + 1))
+          ;[scatter[i], scatter[j]] = [scatter[j], scatter[i]]
+        }
+        cards.forEach((c, i) => {
+          if (c.gone || typeof c.el.animate !== 'function') return
+          const gr = Math.floor(i / cols)
+          const gc = i % cols
+          const wave = entranceMode === 'rows' ? gr : entranceMode === 'columns' ? gc : entranceMode === 'random' ? scatter[i] : gr + gc
+          c.el.animate(
+            [
+              { transform: 'scale(0)', opacity: 0 },
+              { transform: 'scale(1.1)', opacity: 1, offset: 0.7 },
+              { transform: 'scale(1)', opacity: 1 },
+            ],
+            { duration: entranceDur, delay: wave * entranceStagger, easing: 'cubic-bezier(.3,1.2,.4,1)', fill: 'backwards' },
+          )
+        })
+      }
       cards.forEach((c) => c.el.addEventListener('pointerdown', () => tap(c)))
     },
     relayout: layout,
@@ -602,7 +817,9 @@ export const MEMORYMATCH_TEMPLATE: GameTemplate = {
     { key: 'pairs', label: 'Pairs (symbols to find)', type: 'number', min: 2, max: 10, step: 1 },
     { key: 'cols', label: 'Grid columns', type: 'number', min: 2, max: 6, step: 1 },
     { key: 'rows', label: 'Grid rows', type: 'number', min: 2, max: 8, step: 1 },
-    { key: 'gap', label: 'Card gap (px)', type: 'number', min: 0, max: 40, step: 1 },
+    { key: 'gridScale', label: 'Grid scale', type: 'number', min: 0.2, max: 1.5, step: 0.05 },
+    { key: 'colGap', label: 'Column gap (px, negative overlaps)', type: 'number', min: -60, max: 60, step: 1 },
+    { key: 'rowGap', label: 'Row gap (px, negative overlaps)', type: 'number', min: -60, max: 60, step: 1 },
     { key: 'cardAspect', label: 'Card aspect (w/h)', type: 'number', min: 0.3, max: 3, step: 0.05 },
     { key: 'radius', label: 'Corner radius', type: 'number', min: 0, max: 40, step: 1 },
     { key: 'flipMs', label: 'Flip speed (ms)', type: 'number', min: 150, max: 1200, step: 50 },
@@ -611,15 +828,31 @@ export const MEMORYMATCH_TEMPLATE: GameTemplate = {
     { key: 'coverColor', label: 'Cover colour (no image)', type: 'color' },
     { key: 'faceFill', label: 'Face fill', type: 'select', options: ['color', 'transparent'] },
     { key: 'faceColor', label: 'Face colour (no image)', type: 'color' },
+    { key: 'coverPattern', label: 'Cover A/B pattern', type: 'select', options: ['checker', 'columns', 'rows'] },
+    { key: 'cardImageFit', label: 'Card image fit', type: 'select', options: ['contain', 'stretch'] },
+    { key: 'faceStyle', label: 'Flipped face', type: 'select', options: ['card', 'overlay'] },
+    { key: 'pairScaleMode', label: 'Pair images on cards', type: 'select', options: ['match-tracker', 'independent'] },
+    { key: 'pairImageScale', label: 'Pair image scale (all, on top)', type: 'number', min: 0.1, max: 3, step: 0.05 },
+    { key: 'pairMinScale', label: 'Pair image min scale (floor)', type: 'number', min: 0, max: 3, step: 0.05 },
+    { key: 'entrance', label: 'Cards entrance', type: 'select', options: ['diagonal', 'rows', 'columns', 'random', 'off'] },
+    { key: 'entranceStaggerMs', label: 'Entrance stagger (ms)', type: 'number', min: 0, max: 400, step: 10 },
+    { key: 'entranceMs', label: 'Entrance pop (ms)', type: 'number', min: 100, max: 1200, step: 20 },
+    { key: 'flipGlow', label: 'Flipped card glow', type: 'select', options: ['on', 'off'] },
+    { key: 'flipGlowColor', label: 'Glow colour', type: 'color' },
     { key: 'tracker', label: 'Symbol tracker', type: 'select', options: ['top', 'bottom', 'off'] },
     { key: 'trackerSize', label: 'Symbol size (px)', type: 'number', min: 10, max: 120, step: 1 },
+    { key: 'trackerScales', label: 'Per-symbol scales (e.g. 1, 0.8, 1.2)', type: 'text' },
+    { key: 'trackerDx', label: 'Per-symbol X offsets (px)', type: 'text' },
+    { key: 'trackerUnlit', label: 'Unlit style', type: 'select', options: ['image', 'dimmed-lit'] },
+    { key: 'trackerUnlitOpacity', label: 'Unlit opacity (dimmed-lit)', type: 'number', min: 0.05, max: 1, step: 0.05 },
     { key: 'trackerGap', label: 'Symbol spacing (px)', type: 'number', min: 0, max: 80, step: 1 },
     { key: 'trackerShiftX', label: 'Symbols shift X (px)', type: 'number', min: -400, max: 400, step: 1 },
     { key: 'trackerShiftY', label: 'Symbols shift Y (px)', type: 'number', min: -400, max: 400, step: 1 },
   ],
   assetSlots: [
     { key: 'images', label: 'Pair image', list: true, countParam: 'pairs' },
-    { key: 'cover', label: 'Card cover (shared)' },
+    { key: 'cover', label: 'Card cover A (shared)' },
+    { key: 'cover2', label: 'Card cover B (pattern, optional)' },
     { key: 'face', label: 'Flipped card background (shared)' },
     { key: 'symbolsUnlit', label: 'Tracker symbol — unlit', list: true, countParam: 'pairs' },
     { key: 'symbolsLit', label: 'Tracker symbol — lit', list: true, countParam: 'pairs' },
@@ -629,7 +862,9 @@ export const MEMORYMATCH_TEMPLATE: GameTemplate = {
     pairs: 5,
     cols: 4,
     rows: 3,
-    gap: 8,
+    gridScale: 1,
+    colGap: 8,
+    rowGap: 8,
     cardAspect: 0.75,
     radius: 12,
     flipMs: 400,
@@ -638,13 +873,29 @@ export const MEMORYMATCH_TEMPLATE: GameTemplate = {
     coverColor: '#f26430',
     faceFill: 'color',
     faceColor: '#ffffff',
+    flipGlow: 'on',
+    flipGlowColor: '#3fd8ff',
     tracker: 'top',
     trackerSize: 34,
+    trackerScales: '',
+    trackerDx: '',
+    trackerUnlit: 'image',
+    trackerUnlitOpacity: 0.35,
     trackerGap: 18,
     trackerShiftX: 0,
     trackerShiftY: 0,
     images: [],
     cover: '',
+    cover2: '',
+    coverPattern: 'checker',
+    cardImageFit: 'contain',
+    faceStyle: 'card',
+    pairScaleMode: 'match-tracker',
+    pairImageScale: 1,
+    pairMinScale: 0,
+    entrance: 'diagonal',
+    entranceStaggerMs: 70,
+    entranceMs: 380,
     face: '',
     handImage: '',
     symbolsUnlit: [],
