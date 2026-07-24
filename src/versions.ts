@@ -76,6 +76,7 @@ function elementChanges(a: SceneElement, b: SceneElement): string[] {
   if (a.w !== b.w || a.h !== b.h || a.scale !== b.scale) ch.push('resized')
   if (a.zIndex !== b.zIndex) ch.push('reordered')
   if ((a.blur ?? 0) !== (b.blur ?? 0)) ch.push('blur')
+  if ((a.backdropBlur ?? 0) !== (b.backdropBlur ?? 0) || a.backdropBlurMode !== b.backdropBlurMode || a.backdropBlurDir !== b.backdropBlurDir) ch.push('background blur')
   if (a.type !== b.type) ch.push(`type ${a.type}→${b.type}`)
   if (a.assetId !== b.assetId) ch.push('asset')
   if ((a.hidden ?? false) !== (b.hidden ?? false)) ch.push(b.hidden ? 'hidden' : 'shown')

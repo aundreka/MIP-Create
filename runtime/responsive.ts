@@ -22,11 +22,20 @@ let _offX = 0
 let _offY = 0
 let _vw = DESIGN_W
 let _vh = DESIGN_H
+// Vertical anchoring of the FIT content block. 'top' (default) glues it to the top
+// and pools spare height at the bottom; 'center' balances the spare height top and
+// bottom. Sticky module state so it survives the resize-only `computeMetrics` path.
+let _vAlign: 'top' | 'center' = 'top'
 
 /** Set the design-space dimensions (from scene.meta.baseW/baseH). */
 export function setDesign(w: number, h: number): void {
   DESIGN_W = Math.max(1, w)
   DESIGN_H = Math.max(1, h)
+}
+
+/** Set the FIT content's vertical anchor (from scene.meta.vAlign; default 'top'). */
+export function setVAlign(mode: 'top' | 'center' | undefined): void {
+  _vAlign = mode === 'center' ? 'center' : 'top'
 }
 
 /** Recompute the design->screen transform for a viewport of vw x vh CSS px. */
@@ -42,7 +51,9 @@ export function computeMetrics(vw: number, vh: number): void {
   // "everything moved" next to the header band that is anchored to the physical
   // top of the screen — headers, dates and content must hold a constant scaled
   // distance from the top at every viewport aspect.
-  _offY = 0
+  // 'center' opts a project OUT of that (spare height splits top/bottom) — a top-pinned
+  // header/bar (position:fixed) still holds the physical top, so only the FIT block moves.
+  _offY = _vAlign === 'center' ? Math.max(0, (vh - DESIGN_H * _s) / 2) : 0
 }
 
 // ---- FIT helpers: content (centered, letterboxed) -------------------------

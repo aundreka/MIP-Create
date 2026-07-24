@@ -4,7 +4,7 @@
 //   pa:play   — play the whole PROJECT flow (the preview overlay: interactive,
 //               transitions between scenes).
 
-import { computeMetrics, metrics, setDesign } from './responsive'
+import { computeMetrics, metrics, setDesign, setVAlign } from './responsive'
 import { buildScene, type StageHandle } from './stage'
 import { setActiveLocale } from './i18n'
 import { playProject, type SceneManager } from './scenes'
@@ -45,6 +45,7 @@ function render(next: Scene, assets: AssetMap, interactive: boolean): void {
   }
   scene = next
   setDesign(next.meta.baseW || 1080, next.meta.baseH || 1920)
+  setVAlign(next.meta.vAlign)
   computeMetrics(size().w, size().h)
   if (stage && stage.update(next, assets)) {
     stage.startGames(interactive)
@@ -67,6 +68,7 @@ function play(project: Project, assets: AssetMap): void {
   }
   if (manager) manager.destroy()
   setDesign(project.meta.baseW || 1080, project.meta.baseH || 1920)
+  setVAlign(project.meta.vAlign)
   computeMetrics(size().w, size().h)
   manager = playProject(project, assets, { mount: document.body, interactive: true })
 }

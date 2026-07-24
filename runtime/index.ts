@@ -4,7 +4,7 @@
 
 import type { Project } from './scene'
 import type { AssetMap } from './types'
-import { computeMetrics, setDesign } from './responsive'
+import { computeMetrics, setDesign, setVAlign } from './responsive'
 import { bindLifecycle, initMraid, setStoreUrl } from './networks'
 import { resolveLocale, setActiveLocale } from './i18n'
 import { playProject, type SceneManager } from './scenes'
@@ -31,6 +31,7 @@ function viewport(): { w: number; h: number } {
 export async function boot(project: Project, assets: AssetMap, opts: { mount?: HTMLElement } = {}): Promise<SceneManager> {
   installLifecycleStubs()
   setDesign(project.meta.baseW || 1080, project.meta.baseH || 1920)
+  setVAlign(project.meta.vAlign)
   const _ctaMode = project.meta.clickUrlMode ?? 'store'
   if (_ctaMode === 'none') {
     setStoreUrl({ ios: '', android: '' })

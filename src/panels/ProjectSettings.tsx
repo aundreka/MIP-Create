@@ -103,6 +103,17 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
         <NumField label="Base H" value={m.baseH} suffix="px" onChange={(n) => patchMeta({ baseH: n })} />
       </div>
       <ColorField label="Background colour" value={m.bgMatchColor || '#000000'} onChange={(c) => patchMeta({ bgMatchColor: c ?? '#000000' })} />
+      <Row label="Vertical align">
+        <Select
+          value={m.vAlign ?? 'top'}
+          options={[
+            { value: 'top', label: 'Top (spare space at bottom)' },
+            { value: 'center', label: 'Center (spare space top + bottom)' },
+          ]}
+          onChange={(v) => patchMeta({ vAlign: v === 'center' ? 'center' : undefined })}
+        />
+      </Row>
+      <div className="hint pad">On screens taller than the design, <b>Center</b> keeps the content vertically centered (retaining relative size/position) instead of gluing it to the top. Top-pinned headers/bars stay pinned either way.</div>
       <Row label="CTA redirect">
         <Select
           value={m.clickUrlMode ?? 'store'}

@@ -200,6 +200,9 @@ export interface EndsceneConfig {
   // around the media. Overrides the bgColor* fills.
   transparentBg?: boolean
   zoom?: number // scale factor (0.5 - 2.0); default 1.0 for no scaling
+  // Per-orientation ZOOM override for LANDSCAPE. When unset, landscape inherits the
+  // portrait zoom; when set it wins in landscape only.
+  zoomL?: number
   // Letterbox fills are independent per orientation, since portrait splits the
   // bars top/bottom while landscape splits them left/right (and a clip's top/bottom
   // edges differ in colour from its left/right edges).
@@ -556,6 +559,17 @@ export interface SceneElement {
   rotation?: number
   opacity?: number
   blur?: number // uniform layer blur radius in design px (CSS filter: blur)
+  // Background (backdrop) blur — blurs the SCENE CONTENT BEHIND this element's box,
+  // like Figma's "Background blur" effect (as opposed to `blur`, which blurs the
+  // element's OWN content). Radius is in design px, scaled with the fit.
+  //   backdropBlurMode: 'uniform' (default) — even blur across the whole box;
+  //     'progressive' — blur ramps along `backdropBlurDir` via a linear-gradient mask
+  //        (clear at the near edge → full blur at the far edge);
+  //     'radial' — clear in the centre, blurring toward the edges (radial-gradient mask).
+  // Progressive/radial fade the whole layer, so they suit overlay-style boxes (dim/bar).
+  backdropBlur?: number
+  backdropBlurMode?: 'uniform' | 'progressive' | 'radial'
+  backdropBlurDir?: 'up' | 'down' | 'left' | 'right' // progressive ramp direction (default 'down')
 
   sync?: SyncConfig // shared across all MIPs in the project group (editor-only marker)
 
@@ -656,6 +670,11 @@ export interface ProjectMeta {
   locales?: string[]
   defaultLocale?: string // label for the base copy (informational), e.g. 'en'
   cursor?: 'default' | 'none' | 'pointer' | 'crosshair'
+  // Vertical anchor for the FIT content block on screens taller than the design
+  // aspect. 'top' (default) glues content to the top and pools spare height at the
+  // bottom; 'center' splits the spare height top/bottom so the composition sits in
+  // the middle. Top-pinned headers/bars stay pinned regardless.
+  vAlign?: 'top' | 'center'
   // Export-time variants — slightly different mechanics/win-conditions of the same
   // MIP. Each is a set of element patches applied on top of the base; export emits
   // one playable per variant. Editor-only field (stripped from the rendered scene).
@@ -705,6 +724,22 @@ export interface SceneOverlay {
   opacity?: number  // 0-1 dim strength
   color?: string    // hex, default '#000000'
   blurPx?: number   // backdrop-filter blur radius in px (blurs content behind the dim)
+  // Falloff for the backdrop blur (mirrors an element's Background-blur effect):
+  //   'uniform' (default) — even blur across the whole screen;
+  //   'progressive' — blur ramps along `blurDir` (linear-gradient mask);
+  //   'radial' — clear in the centre, blurring toward the edges (radial-gradient mask).
+  blurMode?: 'uniform' | 'progressive' | 'radial'
+  blurDir?: 'up' | 'down' | 'left' | 'right' // progressive ramp direction (default 'down')
+  // Overlay fill shape. 'solid' (default) — an even `color` tint at `opacity`.
+  // 'radial' — a radial gradient from `color` at the CENTRE to `color2` at the EDGES
+  //   (both at `opacity`); when `color2` is unset the edge fades to transparent, giving
+  //   a centre glow / vignette, like Figma's Radial fill.
+  fillMode?: 'solid' | 'radial'
+  color2?: string
+  // Radial fill strength, 0-100 (default 50): how much of the radius holds the full
+  // centre colour before fading to the edge. Higher = the colour covers more of the
+  // screen with a tighter, more pronounced edge; lower = a soft, subtle glow.
+  radialStrength?: number
 }
 
 export interface SceneDef {

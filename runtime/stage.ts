@@ -10,7 +10,7 @@
 //                 the positional layout.
 //   content       the <img> / text / button.
 
-import type { Anchor, Scene, SceneElement } from './scene'
+import type { Anchor, Scene, SceneElement, SceneOverlay } from './scene'
 import type { AssetEntry, AssetMap, RuntimeCtx } from './types'
 import { designH, isLandscape, scale, sx, sy, viewH } from './responsive'
 import { composeElementAnim, entranceLeadDelayMs, entranceTriggers, exitCss, injectAnimStyles, lightraySpec } from './anim'
@@ -723,17 +723,20 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     const opacity = ov.opacity ?? 0
     const blur = ov.blurPx ?? 0
     if (opacity > 0 || blur > 0) {
-      const color = ov.color ?? '#000000'
-      const r = parseInt(color.slice(1, 3), 16) || 0
-      const g = parseInt(color.slice(3, 5), 16) || 0
-      const b = parseInt(color.slice(5, 7), 16) || 0
       const ovDiv = document.createElement('div')
       ovDiv.className = 'pa-scene-overlay'
       ovDiv.style.cssText =
         `position:absolute;left:50%;top:50%;width:300vmax;height:300vmax;` +
         `transform:translate(-50%,-50%);pointer-events:none;z-index:0;` +
-        `background:rgba(${r},${g},${b},${opacity});`
-      if (blur > 0) ovDiv.style.backdropFilter = `blur(${blur}px)`
+        `background:${overlayFillCss(ov)};`
+      if (blur > 0) {
+        const s = ovDiv.style as MaskableStyle
+        s.backdropFilter = `blur(${blur}px)`
+        s.webkitBackdropFilter = `blur(${blur}px)`
+        const mask = blurFalloffMask(ov.blurMode, ov.blurDir)
+        s.maskImage = mask
+        s.webkitMaskImage = mask
+      }
       root.appendChild(ovDiv)
     }
   }
@@ -1289,13 +1292,14 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       const existingOv = root.querySelector<HTMLDivElement>('.pa-scene-overlay')
       const nextOv = nextScene.overlay
       if (existingOv && nextOv) {
-        const opacity = nextOv.opacity ?? 0
-        const color = nextOv.color ?? '#000000'
-        const r = parseInt(color.slice(1, 3), 16) || 0
-        const g = parseInt(color.slice(3, 5), 16) || 0
-        const b = parseInt(color.slice(5, 7), 16) || 0
-        existingOv.style.background = `rgba(${r},${g},${b},${opacity})`
-        existingOv.style.backdropFilter = (nextOv.blurPx ?? 0) > 0 ? `blur(${nextOv.blurPx}px)` : ''
+        existingOv.style.background = overlayFillCss(nextOv)
+        const s = existingOv.style as MaskableStyle
+        const bf = (nextOv.blurPx ?? 0) > 0 ? `blur(${nextOv.blurPx}px)` : ''
+        s.backdropFilter = bf
+        s.webkitBackdropFilter = bf
+        const mask = bf ? blurFalloffMask(nextOv.blurMode, nextOv.blurDir) : ''
+        s.maskImage = mask
+        s.webkitMaskImage = mask
       } else if (!existingOv && nextOv && ((nextOv.opacity ?? 0) > 0 || (nextOv.blurPx ?? 0) > 0)) {
         // overlay was just toggled on — need a full rebuild
         return false
@@ -1512,6 +1516,8 @@ function layoutRec(rec: Rec): void {
   // clip-path: inset(0) clips the blur to the element boundary AFTER filter rendering —
   // more reliable than parent overflow:hidden in old Chromium WebViews (AppLovin).
   rec.anim.style.clipPath = rec.el.blur ? 'inset(0)' : ''
+  // Background (backdrop) blur — blurs the scene content behind this element's box.
+  applyBackdropBlur(rec)
 
   switch (rec.el.type) {
     case 'background':
@@ -1580,6 +1586,70 @@ function applyFrame(rec: Rec): void {
     anim.style.outline = ''
     anim.style.outlineOffset = ''
   }
+}
+
+// Figma-style "Background blur": blur the scene content BEHIND the element via
+// backdrop-filter, scaled with the fit so it reads the same at any viewport size.
+// 'progressive'/'radial' fade the blurred layer with a CSS mask (transparent = the
+// unblurred scene shows through; opaque = fully blurred), so the blur eases off
+// toward one edge (progressive) or the centre (radial). The mask fades the whole
+// layer, so these modes are meant for overlay boxes (dim/bar), not content elements.
+// Mask that fades a blurred backdrop layer (transparent = the unblurred scene shows
+// through; opaque = fully blurred). '' for uniform (no fade). Shared by the per-element
+// Background-blur effect and the scene-level dim/blur overlay.
+function blurFalloffMask(mode: 'uniform' | 'progressive' | 'radial' | undefined, dir: 'up' | 'down' | 'left' | 'right' | undefined): string {
+  if (mode === 'progressive') {
+    // Gradient points TOWARD the fully-blurred edge; 0% (transparent) is the clear edge.
+    const angle = dir === 'up' ? '0deg' : dir === 'right' ? '90deg' : dir === 'left' ? '270deg' : '180deg'
+    return `linear-gradient(${angle}, transparent 0%, rgba(0,0,0,0.2) 30%, #000 65%)`
+  }
+  if (mode === 'radial') return 'radial-gradient(ellipse at center, transparent 25%, rgba(0,0,0,0.45) 55%, #000 80%)'
+  return ''
+}
+
+type MaskableStyle = CSSStyleDeclaration & { webkitBackdropFilter?: string; webkitMaskImage?: string }
+
+// CSS `background` value for the scene dim/blur overlay. 'solid' (default) = an even
+// `color` tint at `opacity`. 'radial' = a radial gradient from `color` (centre) to
+// `color2` (edges); an unset `color2` fades to transparent — a centre glow / vignette.
+function overlayFillCss(ov: SceneOverlay): string {
+  const op = ov.opacity ?? 0
+  const rgba = (hex: string, a: number): string => {
+    const r = parseInt(hex.slice(1, 3), 16) || 0
+    const g = parseInt(hex.slice(3, 5), 16) || 0
+    const b = parseInt(hex.slice(5, 7), 16) || 0
+    return `rgba(${r},${g},${b},${a})`
+  }
+  const c1 = ov.color ?? '#000000'
+  if (ov.fillMode === 'radial') {
+    const edge = ov.color2 ? rgba(ov.color2, op) : rgba(c1, 0)
+    // Size the gradient to the VIEWPORT (60vmax radius ≈ reaches the screen corners),
+    // NOT the oversized 300vmax overlay div — otherwise the fade lands off-screen and
+    // the whole visible area reads as flat centre colour. `radialStrength` sets how
+    // much of that radius keeps the full centre colour before fading (0-90%).
+    const strength = Math.max(0, Math.min(100, ov.radialStrength ?? 50))
+    const hold = Math.round(strength * 0.9)
+    return `radial-gradient(circle 60vmax at center, ${rgba(c1, op)} 0%, ${rgba(c1, op)} ${hold}%, ${edge} 100%)`
+  }
+  return rgba(c1, op)
+}
+
+function applyBackdropBlur(rec: Rec): void {
+  const style = rec.anim.style as MaskableStyle
+  const px = rec.el.backdropBlur
+  if (!px) {
+    style.backdropFilter = ''
+    style.webkitBackdropFilter = ''
+    style.maskImage = ''
+    style.webkitMaskImage = ''
+    return
+  }
+  const bf = `blur(${(px * scale()).toFixed(2)}px)`
+  style.backdropFilter = bf
+  style.webkitBackdropFilter = bf
+  const mask = blurFalloffMask(rec.el.backdropBlurMode, rec.el.backdropBlurDir)
+  style.maskImage = mask
+  style.webkitMaskImage = mask
 }
 
 function applyBox(

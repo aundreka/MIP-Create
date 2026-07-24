@@ -1425,9 +1425,54 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 Full-screen overlay rendered behind all scene elements. Uses an oversized div so edges are
                 always off-screen; no edge artifacts on AppLovin.
               </div>
-              <Slider label="Dim opacity" value={(ov.opacity ?? 0) * 100} min={0} max={100} step={5} suffix="%" onChange={(n) => setOv({ opacity: n / 100 || undefined })} />
-              <ColorField label="Color" value={ov.color ?? '#000000'} onChange={(c) => setOv({ color: c ?? '#000000' })} />
+              <Row label="Fill">
+                <Select
+                  value={ov.fillMode ?? 'solid'}
+                  onChange={(v) => setOv({ fillMode: v === 'solid' ? undefined : (v as 'radial') })}
+                  options={[
+                    { value: 'solid', label: 'Solid' },
+                    { value: 'radial', label: 'Radial' },
+                  ]}
+                />
+              </Row>
+              <Slider label={ov.fillMode === 'radial' ? 'Fill opacity' : 'Dim opacity'} value={(ov.opacity ?? 0) * 100} min={0} max={100} step={5} suffix="%" onChange={(n) => setOv({ opacity: n / 100 || undefined })} />
+              <ColorField label={ov.fillMode === 'radial' ? 'Center color' : 'Color'} value={ov.color ?? '#000000'} onChange={(c) => setOv({ color: c ?? '#000000' })} />
+              {ov.fillMode === 'radial' && (
+                <>
+                  <ColorField label="Edge color (empty = fade out)" value={ov.color2} allowNone onChange={(c) => setOv({ color2: c ?? undefined })} />
+                  <Slider label="Radial strength" value={ov.radialStrength ?? 50} min={0} max={100} step={5} suffix="%" onChange={(n) => setOv({ radialStrength: n === 50 ? undefined : n })} />
+                </>
+              )}
               <NumField label="Blur px" value={ov.blurPx ?? 0} step={1} min={0} max={30} onChange={(n) => setOv({ blurPx: n || undefined })} />
+              {(ov.blurPx ?? 0) > 0 && (
+                <>
+                  <Row label="Falloff">
+                    <Select
+                      value={ov.blurMode ?? 'uniform'}
+                      onChange={(v) => setOv({ blurMode: v === 'uniform' ? undefined : (v as 'progressive' | 'radial') })}
+                      options={[
+                        { value: 'uniform', label: 'Uniform' },
+                        { value: 'progressive', label: 'Progressive' },
+                        { value: 'radial', label: 'Radial' },
+                      ]}
+                    />
+                  </Row>
+                  {ov.blurMode === 'progressive' && (
+                    <Row label="Direction">
+                      <Select
+                        value={ov.blurDir ?? 'down'}
+                        onChange={(v) => setOv({ blurDir: v === 'down' ? undefined : (v as 'up' | 'left' | 'right') })}
+                        options={[
+                          { value: 'down', label: 'Top → bottom' },
+                          { value: 'up', label: 'Bottom → top' },
+                          { value: 'left', label: 'Right → left' },
+                          { value: 'right', label: 'Left → right' },
+                        ]}
+                      />
+                    </Row>
+                  )}
+                </>
+              )}
             </>
           )
         })()}
@@ -1795,7 +1840,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
             if (f.key === 'randomAngles' && !params.randomizeAngle) return null
             if (f.type === 'number') return <NumField key={f.key} label={f.label} value={typeof v === 'number' ? v : 0} step={f.step ?? 1} min={f.min} max={f.max} onChange={(n) => setParam(f.key, n)} />
             if (f.type === 'color')
-              return <ColorField key={f.key} label={f.label} value={typeof v === 'string' ? v : '#888888'} onChange={(c) => setParam(f.key, c ?? '#888888')} />
+              return <ColorField key={f.key} label={f.label} value={typeof v === 'string' && v ? v : undefined} allowNone onChange={(c) => setParam(f.key, c ?? '')} />
             if (f.type === 'boolean')
               return <Toggle key={f.key} label={f.label} checked={!!v} onChange={(b) => setParam(f.key, b)} />
             if (f.type === 'select')
@@ -1876,6 +1921,9 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               )}
               {tpl.id === 'scratch' && params.fit === 'fit' && (
                 <div className="hint pad">Double-click the card on the canvas to position &amp; scale the reveal image: drag to move, corner handles to resize.</div>
+              )}
+              {tpl.id === 'memorymatch' && (
+                <div className="hint pad">Double-click the game on the canvas to edit the tracker symbols: drag a symbol sideways to nudge it, drag its corner handle to resize (aspect locked — bottoms always stay aligned). Esc or click outside to finish.</div>
               )}
               {tpl.id !== 'catch' && (tpl.assetSlots ?? []).filter((slot) => slot.key !== 'brushImage' && slot.key !== 'popupImages').map((slot) => {
                 if (slot.list) {
@@ -2593,7 +2641,8 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                       ]}
                     />
                   </Row>
-                  <Slider label="Zoom" value={cfg.zoom ?? 1} min={0.5} max={2} step={0.05} suffix="×" onChange={(n) => setEnd({ zoom: n })} />
+                  <Slider label="Zoom (portrait)" value={cfg.zoom ?? 1} min={0.5} max={2} step={0.05} suffix="×" onChange={(n) => setEnd({ zoom: n })} />
+                  <Slider label="Zoom (landscape)" value={cfg.zoomL ?? cfg.zoom ?? 1} min={0.5} max={2} step={0.05} suffix="×" onChange={(n) => setEnd({ zoomL: n })} />
                   <Toggle label="Transparent background (show element behind)" checked={!!cfg.transparentBg} onChange={(v) => setEnd({ transparentBg: v || undefined })} />
                   {cfg.transparentBg ? (
                     <div className="hint pad">
@@ -2770,6 +2819,37 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
 
       <Accordion id="inspector.effects" title="Effects" defaultOpen={false}>
         <Slider label="Layer blur" value={el.blur ?? 0} min={0} max={80} suffix="px" onChange={(n) => patchElement(id, { blur: n || undefined })} />
+        <Slider label="Background blur" value={el.backdropBlur ?? 0} min={0} max={80} suffix="px" onChange={(n) => patchElement(id, { backdropBlur: n || undefined })} />
+        {el.backdropBlur ? (
+          <>
+            <div className="hint pad">Blurs the scene <b>behind</b> this element (like Figma’s Background blur). Use a full-screen overlay (dim/bar) to blur the whole scene below it.</div>
+            <Row label="Falloff">
+              <Select
+                value={el.backdropBlurMode ?? 'uniform'}
+                onChange={(v) => patchElement(id, { backdropBlurMode: v === 'uniform' ? undefined : (v as 'progressive' | 'radial') })}
+                options={[
+                  { value: 'uniform', label: 'Uniform' },
+                  { value: 'progressive', label: 'Progressive' },
+                  { value: 'radial', label: 'Radial' },
+                ]}
+              />
+            </Row>
+            {el.backdropBlurMode === 'progressive' && (
+              <Row label="Direction">
+                <Select
+                  value={el.backdropBlurDir ?? 'down'}
+                  onChange={(v) => patchElement(id, { backdropBlurDir: v === 'down' ? undefined : (v as 'up' | 'left' | 'right') })}
+                  options={[
+                    { value: 'down', label: 'Top → bottom' },
+                    { value: 'up', label: 'Bottom → top' },
+                    { value: 'left', label: 'Right → left' },
+                    { value: 'right', label: 'Left → right' },
+                  ]}
+                />
+              </Row>
+            )}
+          </>
+        ) : null}
         <div className="group-title2">Fade with scratch progress</div>
         <div className="hint pad">Fade this element in/out based on how much of the scratch card/grid has been revealed (0–100%).</div>
         <Toggle
