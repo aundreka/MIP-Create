@@ -1,0 +1,25 @@
+# Continuous deployment for the editor (mip-builder.netlify.app).
+#
+# `npm run build` MUST stay a single command: it builds the runtime IIFE into
+# runtime-dist/ FIRST, and src/export.ts inlines that file via `?raw`. Running
+# the editor build alone would embed whatever stale runtime was on disk.
+[build]
+  command = "PA_BUILD=${COMMIT_REF:0:7} npm run build && cp -r runtime-dist dist/runtime-dist"
+  publish = "dist"
+
+# PA_BUILD above stamps the runtime's version banner with the deploying commit
+# (vite.runtime.config.ts falls back to 'dev' when it is unset), so an exported
+# playable is traceable to the build that produced it.
+#
+# The cp step publishes runtime-dist/ as a static path: fetchRuntimeSrc() tries
+# `./runtime-dist/playable-runtime.js` before falling back to the inlined copy.
+# Without it every export logs a 404 first.
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# Deliberately NO catch-all SPA redirect. The editor has no client-side router
+# (index.html / runtime-frame.html / demo.html are real files), and a
+# `/* -> /index.html 200` rule would make the runtime-dist fetch above return
+# HTML with `r.ok === true` — silently exporting playables whose "runtime" is
+# the editor's index page.
