@@ -4161,3 +4161,319 @@ svg {
   background: color-mix(in srgb, #f59e0b 22%, transparent);
   color: #f59e0b;
 }
+
+/* ---- scene timeline (video-editor track panel under the canvas) ---- */
+.tl {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+  outline: none;
+  user-select: none;
+}
+.tl-collapsed {
+  border-top: 1px solid var(--line);
+}
+.tl-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-family: inherit;
+  cursor: pointer;
+}
+.tl-toggle:hover {
+  color: var(--text);
+}
+.tl-chevron {
+  transition: transform var(--t-fast) var(--ease);
+}
+.tl-chevron.open {
+  transform: rotate(90deg);
+}
+.tl-count {
+  min-width: 15px;
+  padding: 0 4px;
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+  color: var(--accent);
+  font-size: 10px;
+  line-height: 15px;
+  text-align: center;
+}
+.tl-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+  height: 30px;
+  padding-right: var(--s2);
+  border-bottom: 1px solid var(--line);
+}
+.tl-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 22px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.tl-btn:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+/* NOT `.primary` — that collides with the global button.primary rule, which would
+   supply its own background under this button's own foreground colour. */
+.tl-btn.tl-play {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+}
+.tl-btn.tl-play:hover {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  color: var(--accent);
+}
+.tl-btn.on {
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  color: var(--accent);
+}
+.tl-time {
+  margin-left: var(--s1);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-sm);
+  color: var(--text);
+}
+.tl-time i {
+  font-style: normal;
+  color: var(--muted);
+}
+.tl-len {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: var(--s3);
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+.tl-len input {
+  width: 46px;
+  padding: 2px 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--input-bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+}
+.tl-hint {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+.tl-body {
+  display: flex;
+  max-height: 190px;
+  min-height: 74px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.tl-names {
+  flex: 0 0 138px;
+  border-right: 1px solid var(--line);
+  background: var(--surface-sunken);
+}
+.tl-names-head {
+  height: 20px;
+  border-bottom: 1px solid var(--line);
+}
+.tl-name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 4px 0 8px;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  cursor: pointer;
+}
+.tl-name:hover {
+  color: var(--text);
+}
+.tl-name.sel {
+  background: var(--selected);
+  color: var(--text);
+}
+.tl-name-txt {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.tl-name-btn {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+}
+.tl-name:hover .tl-name-btn,
+.tl-name.sel .tl-name-btn {
+  opacity: 1;
+}
+.tl-name-btn:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+.tl-name-btn.add:hover {
+  color: var(--accent);
+}
+.tl-empty {
+  padding: var(--s2);
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+.tl-lanes {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.tl-ruler {
+  position: relative;
+  height: 20px;
+  border-bottom: 1px solid var(--line);
+  cursor: ew-resize;
+}
+.tl-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid var(--line);
+  pointer-events: none;
+}
+.tl-tick span {
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.tl-lane {
+  position: relative;
+  height: 24px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+}
+.tl-always {
+  position: absolute;
+  inset: 4px 0;
+  display: flex;
+  align-items: center;
+  padding-left: 8px;
+  border-radius: var(--r-sm);
+  background: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, var(--line) 55%, transparent) 0 6px,
+    transparent 6px 12px
+  );
+  font-size: 9px;
+  color: var(--muted);
+}
+.tl-clip {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--accent) 26%, var(--panel-2));
+  cursor: grab;
+}
+.tl-clip:active {
+  cursor: grabbing;
+}
+.tl-clip.sel {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 42%, var(--panel-2));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+/* an open clip (no duration) runs to the end of the scene — fade its tail */
+.tl-clip.open {
+  border-right-style: dashed;
+  mask-image: linear-gradient(90deg, #000 82%, transparent 100%);
+}
+.tl-clip-txt {
+  position: relative;
+  padding-left: 7px;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  white-space: nowrap;
+  pointer-events: none;
+}
+/* entrance / exit animation ramps — the time the element spends animating in/out */
+.tl-ramp {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+}
+.tl-ramp.in {
+  left: 0;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent-2) 55%, transparent), transparent);
+}
+.tl-ramp.out {
+  right: 0;
+  background: linear-gradient(270deg, color-mix(in srgb, var(--danger) 50%, transparent), transparent);
+}
+.tl-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  cursor: ew-resize;
+}
+.tl-handle.l {
+  left: 0;
+}
+.tl-handle.r {
+  right: 0;
+}
+.tl-handle:hover {
+  background: color-mix(in srgb, var(--accent) 70%, transparent);
+}
+.tl-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 1px solid var(--guide);
+  pointer-events: none;
+}
+.tl-playhead i {
+  position: absolute;
+  top: 0;
+  left: -4px;
+  width: 9px;
+  height: 9px;
+  border-radius: 0 0 var(--r-sm) var(--r-sm);
+  background: var(--guide);
+}

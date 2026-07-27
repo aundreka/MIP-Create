@@ -25,6 +25,9 @@ export type ParentToFrame =
   | { type: 'pa:render'; scene: Scene; assets?: AssetMap | null; interactive?: boolean; locale?: string | null } // single scene (editor canvas); assets omitted when unchanged
   | { type: 'pa:play'; project: Project; assets: AssetMap; locale?: string | null } // full flow (preview)
   | { type: 'pa:setHidden'; id: string; hidden: boolean }
+  // Timeline panel → canvas frame. ms=null clears the preview (show everything);
+  // playing=true runs the timeline for real from `ms`, false freezes that frame.
+  | { type: 'pa:seek'; ms: number | null; playing?: boolean }
 
 export type FrameToParent =
   | { type: 'pa:ready' }

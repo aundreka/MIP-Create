@@ -2,7 +2,7 @@
 // single-element editor with a visual Background-box section.
 
 import { useState, useEffect, useRef, useMemo, type PointerEvent as ReactPointerEvent } from 'react'
-import type { Anchor, AdvanceOn, AnimPresetId, AnimSpec, AnimTrigger, BackgroundConfig, BoxStyle, ConfettiConfig, CountdownConfig, CtaPulsePreset, EndsceneConfig, HandguideConfig, HandguideNode, KeyframeStep, LayoutMode, ObjectFit, SceneDef, SceneElement, SceneKind, SceneOverlay, SfxBinding, ShadowPreset, TextConfig, TransitionType, UnboxingConfig } from '../../runtime/scene'
+import type { Anchor, AdvanceOn, AnimPresetId, AnimSpec, AnimTrigger, BackgroundConfig, BoxStyle, ConfettiConfig, CountdownConfig, CtaPulsePreset, EndsceneConfig, HandguideConfig, HandguideNode, KeyframeStep, LayoutMode, ObjectFit, SceneDef, SceneElement, SceneKind, SceneOverlay, SfxBinding, ShadowPreset, TextConfig, TimingConfig, TransitionType, UnboxingConfig } from '../../runtime/scene'
 import { GAME_TEMPLATES } from '../../runtime/games/registry'
 import type { ParamField } from '../../runtime/games/types'
 import { importFont } from '../bridge'
@@ -68,6 +68,7 @@ import { SfxLibrary } from './SfxLibrary'
 import { startPathDraw } from '../drawMode'
 import { useEditLocale } from '../locale'
 import { setActiveVariant, useActiveVariant } from '../variantMode'
+import { getTimeline, setTimeline } from '../timeline'
 import { KeyframeEditor } from './KeyframeEditor'
 
 const ANCHORS: Anchor[] = ['center', 'top', 'bottom', 'left', 'right', 'top-left', 'top-right', 'bottom-left', 'bottom-right']
@@ -459,11 +460,11 @@ const EASINGS: { value: string; label: string }[] = [
 ]
 // 'lightray' (the moving reflection) is a class-driven pseudo effect, so it can be picked in ANY
 // phase — entrance, loop, or exit — not just as a loop.
-const ENTRANCE_PRESETS: AnimPresetId[] = ['fade', 'slide-up', 'slide-down', 'slide-left', 'slide-right', 'pop', 'bounce', 'spin', 'lightray']
+const ENTRANCE_PRESETS: AnimPresetId[] = ['fade', 'slide-up', 'slide-down', 'slide-left', 'slide-right', 'swipe-left', 'swipe-right', 'pop', 'bounce', 'spin', 'lightray']
 const LOOP_PRESETS: AnimPresetId[] = ['pulse', 'float', 'subtle-float', 'bounce', 'shake', 'wave', 'shine', 'lightray', 'glow', 'spin']
-const EXIT_PRESETS: AnimPresetId[] = ['fade-out', 'scale-out', 'lightray']
+const EXIT_PRESETS: AnimPresetId[] = ['fade-out', 'scale-out', 'swipe-out-left', 'swipe-out-right', 'lightray']
 // Presets offered for STACKED (extra) animations: every node-driven preset + the reflection.
-const NODE_PRESETS: AnimPresetId[] = ['fade', 'slide-up', 'slide-down', 'slide-left', 'slide-right', 'pop', 'bounce', 'shake', 'wave', 'shine', 'glow', 'spin', 'float', 'subtle-float', 'pulse', 'fade-out', 'scale-out', 'lightray']
+const NODE_PRESETS: AnimPresetId[] = ['fade', 'slide-up', 'slide-down', 'slide-left', 'slide-right', 'swipe-left', 'swipe-right', 'pop', 'bounce', 'shake', 'wave', 'shine', 'glow', 'spin', 'float', 'subtle-float', 'pulse', 'fade-out', 'scale-out', 'swipe-out-left', 'swipe-out-right', 'lightray']
 const LOOP_EXTRA_PRESETS: AnimPresetId[] = NODE_PRESETS
 // Friendly labels so effects are findable in the dropdown (the raw ids are terse).
 const PRESET_LABELS: Partial<Record<AnimPresetId, string>> = {
@@ -474,6 +475,10 @@ const PRESET_LABELS: Partial<Record<AnimPresetId, string>> = {
   'slide-down': 'slide down',
   'slide-left': 'slide left',
   'slide-right': 'slide right',
+  'swipe-left': 'swipe left (in from the right edge)',
+  'swipe-right': 'swipe right (in from the left edge)',
+  'swipe-out-left': 'swipe out ← (off the left edge)',
+  'swipe-out-right': 'swipe out → (off the right edge)',
   'fade-out': 'fade out',
   'scale-out': 'scale out',
   'subtle-float': 'subtle float',
@@ -1595,6 +1600,11 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
   const setText = (patch: Partial<TextConfig>): void =>
     patchElement(id, { text: { ...(el.text ?? { value: '', fontSizePx: 48 }), ...patch } })
   const setBox = (patch: Partial<BoxStyle>): void => patchElement(id, { box: { ...(el.box ?? {}), ...patch } })
+  // Scene-timeline window. `durationMs: undefined` in the patch is meaningful — it
+  // reopens the clip ("stays until the scene ends") — so this spreads rather than
+  // filtering out undefined the way the ?? setters above do.
+  const setTiming = (patch: Partial<TimingConfig>): void =>
+    patchElement(id, { timing: { ...(el.timing ?? { inMs: 0 }), ...patch } })
   const isTextOrCta = el.type === 'text' || el.type === 'cta' || el.type === 'button' || el.type === 'choice'
   // countdown is styled like text (font/colour/box), so it shares those sections
   const hasTextStyle = isTextOrCta || el.type === 'countdown'
@@ -2867,6 +2877,116 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
         />
         {el.scratchHideAt != null && (
           <Slider label="Fade out at" value={el.scratchHideAt} min={0} max={100} suffix="%" onChange={(n) => patchElement(id, { scratchHideAt: n })} />
+        )}
+      </Accordion>
+
+      <Accordion id="inspector.timing" title="Timing (in / out)" defaultOpen={false}>
+        <div className="hint pad">
+          Give this element a clip on the scene timeline: it appears at <b>In</b> playing its entrance, then plays its exit
+          and disappears when the clip ends. Drag the clip in the <b>Timeline</b> panel under the canvas to adjust it there.
+        </div>
+        <Toggle
+          label="Timed appearance"
+          checked={!!el.timing}
+          onChange={(v) =>
+            patchElement(id, { timing: v ? { inMs: Math.round(getTimeline().ms), durationMs: 2000 } : undefined })
+          }
+        />
+        {el.timing && (
+          <>
+            <div className="grid2">
+              <NumField
+                label="In (s)"
+                value={Math.round((el.timing.inMs || 0) / 100) / 10}
+                step={0.1}
+                min={0}
+                onChange={(n) => setTiming({ inMs: Math.max(0, Math.round(n * 1000)) })}
+              />
+              <NumField
+                label="Duration (s)"
+                value={el.timing.durationMs != null ? Math.round(el.timing.durationMs / 100) / 10 : 0}
+                step={0.1}
+                min={0}
+                onChange={(n) => setTiming({ durationMs: n > 0 ? Math.round(n * 1000) : undefined })}
+              />
+            </div>
+            <NumField
+              label="Out (s)"
+              value={
+                el.timing.durationMs != null
+                  ? Math.round(((el.timing.inMs || 0) + el.timing.durationMs) / 100) / 10
+                  : 0
+              }
+              step={0.1}
+              min={0}
+              onChange={(n) => {
+                // Editing OUT holds the in point and moves the tail, the way a video
+                // editor's out-point field behaves.
+                const out = Math.round(n * 1000)
+                setTiming({ durationMs: Math.max(100, out - (el.timing?.inMs || 0)) })
+              }}
+            />
+            <Toggle
+              label="Stays until the scene ends"
+              checked={el.timing.durationMs == null}
+              onChange={(v) => setTiming({ durationMs: v ? undefined : 2000 })}
+            />
+            <div className="grid2">
+              <button className="btn" onClick={() => setTiming({ inMs: Math.round(getTimeline().ms) })}>
+                In at playhead
+              </button>
+              <button
+                className="btn"
+                onClick={() => setTiming({ durationMs: Math.max(100, Math.round(getTimeline().ms) - (el.timing?.inMs || 0)) })}
+              >
+                Out at playhead
+              </button>
+            </div>
+            <div className="group-title2">Animate in / out</div>
+            <div className="hint pad">
+              These are the same specs as the Entrance and Exit phases below — set them here for speed, or open Animation for
+              stacking, easing and custom keyframes.
+            </div>
+            <Row label="Animate in">
+              <Select
+                value={(el.animations?.entrance?.preset ?? 'none') as string}
+                onChange={(v) =>
+                  patchElement(id, {
+                    animations: {
+                      ...(el.animations ?? {}),
+                      entrance:
+                        v === 'none'
+                          ? undefined
+                          : { ...(el.animations?.entrance ?? { durationMs: 520, delayMs: 0, easing: 'ease-out', trigger: 'onMount' }), preset: v as AnimSpec['preset'] },
+                      entranceExtra: v === 'none' ? undefined : el.animations?.entranceExtra,
+                    },
+                  })
+                }
+                options={[{ value: 'none', label: 'none (just appears)' }, ...ENTRANCE_PRESETS.map((p) => ({ value: p as string, label: presetLabel(p) }))]}
+              />
+            </Row>
+            <Row label="Animate out">
+              <Select
+                value={(el.animations?.exit?.preset ?? 'none') as string}
+                onChange={(v) =>
+                  patchElement(id, {
+                    animations: {
+                      ...(el.animations ?? {}),
+                      exit:
+                        v === 'none'
+                          ? undefined
+                          : { ...(el.animations?.exit ?? { durationMs: 380, delayMs: 0, easing: 'ease-in' }), preset: v as AnimSpec['preset'] },
+                      exitExtra: v === 'none' ? undefined : el.animations?.exitExtra,
+                    },
+                  })
+                }
+                options={[{ value: 'none', label: 'none (just disappears)' }, ...EXIT_PRESETS.map((p) => ({ value: p as string, label: presetLabel(p) }))]}
+              />
+            </Row>
+            <button className="wide" onClick={() => setTimeline({ open: true, ms: el.timing?.inMs ?? 0, playing: false })}>
+              Show on the timeline
+            </button>
+          </>
         )}
       </Accordion>
 

@@ -44,6 +44,13 @@ export type AnimPresetId =
   | 'slide-down'
   | 'slide-left'
   | 'slide-right'
+  // Swipes travel a VIEWPORT-relative distance (110vw), so the element always
+  // starts/ends fully off the physical screen at any size — unlike the slides,
+  // which move a short authored distance around their resting position.
+  | 'swipe-left'
+  | 'swipe-right'
+  | 'swipe-out-left'
+  | 'swipe-out-right'
   | 'pop'
   | 'bounce'
   | 'shake'
@@ -90,6 +97,24 @@ export interface ElementAnimations {
   entranceExtra?: AnimSpec[]
   loopExtra?: AnimSpec[]
   exitExtra?: AnimSpec[]
+}
+
+/**
+ * Video-editor style lifetime for an element on its scene's local timeline.
+ * The clock starts when the scene is entered (t = 0).
+ *
+ *   inMs       when the element appears — its entrance animation starts here.
+ *   durationMs how long it stays. Omitted = stays until the scene ends (an open
+ *              clip). When set, the exit animation starts at inMs + durationMs
+ *              and the element is removed once that exit finishes.
+ *
+ * The in/out animations themselves are the element's ordinary `animations.entrance`
+ * / `animations.exit` specs, so there is exactly one animation model — timing only
+ * decides WHEN they fire. Absent `timing` = today's behaviour (always visible).
+ */
+export interface TimingConfig {
+  inMs: number
+  durationMs?: number
 }
 
 export interface SfxBinding {
@@ -574,6 +599,7 @@ export interface SceneElement {
   sync?: SyncConfig // shared across all MIPs in the project group (editor-only marker)
 
   landscape?: OrientationOverride
+  timing?: TimingConfig // scene-timeline in/out window (see TimingConfig)
   animations?: ElementAnimations
   sfx?: SfxBinding[]
   idle?: IdleConfig
@@ -753,6 +779,10 @@ export interface SceneDef {
   advance: AdvanceRule
   transition?: Transition // how THIS scene ENTERS
   hideHeader?: boolean // hide the pinned date/countdown header (meta.header) while this scene is current
+  // Length of the editor's timeline ruler for this scene, in ms (editor-only —
+  // the runtime never reads it; element timing windows are absolute). Absent =
+  // the timeline sizes itself to the longest clip.
+  timelineMs?: number
 }
 
 export interface Project {

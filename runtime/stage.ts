@@ -13,7 +13,7 @@
 import type { Anchor, Scene, SceneElement, SceneOverlay } from './scene'
 import type { AssetEntry, AssetMap, RuntimeCtx } from './types'
 import { designH, isLandscape, scale, sx, sy, viewH } from './responsive'
-import { composeElementAnim, entranceLeadDelayMs, entranceTriggers, exitCss, injectAnimStyles, lightraySpec } from './anim'
+import { composeElementAnim, entranceLeadDelayMs, entranceTriggers, exitCss, injectAnimStyles, lightraySpec, phaseFrameCss, phaseTotalMs } from './anim'
 import { applyImageCrop, createContainerContent, createImageContent, styleContainer } from './elements/image'
 import { applyBarFill, createBarContent } from './elements/bar'
 import { createTextContent } from './elements/text'
@@ -479,6 +479,13 @@ export interface StageHandle {
   playEntrances(): void
   /** Play exit animations (called as a scene leaves). */
   playExit(): void
+  /**
+   * Drive the scene timeline from the editor (see TimingConfig).
+   *   ms=null    clear the preview — every timed element is shown again (canvas default).
+   *   playing    true = run the timeline for real from `ms`; false = freeze the frame at `ms`.
+   * No-op for elements without `timing`.
+   */
+  seekTimeline(ms: number | null, playing: boolean): void
   get(id: string): Rec | undefined
   destroy(): void
 }
@@ -526,6 +533,11 @@ html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;overscroll-b
 .pa-tap-outline.pa-tap-on{box-shadow:0 0 0 4px rgba(255,255,255,.9);}
 .pa-textbox{margin:0;display:inline-block;box-sizing:border-box;pointer-events:none;}
 .pa-text-inner{display:block;}
+/* Outside its scene-timeline window (see TimingConfig). A CLASS, not an inline style,
+   because layoutRec rewrites outer.style.opacity from el.opacity on every layout pass —
+   an inline hide would be dropped by the next resize and the element would pop back in.
+   visibility keeps the box measurable for the editor's rect reporting. */
+.pa-el--t-off{opacity:0 !important;visibility:hidden !important;pointer-events:none !important;}
 .pa-root:not(.has-interacted) .pa-show-after-interaction{opacity:0 !important;pointer-events:none !important;}
 .pa-root.has-interacted .pa-hide-after-basket-interaction{opacity:0 !important;pointer-events:none !important;}
 `.trim()
@@ -598,6 +610,21 @@ function restartAnim(node: HTMLElement, css: string): void {
 function runEntrance(rec: Rec): void {
   const css = composeElementAnim(rec.el, true)
   if (css !== 'none') restartAnim(rec.anim, css)
+}
+
+// ---------------------------------------------------------------------------
+// Scene timeline (element in/out windows — see TimingConfig in scene.ts).
+// ---------------------------------------------------------------------------
+/** The element's window on the scene clock: [in, out) ms. out = Infinity for an open clip. */
+function timingWindow(el: SceneElement): { inMs: number; outMs: number } | null {
+  const t = el.timing
+  if (!t) return null
+  const inMs = Math.max(0, t.inMs || 0)
+  const dur = t.durationMs
+  return { inMs, outMs: dur != null && dur > 0 ? inMs + dur : Infinity }
+}
+function setTimedVisible(rec: Rec, visible: boolean): void {
+  rec.outer.classList.toggle('pa-el--t-off', !visible)
 }
 
 // ---------------------------------------------------------------------------
@@ -830,6 +857,122 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       enterSfxTimers.push(window.setTimeout(() => emit('sfx-asset', b.assetId, b.volume ?? 1), delay))
   }
 
+  // ---- scene timeline: element in/out windows -------------------------------
+  // Elements carrying `timing` own a window on the scene's local clock (t=0 at scene
+  // enter). Two drivers, and NEITHER runs unless called — so the static editor canvas
+  // keeps every element visible and placeable exactly as it did before this existed:
+  //   armTimeline(from)    real playback: timers fire the entrance at `in` and the exit
+  //                        at `out`, hiding the element outside its window.
+  //   freezeTimeline(at)   the editor playhead: no timers — each timed element is put
+  //                        into the state it WOULD have at time `at`, with its entrance
+  //                        or exit animation paused on the matching frame (scrubbing).
+  const timedRecs = (): Rec[] => recs.filter((r) => r.el.timing)
+  const timelineTimers: number[] = []
+  // `startedAt` is wall-clock, so a re-apply mid-playback (a live edit) can resume from
+  // where the timeline actually is instead of rewinding to where playback began.
+  let timelinePreview: { ms: number; playing: boolean; startedAt: number } | null = null
+  const clearTimelineTimers = (): void => {
+    for (const t of timelineTimers) window.clearTimeout(t)
+    timelineTimers.length = 0
+  }
+  /** Un-hide anything that no longer has a window (its timing was just removed). */
+  const releaseUntimed = (): void => {
+    for (const rec of recs) {
+      if (rec.el.timing || !rec.outer.classList.contains('pa-el--t-off')) continue
+      rec.outer.classList.remove('pa-el--t-off')
+      rec.anim.style.animationPlayState = ''
+      applyMountAnim(rec)
+    }
+  }
+  const at = (fromMs: number, whenMs: number, fn: () => void): void => {
+    const d = whenMs - fromMs
+    if (d <= 0) fn()
+    else timelineTimers.push(window.setTimeout(fn, d))
+  }
+  /** Schedule one element's remaining timeline events, as if playback started at `fromMs`. */
+  const scheduleTimed = (rec: Rec, fromMs: number): void => {
+    const w = timingWindow(rec.el)
+    if (!w) return
+    const entMs = phaseTotalMs(rec.el, 'entrance')
+    const exitMs = phaseTotalMs(rec.el, 'exit')
+    const goneAt = w.outMs === Infinity ? Infinity : w.outMs + exitMs
+    rec.anim.style.animationPlayState = '' // a previous freeze may have paused it
+
+    if (fromMs >= goneAt) {
+      setTimedVisible(rec, false)
+      return
+    }
+    // --- in ---
+    if (fromMs < w.inMs) {
+      setTimedVisible(rec, false)
+      at(fromMs, w.inMs, () => {
+        setTimedVisible(rec, true)
+        runEntrance(rec)
+        fireEnterSfx(rec)
+      })
+    } else {
+      setTimedVisible(rec, true)
+      if (fromMs < w.inMs + entMs) {
+        // Playback resumed mid-entrance: a negative delay (phaseFrameCss) starts the
+        // animation partway through, and the loop takes over when it would have ended.
+        const css = phaseFrameCss(rec.el, 'entrance', fromMs - w.inMs)
+        if (css) restartAnim(rec.anim, css)
+        at(fromMs, w.inMs + entMs, () => applyMountAnim(rec))
+      } else {
+        applyMountAnim(rec) // past its entrance — just the loop
+      }
+    }
+    // --- out ---
+    if (w.outMs !== Infinity) {
+      at(fromMs, w.outMs, () => {
+        const css = phaseFrameCss(rec.el, 'exit', Math.max(0, fromMs - w.outMs))
+        if (css) restartAnim(rec.anim, css)
+      })
+      at(fromMs, goneAt, () => setTimedVisible(rec, false))
+    }
+  }
+  const armTimeline = (fromMs: number): void => {
+    clearTimelineTimers()
+    timelinePreview = { ms: fromMs, playing: true, startedAt: Date.now() }
+    releaseUntimed()
+    for (const rec of timedRecs()) scheduleTimed(rec, fromMs)
+  }
+  const freezeTimeline = (ms: number): void => {
+    clearTimelineTimers()
+    timelinePreview = { ms, playing: false, startedAt: 0 }
+    releaseUntimed()
+    for (const rec of timedRecs()) {
+      const w = timingWindow(rec.el)!
+      const entMs = phaseTotalMs(rec.el, 'entrance')
+      const exitMs = phaseTotalMs(rec.el, 'exit')
+      const goneAt = w.outMs === Infinity ? Infinity : w.outMs + exitMs
+      if (ms < w.inMs || ms >= goneAt) {
+        setTimedVisible(rec, false)
+        continue
+      }
+      setTimedVisible(rec, true)
+      const phase: 'entrance' | 'exit' | null =
+        ms < w.inMs + entMs ? 'entrance' : w.outMs !== Infinity && ms >= w.outMs ? 'exit' : null
+      if (!phase) {
+        rec.anim.style.animationPlayState = ''
+        applyMountAnim(rec) // between in and out — the loop runs live
+        continue
+      }
+      const css = phaseFrameCss(rec.el, phase, ms - (phase === 'entrance' ? w.inMs : w.outMs))
+      rec.anim.style.animation = css
+      rec.anim.style.animationPlayState = css ? 'paused' : ''
+    }
+  }
+  const clearTimelinePreview = (): void => {
+    clearTimelineTimers()
+    timelinePreview = null
+    for (const rec of timedRecs()) {
+      rec.outer.classList.remove('pa-el--t-off')
+      rec.anim.style.animationPlayState = ''
+      applyMountAnim(rec)
+    }
+  }
+
   let stageWon = false
   const revealOnWin = (): void => {
     if (stageWon) return // idempotent: a game may report completion more than once
@@ -872,6 +1015,11 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
         applyScratchReveal(0)
         offScratchProgress = on('scratch-progress', (p: unknown) => applyScratchReveal(Number(p) || 0))
       }
+      // Same deal for the scene timeline: arm it here (same frame as mount, before the
+      // first paint) so an element with a later in-point never flashes on screen first.
+      // Editor canvas (interactive=false) leaves it unarmed — everything stays visible
+      // and placeable unless the timeline panel is actively previewing.
+      if (interactive && timedRecs().length) armTimeline(0)
       for (const rec of recs) {
         if (rec.el.type === 'game-mount' && !rec.host && rec.content) {
           rec.host = createGameHost({
@@ -1249,9 +1397,15 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     playEntrances() {
       for (const rec of recs) {
         if (rec.el.hidden) continue // hidden/showOnWin elements animate when revealed
+        if (rec.el.timing) continue // the scene timeline owns this element's entrance + enter SFX
         if (entranceTriggers(rec.el, 'onMount')) runEntrance(rec)
         fireEnterSfx(rec) // at the entrance's stagger delay (or immediately if no entrance)
       }
+    },
+    seekTimeline(ms, playing) {
+      if (ms == null) clearTimelinePreview()
+      else if (playing) armTimeline(ms)
+      else freezeTimeline(ms)
     },
     playExit() {
       for (const rec of recs) {
@@ -1340,12 +1494,20 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
         // text value/style + all geometry are re-applied by layoutRec below.
       }
       for (const rec of recs) layoutRec(rec)
+      // Timing edits (dragging a clip in the timeline panel) must show up under the
+      // playhead immediately — re-apply the active preview against the new windows.
+      const preview = timelinePreview
+      if (preview) {
+        if (preview.playing) armTimeline(preview.ms + (Date.now() - preview.startedAt))
+        else freezeTimeline(preview.ms)
+      }
       return true
     },
     get: (id) => byId.get(id),
     destroy() {
       offSetText()
       offScratchProgress?.()
+      clearTimelineTimers()
       for (const t of enterSfxTimers) window.clearTimeout(t)
       enterSfxTimers.length = 0
       for (const dispose of scratchDisposers) dispose()

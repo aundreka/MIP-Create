@@ -24,12 +24,27 @@ const KEYFRAMES = `
 @keyframes pa-cta-pulse-strong{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
 @keyframes pa-fade{0%{opacity:0;transform:scale(.985)}100%{opacity:1;transform:scale(1)}}
 @keyframes pa-pop{0%{transform:scale(.5);opacity:0}55%{transform:scale(1.08);opacity:1}75%{transform:scale(.97)}100%{transform:scale(1);opacity:1}}
-@keyframes pa-slide-up{0%{transform:translateY(46px);opacity:0}70%{transform:translateY(-8px);opacity:1}100%{transform:translateY(0);opacity:1}}
-@keyframes pa-slide-down{0%{transform:translateY(-46px);opacity:0}70%{transform:translateY(8px);opacity:1}100%{transform:translateY(0);opacity:1}}
-@keyframes pa-slide-left{0%{transform:translateX(46px);opacity:0}70%{transform:translateX(-8px);opacity:1}100%{transform:translateX(0);opacity:1}}
-@keyframes pa-slide-right{0%{transform:translateX(-46px);opacity:0}70%{transform:translateX(8px);opacity:1}100%{transform:translateX(0);opacity:1}}
-@keyframes pa-bounce{0%,100%{transform:translateY(0)}30%{transform:translateY(-18px)}55%{transform:translateY(0)}75%{transform:translateY(-7px)}}
-@keyframes pa-shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-6px)}40%{transform:translateX(6px)}60%{transform:translateX(-4px)}80%{transform:translateX(4px)}}
+/* Travel distances are authored in DESIGN px and multiplied by --pa-s (the live FIT
+   scale, published by responsive.computeMetrics) so a slide covers the same share of
+   the composition on a small phone, a tablet and a zoomed-in editor canvas. Without
+   the factor the motion would be a fixed screen distance and the element would settle
+   from a visibly different place on every viewport. --pa-s defaults to 1 so these
+   rules still read sensibly if a surface never ran computeMetrics. */
+@keyframes pa-slide-up{0%{transform:translateY(calc(46px * var(--pa-s,1)));opacity:0}70%{transform:translateY(calc(-8px * var(--pa-s,1)));opacity:1}100%{transform:translateY(0);opacity:1}}
+@keyframes pa-slide-down{0%{transform:translateY(calc(-46px * var(--pa-s,1)));opacity:0}70%{transform:translateY(calc(8px * var(--pa-s,1)));opacity:1}100%{transform:translateY(0);opacity:1}}
+@keyframes pa-slide-left{0%{transform:translateX(calc(46px * var(--pa-s,1)));opacity:0}70%{transform:translateX(calc(-8px * var(--pa-s,1)));opacity:1}100%{transform:translateX(0);opacity:1}}
+@keyframes pa-slide-right{0%{transform:translateX(calc(-46px * var(--pa-s,1)));opacity:0}70%{transform:translateX(calc(8px * var(--pa-s,1)));opacity:1}100%{transform:translateX(0);opacity:1}}
+/* Swipes: a full-screen traversal, so the travel is VIEWPORT-relative (110vw always
+   clears the physical screen from any on-screen position) rather than design-relative.
+   "swipe-left" = the element flies in travelling leftwards (enters from the right edge);
+   "swipe-out-left" = it flies off past the left edge. The small overshoot at 88% gives
+   the arrival some weight instead of a dead stop. */
+@keyframes pa-swipe-left{0%{transform:translateX(110vw);opacity:0}60%{opacity:1}88%{transform:translateX(calc(-14px * var(--pa-s,1)))}100%{transform:translateX(0);opacity:1}}
+@keyframes pa-swipe-right{0%{transform:translateX(-110vw);opacity:0}60%{opacity:1}88%{transform:translateX(calc(14px * var(--pa-s,1)))}100%{transform:translateX(0);opacity:1}}
+@keyframes pa-swipe-out-left{0%{transform:translateX(0);opacity:1}12%{transform:translateX(calc(14px * var(--pa-s,1)))}70%{opacity:1}100%{transform:translateX(-110vw);opacity:0}}
+@keyframes pa-swipe-out-right{0%{transform:translateX(0);opacity:1}12%{transform:translateX(calc(-14px * var(--pa-s,1)))}70%{opacity:1}100%{transform:translateX(110vw);opacity:0}}
+@keyframes pa-bounce{0%,100%{transform:translateY(0)}30%{transform:translateY(calc(-18px * var(--pa-s,1)))}55%{transform:translateY(0)}75%{transform:translateY(calc(-7px * var(--pa-s,1)))}}
+@keyframes pa-shake{0%,100%{transform:translateX(0)}20%{transform:translateX(calc(-6px * var(--pa-s,1)))}40%{transform:translateX(calc(6px * var(--pa-s,1)))}60%{transform:translateX(calc(-4px * var(--pa-s,1)))}80%{transform:translateX(calc(4px * var(--pa-s,1)))}}
 @keyframes pa-wave{0%,100%{transform:rotate(-4deg)}50%{transform:rotate(4deg)}}
 @keyframes pa-shine{0%,100%{filter:brightness(1)}50%{filter:brightness(1.45)}}
 @keyframes pa-glow{0%,100%{filter:drop-shadow(0 0 0 rgba(255,255,255,0))}50%{filter:drop-shadow(0 0 14px rgba(255,255,255,.85))}}
@@ -48,8 +63,8 @@ const KEYFRAMES = `
 .pa-lightray::after{background:linear-gradient(90deg,rgba(255,255,255,0) 41%,rgba(255,255,255,0.28) 46%,rgba(255,255,255,0.85) 49.5%,rgba(255,255,255,0.98) 50%,rgba(255,255,255,0.85) 50.5%,rgba(255,255,255,0.28) 54%,rgba(255,255,255,0) 59%)}
 @keyframes pa-lightray-kf{0%{transform:rotate(var(--pa-lightray-ang,20deg)) translateX(var(--pa-lightray-from,-340%))}55%,100%{transform:rotate(var(--pa-lightray-ang,20deg)) translateX(var(--pa-lightray-to,340%))}}
 @keyframes pa-spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
-@keyframes pa-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
-@keyframes pa-subtle-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+@keyframes pa-float{0%,100%{transform:translateY(0)}50%{transform:translateY(calc(-10px * var(--pa-s,1)))}}
+@keyframes pa-subtle-float{0%,100%{transform:translateY(0)}50%{transform:translateY(calc(-3px * var(--pa-s,1)))}}
 @keyframes pa-pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.04)}}
 @keyframes pa-fade-out{from{opacity:1}to{opacity:0}}
 @keyframes pa-scale-out{from{transform:scale(1);opacity:1}to{transform:scale(.7);opacity:0}}
@@ -158,6 +173,36 @@ export function phaseSpecs(el: SceneElement, phase: Phase): AnimSpec[] {
  * The reflection is an ambient class-driven effect, so it can be added in any phase, not just loop. */
 export function lightraySpec(el: SceneElement): AnimSpec | undefined {
   return (['entrance', 'loop', 'exit'] as const).flatMap((p) => phaseSpecs(el, p)).find((s) => s.preset === 'lightray')
+}
+
+/** Total wall time a phase occupies (the latest `delay + duration` across its stacked
+ * specs), i.e. how long after the phase is triggered until every part of it has finished.
+ * The scene timeline uses it to know when an exit is done and the element can go away. */
+export function phaseTotalMs(el: SceneElement, phase: Phase): number {
+  const specs = phaseSpecs(el, phase)
+  if (!specs.length) return 0
+  return Math.max(0, ...specs.map((s) => (s.delayMs || 0) + s.durationMs))
+}
+
+/**
+ * Animation shorthand that renders ONE FROZEN FRAME of a phase, `elapsedMs` into it —
+ * the editor timeline's scrub. A NEGATIVE animation-delay starts an animation partway
+ * through, and pausing it (the caller sets animation-play-state) holds it exactly there,
+ * so dragging the playhead steps through the real entrance/exit motion rather than a
+ * simple on/off. Before its own delay the spec still fills from its 0% frame (fill:both).
+ */
+export function phaseFrameCss(el: SceneElement, phase: Phase, elapsedMs: number): string {
+  return phaseSpecs(el, phase)
+    .filter((s) => s.preset !== 'lightray') // pseudo-driven sweep, not a node animation
+    .map((s) => {
+      const name = keyframeName(s)
+      if (!name) return ''
+      const delay = s.delayMs || 0
+      const t = Math.max(0, Math.min(elapsedMs, delay + s.durationMs))
+      return `${name} ${s.durationMs}ms ${s.easing || 'ease'} ${delay - t}ms 1 normal both`
+    })
+    .filter(Boolean)
+    .join(', ')
 }
 
 /** Earliest entrance start (min delay across stacked entrance specs) — when the element first appears. */

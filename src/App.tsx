@@ -5,6 +5,7 @@ import { ContextToolbar } from './panels/ContextToolbar'
 import { Inspector } from './panels/Inspector'
 import { Navigator } from './panels/Navigator'
 import { StatusBar } from './panels/StatusBar'
+import { Timeline } from './panels/Timeline'
 import { ToolRail } from './panels/ToolRail'
 import { Topbar } from './panels/Topbar'
 import { DockPanel } from './ui'
@@ -184,6 +185,7 @@ export function App(): JSX.Element {
             <div className="canvas-col">
               <ContextToolbar />
               <EditorCanvas zoom={zoom} pan={pan} setZoom={(z) => setZoom(clampZoom(z))} setPan={setPan} fitSignal={fitSignal} />
+              <Timeline />
             </div>
             <DockPanel id="inspector" side="right" defaultWidth={286} min={240} max={520}>
               <Inspector onProjectSettings={() => setSettings(true)} />

@@ -5,7 +5,7 @@
 // it. Per-frame coordinate math is unchanged from the single-frame editor.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { FrameMetrics, FrameRect, FrameToParent } from '../../runtime/frame-protocol'
+import type { FrameMetrics, FrameRect, FrameToParent, ParentToFrame } from '../../runtime/frame-protocol'
 import type { Anchor, ProjectMeta, Scene, SceneDef, SceneElement } from '../../runtime/scene'
 import type { AssetMap } from '../../runtime/types'
 import { ContextMenu, type MenuItem } from '../panels/ContextMenu'
@@ -15,6 +15,7 @@ import { isSceneHidden, useCanvasView } from '../canvasView'
 import { useActiveVariant } from '../variantMode'
 import { endPathDraw, pathDrawTarget, usePathDraw } from '../drawMode'
 import { useEditLocale } from '../locale'
+import { useTimeline } from '../timeline'
 import { sceneAssetIds } from '../export'
 import {
   beginTransaction,
@@ -308,6 +309,25 @@ export function EditorCanvas(props: Props): JSX.Element {
     // Assets are not included here — the iframe caches them from the last full render.
     iw.postMessage({ type: 'pa:render', scene, interactive: false, locale: editLocaleRef.current }, '*')
   }, [])
+
+  // Timeline playhead → active scene iframe. While playback is RUNNING the runtime
+  // drives itself off its own timers, so only the transport changes (open / play /
+  // pause / a scrub) are posted — not the 60fps playhead position, which stays local
+  // to the timeline panel. Re-posted when the active scene changes so a freshly
+  // mounted frame lands on the same instant as the one it replaced.
+  const timeline = useTimeline()
+  const timelineRef = useRef(timeline)
+  timelineRef.current = timeline
+  // Only the SETTLED position is a dependency: while playing it is pinned to 0 so the
+  // effect doesn't re-fire, and the live position is read through the ref when it does.
+  const seekKey = timeline.playing ? 0 : timeline.ms
+  useEffect(() => {
+    const iw = activeIframeRef.current?.contentWindow
+    if (!iw) return
+    const t = timelineRef.current
+    const msg: ParentToFrame = t.open ? { type: 'pa:seek', ms: t.ms, playing: t.playing } : { type: 'pa:seek', ms: null }
+    iw.postMessage(msg, '*')
+  }, [timeline.open, timeline.playing, seekKey, activeSceneId, renderKey])
 
   // active scene's metrics drive the overlay math
   useEffect(() => {

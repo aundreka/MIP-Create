@@ -54,6 +54,14 @@ export function computeMetrics(vw: number, vh: number): void {
   // 'center' opts a project OUT of that (spare height splits top/bottom) — a top-pinned
   // header/bar (position:fixed) still holds the physical top, so only the FIT block moves.
   _offY = _vAlign === 'center' ? Math.max(0, (vh - DESIGN_H * _s) / 2) : 0
+  // Publish the FIT scale as a CSS variable on :root so stylesheet-driven motion
+  // can be authored in DESIGN px and still scale with the layout. The animation
+  // keyframes (anim.ts) multiply their travel distances by it — without this a
+  // "slide up 46px" would cover a fifth of a small phone's height and a twentieth
+  // of a tablet's, so the same element would visibly settle from a different place
+  // on every screen. One :root write per metrics pass reaches every stage, overlay
+  // and the pinned header at once.
+  if (typeof document !== 'undefined') document.documentElement.style.setProperty('--pa-s', String(_s))
 }
 
 // ---- FIT helpers: content (centered, letterboxed) -------------------------

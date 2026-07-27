@@ -16,6 +16,10 @@ let stage: StageHandle | null = null // single-scene (pa:render)
 let manager: SceneManager | null = null // project flow (pa:play)
 let scene: Scene | null = null
 let cachedAssets: AssetMap = {} // last received assets — skipped in pa:render when unchanged
+// Last timeline position asked for by the editor's timeline panel. Re-applied after
+// every render: a structural edit rebuilds the stage from scratch, and the new stage
+// starts with no preview, which would pop timed-out elements back onto the canvas.
+let lastSeek: { ms: number | null; playing: boolean } = { ms: null, playing: false }
 
 function size(): { w: number; h: number } {
   return { w: Math.max(1, window.innerWidth), h: Math.max(1, window.innerHeight) }
@@ -56,6 +60,7 @@ function render(next: Scene, assets: AssetMap, interactive: boolean): void {
   stage = buildScene(next, assets, { mount: document.body })
   stage.layoutAll()
   stage.startGames(interactive)
+  if (lastSeek.ms != null) stage.seekTimeline(lastSeek.ms, lastSeek.playing)
   requestAnimationFrame(postLayout)
 }
 
@@ -96,6 +101,9 @@ window.addEventListener('message', (e: MessageEvent) => {
   else if (d.type === 'pa:setHidden' && stage) {
     stage.setHidden(d.id, d.hidden)
     requestAnimationFrame(postLayout)
+  } else if (d.type === 'pa:seek') {
+    lastSeek = { ms: d.ms, playing: !!d.playing }
+    stage?.seekTimeline(d.ms, !!d.playing)
   }
 })
 
