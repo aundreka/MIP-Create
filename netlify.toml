@@ -18,6 +18,16 @@
 [build.environment]
   NODE_VERSION = "22"
 
+  # Netlify's secrets scanner fails the build when an env var's value turns up in
+  # the published output. Both of these are SUPPOSED to be there: Vite inlines
+  # `import.meta.env.VITE_*` into the client bundle at build time, and the browser
+  # needs them to reach Supabase at all (src/cloud/supabase.ts). The anon key is a
+  # public credential by design — share links are guarded by the `shares` bucket's
+  # RLS policy and unguessable codes, not by keeping the key secret. Set the two
+  # values in Site configuration -> Environment variables; without them the build
+  # still succeeds and the editor just hides its cloud features.
+  SECRETS_SCAN_OMIT_KEYS = "VITE_SUPABASE_URL,VITE_SUPABASE_ANON_KEY"
+
 # Deliberately NO catch-all SPA redirect. The editor has no client-side router
 # (index.html / runtime-frame.html / demo.html are real files), and a
 # `/* -> /index.html 200` rule would make the runtime-dist fetch above return
