@@ -57,6 +57,16 @@ export function createScratch(): GameModule {
   let moves = 0
   let coverImg: HTMLImageElement | null = null
   let coverReady = false
+  // The prize is painted into its OWN canvas, sized and positioned with the exact same
+  // math as the cover canvas (see drawPrize). Same element type, same backing size, same
+  // rect — so the two land on identical pixels in every browser and the prize can never
+  // peek out around the cover's edge. A DOM prize (<img>/background) rounds differently
+  // from a <canvas>, which showed up as a hairline outline of the prize art tracing the
+  // cover's perimeter. scratch_grid.ts fixed the same leak the same way.
+  let prizeCanvas: HTMLCanvasElement | null = null
+  let pc2d: CanvasRenderingContext2D | null = null
+  let prizeImg: HTMLImageElement | null = null
+  let prizeReady = false
   // The prize/reveal sits BENEATH the cover canvas. Until the cover has actually painted an
   // occluding frame, showing the prize would let it flash through (e.g. a transparent-color
   // cover whose image is still loading when the scene fades in). Keep the prize hidden until
@@ -277,10 +287,25 @@ export function createScratch(): GameModule {
     return { x: (cw - dw) / 2 / cw, y: (ch - dh) / 2 / ch, w: dw / cw, h: dh / ch }
   }
 
+  // Paint the prize into its own canvas at EXACTLY the rect the cover is drawn into, at the
+  // same backing size — the whole point is that both are canvases running identical math, so
+  // there is no sub-pixel seam for the prize to leak through. Only the 'follow' + prize-image
+  // path uses this; 'fit' keeps its freely-transformed <img> and the no-image case its text.
+  const drawPrize = (): void => {
+    if (!prizeCanvas || !pc2d) return
+    const w = prizeCanvas.width
+    const h = prizeCanvas.height
+    pc2d.clearRect(0, 0, w, h)
+    if (!prizeImg || !prizeReady || !(prizeImg.naturalWidth || prizeImg.width)) return
+    const r = coverContainRect()
+    pc2d.drawImage(prizeImg, r.x * w, r.y * h, r.w * w, r.h * h)
+  }
+
   // Position the reveal to follow the cover's contain rect (stretched to fill it). In 'fit' mode the
-  // reveal keeps its own full-card box + manual transform, so leave it alone.
+  // reveal keeps its own full-card box + manual transform, so leave it alone. The canvas prize also
+  // opts out: its div stays pinned to the whole card and drawPrize places the art inside it.
   const positionReveal = (): void => {
-    if (!prize || fitMode === 'fit') return
+    if (!prize || fitMode === 'fit' || prizeCanvas) return
     const r = coverContainRect()
     prize.style.inset = 'auto'
     prize.style.left = (r.x * 100).toFixed(3) + '%'
@@ -343,6 +368,12 @@ export function createScratch(): GameModule {
     if (w === canvas.width && h === canvas.height) return
     canvas.width = w
     canvas.height = h
+    // Same backing size as the cover, so both rasterize onto the same pixel grid.
+    if (prizeCanvas) {
+      prizeCanvas.width = w
+      prizeCanvas.height = h
+      drawPrize()
+    }
     lastPt = null
     positionReveal() // card aspect may have changed → keep the reveal on the cover's contain rect
     if (!won) fillCover()
@@ -477,9 +508,18 @@ export function createScratch(): GameModule {
             `transform-origin:center center;transform:translate(${revealX}%,${revealY}%) scale(${revealScale});`
           prize.appendChild(img)
         } else {
-          // 'follow': the prize DIV is sized to the cover's contain rect (positionReveal), and the
-          // image is stretched to fill it — so the reveal exactly follows the cover's size/shape.
-          prize.style.background = `${revealBg} center/100% 100% no-repeat url("${prizeSrc}")`
+          // 'follow': the prize is drawn into a canvas that mirrors the cover canvas exactly, so
+          // the reveal follows the cover's size/shape without a sub-pixel seam around it.
+          prizeCanvas = document.createElement('canvas')
+          prizeCanvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;'
+          pc2d = prizeCanvas.getContext('2d')
+          prize.appendChild(prizeCanvas)
+          prizeImg = new Image()
+          prizeImg.onload = () => {
+            prizeReady = true
+            drawPrize()
+          }
+          prizeImg.src = prizeSrc
         }
       } else {
         const span = document.createElement('div')
@@ -502,6 +542,7 @@ export function createScratch(): GameModule {
           coverImg.onload = () => {
             coverReady = true
             positionReveal() // now the cover aspect is known → size the reveal to its contain rect
+            drawPrize() // the contain rect just changed — repaint the prize onto the new one
             if (!won) fillCover()
             markCovered() // opaque cover image is down → safe to show the prize beneath it
           }
