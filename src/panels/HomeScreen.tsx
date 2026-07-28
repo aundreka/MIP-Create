@@ -4,7 +4,7 @@
 // editor to that project (persisting the current one first).
 
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { createProject, currentProjectId, deleteProject, duplicateProject, listProjects, loadProjectPreview, openProject, renameProject, saveCurrent } from '../projects'
+import { createProject, currentProjectId, deleteProject, duplicateProject, listProjects, loadProjectPreview, openProject, renameProject, saveCurrent, type ProjectRecord } from '../projects'
 import type { ProjectData } from '../bridge'
 import { gameTemplateStarters, STARTERS, type Starter } from '../templates'
 import { SceneThumb } from '../preview/SceneThumb'
@@ -12,7 +12,7 @@ import { allBrands, brandsFor, usagesFor } from '../templateUsage'
 import { TemplateCard } from './TemplateCard'
 import { exportAllData, backupFilename, importAllData, readBackupInfo } from '../backup'
 import { downloadBlob } from '../export'
-import { ArrowDownToLine, ArrowUpToLine, Copy, Diamond, FolderOpen, Icon, LayoutGrid, ListChecks, Pencil, Plus, ScanSearch, Search, Star, Upload, User, X } from '../icons'
+import { ArrowDownToLine, ArrowUpToLine, Copy, Diamond, FolderOpen, Icon, LayoutGrid, ListChecks, Pencil, Plus, ScanSearch, Search, Share2, Star, Upload, User, X } from '../icons'
 
 // Team library loads lazily (keeps Supabase out of the Home chunk until the tab opens).
 const TeamLibrary = lazy(() => import('./TeamPanel').then((m) => ({ default: m.TeamLibrary })))
@@ -79,7 +79,7 @@ function when(ts: number): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 }
 
-export function HomeScreen(props: { onClose: () => void; onProfile: () => void; onGenerate?: () => void; onQuizFunnel?: () => void; onImportBuilt?: () => void; onShare?: () => void; onQaCheck?: () => void; initialTab?: 'projects' | 'team' }): JSX.Element {
+export function HomeScreen(props: { onClose: () => void; onProfile: () => void; onGenerate?: () => void; onQuizFunnel?: () => void; onImportBuilt?: () => void; onShare?: () => void; onShareProject?: (id: string, name: string) => void; onQaCheck?: () => void; initialTab?: 'projects' | 'team' }): JSX.Element {
   const [tick, force] = useState(0)
   const refresh = (): void => force((n) => n + 1)
   const [editId, setEditId] = useState<string | null>(null)
@@ -163,16 +163,31 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
     )
   })
 
-  // Bucket the library by project group (ungrouped MIPs last), preserving the
-  // most-recent-first order within each bucket.
-  const grouped: { id: string; name: string; items: typeof projects }[] = []
-  const groupIndex = new Map<string, number>()
-  const ungrouped: typeof projects = []
+  // One recency-ordered feed: project groups and loose MIPs compete on the SAME
+  // timeline, so whatever you touched last is always on top. (Ungrouped MIPs used to
+  // be pinned below every group, which buried the file you were just editing.)
+  //
+  // `projects` is already newest-first, so appending a group the first time one of
+  // its MIPs shows up drops it exactly where its newest member falls — no second sort.
+  // Consecutive loose MIPs merge into one run so they share a grid row instead of
+  // each getting its own.
+  type Block =
+    | { kind: 'loose'; items: ProjectRecord[] }
+    | { kind: 'group'; id: string; name: string; items: ProjectRecord[] }
+  const blocks: Block[] = []
+  const groupBlock = new Map<string, Block & { kind: 'group' }>()
   for (const p of projects) {
-    if (!p.projectId) { ungrouped.push(p); continue }
-    let i = groupIndex.get(p.projectId)
-    if (i === undefined) { i = grouped.length; groupIndex.set(p.projectId, i); grouped.push({ id: p.projectId, name: p.projectName || 'Untitled project', items: [] }) }
-    grouped[i].items.push(p)
+    if (!p.projectId) {
+      const last = blocks[blocks.length - 1]
+      if (last?.kind === 'loose') last.items.push(p)
+      else blocks.push({ kind: 'loose', items: [p] })
+      continue
+    }
+    const g = groupBlock.get(p.projectId)
+    if (g) { g.items.push(p); continue }
+    const next = { kind: 'group' as const, id: p.projectId, name: p.projectName || 'Untitled project', items: [p] }
+    groupBlock.set(p.projectId, next)
+    blocks.push(next)
   }
 
   const open = async (id: string): Promise<void> => {
@@ -221,6 +236,11 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
         <button title="Duplicate" onClick={() => void duplicateProject(p.id).then(() => refresh())}>
           <Icon icon={Copy} size={13} />
         </button>
+        {props.onShareProject && (
+          <button title="Share this playable — get a code / link to hand someone an editable copy" onClick={() => props.onShareProject!(p.id, p.name)}>
+            <Icon icon={Share2} size={13} />
+          </button>
+        )}
         <button
           className="danger"
           title="Delete"
@@ -309,12 +329,15 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
                   <span>Import built playable</span>
                 </button>
               )}
+              {/* Receive only. SENDING moved onto each playable's card — you share a
+                  specific MIP, not "the current one", so it belongs on the thing itself.
+                  Importing genuinely does start a new project, so it stays here. */}
               {props.onShare && (
-                <button className="new-card" onClick={() => props.onShare!()} title="Import a MIP someone shared with you via a code / link (or share yours)">
+                <button className="new-card" onClick={() => props.onShare!()} title="Import a MIP someone shared with you via a code / link">
                   <span className="plus">
                     <Icon icon={Copy} size={22} />
                   </span>
-                  <span>Share / import by code</span>
+                  <span>Import by code</span>
                 </button>
               )}
               {props.onQaCheck && (
@@ -328,19 +351,21 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
             </div>
 
             <div className="group-title">Your playables ({projects.length})</div>
-          {grouped.map((g) => (
-            <div key={g.id} className="proj-group">
-              <div className="proj-group-head">
-                <Icon icon={FolderOpen} size={14} /> {g.name} <span className="proj-group-count">{g.items.length}</span>
+          {blocks.map((b) =>
+            b.kind === 'group' ? (
+              <div key={'g:' + b.id} className="proj-group">
+                <div className="proj-group-head">
+                  <Icon icon={FolderOpen} size={14} /> {b.name} <span className="proj-group-count">{b.items.length}</span>
+                </div>
+                <div className="home-grid">{b.items.map(renderCard)}</div>
               </div>
-              <div className="home-grid">{g.items.map(renderCard)}</div>
-            </div>
-          ))}
-          {ungrouped.length > 0 && (
-            <div className="proj-group">
-              {grouped.length > 0 && <div className="proj-group-head muted">Ungrouped</div>}
-              <div className="home-grid">{ungrouped.map(renderCard)}</div>
-            </div>
+            ) : (
+              // No "Ungrouped" heading — these are interleaved by recency now, so a
+              // header would imply a section that doesn't exist.
+              <div key={'loose:' + b.items[0].id} className="proj-group">
+                <div className="home-grid">{b.items.map(renderCard)}</div>
+              </div>
+            ),
           )}
           </div>
 

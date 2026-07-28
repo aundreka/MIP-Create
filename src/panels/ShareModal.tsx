@@ -12,11 +12,13 @@ import { Copy, Icon } from '../icons'
 import { isCloudConfigured } from '../cloud/supabase'
 import { createShare, fetchShare, shareLink } from '../cloud/shareStore'
 import { getState } from '../store'
-import { createProject, saveCurrent } from '../projects'
+import { createProject, currentProjectId, loadProjectPreview, saveCurrent } from '../projects'
 
 const errText = (e: unknown): string => String((e as Error)?.message ?? e)
 
-export function ShareModal(props: { initialCode?: string; onClose: () => void; onImported: () => void }): JSX.Element {
+/** Sharing a named playable from Home is send-only — you picked WHICH MIP to send,
+ * so the "receive a code" half would be answering a question you didn't ask. */
+export function ShareModal(props: { initialCode?: string; target?: { id: string; name: string }; onClose: () => void; onImported: () => void }): JSX.Element {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
@@ -32,10 +34,22 @@ export function ShareModal(props: { initialCode?: string; onClose: () => void; o
       .finally(() => setBusy(false))
   }
 
-  const mipName = getState().project.meta.name || 'untitled'
+  const sendOnly = !!props.target
+  const mipName = props.target?.name || getState().project.meta.name || 'untitled'
 
   const doCreate = wrap(async () => {
+    // Flush the open project first either way: it may BE the target, and even when it
+    // isn't, a share shouldn't be the thing that loses someone's unsaved edits.
     await saveCurrent()
+    const id = props.target?.id
+    if (id && id !== currentProjectId()) {
+      // A different playable than the one on screen — read it back from the library
+      // with its asset bytes rehydrated, since only the open project lives in memory.
+      const data = await loadProjectPreview(id)
+      if (!data) throw new Error('That playable could not be loaded from your library.')
+      setCode(await createShare(data))
+      return
+    }
     const s = getState()
     setCode(await createShare({ project: s.project, assets: s.assets, trace: s.trace }))
   })
@@ -65,14 +79,15 @@ export function ShareModal(props: { initialCode?: string; onClose: () => void; o
   }
 
   return (
-    <Modal title="Share / import a MIP" onClose={props.onClose} size="sm">
+    <Modal title={sendOnly ? `Share “${mipName}”` : 'Share / import a MIP'} onClose={props.onClose} size="sm">
       {!isCloudConfigured() ? (
         <div className="hint pad">
           Cloud sharing isn’t configured. Add <b>VITE_SUPABASE_URL</b> and <b>VITE_SUPABASE_ANON_KEY</b> to <b>.env.local</b> and restart.
         </div>
       ) : (
         <>
-          <div className="group-title">Send: share “{mipName}”</div>
+          {/* The modal title already names the MIP in send-only mode — don't say it twice. */}
+          <div className="group-title">{sendOnly ? 'Send a copy' : `Send: share “${mipName}”`}</div>
           {code ? (
             <div className="share-out">
               <div className="share-code">{code}</div>
@@ -98,13 +113,17 @@ export function ShareModal(props: { initialCode?: string; onClose: () => void; o
             </>
           )}
 
-          <div className="group-title">Receive: import a code</div>
-          <Row label="Code / link">
-            <input placeholder="e.g. k7m2p9qd" value={importCode} onChange={(e) => setImportCode(e.target.value)} />
-          </Row>
-          <button className="wide" disabled={busy || !importCode.trim()} onClick={doImport}>
-            {busy ? 'Importing…' : 'Import as new project'}
-          </button>
+          {!sendOnly && (
+            <>
+              <div className="group-title">Receive: import a code</div>
+              <Row label="Code / link">
+                <input placeholder="e.g. k7m2p9qd" value={importCode} onChange={(e) => setImportCode(e.target.value)} />
+              </Row>
+              <button className="wide" disabled={busy || !importCode.trim()} onClick={doImport}>
+                {busy ? 'Importing…' : 'Import as new project'}
+              </button>
+            </>
+          )}
           {err && <div className="warn-line">{err}</div>}
         </>
       )}

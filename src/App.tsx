@@ -59,6 +59,10 @@ export function App(): JSX.Element {
   // code prefilled so a recipient can import straight from a pasted link.
   const shareCode = useMemo(() => /share=([a-z0-9]+)/i.exec(location.hash)?.[1] ?? '', [])
   const [share, setShare] = useState(() => location.hash.toLowerCase().includes('share='))
+  // Set when Home shares one specific playable (its card's share button) rather than
+  // whatever project is open — null means the modal shows both send and receive.
+  const [shareTarget, setShareTarget] = useState<{ id: string; name: string } | null>(null)
+  const closeShare = (): void => { setShare(false); setShareTarget(null) }
   const [cmdK, setCmdK] = useState(false)
 
   // Deep-link from a QA finding to the offending project/scene/element.
@@ -159,7 +163,7 @@ export function App(): JSX.Element {
         // Home route — the editor is unmounted behind it (its state lives in the
         // module-level store, so nothing is lost). Opening a project enters the editor.
         <Suspense fallback={null}>
-          <HomeScreen onClose={() => setHome(false)} initialTab={homeTab} onProfile={() => setProfile(true)} onGenerate={() => { setHome(false); setGenMip(true) }} onQuizFunnel={() => { setHome(false); setQuiz(true) }} onImportBuilt={() => { setHome(false); setImportBuilt(true) }} onShare={() => setShare(true)} onQaCheck={() => setQaCheck(true)} />
+          <HomeScreen onClose={() => setHome(false)} initialTab={homeTab} onProfile={() => setProfile(true)} onGenerate={() => { setHome(false); setGenMip(true) }} onQuizFunnel={() => { setHome(false); setQuiz(true) }} onImportBuilt={() => { setHome(false); setImportBuilt(true) }} onShare={() => setShare(true)} onShareProject={(id, name) => { setShareTarget({ id, name }); setShare(true) }} onQaCheck={() => setQaCheck(true)} />
         </Suspense>
       ) : (
         <>
@@ -206,7 +210,7 @@ export function App(): JSX.Element {
         {exportOpen && <ExportModal onClose={() => setExportOpen(false)} onQaCheck={() => setQaCheck(true)} />}
         {qa && <QaPanel onClose={() => setQa(false)} onNavigate={qaNavigate} />}
         {qaCheck && <QaCheckPanel onClose={() => setQaCheck(false)} />}
-        {share && <ShareModal initialCode={shareCode} onClose={() => setShare(false)} onImported={() => { setShare(false); setHome(false) }} />}
+        {share && <ShareModal initialCode={shareCode} target={shareTarget ?? undefined} onClose={closeShare} onImported={() => { closeShare(); setHome(false) }} />}
         {cmdK && <CommandPalette commands={commands} onClose={() => setCmdK(false)} />}
       </Suspense>
     </div>
