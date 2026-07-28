@@ -15,7 +15,7 @@ import { isSceneHidden, useCanvasView } from '../canvasView'
 import { useActiveVariant } from '../variantMode'
 import { endPathDraw, pathDrawTarget, usePathDraw } from '../drawMode'
 import { useEditLocale } from '../locale'
-import { useTimeline } from '../timeline'
+import { setSceneMediaMs, useTimeline } from '../timeline'
 import { sceneAssetIds } from '../export'
 import {
   beginTransaction,
@@ -117,7 +117,7 @@ function CanvasFrame(props: {
   assets: AssetMap
   renderKey: number
   locale: string | null
-  onLayout: (id: string, rects: FrameRect[], metrics: FrameMetrics) => void
+  onLayout: (id: string, rects: FrameRect[], metrics: FrameMetrics, mediaMs?: number) => void
   iframeRef?: (el: HTMLIFrameElement | null) => void
 }): JSX.Element {
   const { sceneId, def, meta, assets, renderKey, locale, onLayout, iframeRef } = props
@@ -156,7 +156,7 @@ function CanvasFrame(props: {
         ready.current = true
         post()
       } else if (d.type === 'pa:layout') {
-        onLayout(sceneId, d.rects, d.metrics)
+        onLayout(sceneId, d.rects, d.metrics, d.mediaMs)
       }
     }
     window.addEventListener('message', onMsg)
@@ -511,10 +511,12 @@ export function EditorCanvas(props: Props): JSX.Element {
     return () => window.removeEventListener('keydown', onKey)
   }, [cropEdit, exitCrop])
 
-  const handleLayout = useCallback((id: string, r: FrameRect[], m: FrameMetrics): void => {
+  const handleLayout = useCallback((id: string, r: FrameRect[], m: FrameMetrics, mediaMs?: number): void => {
     metricsByScene.current[id] = m
     if (id === liveRef.current.activeSceneId) metricsRef.current = m
     setRectsByScene((prev) => ({ ...prev, [id]: r }))
+    // Lets the timeline ruler grow to cover a video in this scene.
+    if (mediaMs != null) setSceneMediaMs(id, mediaMs)
   }, [])
 
   // ---- frame positions (auto row layout, draggable overrides) ---------------

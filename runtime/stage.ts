@@ -10,9 +10,9 @@
 //                 the positional layout.
 //   content       the <img> / text / button.
 
-import type { Anchor, Scene, SceneElement, SceneOverlay } from './scene'
+import type { Anchor, AnimSpec, Scene, SceneElement, SceneOverlay } from './scene'
 import type { AssetEntry, AssetMap, RuntimeCtx } from './types'
-import { designH, isLandscape, scale, sx, sy, viewH } from './responsive'
+import { designH, designW as baseDesignW, isLandscape, scale, sx, sy, viewH } from './responsive'
 import { composeElementAnim, entranceLeadDelayMs, entranceTriggers, exitCss, injectAnimStyles, lightraySpec, phaseFrameCss, phaseTotalMs } from './anim'
 import { applyImageCrop, createContainerContent, createImageContent, styleContainer } from './elements/image'
 import { applyBarFill, createBarContent } from './elements/bar'
@@ -43,6 +43,11 @@ interface Rec {
   hg?: { stop(): void } // handguide animator
   confetti?: ConfettiController // confetti particle system
   idle?: { stop(): void } // generic idle visibility animator
+  // Typewriter state. `typeShown` is the number of characters currently revealed —
+  // null means "not typing, show the whole string". layoutText reads it on every pass
+  // so a resize mid-type re-slices the live text instead of snapping to the full value.
+  typeShown?: number | null
+  typeTimer?: number
 }
 
 function startIdleBehavior(rec: Rec, root: HTMLElement): { stop(): void } {
@@ -436,7 +441,10 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
 function tickCountdown(rec: Rec): void {
   const inner = rec.content?.firstElementChild as HTMLElement | null
   if (!inner) return
-  inner.textContent = formatCountdown(rec.el, rec.deadline ?? Date.now(), Date.now())
+  const full = formatCountdown(rec.el, rec.deadline ?? Date.now(), Date.now())
+  // A type-out in progress owns the visible string; the ticker still refreshes the
+  // underlying value so the reveal keeps typing the CURRENT time, not a stale one.
+  inner.textContent = rec.typeShown != null ? sliceText(full, rec.typeShown) : full
 }
 function startTicker(rec: Rec): void {
   if (rec.ticker) {
@@ -565,6 +573,7 @@ const round = (n: number): number => Math.round(n)
 // Lets the top-level layout functions resolve ANOTHER element (countdown attachToId)
 // via the DOM — same-root children only — without threading the per-stage recs map.
 const recByOuter = new WeakMap<Element, Rec>()
+const loadedMetadataRearm = new WeakSet<HTMLVideoElement>()
 
 // ---------------------------------------------------------------------------
 // Animation application (inner .pa-el-anim node, so it never fights the stage's
@@ -606,10 +615,160 @@ function restartAnim(node: HTMLElement, css: string): void {
   node.style.animation = css
   setAnimHints(node, true)
 }
+function clearNodeAnim(node: HTMLElement): void {
+  node.style.animation = ''
+  setAnimHints(node, false)
+}
 // Entrance (+ its loop, delayed to start after the entrance) — interactive only.
 function runEntrance(rec: Rec): void {
   const css = composeElementAnim(rec.el, true)
   if (css !== 'none') restartAnim(rec.anim, css)
+  else clearNodeAnim(rec.anim)
+  const cfg = phaseTypingConfig(rec.el, 'entrance') ?? rec.el.typing
+  if (cfg) startTyping(rec, 0, cfg) // the typewriter shares the entrance's origin
+}
+
+// ---------------------------------------------------------------------------
+// Typewriter reveal (see TypingConfig in scene.ts).
+// ---------------------------------------------------------------------------
+/** The full string an element wants to display, before any typing slice. */
+function fullTextOf(rec: Rec): string {
+  const el = rec.el
+  if (el.type === 'countdown') return formatCountdown(el, rec.deadline ?? Date.now(), Date.now())
+  return localize(el.text)
+}
+const textChars = (s: string): string[] => Array.from(s)
+const sliceText = (s: string, chars: number): string => textChars(s).slice(0, chars).join('')
+const phaseTypingSpec = (el: SceneElement, phase: 'entrance' | 'exit'): AnimSpec | undefined =>
+  [el.animations?.[phase], ...((el.animations?.[(phase + 'Extra') as 'entranceExtra' | 'exitExtra'] ?? []) as AnimSpec[])]
+    .filter((s): s is AnimSpec => !!s)
+    .find((s) => s.preset === 'typewriter')
+const phaseTypingConfig = (el: SceneElement, phase: 'entrance' | 'exit'): NonNullable<SceneElement['typing']> | null => {
+  const spec = phaseTypingSpec(el, phase)
+  if (!spec) return null
+  return { caret: true, ...(el.typing ?? {}), durationMs: spec.durationMs, delayMs: spec.delayMs }
+}
+/** ms per character — `durationMs` (total) wins over `cps` when both are set. */
+function typeStepMs(cfg: NonNullable<SceneElement['typing']>, chars: number): number {
+  if (cfg.durationMs != null && cfg.durationMs > 0) return cfg.durationMs / Math.max(1, chars)
+  return 1000 / Math.max(1, cfg.cps ?? 24)
+}
+/** Write the current slice straight to the DOM — no full layout pass per character. */
+function paintTyped(rec: Rec): void {
+  const inner = rec.content?.firstElementChild as HTMLElement | null
+  if (!inner) return
+  const full = fullTextOf(rec)
+  inner.textContent = rec.typeShown != null ? sliceText(full, rec.typeShown) : full
+}
+function stopTyping(rec: Rec, reveal: boolean): void {
+  if (rec.typeTimer) window.clearTimeout(rec.typeTimer)
+  rec.typeTimer = 0
+  if (reveal) {
+    rec.typeShown = null
+    const inner = rec.content?.firstElementChild as HTMLElement | null
+    inner?.classList.remove('pa-typing-caret')
+    paintTyped(rec)
+  }
+}
+/**
+ * Start the typewriter. `fromMs` lets playback resume mid-type (the scene timeline
+ * hands us how far in we already are). Non-looping runs settle on the full string,
+ * so a finished element behaves exactly like an untyped one.
+ */
+function startTyping(rec: Rec, fromMs = 0, cfg = rec.el.typing): void {
+  const inner = rec.content?.firstElementChild as HTMLElement | null
+  if (!cfg || !inner) return
+  stopTyping(rec, false)
+  const delay = Math.max(0, cfg.delayMs ?? 0)
+  const full = fullTextOf(rec)
+  const chars = textChars(full).length
+  const step = typeStepMs(cfg, chars)
+  const showCaret = !!cfg.caret
+  inner.classList.toggle('pa-typing-caret', showCaret)
+
+  const cycleMs = delay + chars * step
+  let t = Math.max(0, fromMs)
+  if (cfg.loop) t = t % (cycleMs + Math.max(0, cfg.holdMs ?? 1500)) // resume inside the current loop
+
+  const tick = (): void => {
+    const shown = t <= delay ? 0 : Math.min(chars, Math.floor((t - delay) / step))
+    rec.typeShown = shown
+    paintTyped(rec)
+    if (shown >= chars) {
+      if (!cfg.loop) {
+        rec.typeShown = null // settle on the live string (a countdown keeps ticking)
+        if (!cfg.keepCaret) inner.classList.remove('pa-typing-caret')
+        paintTyped(rec)
+        return
+      }
+      rec.typeTimer = window.setTimeout(() => {
+        t = 0
+        tick()
+      }, Math.max(0, cfg.holdMs ?? 1500))
+      return
+    }
+    // Advance to exactly the next character boundary so slow speeds don't burn frames.
+    const nextAt = delay + (shown + 1) * step
+    rec.typeTimer = window.setTimeout(() => {
+      t = nextAt
+      tick()
+    }, Math.max(16, nextAt - t))
+  }
+  tick()
+}
+/** Put the typewriter into the state it would have `atMs` after entering — the editor scrub. */
+function freezeTyping(rec: Rec, atMs: number): void {
+  const cfg = phaseTypingConfig(rec.el, 'entrance') ?? rec.el.typing
+  if (!cfg) return
+  stopTyping(rec, false)
+  const full = fullTextOf(rec)
+  const chars = textChars(full).length
+  const delay = Math.max(0, cfg.delayMs ?? 0)
+  const step = typeStepMs(cfg, chars)
+  const shown = atMs <= delay ? 0 : Math.min(chars, Math.floor((atMs - delay) / step))
+  rec.typeShown = shown >= chars ? null : shown
+  const inner = rec.content?.firstElementChild as HTMLElement | null
+  inner?.classList.toggle('pa-typing-caret', !!cfg.caret && rec.typeShown != null)
+  paintTyped(rec)
+}
+function startTypingOut(rec: Rec, fromMs = 0): void {
+  const cfg = phaseTypingConfig(rec.el, 'exit')
+  const inner = rec.content?.firstElementChild as HTMLElement | null
+  if (!cfg || !inner) return
+  stopTyping(rec, false)
+  const delay = Math.max(0, cfg.delayMs ?? 0)
+  const chars = textChars(fullTextOf(rec)).length
+  const step = typeStepMs(cfg, chars)
+  inner.classList.toggle('pa-typing-caret', !!cfg.caret)
+  let t = Math.max(0, fromMs)
+  const tick = (): void => {
+    const removed = t <= delay ? 0 : Math.min(chars, Math.floor((t - delay) / step))
+    rec.typeShown = Math.max(0, chars - removed)
+    paintTyped(rec)
+    if (removed >= chars) {
+      if (!cfg.keepCaret) inner.classList.remove('pa-typing-caret')
+      return
+    }
+    const nextAt = delay + (removed + 1) * step
+    rec.typeTimer = window.setTimeout(() => {
+      t = nextAt
+      tick()
+    }, Math.max(16, nextAt - t))
+  }
+  tick()
+}
+function freezeTypingOut(rec: Rec, atMs: number): void {
+  const cfg = phaseTypingConfig(rec.el, 'exit')
+  if (!cfg) return
+  stopTyping(rec, false)
+  const chars = textChars(fullTextOf(rec)).length
+  const delay = Math.max(0, cfg.delayMs ?? 0)
+  const step = typeStepMs(cfg, chars)
+  const removed = atMs <= delay ? 0 : Math.min(chars, Math.floor((atMs - delay) / step))
+  rec.typeShown = Math.max(0, chars - removed)
+  const inner = rec.content?.firstElementChild as HTMLElement | null
+  inner?.classList.toggle('pa-typing-caret', !!cfg.caret && rec.typeShown > 0)
+  paintTyped(rec)
 }
 
 // ---------------------------------------------------------------------------
@@ -625,6 +784,7 @@ function timingWindow(el: SceneElement): { inMs: number; outMs: number } | null 
 }
 function setTimedVisible(rec: Rec, visible: boolean): void {
   rec.outer.classList.toggle('pa-el--t-off', !visible)
+  if (!visible && (rec.typeTimer || rec.typeShown != null)) stopTyping(rec, true)
 }
 
 // ---------------------------------------------------------------------------
@@ -652,10 +812,20 @@ function dataUrlToBytes(src: string): Uint8Array | null {
 // `url(...)` out of the exported bundle — AppLovin's static preflight scanner
 // reads a templated `url('${a.src}')` in the runtime source as an un-inlined
 // external font and blocks the upload, even when no fonts are present.
+// Font assets already registered, keyed by asset id -> the src they were built from.
+// injectFontStyles runs on every build AND every live update (a font uploaded into an
+// open scene arrives through the update path, which does NOT rebuild the DOM — before
+// this the FontFace was never registered and the element silently fell back to the
+// default face while its font-family said otherwise). Re-registering the same face on
+// each keystroke would leak faces into document.fonts, so skip ids already loaded and
+// re-register only when the underlying data actually changed (a re-upload).
+const injectedFonts = new Map<string, string>()
+
 function injectFontStyles(assets: AssetMap): void {
   const fonts = Object.entries(assets).filter(([, a]) => a.kind === 'font')
   if (!fonts.length || typeof FontFace === 'undefined') return
   for (const [assetId, a] of fonts) {
+    if (injectedFonts.get(assetId) === a.src) continue
     const bytes = dataUrlToBytes(a.src)
     if (!bytes) continue
     try {
@@ -663,6 +833,7 @@ function injectFontStyles(assets: AssetMap): void {
       // bold or falls back when the element uses a non-default weight.
       const face = new FontFace(assetId, bytes.buffer as ArrayBuffer, { weight: '100 900' })
       document.fonts.add(face)
+      injectedFonts.set(assetId, a.src)
       void face.load().catch(() => {})
     } catch {
       /* malformed font data — skip so one bad asset can't break the scene */
@@ -875,6 +1046,89 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     for (const t of timelineTimers) window.clearTimeout(t)
     timelineTimers.length = 0
   }
+  // ---- video under the playhead --------------------------------------------
+  // Left alone, every <video> in a scene autoplays on a loop of its own — which is
+  // right for the plain canvas (authors want to see the clip move) but wrong the
+  // moment the timeline is previewing: the loop drifts against the ruler and you
+  // can't tell which frame your overlays actually land on. While a preview is
+  // active the playhead OWNS the videos; clearing the preview hands them back.
+  // Covers both video surfaces: the endscene <video> and a video asset inside an
+  // image/container element.
+  const videoLoopWas = new WeakMap<HTMLVideoElement, boolean>()
+  const videoLoopResetWired = new WeakSet<HTMLVideoElement>()
+  const videosOf = (rec: Rec): HTMLVideoElement[] => Array.from(rec.outer.querySelectorAll('video'))
+  /** A clip starts at its element's in-point; an untimed element starts with the scene. */
+  const videoOriginMs = (rec: Rec): number => Math.max(0, rec.el.timing?.inMs ?? 0)
+  const loopingVideoMs = (): number => {
+    let ms = 0
+    for (const rec of recs) {
+      for (const v of videosOf(rec)) {
+        const loops = videoLoopWas.get(v) ?? v.loop
+        if (loops && isFinite(v.duration) && v.duration > 0) ms = Math.max(ms, v.duration * 1000)
+      }
+    }
+    return ms
+  }
+  const timelineLoopMs = (): number => {
+    const hasLoopingEndscene = recs.some((rec) => rec.el.type === 'endscene' && rec.el.endscene?.loop)
+    const authoredMs = hasLoopingEndscene && scene.timelineMs && scene.timelineMs > 0 ? scene.timelineMs : 0
+    const videoMs = loopingVideoMs()
+    return authoredMs || videoMs
+  }
+  const seekVideo = (v: HTMLVideoElement, sec: number, play: boolean): void => {
+    if (!videoLoopWas.has(v)) videoLoopWas.set(v, v.loop)
+    if (!videoLoopResetWired.has(v)) {
+      videoLoopResetWired.add(v)
+      v.addEventListener('ended', () => {
+        if (timelinePreview?.playing) armTimeline(0)
+      })
+    }
+    v.loop = false
+    const apply = (): void => {
+      const dur = isFinite(v.duration) && v.duration > 0 ? v.duration : 0
+      // Park just shy of the end: seeking exactly to duration shows a blank frame
+      // in Chromium rather than the last one.
+      const t = Math.max(0, dur ? Math.min(sec, dur - 0.02) : sec)
+      try {
+        v.currentTime = t
+      } catch {
+        /* not seekable yet — the loadedmetadata pass below retries */
+      }
+      if (play && sec >= 0 && (!dur || sec < dur)) void v.play().catch(() => {})
+      else v.pause()
+      if (timelinePreview?.playing && dur > 0 && (videoLoopWas.get(v) ?? v.loop) && !loadedMetadataRearm.has(v)) {
+        loadedMetadataRearm.add(v)
+        armTimeline(timelinePreview.ms + (Date.now() - timelinePreview.startedAt))
+      }
+    }
+    // currentTime is a no-op before metadata lands, so retry once it does.
+    if (v.readyState >= 1) apply()
+    else v.addEventListener('loadedmetadata', apply, { once: true })
+  }
+  const previewVideos = (ms: number, playing: boolean, fromMs: number): void => {
+    for (const rec of recs) {
+      const vids = videosOf(rec)
+      if (!vids.length) continue
+      const origin = videoOriginMs(rec)
+      for (const v of vids) {
+        if (playing && ms < origin) {
+          seekVideo(v, 0, false) // not on screen yet — hold the first frame…
+          at(fromMs, origin, () => seekVideo(v, 0, true)) // …and roll when it enters
+        } else {
+          seekVideo(v, (ms - origin) / 1000, playing)
+        }
+      }
+    }
+  }
+  const releaseVideos = (): void => {
+    for (const rec of recs)
+      for (const v of videosOf(rec)) {
+        const was = videoLoopWas.get(v)
+        if (was != null) v.loop = was
+        void v.play().catch(() => {})
+      }
+  }
+
   /** Un-hide anything that no longer has a window (its timing was just removed). */
   const releaseUntimed = (): void => {
     for (const rec of recs) {
@@ -895,8 +1149,24 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     if (!w) return
     const entMs = phaseTotalMs(rec.el, 'entrance')
     const exitMs = phaseTotalMs(rec.el, 'exit')
+    const entranceTyping = phaseTypingConfig(rec.el, 'entrance') ?? rec.el.typing
+    const exitTyping = phaseTypingConfig(rec.el, 'exit')
     const goneAt = w.outMs === Infinity ? Infinity : w.outMs + exitMs
     rec.anim.style.animationPlayState = '' // a previous freeze may have paused it
+    const syncCountdown = (sceneMs: number): void => {
+      if (rec.el.type !== 'countdown') return
+      const mode = rec.el.countdown?.mode
+      if (mode === 'timer') {
+        const totalMs = Math.max(0, rec.el.countdown?.seconds ?? 60) * 1000
+        const elapsedMs = Math.max(0, sceneMs - w.inMs)
+        rec.deadline = Date.now() + Math.max(0, totalMs - elapsedMs)
+      } else if (mode === 'dynamic') {
+        rec.deadline = computeDeadline(rec.el, Date.now())
+      } else if (mode === 'clock') {
+        rec.deadline = Date.now()
+      }
+      tickCountdown(rec)
+    }
 
     if (fromMs >= goneAt) {
       setTimedVisible(rec, false)
@@ -907,19 +1177,24 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       setTimedVisible(rec, false)
       at(fromMs, w.inMs, () => {
         setTimedVisible(rec, true)
+        syncCountdown(w.inMs)
         runEntrance(rec)
         fireEnterSfx(rec)
       })
     } else {
       setTimedVisible(rec, true)
+      syncCountdown(fromMs)
       if (fromMs < w.inMs + entMs) {
         // Playback resumed mid-entrance: a negative delay (phaseFrameCss) starts the
         // animation partway through, and the loop takes over when it would have ended.
         const css = phaseFrameCss(rec.el, 'entrance', fromMs - w.inMs)
         if (css) restartAnim(rec.anim, css)
+        else clearNodeAnim(rec.anim)
+        if (entranceTyping) startTyping(rec, fromMs - w.inMs, entranceTyping)
         at(fromMs, w.inMs + entMs, () => applyMountAnim(rec))
       } else {
         applyMountAnim(rec) // past its entrance — just the loop
+        if (entranceTyping) startTyping(rec, fromMs - w.inMs, entranceTyping)
       }
     }
     // --- out ---
@@ -927,32 +1202,47 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       at(fromMs, w.outMs, () => {
         const css = phaseFrameCss(rec.el, 'exit', Math.max(0, fromMs - w.outMs))
         if (css) restartAnim(rec.anim, css)
+        else clearNodeAnim(rec.anim)
+        if (exitTyping) startTypingOut(rec, Math.max(0, fromMs - w.outMs))
       })
       at(fromMs, goneAt, () => setTimedVisible(rec, false))
     }
   }
   const armTimeline = (fromMs: number): void => {
     clearTimelineTimers()
-    timelinePreview = { ms: fromMs, playing: true, startedAt: Date.now() }
+    const loopMs = timelineLoopMs()
+    const playMs = loopMs > 0 ? ((fromMs % loopMs) + loopMs) % loopMs : fromMs
+    timelinePreview = { ms: playMs, playing: true, startedAt: Date.now() }
     releaseUntimed()
-    for (const rec of timedRecs()) scheduleTimed(rec, fromMs)
+    for (const rec of timedRecs()) scheduleTimed(rec, playMs)
+    previewVideos(playMs, true, playMs)
+    if (loopMs > 0) {
+      const nextLoopIn = Math.max(1, loopMs - playMs)
+      timelineTimers.push(window.setTimeout(() => armTimeline(0), nextLoopIn))
+    }
   }
   const freezeTimeline = (ms: number): void => {
     clearTimelineTimers()
     timelinePreview = { ms, playing: false, startedAt: 0 }
     releaseUntimed()
+    previewVideos(ms, false, ms)
     for (const rec of timedRecs()) {
       const w = timingWindow(rec.el)!
       const entMs = phaseTotalMs(rec.el, 'entrance')
       const exitMs = phaseTotalMs(rec.el, 'exit')
+      const entranceTyping = phaseTypingConfig(rec.el, 'entrance') ?? rec.el.typing
+      const exitTyping = phaseTypingConfig(rec.el, 'exit')
       const goneAt = w.outMs === Infinity ? Infinity : w.outMs + exitMs
       if (ms < w.inMs || ms >= goneAt) {
         setTimedVisible(rec, false)
+        if (entranceTyping) freezeTyping(rec, ms < w.inMs ? 0 : Infinity) // parked at the start / finished
         continue
       }
       setTimedVisible(rec, true)
       const phase: 'entrance' | 'exit' | null =
         ms < w.inMs + entMs ? 'entrance' : w.outMs !== Infinity && ms >= w.outMs ? 'exit' : null
+      if (phase === 'exit' && exitTyping) freezeTypingOut(rec, ms - w.outMs)
+      else if (entranceTyping) freezeTyping(rec, ms - w.inMs) // scrub through the type-out
       if (!phase) {
         rec.anim.style.animationPlayState = ''
         applyMountAnim(rec) // between in and out — the loop runs live
@@ -966,12 +1256,19 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
   const clearTimelinePreview = (): void => {
     clearTimelineTimers()
     timelinePreview = null
+    releaseVideos()
     for (const rec of timedRecs()) {
       rec.outer.classList.remove('pa-el--t-off')
       rec.anim.style.animationPlayState = ''
       applyMountAnim(rec)
+      if ((rec.el.typing || phaseTypingConfig(rec.el, 'entrance') || phaseTypingConfig(rec.el, 'exit')) && rec.typeShown != null)
+        stopTyping(rec, true) // back to the full string for editing
     }
   }
+  const onEndsceneMediaReset = (): void => {
+    if (timelinePreview?.playing) armTimeline(0)
+  }
+  root.addEventListener('pa-endscene-media-reset', onEndsceneMediaReset)
 
   let stageWon = false
   const revealOnWin = (): void => {
@@ -1399,6 +1696,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
         if (rec.el.hidden) continue // hidden/showOnWin elements animate when revealed
         if (rec.el.timing) continue // the scene timeline owns this element's entrance + enter SFX
         if (entranceTriggers(rec.el, 'onMount')) runEntrance(rec)
+        else if (rec.el.typing) startTyping(rec) // typing doesn't require an entrance animation
         fireEnterSfx(rec) // at the entrance's stagger delay (or immediately if no entrance)
       }
     },
@@ -1436,6 +1734,10 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
         if (nel.type === 'unboxing' && JSON.stringify(nel.unboxing) !== JSON.stringify(rec.el.unboxing)) return false
       }
       ctx.assets = nextAssets
+      // A font uploaded into an already-open scene arrives here, not through buildScene:
+      // register it now or the element's font-family points at a face the document has
+      // never heard of and the text silently renders in the fallback font.
+      injectFontStyles(nextAssets)
       // re-apply the scene background (set at build time) so background edits are live
       root.style.background = sceneBgCss(nextScene.meta.bgMatchColor, nextScene.meta.bgMatchColor2)
       root.style.setProperty('--pa-bg', nextScene.meta.bgMatchColor || '#000000')
@@ -1491,6 +1793,9 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
         if (JSON.stringify(nel.animations) !== JSON.stringify(prev.animations) || JSON.stringify(nel.cta) !== JSON.stringify(prev.cta)) applyMountAnim(rec)
         // restart the countdown ticker when its config changed
         if (nel.type === 'countdown' && JSON.stringify(nel.countdown) !== JSON.stringify(prev.countdown)) startTicker(rec)
+        // Typing switched off (or edited) while a partial string was on screen — put the
+        // full text back, otherwise the canvas would keep showing a half-typed value.
+        if (!nel.typing && !phaseTypingConfig(nel, 'entrance') && !phaseTypingConfig(nel, 'exit') && rec.typeShown != null) stopTyping(rec, true)
         // text value/style + all geometry are re-applied by layoutRec below.
       }
       for (const rec of recs) layoutRec(rec)
@@ -1518,7 +1823,9 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
         rec.idle?.stop()
         rec.confetti?.destroy()
         if (rec.ticker) window.clearInterval(rec.ticker)
+        if (rec.typeTimer) window.clearTimeout(rec.typeTimer)
       }
+      root.removeEventListener('pa-endscene-media-reset', onEndsceneMediaReset)
       root.remove()
     },
   }
@@ -1709,7 +2016,7 @@ function layoutRec(rec: Rec): void {
       outer.style.top = '0'
       outer.style.width = '100%'
       outer.style.height = '100%'
-      outer.style.transform = 'none'
+      outer.style.transform = e.rotation ? `rotate(${e.rotation}deg)` : 'none'
       return
     default:
       layoutAsset(rec, e, e.mode === 'extend' ? 'extend' : 'fit')
@@ -2029,37 +2336,161 @@ function applyBoxStyle(node: HTMLElement, box: SceneElement['box'], s: number): 
 // target, and to the authored design-px offset so the gap scales in lockstep.
 function attachedTextPos(rec: Rec, e: Effective): { left: number; top: number; k: number } | null {
   const attachId = rec.el.type === 'countdown' ? rec.el.countdown?.attachToId : undefined
-  if (!attachId) return null
   const root = rec.outer.parentElement
   if (!root) return null
   let target: Rec | undefined
-  for (const child of Array.from(root.children)) {
-    if ((child as HTMLElement).dataset?.id === attachId) {
-      target = recByOuter.get(child)
-      break
+  if (attachId) {
+    for (const child of Array.from(root.children)) {
+      if ((child as HTMLElement).dataset?.id === attachId) {
+        target = recByOuter.get(child)
+        break
+      }
     }
+  } else if (rec.el.type === 'countdown') {
+    target = autoEndsceneTarget(rec, root)
   }
+  const isAutoEndscene = !attachId && target?.el.type === 'endscene'
   if (!target || target === rec) return null
   // Make sure the target's geometry is current for this pass (element order in the
   // scene is arbitrary). Never re-enter for text/countdown targets — no recursion.
   if (target.el.type !== 'text' && target.el.type !== 'countdown') layoutRec(target)
   const tE = effective(target.el)
   if (tE.hidden) return null
-  const designW = tE.w ?? target.intrinsic.w * tE.scale
-  const designH = tE.h ?? target.intrinsic.h * tE.scale
-  if (!(designW > 0) || !(designH > 0)) return null
+  const targetDesignW = tE.w ?? target.intrinsic.w * tE.scale
+  const targetDesignH = tE.h ?? target.intrinsic.h * tE.scale
+  if (!(targetDesignW > 0) || !(targetDesignH > 0)) return null
   const tRect = target.outer.getBoundingClientRect()
   if (tRect.width < 1 || tRect.height < 1) return null
   const rootRect = root.getBoundingClientRect()
-  const k = tRect.height / designH
+  const media = attachedTargetMediaRect(target, tRect)
+
+  if (isAutoEndscene && media) {
+    const ref = autoEndsceneReferenceRect(target, e)
+    if (ref) {
+      const isBottomStrip = ref.normalTop > ref.height * 0.6
+      if (isBottomStrip) {
+        const k = isLandscape() ? media.width / ref.media.width : scale() / ref.fitScale
+        return {
+          left: isLandscape()
+            ? tRect.left - rootRect.left + (tRect.width - ref.width * k) / 2 + ref.normalLeft * k
+            : sx(e.x),
+          top: sy(e.y),
+          k: isLandscape() ? ref.fitScale * k : scale(),
+        }
+      }
+      if (isLandscape()) {
+        const k = media.width / ref.media.width
+        // Legacy countdown overlays should scale with the media, but their authored
+        // vertical position must remain stable. Applying the contain/cover offset to
+        // `top` makes them visibly nudge during resize/orientation changes.
+          return {
+            left: tRect.left - rootRect.left + (tRect.width - ref.width * k) / 2 + ref.normalLeft * k,
+            top: sy(e.y),
+            k: ref.fitScale * k,
+          }
+      }
+      const nx = (ref.normalLeft - ref.media.left) / ref.media.width
+      return {
+        left: media.left - rootRect.left + nx * media.width,
+        top: sy(e.y),
+        k: ref.fitScale * (media.height / ref.media.height),
+      }
+    }
+  }
+
   // The target's design-space top-left (its x/y is an anchor point, not a corner).
   const [atx, aty] = ANCHOR[tE.anchor]
-  const tLeftD = tE.x + (atx / 100) * designW
-  const tTopD = tE.y + (aty / 100) * designH
+  const tLeftD = tE.x + (atx / 100) * targetDesignW
+  const tTopD = tE.y + (aty / 100) * targetDesignH
+  if (media) {
+    const nx = (e.x - tLeftD) / targetDesignW
+    const ny = (e.y - tTopD) / targetDesignH
+    return {
+      left: media.left - rootRect.left + nx * media.width,
+      top: media.top - rootRect.top + ny * media.height,
+      k: media.height / targetDesignH,
+    }
+  }
+  const k = tRect.height / targetDesignH
   return {
     left: tRect.left - rootRect.left + (e.x - tLeftD) * k,
     top: tRect.top - rootRect.top + (e.y - tTopD) * k,
     k,
+  }
+}
+
+function attachedTargetMediaRect(
+  target: Rec,
+  rect: Pick<DOMRect, 'left' | 'top' | 'width' | 'height'>,
+): { left: number; top: number; width: number; height: number } | null {
+  if (target.el.type !== 'endscene' || !(target.content instanceof HTMLElement)) return null
+  const d = target.content.dataset
+  const landscape = isLandscape()
+  const mediaEl = target.content.querySelector<HTMLVideoElement | HTMLImageElement>(
+    landscape ? '.pa-endscene-video,.pa-endscene-img' : '.pa-endscene-video,.pa-endscene-img',
+  )
+  const dataW = parseFloat((landscape ? d.mediaWL : d.mediaWP) || '')
+  const dataH = parseFloat((landscape ? d.mediaHL : d.mediaHP) || '')
+  const naturalW =
+    mediaEl instanceof HTMLVideoElement && mediaEl.videoWidth > 0 ? mediaEl.videoWidth :
+    mediaEl instanceof HTMLImageElement && mediaEl.naturalWidth > 0 ? mediaEl.naturalWidth :
+    dataW
+  const naturalH =
+    mediaEl instanceof HTMLVideoElement && mediaEl.videoHeight > 0 ? mediaEl.videoHeight :
+    mediaEl instanceof HTMLImageElement && mediaEl.naturalHeight > 0 ? mediaEl.naturalHeight :
+    dataH
+  if (!(naturalW > 0) || !(naturalH > 0)) return null
+  const fullH = landscape ? d.fhL === '1' : d.fhP === '1'
+  const zoom = parseFloat((landscape ? d.zoomL : d.zoomP) || '1') || 1
+  if (fullH) {
+    const h = rect.height * zoom
+    const w = h * (naturalW / naturalH)
+    return { left: rect.left + (rect.width - w) / 2, top: rect.top + (rect.height - h) / 2, width: w, height: h }
+  }
+  const fit = (landscape ? d.fitL : d.fitP) || 'cover'
+  const base = fit === 'contain'
+    ? Math.min(rect.width / naturalW, rect.height / naturalH)
+    : Math.max(rect.width / naturalW, rect.height / naturalH)
+  const k = base * zoom
+  const w = naturalW * k
+  const h = naturalH * k
+  return { left: rect.left + (rect.width - w) / 2, top: rect.top + (rect.height - h) / 2, width: w, height: h }
+}
+
+function autoEndsceneTarget(rec: Rec, root: Element): Rec | undefined {
+  const currentZ = rec.el.zIndex ?? 0
+  const candidates: Rec[] = []
+  for (const child of Array.from(root.children)) {
+    const other = recByOuter.get(child)
+    if (!other || other === rec || other.el.type !== 'endscene') continue
+    const e = effective(other.el)
+    if (e.hidden || e.mode !== 'extend') continue
+    if ((other.el.zIndex ?? 0) > currentZ) continue
+    candidates.push(other)
+  }
+  candidates.sort((a, b) => (b.el.zIndex ?? 0) - (a.el.zIndex ?? 0))
+  return candidates[0]
+}
+
+function autoEndsceneReferenceRect(
+  target: Rec,
+  e: Effective,
+): { normalLeft: number; normalTop: number; fitScale: number; width: number; height: number; media: { left: number; top: number; width: number; height: number } } | null {
+  const designW = baseDesignW()
+  const designHpx = designH()
+  const refW = isLandscape() ? designHpx : designW
+  const refH = isLandscape() ? designW : designHpx
+  const fitScale = Math.min(refW / designW, refH / designHpx)
+  const offX = (refW - designW * fitScale) / 2
+  const media = attachedTargetMediaRect(target, { left: 0, top: 0, width: refW, height: refH })
+  if (!media || !(media.width > 0) || !(media.height > 0)) return null
+  return {
+    normalLeft: offX + e.x * fitScale,
+    normalTop: e.y * fitScale,
+    fitScale,
+    width: refW,
+    height: refH,
+    media,
   }
 }
 
@@ -2079,7 +2510,10 @@ function layoutText(rec: Rec, e: Effective): void {
 
   // inner text styling (re-applied each layout so edits stay reactive).
   // Countdown elements show the live formatted time, not the static value.
-  inner.textContent = rec.el.type === 'countdown' ? formatCountdown(rec.el, rec.deadline ?? Date.now(), Date.now()) : localize(t)
+  // Mid-typewriter, re-slice the LIVE string rather than snapping to the full value —
+  // otherwise a resize (or a countdown tick) during the type-out would finish it early.
+  const fullText = rec.el.type === 'countdown' ? formatCountdown(rec.el, rec.deadline ?? Date.now(), Date.now()) : localize(t)
+  inner.textContent = rec.typeShown != null ? fullText.slice(0, rec.typeShown) : fullText
   inner.style.fontFamily = t.fontFamily ?? ''
   inner.style.fontWeight = String(t.fontWeight ?? 400)
   inner.style.color = t.color ?? '#fff'
@@ -2089,7 +2523,7 @@ function layoutText(rec: Rec, e: Effective): void {
   inner.style.fontSize = t.fontSizePx * s + 'px'
   inner.style.letterSpacing = (t.letterSpacingPx ?? 0) * s + 'px'
   inner.style.setProperty('-webkit-text-stroke', t.strokePx ? t.strokePx * s + 'px ' + (t.strokeColor ?? '#000') : '')
-  inner.style.whiteSpace = e.w != null || t.maxWidthPx ? 'normal' : 'nowrap'
+  inner.style.whiteSpace = e.w != null || t.maxWidthPx ? 'pre-line' : 'pre'
   inner.style.maxWidth = t.maxWidthPx ? t.maxWidthPx * s + 'px' : ''
 
   // background box
@@ -2171,7 +2605,8 @@ function layoutBackground(rec: Rec): void {
   outer.style.bottom = ''
   outer.style.width = '100%'
   outer.style.height = '100%'
-  outer.style.transform = 'none'
+  const rot = effective(rec.el).rotation
+  outer.style.transform = rot ? `rotate(${rot}deg)` : 'none'
   // The <img> fills this full-screen box; object-fit crops it. In PORTRAIT the user
   // picks which part of the cover-crop stays visible (focusX/focusY). LANDSCAPE always
   // centers, so the image simply crops to cover the wider screen. Re-applied every
@@ -2234,7 +2669,8 @@ function layoutDim(rec: Rec): void {
   outer.style.top = '50%'
   outer.style.width = '300vmax'
   outer.style.height = '300vmax'
-  outer.style.transform = 'translate(-50%,-50%)'
+  const rot = effective(rec.el).rotation
+  outer.style.transform = `translate(-50%,-50%)` + (rot ? ` rotate(${rot}deg)` : '')
   outer.style.background = d?.color ?? '#000'
   outer.style.opacity = String(d?.alpha ?? 0.6)
   outer.style.pointerEvents = d?.blocksInput ? 'auto' : 'none'

@@ -118,6 +118,34 @@ describe('element timing windows', () => {
     expect(isOff(stage, 'a')).toBe(true)
   })
 
+  it('restarts timed elements when an exported looped video starts another pass', () => {
+    const stage = mount([
+      {
+        id: 'vid',
+        type: 'endscene',
+        name: 'Video',
+        x: 540,
+        y: 960,
+        w: 1080,
+        h: 1920,
+        anchor: 'center',
+        zIndex: 1,
+        mode: 'extend',
+        endscene: { loop: true },
+      } as SceneElement,
+      el({ id: 'a', timing: { inMs: 0, durationMs: 900 } }),
+    ])
+    const video = stage.root.querySelector('video')!
+    Object.defineProperty(video, 'duration', { value: 2, configurable: true })
+
+    stage.seekTimeline(0, true)
+    expect(isOff(stage, 'a')).toBe(false)
+    vi.advanceTimersByTime(900)
+    expect(isOff(stage, 'a')).toBe(true)
+    vi.advanceTimersByTime(1100)
+    expect(isOff(stage, 'a')).toBe(false)
+  })
+
   it('keeps the element hidden across a relayout (resize / rotation)', () => {
     const stage = mount([el({ id: 'a', timing: { inMs: 2000, durationMs: 1000 } })])
     stage.seekTimeline(0, false)
@@ -193,5 +221,23 @@ describe('element timing windows', () => {
     expect(isOff(stage, 'a')).toBe(true)
     stage.seekTimeline(null, false)
     expect(isOff(stage, 'a')).toBe(false)
+  })
+
+  it('honors rotation on special full-screen and text-like element types', () => {
+    const stage = mount([
+      el({ id: 'bg', type: 'background', assetId: 'a1', rotation: 11 }),
+      el({ id: 'dim', type: 'dim', rotation: 22, dim: { color: '#000000', alpha: 0.4 } }),
+      el({ id: 'confetti', type: 'confetti', rotation: 33, confetti: {} }),
+      el({ id: 'txt', rotation: 44 }),
+      el({ id: 'cd', type: 'countdown', rotation: 55, countdown: { mode: 'dynamic', dynamicDays: 1, format: 'MMM D' } }),
+      el({ id: 'end', type: 'endscene', rotation: 66, endscene: { objectFit: 'cover', bgColor: '#000000' } }),
+    ])
+
+    expect(stage.get('bg')!.outer.style.transform).toContain('rotate(11deg)')
+    expect(stage.get('dim')!.outer.style.transform).toContain('rotate(22deg)')
+    expect(stage.get('confetti')!.outer.style.transform).toContain('rotate(33deg)')
+    expect(stage.get('txt')!.outer.style.transform).toContain('rotate(44deg)')
+    expect(stage.get('cd')!.outer.style.transform).toContain('rotate(55deg)')
+    expect(stage.get('end')!.outer.style.transform).toContain('rotate(66deg)')
   })
 })

@@ -51,6 +51,15 @@ export type AnimPresetId =
   | 'swipe-right'
   | 'swipe-out-left'
   | 'swipe-out-right'
+  // Wipes DON'T move the element: a clip edge sweeps across the box, uncovering it
+  // (wipe-*) or erasing it (wipe-out-*). The name says which way the edge travels.
+  | 'wipe-left'
+  | 'wipe-right'
+  | 'wipe-up'
+  | 'wipe-out-left'
+  | 'wipe-out-right'
+  | 'wipe-out-up'
+  | 'typewriter'
   | 'pop'
   | 'bounce'
   | 'shake'
@@ -115,6 +124,29 @@ export interface ElementAnimations {
 export interface TimingConfig {
   inMs: number
   durationMs?: number
+}
+
+/**
+ * Typewriter reveal for a text / dynamic-date element: the string appears one
+ * character at a time when the element enters.
+ *
+ * Driven in JS rather than the classic CSS steps()+width trick, which needs a
+ * monospace font to land on character boundaries and can't handle wrapping — this
+ * works with any font, any number of lines, and stays correct across relayouts
+ * because the partial string is re-derived from the live text on every layout pass.
+ *
+ * Speed and total time are two views of the same thing: `durationMs` wins when set
+ * (the whole string types in exactly that long, whatever its length), otherwise the
+ * string types at `cps` characters per second.
+ */
+export interface TypingConfig {
+  cps?: number // characters per second (default 24); ignored when durationMs is set
+  durationMs?: number // total time to type the whole string, overrides cps
+  delayMs?: number // wait this long after the element enters before typing starts
+  caret?: boolean // show a blinking caret while typing
+  keepCaret?: boolean // keep the caret after the last character (default: hide it)
+  loop?: boolean // retype forever: type, hold, clear, repeat
+  holdMs?: number // pause at the full string before looping (default 1500)
 }
 
 export interface SfxBinding {
@@ -278,14 +310,24 @@ export interface BoxStyle {
 // date parts of the target date: {MMMM} July, {MMM} Jul, {M}/{MM} 7/07,
 // {D}/{DD} 12/12, {YYYY}/{YY} — month names follow dateLocale.
 export interface CountdownConfig {
-  mode: 'timer' | 'date' | 'dynamic'
+  // 'clock' shows the CURRENT wall-clock time (default format '{hh}:{mm}' → "14:05"),
+  // re-rendered every second; the other modes count toward a target instant.
+  mode: 'timer' | 'date' | 'dynamic' | 'clock'
   seconds?: number
   targetIso?: string
   dynamicDays?: number
   format: string
   dateStyle?: 'short' | 'long' | 'numeric' | 'monthDay' // how {date} renders
   dateLocale?: string // BCP-47 tag for {date} rendering (default 'en-US')
-  capitalize?: boolean // upper-case the first letter of every word in the rendered text
+  // Clock mode only: render {h}/{hh} as 1–12 instead of 0–23. The AM/PM suffix is the
+  // separate {A} (PM) / {a} (pm) token, so it can sit anywhere in the format.
+  hour12?: boolean
+  // Case applied to the whole rendered string. Month names come out of Intl already
+  // title-cased, so 'upper' is what turns "Jul" into "JUL"; 'title' only affects
+  // lower-case words you typed yourself.
+  textCase?: 'none' | 'title' | 'upper' | 'lower'
+  /** @deprecated superseded by textCase ('title'); still honored for older projects. */
+  capitalize?: boolean
   // Glue this element to another element (usually an image): position and font
   // size are derived from the TARGET's rendered rect instead of the global FIT
   // math, so the text keeps the same relative offset and proportional height at
@@ -600,6 +642,7 @@ export interface SceneElement {
 
   landscape?: OrientationOverride
   timing?: TimingConfig // scene-timeline in/out window (see TimingConfig)
+  typing?: TypingConfig // typewriter reveal for text / countdown elements
   animations?: ElementAnimations
   sfx?: SfxBinding[]
   idle?: IdleConfig
@@ -658,6 +701,9 @@ export interface HeaderConfig {
   // (bare or {braced}): MMMM full month, MMM short month, MM/M numeric month,
   // DD/D day, YYYY/YY year. Empty → the legacy "JULY 15, 2026" rendering.
   dateFormat?: string
+  // Case applied to the rendered date/timer. 'upper' is what turns "Jul" into "JUL" —
+  // Intl hands back month names already title-cased, so 'title' is a no-op on them.
+  textCase?: 'none' | 'title' | 'upper' | 'lower'
 }
 
 export interface ProjectMeta {
@@ -729,6 +775,7 @@ export interface Scene {
   overlay?: SceneOverlay
   sfx?: SfxBinding[]
   bgm?: { assetId: string; volume: number }
+  timelineMs?: number
 }
 
 export type AdvanceOn = 'gameWin' | 'timer' | 'tap' | 'manual'

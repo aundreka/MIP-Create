@@ -21,6 +21,12 @@ export interface HeaderConfig {
   countdownSeconds?: number
   countdownFormat?: string
   dateFormat?: string
+  // Case applied to the rendered date/timer (the band's own prefix/suffix are left
+  // as typed). Passed straight through to the shared formatter — these used to be
+  // dropped here, so the project-level date silently ignored them.
+  textCase?: 'none' | 'title' | 'upper' | 'lower'
+  dateLocale?: string
+  dateStyle?: 'short' | 'long' | 'numeric' | 'monthDay'
 }
 
 interface HeaderHandle {
@@ -76,7 +82,7 @@ export function mountHeader(container: HTMLElement, opts: HeaderConfig): HeaderH
     const fmt = opts.countdownFormat || '{mm}:{ss}'
     const deadline = Date.now() + Math.max(0, opts.countdownSeconds ?? 300) * 1000
     const render = (): void => {
-      text.textContent = (opts.prefix ?? '') + renderCountdownFormat(fmt, deadline, Date.now()) + (opts.suffix ?? '')
+      text.textContent = (opts.prefix ?? '') + renderCountdownFormat(fmt, deadline, Date.now(), opts) + (opts.suffix ?? '')
     }
     render()
     if (formatTicks(fmt)) {
@@ -89,7 +95,7 @@ export function mountHeader(container: HTMLElement, opts: HeaderConfig): HeaderH
     // Custom layouts render today via the shared token formatter (deadline=now
     // makes the date tokens target today); empty keeps the legacy fixed style.
     const now = Date.now()
-    const date = opts.dateFormat ? renderCountdownFormat(braceBareTokens(opts.dateFormat), now, now) : formatHeaderDate()
+    const date = opts.dateFormat ? renderCountdownFormat(braceBareTokens(opts.dateFormat), now, now, opts) : formatHeaderDate()
     text.textContent = (opts.prefix ?? '') + date + (opts.suffix ?? '')
   }
 

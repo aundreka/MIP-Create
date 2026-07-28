@@ -92,6 +92,18 @@ export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): 
                 />
               </Row>
             )}
+            <Row label="Text case">
+              <Select
+                value={h.textCase ?? 'none'}
+                onChange={(v) => set({ textCase: v === 'none' ? undefined : (v as NonNullable<typeof h.textCase>) })}
+                options={[
+                  { value: 'none', label: 'As typed' },
+                  { value: 'upper', label: 'UPPERCASE' },
+                  { value: 'title', label: 'Capitalize Each Word' },
+                  { value: 'lower', label: 'lowercase' },
+                ]}
+              />
+            </Row>
             {(() => {
               // Same pattern as the Inspector's text-font picker: font assets are
               // base64 data URLs whose id doubles as the CSS font-family, embedded

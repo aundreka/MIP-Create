@@ -1137,6 +1137,15 @@ export function createScratchGrid(): GameModule {
       const dateColor = str(params.dateColor as unknown, '#ffffff')
       const dateWeight = Math.max(100, Math.min(900, num(params.dateWeight as unknown, 700)))
       const dateFont = str(params.dateFont as unknown, '')
+      // Same case control the countdown element has — month names come out of Intl
+      // title-cased, so UPPERCASE is the only mode that turns "Jul" into "JUL".
+      // The param stores its display label (paramFields options are plain strings).
+      const DATE_CASE: Record<string, 'none' | 'title' | 'upper' | 'lower'> = {
+        UPPERCASE: 'upper',
+        'Capitalize Each Word': 'title',
+        lowercase: 'lower',
+      }
+      const dateCase = DATE_CASE[str(params.dateCase as unknown, '')] ?? 'none'
 
       // Per-cell win overlay overrides (each falls back to the global default).
       const cellWinSceneId = (i: number): string =>
@@ -1284,7 +1293,7 @@ export function createScratchGrid(): GameModule {
         if (dateFmt) {
           dateEl = document.createElement('div')
           const now = Date.now()
-          dateEl.textContent = renderCountdownFormat(braceBareTokens(dateFmt), now + dateDays * 86400000, now)
+          dateEl.textContent = renderCountdownFormat(braceBareTokens(dateFmt), now + dateDays * 86400000, now, { textCase: dateCase })
           dateEl.style.cssText =
             `position:absolute;left:${dateX}%;top:${dateY}%;transform:translate(-50%,-50%);` +
             'pointer-events:none;white-space:pre-line;text-align:center;line-height:1.15;user-select:none;-webkit-user-select:none;'
@@ -1535,6 +1544,7 @@ export const SCRATCH_GRID_TEMPLATE: GameTemplate = {
     { key: 'dateY', label: 'Date Y (% of cell)', type: 'number', min: 0, max: 100, step: 1 },
     { key: 'dateColor', label: 'Date color', type: 'color' },
     { key: 'dateWeight', label: 'Date weight', type: 'number', min: 100, max: 900, step: 100 },
+    { key: 'dateCase', label: 'Date case', type: 'select', options: ['As typed', 'UPPERCASE', 'Capitalize Each Word', 'lowercase'] },
     { key: 'dateFont', label: 'Date font (family or uploaded font id)', type: 'text' },
     { key: 'gap', label: 'Outer padding', type: 'number', min: 0, max: 60, step: 2 },
     { key: 'colGap', label: 'Column gap', type: 'number', min: 0, max: 60, step: 2 },

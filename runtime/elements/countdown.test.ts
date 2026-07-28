@@ -31,4 +31,8 @@ describe('countdown element bare date tokens', () => {
     expect(formatCountdown(el('Ends DD'), T, T)).toBe('Ends 16')
     expect(formatCountdown(el('DAY D'), T, T)).toBe('DAY 16')
   })
+
+  it('preserves newlines in the format field', () => {
+    expect(formatCountdown(el('Ends\nMMM D'), T, T)).toBe('Ends\nJul 16')
+  })
 })

@@ -31,4 +31,7 @@ export type ParentToFrame =
 
 export type FrameToParent =
   | { type: 'pa:ready' }
-  | { type: 'pa:layout'; metrics: FrameMetrics; rects: FrameRect[] }
+  // mediaMs: the longest <video> in the scene, so the editor's timeline ruler can
+  // span the footage instead of cutting it off at the default length. 0 = no video
+  // (or its metadata hasn't loaded yet — a later pa:layout carries the real value).
+  | { type: 'pa:layout'; metrics: FrameMetrics; rects: FrameRect[]; mediaMs?: number }

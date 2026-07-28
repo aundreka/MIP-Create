@@ -38,8 +38,16 @@ function postLayout(): void {
     const r = node.getBoundingClientRect()
     rects.push({ id, type: typeById.get(id) ?? 'image', x: r.left, y: r.top, w: r.width, h: r.height })
   }
-  post({ type: 'pa:layout', metrics: metrics(), rects })
+  let mediaMs = 0
+  for (const v of Array.from(document.querySelectorAll('video')))
+    if (isFinite(v.duration) && v.duration > 0) mediaMs = Math.max(mediaMs, v.duration * 1000)
+  post({ type: 'pa:layout', metrics: metrics(), rects, mediaMs })
 }
+
+// Video duration is unknown until metadata lands, which is normally AFTER the layout
+// pass above — re-post so the timeline ruler can grow to fit the footage. loadedmetadata
+// doesn't bubble, hence the capture-phase listener.
+document.addEventListener('loadedmetadata', () => requestAnimationFrame(postLayout), true)
 
 // single-scene render (editor canvas)
 function render(next: Scene, assets: AssetMap, interactive: boolean): void {

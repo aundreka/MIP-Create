@@ -460,11 +460,11 @@ const EASINGS: { value: string; label: string }[] = [
 ]
 // 'lightray' (the moving reflection) is a class-driven pseudo effect, so it can be picked in ANY
 // phase — entrance, loop, or exit — not just as a loop.
-const ENTRANCE_PRESETS: AnimPresetId[] = ['fade', 'slide-up', 'slide-down', 'slide-left', 'slide-right', 'swipe-left', 'swipe-right', 'pop', 'bounce', 'spin', 'lightray']
+const ENTRANCE_PRESETS: AnimPresetId[] = ['fade', 'typewriter', 'wipe-right', 'wipe-left', 'wipe-up', 'slide-up', 'slide-down', 'slide-left', 'slide-right', 'swipe-left', 'swipe-right', 'pop', 'bounce', 'spin', 'lightray']
 const LOOP_PRESETS: AnimPresetId[] = ['pulse', 'float', 'subtle-float', 'bounce', 'shake', 'wave', 'shine', 'lightray', 'glow', 'spin']
-const EXIT_PRESETS: AnimPresetId[] = ['fade-out', 'scale-out', 'swipe-out-left', 'swipe-out-right', 'lightray']
+const EXIT_PRESETS: AnimPresetId[] = ['fade-out', 'typewriter', 'wipe-out-left', 'wipe-out-right', 'wipe-out-up', 'scale-out', 'swipe-out-left', 'swipe-out-right', 'lightray']
 // Presets offered for STACKED (extra) animations: every node-driven preset + the reflection.
-const NODE_PRESETS: AnimPresetId[] = ['fade', 'slide-up', 'slide-down', 'slide-left', 'slide-right', 'swipe-left', 'swipe-right', 'pop', 'bounce', 'shake', 'wave', 'shine', 'glow', 'spin', 'float', 'subtle-float', 'pulse', 'fade-out', 'scale-out', 'swipe-out-left', 'swipe-out-right', 'lightray']
+const NODE_PRESETS: AnimPresetId[] = ['fade', 'wipe-right', 'wipe-left', 'wipe-up', 'slide-up', 'slide-down', 'slide-left', 'slide-right', 'swipe-left', 'swipe-right', 'pop', 'bounce', 'shake', 'wave', 'shine', 'glow', 'spin', 'float', 'subtle-float', 'pulse', 'fade-out', 'wipe-out-left', 'wipe-out-right', 'wipe-out-up', 'scale-out', 'swipe-out-left', 'swipe-out-right', 'lightray']
 const LOOP_EXTRA_PRESETS: AnimPresetId[] = NODE_PRESETS
 // Friendly labels so effects are findable in the dropdown (the raw ids are terse).
 const PRESET_LABELS: Partial<Record<AnimPresetId, string>> = {
@@ -475,13 +475,20 @@ const PRESET_LABELS: Partial<Record<AnimPresetId, string>> = {
   'slide-down': 'slide down',
   'slide-left': 'slide left',
   'slide-right': 'slide right',
-  'swipe-left': 'swipe left (in from the right edge)',
-  'swipe-right': 'swipe right (in from the left edge)',
-  'swipe-out-left': 'swipe out ← (off the left edge)',
-  'swipe-out-right': 'swipe out → (off the right edge)',
+  'wipe-right': 'wipe in → (uncovers left to right)',
+  'wipe-left': 'wipe in ← (uncovers right to left)',
+  'wipe-up': 'wipe in ↑ (uncovers bottom to top)',
+  'wipe-out-left': 'wipe off ← (erases right to left)',
+  'wipe-out-right': 'wipe off → (erases left to right)',
+  'wipe-out-up': 'wipe off ↑ (erases bottom to top)',
+  'swipe-left': 'slide across ← (flies in from the right)',
+  'swipe-right': 'slide across → (flies in from the left)',
+  'swipe-out-left': 'slide off ← (flies past the left edge)',
+  'swipe-out-right': 'slide off → (flies past the right edge)',
   'fade-out': 'fade out',
   'scale-out': 'scale out',
   'subtle-float': 'subtle float',
+  typewriter: 'typewriter',
 }
 const presetLabel = (p: AnimPresetId): string => PRESET_LABELS[p] ?? (p as string)
 // Direction options for the 'lightray' reflection sweep (mapped to an angle in degrees).
@@ -1605,6 +1612,8 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
   // filtering out undefined the way the ?? setters above do.
   const setTiming = (patch: Partial<TimingConfig>): void =>
     patchElement(id, { timing: { ...(el.timing ?? { inMs: 0 }), ...patch } })
+  // Same deal as setTiming — `durationMs: undefined` is meaningful here too (it hands
+  // control back to the chars-per-second speed), so this spreads rather than filters.
   const isTextOrCta = el.type === 'text' || el.type === 'cta' || el.type === 'button' || el.type === 'choice'
   // countdown is styled like text (font/colour/box), so it shares those sections
   const hasTextStyle = isTextOrCta || el.type === 'countdown'
@@ -1644,7 +1653,6 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
     { key: 'soft', label: 'Soft', box: { bgColor: '#ffffff', radiusPx: 26, paddingXPx: 40, paddingYPx: 24, shadow: 'medium' } },
     { key: 'glass', label: 'Glass', box: { bgColor: 'rgba(255,255,255,0.16)', radiusPx: 24, borderPx: 1.5, borderColor: 'rgba(255,255,255,0.55)', paddingXPx: 36, paddingYPx: 20, shadow: 'soft' } },
   ]
-
   return (
     <div className="panel inspector">
       {variantBanner}
@@ -1787,7 +1795,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
       ) : (
         <NumField label="Scale" value={g.scale} step={0.01} onChange={(n) => patchGeometry(id, { scale: n })} />
       )}
-      {(el.type === 'bar' || el.type === 'image') && (
+      {(
         <div className="grid2" style={{ marginTop: 4 }}>
           <NumField label="Angle" value={el.rotation ?? 0} suffix="°" onChange={(n) => patchElement(id, { rotation: n === 0 ? undefined : n })} />
         </div>
@@ -2317,14 +2325,54 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               <Row label="Mode">
                 <Select
                   value={cfg.mode}
-                  onChange={(v) => setCd({ mode: v as CountdownConfig['mode'] })}
+                  onChange={(v) => {
+                    const mode = v as CountdownConfig['mode']
+                    // A clock with a pure date format ("TODAY MMM D") would render a
+                    // frozen label, so seed the canonical 00:00 format — unless the
+                    // author already has time tokens they want to keep.
+                    const needsClockFmt = mode === 'clock' && !/\{h{1,2}\}|\{m{1,2}\}|\{s{1,2}\}/.test(cfg.format || '')
+                    setCd(needsClockFmt ? { mode, format: '{hh}:{mm}' } : { mode })
+                  }}
                   options={[
                     { value: 'dynamic', label: 'dynamic (now + days)' },
                     { value: 'timer', label: 'timer (countdown)' },
                     { value: 'date', label: 'fixed date' },
+                    { value: 'clock', label: 'clock (current time)' },
                   ]}
                 />
               </Row>
+              {cfg.mode === 'clock' && (
+                <>
+                  <Row label="Time format">
+                    <Select
+                      value={cfg.hour12 ? '12' : '24'}
+                      onChange={(v) => {
+                        const hour12 = v === '12'
+                        // Keep the format in step with the choice: 12-hour needs the AM/PM
+                        // token to be readable, 24-hour has no use for it.
+                        const f = cfg.format || '{hh}:{mm}'
+                        const hasMeridiem = /\{[Aa]\}/.test(f)
+                        const format = hour12
+                          ? hasMeridiem
+                            ? f
+                            : `${f} {A}`
+                          : f.replace(/\s*\{[Aa]\}/g, '')
+                        setCd({ hour12: hour12 || undefined, format })
+                      }}
+                      options={[
+                        { value: '24', label: '24-hour — 14:05' },
+                        { value: '12', label: '12-hour — 2:05 PM' },
+                      ]}
+                    />
+                  </Row>
+                  <div className="hint pad">
+                    Shows the viewer's own clock, updating every second. <b>{'{hh}:{mm}'}</b> → “
+                    {cfg.hour12 ? '02:05' : '14:05'}” (zero-padded); <b>{'{h}:{mm}'}</b> drops the leading zero and{' '}
+                    <b>{'{ss}'}</b> adds seconds. <b>{'{A}'}</b> → PM, <b>{'{a}'}</b> → pm. Date tokens (<b>MMM</b>, <b>D</b>…)
+                    show today.
+                  </div>
+                </>
+              )}
               {cfg.mode === 'dynamic' && (
                 <NumField label="Days from now" value={cfg.dynamicDays ?? 1} step={1} min={0} onChange={(n) => setCd({ dynamicDays: n })} />
               )}
@@ -2341,7 +2389,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 </Row>
               )}
               <Row label="Format">
-                <input value={cfg.format} onChange={(e) => setCd({ format: e.target.value })} placeholder="{hh}:{mm}:{ss}" />
+                <textarea value={cfg.format} rows={2} onChange={(e) => setCd({ format: e.target.value })} placeholder="{hh}:{mm}:{ss}" />
               </Row>
               {cfg.format.includes('{date}') && (
                 <Row label="Date style">
@@ -2369,7 +2417,22 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                   />
                 </Row>
               )}
-              <Toggle label="Capitalize text" checked={!!cfg.capitalize} onChange={(v) => setCd({ capitalize: v || undefined })} />
+              <Row label="Text case">
+                <Select
+                  value={cfg.textCase ?? (cfg.capitalize ? 'title' : 'none')}
+                  onChange={(v) => setCd({ textCase: v as CountdownConfig['textCase'], capitalize: undefined })}
+                  options={[
+                    { value: 'none', label: 'As typed' },
+                    { value: 'upper', label: 'UPPERCASE' },
+                    { value: 'title', label: 'Capitalize Each Word' },
+                    { value: 'lower', label: 'lowercase' },
+                  ]}
+                />
+              </Row>
+              <div className="hint pad">
+                Month names arrive already capitalized (<b>Jul</b>), so “Capitalize Each Word” won’t change them — pick{' '}
+                <b>UPPERCASE</b> for <b>JUL</b>.
+              </div>
               {(() => {
                 const targets = state.scene.elements.filter((t) => t.id !== id && (t.type === 'image' || t.type === 'bar'))
                 // A stale id (target deleted) stays listed so it can be seen + cleared.
@@ -2965,6 +3028,28 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 options={[{ value: 'none', label: 'none (just appears)' }, ...ENTRANCE_PRESETS.map((p) => ({ value: p as string, label: presetLabel(p) }))]}
               />
             </Row>
+            {el.animations?.entrance && (
+              <div className="grid2">
+                <NumField
+                  label="In speed (ms)"
+                  value={el.animations.entrance.durationMs}
+                  step={50}
+                  min={0}
+                  onChange={(n) =>
+                    patchElement(id, { animations: { ...(el.animations ?? {}), entrance: { ...el.animations!.entrance!, durationMs: Math.max(0, n) } } })
+                  }
+                />
+                <NumField
+                  label="In delay (ms)"
+                  value={el.animations.entrance.delayMs}
+                  step={50}
+                  min={0}
+                  onChange={(n) =>
+                    patchElement(id, { animations: { ...(el.animations ?? {}), entrance: { ...el.animations!.entrance!, delayMs: Math.max(0, n) } } })
+                  }
+                />
+              </div>
+            )}
             <Row label="Animate out">
               <Select
                 value={(el.animations?.exit?.preset ?? 'none') as string}
@@ -2983,6 +3068,28 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 options={[{ value: 'none', label: 'none (just disappears)' }, ...EXIT_PRESETS.map((p) => ({ value: p as string, label: presetLabel(p) }))]}
               />
             </Row>
+            {el.animations?.exit && (
+              <div className="grid2">
+                <NumField
+                  label="Out speed (ms)"
+                  value={el.animations.exit.durationMs}
+                  step={50}
+                  min={0}
+                  onChange={(n) =>
+                    patchElement(id, { animations: { ...(el.animations ?? {}), exit: { ...el.animations!.exit!, durationMs: Math.max(0, n) } } })
+                  }
+                />
+                <NumField
+                  label="Out delay (ms)"
+                  value={el.animations.exit.delayMs}
+                  step={50}
+                  min={0}
+                  onChange={(n) =>
+                    patchElement(id, { animations: { ...(el.animations ?? {}), exit: { ...el.animations!.exit!, delayMs: Math.max(0, n) } } })
+                  }
+                />
+              </div>
+            )}
             <button className="wide" onClick={() => setTimeline({ open: true, ms: el.timing?.inMs ?? 0, playing: false })}>
               Show on the timeline
             </button>

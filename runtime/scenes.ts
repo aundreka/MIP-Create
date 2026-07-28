@@ -246,6 +246,7 @@ export function playProject(
     elements: def.elements,
     kind: def.kind,
     overlay: def.overlay,
+    timelineMs: def.timelineMs,
   })
 
   const nextId = (def: SceneDef): string | null => {

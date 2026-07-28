@@ -167,6 +167,16 @@ export function createEndsceneContent(el: SceneElement, ctx: RuntimeCtx): HTMLEl
   const lv = ctx.src(cfg?.landscapeVideoId) || pv
   const pi = ctx.src(cfg?.portraitImageId)
   const li = ctx.src(cfg?.landscapeImageId) || pi
+  const pa = ctx.asset(cfg?.portraitVideoId) ?? ctx.asset(cfg?.portraitImageId)
+  const la = ctx.asset(cfg?.landscapeVideoId) ?? ctx.asset(cfg?.landscapeImageId) ?? pa
+  if (pa?.w && pa?.h) {
+    wrap.dataset.mediaWP = String(pa.w)
+    wrap.dataset.mediaHP = String(pa.h)
+  }
+  if (la?.w && la?.h) {
+    wrap.dataset.mediaWL = String(la.w)
+    wrap.dataset.mediaHL = String(la.h)
+  }
 
   const video = document.createElement('video')
   video.className = 'pa-endscene-video'
@@ -383,6 +393,7 @@ export function updateEndsceneMedia(wrap: HTMLElement, landscape: boolean): void
       video.dataset.cur = vSrc
       video.src = vSrc
       video.load()
+      wrap.dispatchEvent(new CustomEvent('pa-endscene-media-reset', { bubbles: true }))
     }
     void video.play().catch(() => {})
     video.style.display = 'block'
@@ -392,6 +403,7 @@ export function updateEndsceneMedia(wrap: HTMLElement, landscape: boolean): void
     if (img.dataset.cur !== iSrc) {
       img.dataset.cur = iSrc
       img.src = iSrc
+      wrap.dispatchEvent(new CustomEvent('pa-endscene-media-reset', { bubbles: true }))
     }
     img.style.display = 'block'
     video.style.display = 'none'

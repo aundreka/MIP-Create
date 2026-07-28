@@ -43,6 +43,27 @@ const KEYFRAMES = `
 @keyframes pa-swipe-right{0%{transform:translateX(-110vw);opacity:0}60%{opacity:1}88%{transform:translateX(calc(14px * var(--pa-s,1)))}100%{transform:translateX(0);opacity:1}}
 @keyframes pa-swipe-out-left{0%{transform:translateX(0);opacity:1}12%{transform:translateX(calc(14px * var(--pa-s,1)))}70%{opacity:1}100%{transform:translateX(-110vw);opacity:0}}
 @keyframes pa-swipe-out-right{0%{transform:translateX(0);opacity:1}12%{transform:translateX(calc(-14px * var(--pa-s,1)))}70%{opacity:1}100%{transform:translateX(110vw);opacity:0}}
+/* WIPES — the element stays put and a moving edge uncovers or erases it, like a
+   squeegee crossing the box. clip-path:inset(top right bottom left): growing the
+   RIGHT inset eats the box from the right edge inward, growing the LEFT inset eats
+   it from the left. Direction names the way the edge TRAVELS:
+     wipe-right     reveal, edge travels left→right   (content appears from the left)
+     wipe-left      reveal, edge travels right→left
+     wipe-out-left  erase,  edge travels right→left   (the left side is last to go)
+     wipe-out-right erase,  edge travels left→right
+   Percentages, so the sweep covers the whole element at any size — no --pa-s needed.
+   A CSS animation outranks the inline clip-path layoutRec writes for the blur clip,
+   so the two never fight. */
+@keyframes pa-wipe-right{from{clip-path:inset(0 100% 0 0)}to{clip-path:inset(0 0 0 0)}}
+@keyframes pa-wipe-left{from{clip-path:inset(0 0 0 100%)}to{clip-path:inset(0 0 0 0)}}
+@keyframes pa-wipe-out-left{from{clip-path:inset(0 0 0 0)}to{clip-path:inset(0 100% 0 0)}}
+@keyframes pa-wipe-out-right{from{clip-path:inset(0 0 0 0)}to{clip-path:inset(0 0 0 100%)}}
+@keyframes pa-wipe-up{from{clip-path:inset(100% 0 0 0)}to{clip-path:inset(0 0 0 0)}}
+@keyframes pa-wipe-out-up{from{clip-path:inset(0 0 0 0)}to{clip-path:inset(0 0 100% 0)}}
+/* Typewriter caret — a blinking bar parked at the end of the typed text. */
+@keyframes pa-caret-blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+.pa-typing-caret::after{content:'';display:inline-block;width:.08em;height:1em;margin-left:.06em;
+  vertical-align:-.12em;background:currentColor;animation:pa-caret-blink 1s step-end infinite;}
 @keyframes pa-bounce{0%,100%{transform:translateY(0)}30%{transform:translateY(calc(-18px * var(--pa-s,1)))}55%{transform:translateY(0)}75%{transform:translateY(calc(-7px * var(--pa-s,1)))}}
 @keyframes pa-shake{0%,100%{transform:translateX(0)}20%{transform:translateX(calc(-6px * var(--pa-s,1)))}40%{transform:translateX(calc(6px * var(--pa-s,1)))}60%{transform:translateX(calc(-4px * var(--pa-s,1)))}80%{transform:translateX(calc(4px * var(--pa-s,1)))}}
 @keyframes pa-wave{0%,100%{transform:rotate(-4deg)}50%{transform:rotate(4deg)}}
@@ -128,6 +149,7 @@ function ensureCustomKeyframes(steps: KeyframeStep[]): string {
 
 // ---- shorthand builders ----------------------------------------------------
 function keyframeName(spec: AnimSpec): string {
+  if (spec.preset === 'typewriter') return ''
   if (spec.preset === 'custom') return spec.custom?.length ? ensureCustomKeyframes(spec.custom) : ''
   return 'pa-' + spec.preset
 }
@@ -194,6 +216,7 @@ export function phaseTotalMs(el: SceneElement, phase: Phase): number {
 export function phaseFrameCss(el: SceneElement, phase: Phase, elapsedMs: number): string {
   return phaseSpecs(el, phase)
     .filter((s) => s.preset !== 'lightray') // pseudo-driven sweep, not a node animation
+    .filter((s) => s.preset !== 'typewriter') // JS-driven text reveal/erase
     .map((s) => {
       const name = keyframeName(s)
       if (!name) return ''
@@ -240,6 +263,7 @@ export function composeElementAnim(el: SceneElement, includeEntrance: boolean): 
   if (includeEntrance) {
     for (const e of phaseSpecs(el, 'entrance')) {
       if (e.preset === 'lightray') continue // pseudo-driven sweep, not a node animation
+      if (e.preset === 'typewriter') continue // JS-driven text reveal
       const css = animationCss(e, false)
       if (css) parts.push(css)
       loopDelay = Math.max(loopDelay, (e.delayMs || 0) + e.durationMs)
@@ -263,6 +287,7 @@ export function composeElementAnim(el: SceneElement, includeEntrance: boolean): 
 export function exitCss(el: SceneElement): string {
   return phaseSpecs(el, 'exit')
     .filter((e) => e.preset !== 'lightray') // pseudo-driven sweep, not a node animation
+    .filter((e) => e.preset !== 'typewriter') // JS-driven text erase
     .map((e) => animationCss(e, false))
     .filter(Boolean)
     .join(', ')

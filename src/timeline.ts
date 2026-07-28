@@ -55,19 +55,35 @@ export function clipEnd(el: SceneElement): number | null {
   return d != null && d > 0 ? Math.max(0, t.inMs || 0) + d : null
 }
 
+// Longest <video> in each scene, reported by that scene's frame once its metadata
+// loads (see pa:layout.mediaMs). The ruler grows to fit the footage so you can scrub
+// the whole clip instead of running out of timeline part-way through it.
+let mediaByScene: Record<string, number> = {}
+export function setSceneMediaMs(sceneId: string, ms: number): void {
+  if ((mediaByScene[sceneId] ?? 0) === ms) return
+  mediaByScene = { ...mediaByScene, [sceneId]: ms }
+  emit()
+}
+export function getSceneMediaMs(sceneId: string): number {
+  return mediaByScene[sceneId] ?? 0
+}
+
 /**
  * Ruler length for a scene: the author's explicit `timelineMs` when set, otherwise
- * enough to hold every clip plus a tail. Never shorter than the default, so the ruler
- * doesn't jump around while the first clip is being dragged.
+ * enough to hold every clip AND any video in the scene, plus a tail. Never shorter
+ * than the default, so the ruler doesn't jump about while a clip is being dragged.
  */
 export function timelineLength(sd: SceneDef | undefined): number {
   if (!sd) return DEFAULT_TIMELINE_MS
   if (sd.timelineMs && sd.timelineMs > 0) return sd.timelineMs
+  const media = getSceneMediaMs(sd.id)
   let last = 0
   for (const el of sd.elements) {
     const end = clipEnd(el)
     if (end != null) last = Math.max(last, end)
     else if (el.timing) last = Math.max(last, el.timing.inMs || 0)
   }
-  return Math.max(DEFAULT_TIMELINE_MS, Math.ceil((last + TAIL_MS) / 500) * 500)
+  // A video needs no tail — the ruler ending exactly at the last frame is the useful
+  // thing — so it's compared after the clip tail is added, not before.
+  return Math.max(DEFAULT_TIMELINE_MS, media, Math.ceil((last + TAIL_MS) / 500) * 500)
 }

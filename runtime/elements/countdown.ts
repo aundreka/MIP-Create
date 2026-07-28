@@ -11,6 +11,9 @@ const DAY = 86400000
 export function computeDeadline(el: SceneElement, now: number): number {
   const cd = el.countdown
   if (!cd) return now
+  // Clock shows the current time, so there is no target instant — the renderer reads
+  // `now` directly and the deadline is only a placeholder.
+  if (cd.mode === 'clock') return now
   if (cd.mode === 'timer') return now + Math.max(0, cd.seconds ?? 60) * 1000
   if (cd.mode === 'dynamic') return now + Math.max(0, cd.dynamicDays ?? 3) * DAY
   const t = cd.targetIso ? Date.parse(cd.targetIso) : NaN
@@ -33,13 +36,43 @@ export function formatTicks(fmt: string): boolean {
 }
 
 export function needsTicker(el: SceneElement): boolean {
+  // A clock must keep ticking whatever its format — even a bare {hh}:{mm} has to roll
+  // over on the minute, and formatTicks alone can't tell a clock from a static label.
+  if (el.countdown?.mode === 'clock') return true
   return formatTicks(el.countdown?.format || '')
 }
+
+/** How the rendered text is cased. 'title' upper-cases the first letter of every
+ * word ("order by jul 30" → "Order By Jul 30"); 'upper'/'lower' transform the whole
+ * string. Note that month names arrive already title-cased from Intl, so 'title' is
+ * a no-op on them — 'upper' is what turns "Jul" into "JUL". */
+export type TextCase = 'none' | 'title' | 'upper' | 'lower'
 
 export interface CountdownFormatOpts {
   dateLocale?: string
   dateStyle?: 'short' | 'long' | 'numeric' | 'monthDay'
+  textCase?: TextCase
+  /** Legacy on/off flag, equivalent to textCase 'title'. Read only when textCase is unset. */
   capitalize?: boolean
+  /** Clock mode: {h}/{hh}/{m}/{mm}/{s}/{ss} render the CURRENT wall-clock time rather
+   * than the time remaining, and the date tokens target today. */
+  clock?: boolean
+  /** 12-hour clock: {h}/{hh} render 1–12 instead of 0–23. Only applies in clock mode —
+   * on a countdown those tokens are a remaining duration, where 12-hour is meaningless.
+   * Pair it with the {A} / {a} token for the AM/PM suffix. */
+  hour12?: boolean
+}
+
+/** Resolve the effective case, honoring the legacy `capitalize` boolean. */
+export function effectiveCase(opts: CountdownFormatOpts): TextCase {
+  return opts.textCase ?? (opts.capitalize ? 'title' : 'none')
+}
+
+function applyCase(s: string, mode: TextCase): string {
+  if (mode === 'upper') return s.toUpperCase()
+  if (mode === 'lower') return s.toLowerCase()
+  if (mode === 'title') return s.replace(/\b\p{L}/gu, (c) => c.toUpperCase())
+  return s
 }
 
 // Date-format fields accept bare tokens ("MMMM D, YYYY") for convenience; the
@@ -53,19 +86,32 @@ export function braceBareTokens(fmt: string): string {
 /** Render the format string for the remaining time to `deadline`. Bare date
  * tokens (MM.D, MMMM D YYYY) are accepted like everywhere else. */
 export function formatCountdown(el: SceneElement, deadline: number, now: number): string {
-  return renderCountdownFormat(braceBareTokens(el.countdown?.format || '{d}d {hh}:{mm}:{ss}'), deadline, now, el.countdown ?? {})
+  const cd = el.countdown
+  const fallback = cd?.mode === 'clock' ? '{hh}:{mm}' : '{d}d {hh}:{mm}:{ss}'
+  return renderCountdownFormat(braceBareTokens(cd?.format || fallback), deadline, now, {
+    ...(cd ?? {}),
+    clock: cd?.mode === 'clock',
+  })
 }
 
 /** Element-independent core of formatCountdown — also drives the pinned header's
  * countdown mode, so both surfaces share one token vocabulary. */
 export function renderCountdownFormat(fmt: string, deadline: number, now: number, opts: CountdownFormatOpts = {}): string {
+  // Clock mode reads the CURRENT wall-clock time instead of a remaining duration,
+  // so {hh}:{mm} shows "14:05". Date tokens then target today (deadline = now), which
+  // is what a clock should show alongside the time.
+  const clock = !!opts.clock
+  const nowDate = new Date(now)
   const total = Math.max(0, deadline - now)
-  const d = Math.floor(total / DAY)
-  const h = Math.floor(total / 3600000) % 24
-  const m = Math.floor(total / 60000) % 60
-  const s = Math.floor(total / 1000) % 60
+  const d = clock ? 0 : Math.floor(total / DAY)
+  // 12-hour applies to the CLOCK only: on a countdown {hh} is hours remaining, and
+  // folding 0 into 12 there would read as "12 hours left" when none are.
+  const h24 = clock ? nowDate.getHours() : Math.floor(total / 3600000) % 24
+  const h = clock && opts.hour12 ? h24 % 12 || 12 : h24
+  const m = clock ? nowDate.getMinutes() : Math.floor(total / 60000) % 60
+  const s = clock ? nowDate.getSeconds() : Math.floor(total / 1000) % 60
   const locale = opts.dateLocale || 'en-US'
-  const target = new Date(deadline)
+  const target = clock ? nowDate : new Date(deadline)
   let dateStr = ''
   try {
     dateStr = target.toLocaleDateString(locale, DATE_OPTS[opts.dateStyle ?? 'short'] ?? DATE_OPTS.short)
@@ -80,7 +126,13 @@ export function renderCountdownFormat(fmt: string, deadline: number, now: number
       return ''
     }
   }
+  // AM/PM for the instant the other date tokens describe (today in clock mode, the
+  // target otherwise). Braces are required — a bare "A" would collide with ordinary
+  // copy like "A GREAT DEAL".
+  const meridiem = target.getHours() < 12 ? 'AM' : 'PM'
   const out = fmt
+    .replace(/\{A\}/g, meridiem)
+    .replace(/\{a\}/g, meridiem.toLowerCase())
     .replace(/\{date\}/g, dateStr)
     .replace(/\{MMMM\}/g, monthName('long'))
     .replace(/\{MMM\}/g, monthName('short'))
@@ -98,6 +150,5 @@ export function renderCountdownFormat(fmt: string, deadline: number, now: number
     .replace(/\{h\}/g, String(h))
     .replace(/\{m\}/g, String(m))
     .replace(/\{s\}/g, String(s))
-  // Capitalize the first letter of every word (e.g. "Order by" -> "Order By").
-  return opts.capitalize ? out.replace(/\b\p{L}/gu, (c) => c.toUpperCase()) : out
+  return applyCase(out, effectiveCase(opts))
 }
