@@ -67,6 +67,14 @@ export function createScratch(): GameModule {
   let pc2d: CanvasRenderingContext2D | null = null
   let prizeImg: HTMLImageElement | null = null
   let prizeReady = false
+  let revealBgColor = '' // letterbox colour, painted INSIDE the prize canvas so the mask catches it
+  // The prize is masked BY the cover: erased everywhere the cover bitmap is still intact, so it
+  // exists only where the player has actually scratched. This is what makes leaks impossible
+  // rather than merely unlikely — it holds no matter what alpha the cover art carries (soft
+  // edges, baked-in rounded corners) and no matter how the two canvases round. Dropped on win
+  // so the cover can fade away onto a fully drawn prize.
+  let maskToScratch = true
+  let maskRaf = 0
   // The prize/reveal sits BENEATH the cover canvas. Until the cover has actually painted an
   // occluding frame, showing the prize would let it flash through (e.g. a transparent-color
   // cover whose image is still loading when the scene fades in). Keep the prize hidden until
@@ -295,10 +303,33 @@ export function createScratch(): GameModule {
     if (!prizeCanvas || !pc2d) return
     const w = prizeCanvas.width
     const h = prizeCanvas.height
+    pc2d.globalCompositeOperation = 'source-over'
     pc2d.clearRect(0, 0, w, h)
     if (!prizeImg || !prizeReady || !(prizeImg.naturalWidth || prizeImg.width)) return
     const r = coverContainRect()
+    // The letterbox colour goes in the canvas rather than on the div: on the div it would be an
+    // unmasked rectangle, free to show around the cover exactly like the prize art used to.
+    if (revealBgColor) {
+      pc2d.fillStyle = revealBgColor
+      pc2d.fillRect(r.x * w, r.y * h, r.w * w, r.h * h)
+    }
     pc2d.drawImage(prizeImg, r.x * w, r.y * h, r.w * w, r.h * h)
+    // Punch out everything the cover still covers. Same backing size, so the cover blits 1:1.
+    if (maskToScratch && canvas && canvas.width === w && canvas.height === h) {
+      pc2d.globalCompositeOperation = 'destination-out'
+      pc2d.drawImage(canvas, 0, 0)
+      pc2d.globalCompositeOperation = 'source-over'
+    }
+  }
+
+  // Re-mask at most once per frame. A pointermove can fire several times per frame and each
+  // repaint is two full-canvas blits, so coalescing keeps the cost flat during a fast scrub.
+  const scheduleMask = (): void => {
+    if (!prizeCanvas || !maskToScratch || maskRaf) return
+    maskRaf = requestAnimationFrame(() => {
+      maskRaf = 0
+      drawPrize()
+    })
   }
 
   // Position the reveal to follow the cover's contain rect (stretched to fill it). In 'fit' mode the
@@ -398,6 +429,7 @@ export function createScratch(): GameModule {
     c2d.arc(x, y, r, 0, Math.PI * 2)
     c2d.fill()
     lastPt = { x, y }
+    scheduleMask() // the cover just changed — reshape the prize to match what's been cleared
   }
 
   // Fraction of the reveal ZONE that has been scratched clear (alpha < 128). Pixels
@@ -429,6 +461,12 @@ export function createScratch(): GameModule {
   const reveal = (): void => {
     if (won) return
     won = true
+    // Stop masking and repaint the prize whole BEFORE the cover starts fading. The cover fades
+    // via CSS opacity, which doesn't change its bitmap — so a still-masked prize would dissolve
+    // into a prize-shaped hole instead of the prize.
+    maskToScratch = false
+    if (maskRaf) { cancelAnimationFrame(maskRaf); maskRaf = 0 }
+    drawPrize()
     emit('scratch-progress', 1) // fully revealed → drive any threshold-based element fades
     if (winCb) winCb() // fires immediately at win — for SFX that should not be delayed
     ctx.sfx.loopStop?.('drag') // stop the scratching loop on win
@@ -510,6 +548,9 @@ export function createScratch(): GameModule {
         } else {
           // 'follow': the prize is drawn into a canvas that mirrors the cover canvas exactly, so
           // the reveal follows the cover's size/shape without a sub-pixel seam around it.
+          // Hand the letterbox colour to the canvas and take it off the div — see drawPrize.
+          revealBgColor = str(params.revealBgColor, '')
+          prize.style.background = 'transparent'
           prizeCanvas = document.createElement('canvas')
           prizeCanvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;'
           pc2d = prizeCanvas.getContext('2d')
@@ -762,6 +803,7 @@ export function createScratch(): GameModule {
     },
     destroy() {
       ro?.disconnect()
+      if (maskRaf) { cancelAnimationFrame(maskRaf); maskRaf = 0 }
       dprCleanup?.()
       dprCleanup = null
       brushIntroAnim?.cancel()
