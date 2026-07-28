@@ -178,7 +178,7 @@ export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): 
             <div className="hint pad">
               {h.mode === 'countdown'
                 ? 'Counts down from the duration when the ad loads. Format tokens: {hh} {mm} {ss} (padded) or {h} {m} {s}.'
-                : 'Shows the current date. Format tokens: MMMM (July), MMM (Jul), MM (07), M (7), DD (05), D (5), YYYY (2026), YY (26). Empty = “JULY 15, 2026” style.'}{' '}
+                : 'Shows the current date. Format tokens: MMMM (July), MMM (Jul), MM (07), M (7), DD (05), D (5), Do (5th), YYYY (2026), YY (26). Empty = “JULY 15, 2026” style.'}{' '}
               Leave background as “none” for no band.
             </div>
           </>

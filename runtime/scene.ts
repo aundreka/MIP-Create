@@ -308,7 +308,8 @@ export interface BoxStyle {
 // the date auto-updates whenever the ad runs. `format` is a token string:
 // {d}{h}{m}{s} (raw) / {dd}{hh}{mm}{ss} (2-digit) / {date} (localized date) /
 // date parts of the target date: {MMMM} July, {MMM} Jul, {M}/{MM} 7/07,
-// {D}/{DD} 12/12, {YYYY}/{YY} — month names follow dateLocale.
+// {D}/{DD} 12/12, {Do} 21st (ordinal day), {o} the bare suffix, {YYYY}/{YY} —
+// month names follow dateLocale; the ordinal suffix is English-only.
 export interface CountdownConfig {
   // 'clock' shows the CURRENT wall-clock time (default format '{hh}:{mm}' → "14:05"),
   // re-rendered every second; the other modes count toward a target instant.
@@ -699,7 +700,8 @@ export interface HeaderConfig {
   countdownFormat?: string // token string, e.g. '{mm} {ss}' (default '{mm}:{ss}')
   // Custom layout for date mode, e.g. 'MMMM D, YYYY' → "July 15, 2026". Tokens
   // (bare or {braced}): MMMM full month, MMM short month, MM/M numeric month,
-  // DD/D day, YYYY/YY year. Empty → the legacy "JULY 15, 2026" rendering.
+  // DD/D day, Do ordinal day (21st), YYYY/YY year. Empty → the legacy
+  // "JULY 15, 2026" rendering.
   dateFormat?: string
   // Case applied to the rendered date/timer. 'upper' is what turns "Jul" into "JUL" —
   // Intl hands back month names already title-cased, so 'title' is a no-op on them.

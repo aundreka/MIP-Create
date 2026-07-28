@@ -1532,7 +1532,7 @@ export const SCRATCH_GRID_TEMPLATE: GameTemplate = {
     { key: 'cell1Label', label: 'Cell 2 text override', type: 'text' },
     { key: 'cell2Label', label: 'Cell 3 text override', type: 'text' },
     { key: 'cell3Label', label: 'Cell 4 text override', type: 'text' },
-    { key: 'winDate', label: 'Win cells dynamic date (tokens: MMMM D YYYY; empty = off)', type: 'text' },
+    { key: 'winDate', label: 'Win cells dynamic date (tokens: MMMM D Do YYYY; empty = off)', type: 'text' },
     { key: 'loseDate', label: 'Lose cells dynamic date', type: 'text' },
     { key: 'cell0date', label: 'Cell 1 date override', type: 'text' },
     { key: 'cell1date', label: 'Cell 2 date override', type: 'text' },

@@ -960,7 +960,7 @@ function ScratchGridCells({ params, setParam, setParams, elementId, cardAspect }
       <Accordion id="inspector.scratchGridDate" title="Dynamic date (inside cells)" defaultOpen={false}>
         <div className="hint pad">
           Shows a live date inside the cell reveal (under the cover), scaling with the cell like the cell art. Tokens: <b>MMMM</b> July,{' '}
-          <b>MMM</b> Jul, <b>MM/M</b> 07/7, <b>DD/D</b> day, <b>YYYY/YY</b> year — e.g. “(MMMM D)” → “(July 16)”. Empty everywhere = no
+          <b>MMM</b> Jul, <b>MM/M</b> 07/7, <b>DD/D</b> day, <b>Do</b> 21st, <b>YYYY/YY</b> year — e.g. “(MMMM Do)” → “(July 21st)”. Empty everywhere = no
           date; each cell can opt out with its “Show dynamic date” toggle.
         </div>
         <Row label="Win cells date">
@@ -2460,8 +2460,8 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               <div className="hint pad">
                 <b>Timer</b> tokens (live): <b>{'{hh}:{mm}:{ss}'}</b> / <b>{'{d} {h} {m} {s}'}</b>. <b>Date</b> label (no ticking):{' '}
                 <b>{'{date}'}</b>, e.g. "Order by {'{date}'}", or build your own from parts: <b>MMMM</b> July, <b>MMM</b> Jul,{' '}
-                <b>MM/M</b> 07/7, <b>DD/D</b> day, <b>YYYY/YY</b> year (braces optional — "MM.D" → "07.16") — e.g. "Ends MMMM D" →
-                "Ends July 12". "Dynamic" recomputes from today whenever the ad runs.
+                <b>MM/M</b> 07/7, <b>DD/D</b> day, <b>Do</b> 21st, <b>YYYY/YY</b> year (braces optional — "MM.D" → "07.16") — e.g.
+                "Ends MMMM Do" → "Ends July 21st". "Dynamic" recomputes from today whenever the ad runs.
               </div>
             </Accordion>
           )

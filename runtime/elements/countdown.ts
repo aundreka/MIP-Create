@@ -68,6 +68,16 @@ export function effectiveCase(opts: CountdownFormatOpts): TextCase {
   return opts.textCase ?? (opts.capitalize ? 'title' : 'none')
 }
 
+/** English ordinal suffix for a day of the month: 1st, 2nd, 3rd, 4th … and the 11th/12th/13th
+ * exception, which take 'th' despite ending in 1/2/3. English-only by design — the {Do}/{o}
+ * tokens are for ad copy like "Ends July 21st"; `dateLocale` still governs {date}/{MMMM}. */
+export function ordinalSuffix(day: number): string {
+  const teens = day % 100
+  if (teens >= 11 && teens <= 13) return 'th'
+  const unit = day % 10
+  return unit === 1 ? 'st' : unit === 2 ? 'nd' : unit === 3 ? 'rd' : 'th'
+}
+
 function applyCase(s: string, mode: TextCase): string {
   if (mode === 'upper') return s.toUpperCase()
   if (mode === 'lower') return s.toLowerCase()
@@ -79,8 +89,12 @@ function applyCase(s: string, mode: TextCase): string {
 // formatter itself only knows {braced} ones. Wrap bare standalone tokens in
 // braces, leaving anything already braced untouched. Shared by the pinned
 // header and the scratch-grid cell date.
+//
+// `Do` (ordinal day, "MMMM Do" → "July 21st") joins the bare list; the bare suffix
+// `o` deliberately does NOT, since a lone "o" is far likelier to be copy than a token.
+// Write "{D}{o}" if you want the parts separately.
 export function braceBareTokens(fmt: string): string {
-  return fmt.replace(/\{[^}]*\}|\b(MMMM|MMM|MM|M|DD|D|YYYY|YY)\b/g, (match, bare: string | undefined) => (bare ? `{${bare}}` : match))
+  return fmt.replace(/\{[^}]*\}|\b(MMMM|MMM|MM|M|Do|DD|D|YYYY|YY)\b/g, (match, bare: string | undefined) => (bare ? `{${bare}}` : match))
 }
 
 /** Render the format string for the remaining time to `deadline`. Bare date
@@ -138,6 +152,11 @@ export function renderCountdownFormat(fmt: string, deadline: number, now: number
     .replace(/\{MMM\}/g, monthName('short'))
     .replace(/\{MM\}/g, pad(target.getMonth() + 1))
     .replace(/\{M\}/g, String(target.getMonth() + 1))
+    // {Do} = day with its ordinal suffix ("21st"); {o} = the bare suffix, so "{D}{o}" and
+    // "{DD}{o}" compose too. Both must precede {DD}/{D} in this chain — not because the
+    // literal patterns overlap (they don't) but so the ordering reads day-tokens-together.
+    .replace(/\{Do\}/g, String(target.getDate()) + ordinalSuffix(target.getDate()))
+    .replace(/\{o\}/g, ordinalSuffix(target.getDate()))
     .replace(/\{DD\}/g, pad(target.getDate()))
     .replace(/\{D\}/g, String(target.getDate()))
     .replace(/\{YYYY\}/g, String(target.getFullYear()))
