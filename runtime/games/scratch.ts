@@ -27,16 +27,47 @@ const parseBrushPath = (raw: string): { x: number; y: number }[] => {
 // first frame. Shared across cards (covers are usually the same asset in a multi-card flow).
 const coverCache = new Map<string, HTMLImageElement>()
 
+// An image is only safe to blit once its bitmap is DECODED — not merely loaded. On iOS/WebKit
+// `complete` and `naturalWidth` flip as soon as the bytes arrive, but drawImage() of an image
+// whose decode hasn't finished paints NOTHING: the decode is handed off-thread and the canvas is
+// never re-rasterized once it lands. It only bites on the first load — a revisit hits the
+// already-decoded memory cache — which is exactly when a card came up showing the reveal through
+// a blank cover. So track decode completion ourselves and gate every cover paint on it.
+const decodedImages = new WeakSet<HTMLImageElement>()
+
+/** Run `done` once img's bitmap is genuinely ready to draw (or has definitively failed).
+ * decode() is the real signal; the load/error listeners cover WebViews without it. Always
+ * asynchronous, so a caller can rely on the rest of its own function body having run. */
+const whenDecoded = (img: HTMLImageElement, done: (ok: boolean) => void): void => {
+  const settle = (ok: boolean): void => {
+    if (ok) decodedImages.add(img)
+    done(ok)
+  }
+  const dec = img.decode?.()
+  if (dec) {
+    // decode() rejects on some detached/cross-origin images that still draw fine, so fall back
+    // to the load state rather than declaring the image dead.
+    dec.then(() => settle(true), () => settle(!!(img.complete && (img.naturalWidth || img.width))))
+    return
+  }
+  if (img.complete) {
+    Promise.resolve().then(() => settle(!!(img.naturalWidth || img.width)))
+    return
+  }
+  // addEventListener (not onload=) — a cached cover is shared between cards, and assigning
+  // would clobber another card's handler.
+  img.addEventListener('load', () => settle(true), { once: true })
+  img.addEventListener('error', () => settle(false), { once: true })
+}
+
 /** Warm the decoded-image cache for a scratch cover so the card paints it flash-free on mount.
  * Call ahead of navigating to the scratch scene (playProject preloads every scratch cover at boot). */
 export function preloadScratchCover(src: string): void {
   if (!src || coverCache.has(src)) return
   const img = new Image()
-  img.src = src
   coverCache.set(src, img)
-  // decode() resolves once the bitmap is ready, so a later drawImage is immediate. Best-effort:
-  // older WebViews lack it (the onload path still covers them) and it can reject on detached imgs.
-  img.decode?.().catch(() => { /* fall back to onload timing */ })
+  img.src = src
+  whenDecoded(img, () => { /* the decoded flag is the point; mount reads it off decodedImages */ })
 }
 
 export function createScratch(): GameModule {
@@ -556,11 +587,13 @@ export function createScratch(): GameModule {
           pc2d = prizeCanvas.getContext('2d')
           prize.appendChild(prizeCanvas)
           prizeImg = new Image()
-          prizeImg.onload = () => {
-            prizeReady = true
-            drawPrize()
-          }
           prizeImg.src = prizeSrc
+          // Same decode gate as the cover: on iOS a just-loaded image blits as nothing, which
+          // here would draw an empty prize canvas that never repaints.
+          whenDecoded(prizeImg, (ok) => {
+            prizeReady = ok
+            drawPrize()
+          })
         }
       } else {
         const span = document.createElement('div')
@@ -570,31 +603,6 @@ export function createScratch(): GameModule {
       }
       ctx.root.appendChild(prize)
       positionReveal() // no cover image yet → full card; refined once the cover loads
-
-      if (coverSrc) {
-        const cached = coverCache.get(coverSrc)
-        if (cached && cached.complete && (cached.naturalWidth || cached.width)) {
-          // Already decoded (preloaded ahead of mount): adopt it so sizeCanvas() paints the cover
-          // synchronously on the first frame — no transparent gap, no pop-in flash.
-          coverImg = cached
-          coverReady = true
-        } else {
-          coverImg = new Image()
-          coverImg.onload = () => {
-            coverReady = true
-            positionReveal() // now the cover aspect is known → size the reveal to its contain rect
-            drawPrize() // the contain rect just changed — repaint the prize onto the new one
-            if (!won) fillCover()
-            markCovered() // opaque cover image is down → safe to show the prize beneath it
-          }
-          // Cover art failed to load: don't strand the prize hidden forever. If an opaque
-          // coverColor was filled it still hides the prize; otherwise the card is see-through
-          // by authoring and the prize is meant to show.
-          coverImg.onerror = () => markCovered()
-          coverImg.src = coverSrc
-          coverCache.set(coverSrc, coverImg) // warm the cache for any later card using this cover
-        }
-      }
 
       // Optional brush: a floating image whose authored tip does the scratching. Created hidden;
       // sized/positioned at the first touch. z-index sits above EVERYTHING — the win/lose overlay
@@ -634,6 +642,36 @@ export function createScratch(): GameModule {
       }
       ctx.root.appendChild(canvas)
       c2d = canvas.getContext('2d')!
+
+      // Cover art. Resolved AFTER the canvas exists so the decode callback can paint straight
+      // into it. coverReady is set only from a decoded bitmap (see decodedImages) — treating a
+      // merely-loaded image as ready is what let iOS blit an empty cover and strand the card
+      // showing its prize.
+      if (coverSrc) {
+        let img = coverCache.get(coverSrc)
+        if (!img) {
+          img = new Image()
+          coverCache.set(coverSrc, img) // warm the cache for any later card using this cover
+          img.src = coverSrc
+        }
+        coverImg = img
+        if (decodedImages.has(img)) {
+          // Decoded ahead of mount (preloaded at boot): sizeCanvas() below paints the cover
+          // synchronously on the very first frame — no transparent gap, no pop-in flash.
+          coverReady = true
+        } else {
+          whenDecoded(img, (ok) => {
+            // Failed to load: don't strand the prize hidden forever. An opaque coverColor still
+            // hides it; a card authored with no color is see-through by intent.
+            coverReady = ok
+            positionReveal() // now the cover aspect is known → size the reveal to its contain rect
+            if (!won) fillCover() // paint the cover FIRST, so the mask below sees the real bitmap
+            drawPrize() // the contain rect just changed — repaint the prize onto the new one
+            markCovered() // cover is down (or dead) → safe to show the prize beneath it
+          })
+        }
+      }
+
       sizeCanvas() // paints the initial cover synchronously (coverColor + any preloaded image)
       // Show the prize right away only when nothing async can uncover it: no cover image to wait
       // for, an opaque coverColor already fills the canvas this frame, or the cover image was
