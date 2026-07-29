@@ -20,8 +20,10 @@ export interface HintMove {
 export interface GameContext {
   /** The game-layer slot element (already sized; the game fills it). */
   root: HTMLElement
-  /** Resolve an asset id to its src (data URL / url). */
-  assets: { src(id?: string): string }
+  /** Resolve an asset id to its src (data URL / url), and to its intrinsic pixel
+   * size when known — so a game can size art by the art's OWN aspect instead of
+   * guessing a box for it. */
+  assets: { src(id?: string): string; size?(id?: string): { w: number; h: number } | null }
   /** Play an SFX event; loopStart/loopStop drive a looping gesture sound (e.g. a
    * scratching/dragging loop that runs while the pointer is held). */
   sfx: { play(event: string): void; loopStart?(event: string): void; loopStop?(event: string): void }

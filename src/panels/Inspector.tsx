@@ -141,6 +141,7 @@ function ElementSound(props: { el: SceneElement }): JSX.Element {
   // scratching" sound; reveal targets add a "when revealed" one-shot.
   const isScratching = el.scratch || el.game?.templateId === 'scratch' || el.game?.templateId === 'scratch_grid'
   const isFlipping = el.game?.templateId === 'memorymatch' || el.game?.templateId === 'flipmatch'
+  const isFlipbook = el.game?.templateId === 'flipbook'
   const isCatchBasket = el.game?.templateId === 'catch'
   const eventOptions = [
     { value: 'tap', label: 'On tap' },
@@ -151,6 +152,12 @@ function ElementSound(props: { el: SceneElement }): JSX.Element {
           { value: 'flip', label: 'On card flip' },
           { value: 'correct', label: 'On pair found' },
           { value: 'wrong', label: 'Incorrect pair' },
+        ]
+      : []),
+    ...(isFlipbook
+      ? [
+          { value: 'flip', label: 'On page flip' },
+          { value: 'lastPage', label: 'On last page' },
         ]
       : []),
     ...(isCatchBasket ? [
@@ -1622,6 +1629,12 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
   // content elements can be a scratch cover and/or a reveal target
   const canScratch = el.type === 'image' || el.type === 'bar' || el.type === 'text' || el.type === 'cta' || el.type === 'handguide'
   const sceneHasCatch = activeSceneDef(state)?.elements.some((e) => e.game?.templateId === 'catch') ?? false
+  // A flipbook in the scene lets any element be bound to one of its pages. Page 1 is
+  // the shut cover when the book has one, then one page per opening.
+  const flipbookEl = activeSceneDef(state)?.elements.find((e) => e.game?.templateId === 'flipbook')
+  const bookPages = flipbookEl
+    ? (flipbookEl.game?.params?.hasCover === false ? 0 : 1) + Math.max(1, Math.min(6, Number(flipbookEl.game?.params?.spreads ?? 2)))
+    : 0
   const canIdleBehavior = el.type === 'image' || el.type === 'handguide' || (el.type === 'bar' && el.mode === 'fit')
   const setScratch = (patch: Partial<NonNullable<SceneElement['scratch']>>): void =>
     patchElement(id, { scratch: { ...(el.scratch ?? {}), ...patch } })
@@ -1673,6 +1686,21 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
       )}
       <Toggle label="Above other overlays (top layer)" checked={!!el.overlayTop} onChange={(v) => patchElement(id, { overlayTop: v || undefined })} />
       <Toggle label="Hide on overlay" checked={!!el.hideOnOverlay} onChange={(v) => patchElement(id, { hideOnOverlay: v || undefined })} />
+      {bookPages > 0 && el.type !== 'game-mount' && (
+        <Row label="Only on book page">
+          <Select
+            value={String(el.showOnPage ?? 0)}
+            onChange={(v) => patchElement(id, { showOnPage: Number(v) || undefined })}
+            options={[
+              { value: '0', label: 'Every page' },
+              ...Array.from({ length: bookPages }, (_, i) => ({
+                value: String(i + 1),
+                label: `Page ${i + 1}${i === 0 && flipbookEl?.game?.params?.hasCover !== false ? ' (cover)' : ''}`,
+              })),
+            ]}
+          />
+        </Row>
+      )}
 
       {/* Per-orientation visibility: base `hidden` + landscape override `landscape.hidden`.
           The canvas reflects it live — the element only renders in the orientation(s) it
@@ -2223,6 +2251,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                     { value: 'scratch', label: 'Scratch (back-and-forth rub)' },
                     { value: 'match', label: 'Match pairs (follow the game’s next card)' },
                     { value: 'brush', label: 'Point at the scratch brush (after its intro)' },
+                    { value: 'still', label: 'Still (no movement at all)' },
                   ]}
                 />
               </Row>

@@ -369,7 +369,9 @@ export interface IdleConfig {
 
 export interface HandguideConfig {
   // 'brush' points the hand at the scratch card's brush (appears only after the brush's intro).
-  mode: 'smart' | 'tap' | 'slide' | 'scratch' | 'match' | 'brush'
+  // 'still' places the hand and leaves it there — no motion of any kind (idle
+  // show/hide still applies; it just never moves).
+  mode: 'smart' | 'tap' | 'slide' | 'scratch' | 'match' | 'brush' | 'still'
   toX?: number
   toY?: number
   nodes?: HandguideNode[]
@@ -624,6 +626,10 @@ export interface SceneElement {
   // the value. Set both for a visible window [showAt, hideAt). Unset = always visible (default).
   scratchShowAt?: number
   scratchHideAt?: number
+  // Show this element ONLY while the given page of a flipbook in the scene is open —
+  // 1-based, page 1 being the shut cover when the book has one. Unset = always
+  // visible. The editor canvas ignores it so every page's elements stay placeable.
+  showOnPage?: number
   rotation?: number
   opacity?: number
   blur?: number // uniform layer blur radius in design px (CSS filter: blur)

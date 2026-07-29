@@ -133,8 +133,10 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
   // Waypoints (design px). 'slide' uses the configured nodes (or legacy toX/toY);
   // 'smart' targets the CTA/game; 'tap' stays in place (no waypoints).
   let pts: { x: number; y: number; pauseMs?: number }[] = []
-  let kind: 'tap' | 'slide' | 'scratch' | 'match' | 'brush' = 'tap'
-  if (cfg.mode === 'slide') {
+  let kind: 'tap' | 'slide' | 'scratch' | 'match' | 'brush' | 'still' = 'tap'
+  if (cfg.mode === 'still') {
+    kind = 'still'
+  } else if (cfg.mode === 'slide') {
     if (cfg.nodes && cfg.nodes.length) pts = cfg.nodes.filter((p) => p && p.x != null && p.y != null)
     else if (cfg.toX != null && cfg.toY != null) pts = [{ x: cfg.toX, y: cfg.toY }]
     if (pts.length) kind = 'slide'
@@ -176,8 +178,7 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
   }
   if (steps.length) steps[steps.length - 1].dwell = 0 // the return-to-start leg never dwells
   const total = steps.reduce((s, st) => s + travel + st.dwell, 0) || travel
-  const pressEnd = total - travel // the return leg begins here (finger lifts)
-  const ramp = Math.min(140, pressEnd / 3 || 1)
+  // (No press ramp: 'slide' is movement only — see the frame loop.)
 
   let raf = 0
   let running = false
@@ -348,7 +349,9 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
       }
       ox = (cx - sx) * s
       oy = (cy - sy) * s
-      if (c < pressEnd) press = c < ramp ? c / ramp : c > pressEnd - ramp ? (pressEnd - c) / ramp : 1
+      // Slide MOVES only — no press dip. The scale-down read as the hand zooming in
+      // at the start of every loop, which fought the sense of it travelling a path.
+      // (The other modes keep their dip: it is the whole point of a tap.)
     } else {
       const phase = ((now - t0) % travel) / travel
       press = phase < 0.5 ? Math.sin(phase * Math.PI) : 0
@@ -363,6 +366,9 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     // 'brush' mode reveals itself inside the frame, AFTER it's sized + positioned — otherwise it
     // would flash at its initial top-left (0,0) for a frame. All other modes reveal immediately.
     if (kind !== 'brush') content.style.opacity = '1'
+    // 'still': show it and stop there. No frame loop at all, so nothing ever writes a
+    // transform and the hand sits exactly where it was placed.
+    if (kind === 'still') return
     raf = requestAnimationFrame(frame)
   }
   const hide = (): void => {
@@ -1016,6 +1022,25 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     }
   }
 
+  // Show an element only while a particular page of a flipbook is open. The book emits
+  // 'book-page' with its 1-based page number whenever it turns (page 1 = the shut
+  // cover when there is one, then each opening). Same shape as the scratch fade above:
+  // the game reports, the stage decides who is visible.
+  const pageEls = recs.filter((r) => r.el.showOnPage != null)
+  let offBookPage: (() => void) | null = null
+  let lastPage = 1 // re-applied after every layout pass (layoutRec resets outer opacity)
+  const applyBookPage = (n: number): void => {
+    lastPage = n
+    for (const r of pageEls) {
+      const visible = r.el.showOnPage === n
+      if (!r.outer.style.transition.includes('opacity')) {
+        r.outer.style.transition = (r.outer.style.transition ? r.outer.style.transition + ', ' : '') + 'opacity 300ms ease'
+      }
+      r.outer.style.opacity = visible ? String(r.el.opacity ?? 1) : '0'
+      r.outer.style.pointerEvents = visible ? '' : 'none'
+    }
+  }
+
   // Fire 'elementEnter' SFX bindings for an element as it animates in. Scheduled at the
   // entrance's own delay so staggered elements each pop with their sound in sync with the
   // visual (delay 0 = element has no entrance → fires immediately). Used for staggered pop-ins.
@@ -1302,6 +1327,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       // layoutRec resets outer opacity from el.opacity — re-impose the scratch-progress
       // fade state so a resize/rotation can't pop threshold-hidden elements back in.
       if (offScratchProgress) applyScratchReveal(lastScratchP)
+      if (offBookPage) applyBookPage(lastPage)
     },
     startGames(interactive) {
       // Scratch-progress element fades (scratchShowAt/scratchHideAt) run in interactive
@@ -1311,6 +1337,12 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       if (interactive && revealEls.length && !offScratchProgress) {
         applyScratchReveal(0)
         offScratchProgress = on('scratch-progress', (p: unknown) => applyScratchReveal(Number(p) || 0))
+      }
+      // Per-page elements, same timing and the same editor exemption: on the canvas
+      // they stay visible so every page's elements remain placeable.
+      if (interactive && pageEls.length && !offBookPage) {
+        applyBookPage(1)
+        offBookPage = on('book-page', (n: unknown) => applyBookPage(Math.max(1, Math.round(Number(n) || 1))))
       }
       // Same deal for the scene timeline: arm it here (same frame as mount, before the
       // first paint) so an element with a later in-point never flashes on screen first.
@@ -1799,6 +1831,12 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
         // text value/style + all geometry are re-applied by layoutRec below.
       }
       for (const rec of recs) layoutRec(rec)
+      // Same second pass layoutAll() does: layoutRec resizes the game-mount's BOX, but
+      // a mounted game lays itself out from that box's pixel size and only finds out it
+      // changed when told. Without this, the editor canvas (the only caller of this
+      // in-place update path) leaves a game at whatever size it computed on mount while
+      // preview/export — which always rebuild — show the right one.
+      for (const rec of recs) if (rec.host) rec.host.relayout()
       // Timing edits (dragging a clip in the timeline panel) must show up under the
       // playhead immediately — re-apply the active preview against the new windows.
       const preview = timelinePreview
@@ -1812,6 +1850,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     destroy() {
       offSetText()
       offScratchProgress?.()
+      offBookPage?.()
       clearTimelineTimers()
       for (const t of enterSfxTimers) window.clearTimeout(t)
       enterSfxTimers.length = 0

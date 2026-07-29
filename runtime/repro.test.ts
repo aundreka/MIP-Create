@@ -14,11 +14,12 @@ function baseMeta() {
   }
 }
 
-function makeProject(): Project {
+function makeProject(ctaExtra: Record<string, unknown> = {}): Project {
   const cta = {
     id: 'cta1', type: 'cta' as const, name: 'CTA',
     x: 540, y: 1700, w: 400, h: 120, anchor: 'center' as const,
     zIndex: 5, mode: 'fit' as const, text: { value: 'PLAY', fontSizePx: 40 },
+    ...ctaExtra,
   }
   return {
     meta: baseMeta(),
@@ -102,5 +103,51 @@ describe('CTA over overlay on resize', () => {
     console.log('OVERLAY CTA AFTER: exists=', !!a, 'parent=', a?.parentElement?.className, 'z=', a?.style.zIndex, 'display=', a?.style.display)
     expect(a).toBeTruthy()
     expect(a!.style.display).not.toBe('none')
+  })
+})
+
+// "Hide on overlay" has to reach the CTA. The CTA is ALWAYS overlay-immune, which
+// means it is parked out of the game scene's root and into the stage container at
+// mount — so a hide pass that only walks the scene root misses precisely the
+// elements that would otherwise sit on top of the overlay.
+describe('hide on overlay', () => {
+  beforeEach(() => {
+    document.body.innerHTML = ''
+    vi.useFakeTimers()
+    setDesign(1080, 1920)
+    computeMetrics(1080, 1920)
+  })
+
+  const openOverlay = (project: Project): { mount: HTMLElement; cta: () => HTMLElement } => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    playProject(project, {}, { mount, interactive: true })
+    mount.querySelector('.pa-stage')!.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+    vi.runOnlyPendingTimers()
+    return { mount, cta: () => mount.querySelector<HTMLElement>('.pa-el[data-id="cta1"]')! }
+  }
+
+  it('hides the parked CTA while the overlay is up', () => {
+    const { cta } = openOverlay(makeProject({ hideOnOverlay: true }))
+    // Parked (so the old scene-root-only query could never have found it)...
+    expect(cta().parentElement?.className).toContain('pa-stage')
+    // ...and hidden all the same.
+    expect(cta().style.display).toBe('none')
+  })
+
+  it('leaves the CTA alone when the flag is off', () => {
+    const { cta } = openOverlay(makeProject())
+    expect(cta().style.display).not.toBe('none')
+  })
+
+  it('hides an ordinary (unparked) element too', () => {
+    const project = makeProject()
+    project.scenes[0].elements.push({
+      id: 'note', type: 'text', name: 'Note', x: 540, y: 400,
+      anchor: 'center', zIndex: 2, mode: 'fit', hideOnOverlay: true,
+      text: { value: 'TAP THE BOOK', fontSizePx: 40 },
+    })
+    const { mount } = openOverlay(project)
+    expect(mount.querySelector<HTMLElement>('.pa-el[data-id="note"]')!.style.display).toBe('none')
   })
 })

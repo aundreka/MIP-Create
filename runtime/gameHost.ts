@@ -46,7 +46,13 @@ export function createGameHost(opts: GameHostOptions): GameHost | null {
   mod.mount(
     {
       root: opts.slot,
-      assets: { src: (id) => (id && opts.assets[id] ? opts.assets[id].src : '') },
+      assets: {
+        src: (id) => (id && opts.assets[id] ? opts.assets[id].src : ''),
+        size: (id) => {
+          const a = id ? opts.assets[id] : undefined
+          return a && a.w > 0 && a.h > 0 ? { w: a.w, h: a.h } : null
+        },
+      },
       sfx: { play: opts.sfx, loopStart: opts.sfxLoopStart, loopStop: opts.sfxLoopStop },
       rng: mulberry32(123456),
       scale,

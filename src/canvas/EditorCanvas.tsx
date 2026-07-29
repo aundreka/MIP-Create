@@ -10,7 +10,7 @@ import type { Anchor, ProjectMeta, Scene, SceneDef, SceneElement } from '../../r
 import type { AssetMap } from '../../runtime/types'
 import { ContextMenu, type MenuItem } from '../panels/ContextMenu'
 import { getFramePos, setFramePos } from '../canvasLayout'
-import { resizeBox } from './geometry'
+import { flipbookBoxes, flipbookOpts, resizeBox, type Box } from './geometry'
 import { isSceneHidden, useCanvasView } from '../canvasView'
 import { useActiveVariant } from '../variantMode'
 import { endPathDraw, pathDrawTarget, usePathDraw } from '../drawMode'
@@ -258,6 +258,14 @@ export function EditorCanvas(props: Props): JSX.Element {
   const [dateLive, setDateLive] = useState<{ x: number; y: number } | null>(null)
   const dateDrag = useRef<{ base: { x: number; y: number; w: number; h: number }; last: { x: number; y: number } | null } | null>(null)
   const curDateRef = useRef<{ x: number; y: number }>({ x: 50, y: 50 })
+  // Flipbook book editor: double-click the book → drag the fold line onto the spine
+  // drawn in the artwork, and drag the shut cover's corners to size it.
+  const [spineEdit, setSpineEdit] = useState<string | null>(null)
+  const [spineLive, setSpineLive] = useState<{ coverScale: number; bookScale: number } | null>(null)
+  const spineDrag = useRef<
+    | { mode: 'cover' | 'book'; base: { x: number; w: number; cx: number; cy: number; dist: number }; start: number; last: number | null }
+    | null
+  >(null)
   // Canva-style image crop: which image is being cropped, its live geometry, and the
   // in-flight gesture (resize a window edge, pan the picture, or none).
   const [cropEdit, setCropEdit] = useState<string | null>(null)
@@ -399,6 +407,24 @@ export function EditorCanvas(props: Props): JSX.Element {
       setTrackerLive(null)
     }
   }, [trackerEdit, scene])
+  useEffect(() => {
+    if (spineEdit && !scene.elements.some((e) => e.id === spineEdit)) {
+      setSpineEdit(null)
+      setSpineLive(null)
+    }
+  }, [spineEdit, scene])
+  useEffect(() => {
+    if (!spineEdit) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        spineDrag.current = null
+        setSpineEdit(null)
+        setSpineLive(null)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [spineEdit])
   useEffect(() => {
     if (!trackerEdit) return
     const onKey = (e: KeyboardEvent): void => {
@@ -731,6 +757,12 @@ export function EditorCanvas(props: Props): JSX.Element {
       setTrackerLive(null)
       return
     }
+    if (spineEdit) {
+      // Clicking off the fold line (which stops its own events) exits spine-edit.
+      setSpineEdit(null)
+      setSpineLive(null)
+      return
+    }
     const { px, py } = toIntrinsic(e.clientX, e.clientY)
     if (pathDrawTarget()) {
       // each click drops a waypoint; double-click / Enter finishes (handled below)
@@ -1002,6 +1034,12 @@ export function EditorCanvas(props: Props): JSX.Element {
     if (el && el.type === 'game-mount' && el.game?.templateId === 'memorymatch') {
       setTrackerLive(null)
       setTrackerEdit(hit.id)
+      return
+    }
+    // Double-click a flipbook → drag its fold line onto the spine in the artwork.
+    if (el && el.type === 'game-mount' && el.game?.templateId === 'flipbook') {
+      setSpineLive(null)
+      setSpineEdit(hit.id)
       return
     }
     // Double-click a scratch card that has a prize image → edit the reveal transform.
@@ -1521,6 +1559,74 @@ export function EditorCanvas(props: Props): JSX.Element {
     }
   }
 
+  // ---- flipbook book editor --------------------------------------------------
+  // Two things live on the canvas here, both measured against the BOOK (an
+  // aspect-locked box centered in the element) rather than the element itself:
+  // the fold line, and the shut cover's box with corner handles. Mirrors
+  // runtime/games/flipbook.ts layout()/sizeCover() so what you drag is what renders.
+  const spineEl = spineEdit ? scene.elements.find((e) => e.id === spineEdit) ?? null : null
+  const spineRect = spineEdit ? rects.find((r) => r.id === spineEdit) ?? null : null
+  const spineParams: Record<string, unknown> = spineEl?.game?.params ?? {}
+  const curCoverScale = spineLive?.coverScale ?? (typeof spineParams.coverScale === 'number' ? spineParams.coverScale : 100)
+  const curBookScale = spineLive?.bookScale ?? (typeof spineParams.bookScale === 'number' ? spineParams.bookScale : 100)
+  const spineBoxes = spineRect
+    ? flipbookBoxes(spineRect, { ...flipbookOpts(spineParams, assets), bookScale: curBookScale, coverScale: curCoverScale })
+    : null
+  const spineBook = spineBoxes?.book ?? null
+  const spineCover = spineBoxes?.cover ?? null
+  // Passive indicator: a SELECTED flipbook shows where its fold falls — the seam
+  // between the left and right page art — so the layout is visible without opening
+  // the editor. The fold is derived from the art, so there is nothing to drag.
+  const spineHint = ((): { book: Box; x: number } | null => {
+    if (spineEdit || !singleRect || single?.type !== 'game-mount' || single.game?.templateId !== 'flipbook') return null
+    const p: Record<string, unknown> = single.game?.params ?? {}
+    const { book, spineX } = flipbookBoxes(singleRect, flipbookOpts(p, assets))
+    return { book, x: spineX }
+  })()
+  /** Grab a corner of the book or of the shut cover: uniform scale about that box's
+   * centre, frozen at drag start so the anchor can't chase the pointer as it resizes. */
+  const onScaleDown = (mode: 'cover' | 'book') => (e: React.PointerEvent): void => {
+    e.stopPropagation()
+    const box = mode === 'book' ? spineBook : spineCover
+    if (!spineBook || !box) return
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    const o = overlayRef.current!.getBoundingClientRect()
+    const z = liveRef.current.zoom
+    const cx = box.x + box.w / 2
+    const cy = box.y + box.h / 2
+    const dx = (e.clientX - o.left) / z - cx
+    const dy = (e.clientY - o.top) / z - cy
+    spineDrag.current = {
+      mode,
+      base: { x: spineBook.x, w: spineBook.w, cx, cy, dist: Math.max(1, Math.hypot(dx, dy)) },
+      start: mode === 'book' ? curBookScale : curCoverScale,
+      last: null,
+    }
+  }
+  const onSpineMove = (e: React.PointerEvent): void => {
+    const d = spineDrag.current
+    if (!d) return
+    e.stopPropagation()
+    const o = overlayRef.current!.getBoundingClientRect()
+    const z = liveRef.current.zoom
+    const ox = (e.clientX - o.left) / z
+    const oy = (e.clientY - o.top) / z
+    const ratio = Math.hypot(ox - d.base.cx, oy - d.base.cy) / d.base.dist
+    const max = d.mode === 'book' ? 200 : 150
+    d.last = Math.max(20, Math.min(max, d.start * ratio))
+    setSpineLive({ coverScale: curCoverScale, bookScale: curBookScale, [d.mode === 'book' ? 'bookScale' : 'coverScale']: d.last })
+  }
+  const onSpineUp = (e: React.PointerEvent): void => {
+    e.stopPropagation()
+    const d = spineDrag.current
+    spineDrag.current = null
+    const g = spineEl?.game
+    if (d?.last != null && spineEl && g) {
+      const key = d.mode === 'book' ? 'bookScale' : 'coverScale'
+      patchElement(spineEl.id, { game: { ...g, params: { ...(g.params ?? {}), [key]: Math.round(d.last * 10) / 10 } } })
+    }
+  }
+
   // ---- memory-match tracker symbol editor -----------------------------------
   // Mirrors runtime/games/memorymatch.ts tracker layout (baseline model): symbols
   // left-to-right, bottoms on a shared baseline; per-symbol scale + X nudge.
@@ -1734,7 +1840,7 @@ export function EditorCanvas(props: Props): JSX.Element {
                   mirrors portrait. Seeding snapshots portrait geometry per element and
                   the banner disappears (overrides now exist). */}
               {active && landscape && lsN === 0 && sd.elements.length > 0 && !activeVariant && !lsBannerClosed[sd.id] &&
-                !revealEdit && !zoneEdit && !cropEdit && !trackerEdit && (
+                !revealEdit && !zoneEdit && !cropEdit && !trackerEdit && !spineEdit && (
                 <div className="ls-banner" onPointerDown={(e) => e.stopPropagation()}>
                   <span>Landscape mirrors portrait</span>
                   <button onClick={() => seedLandscapeLayout()}>Create separate landscape layout</button>
@@ -1763,7 +1869,7 @@ export function EditorCanvas(props: Props): JSX.Element {
                   onDoubleClick={onDoubleClick}
                   onContextMenu={onContextMenu}
                 >
-                  {!revealEdit && !zoneEdit && !cropEdit && !trackerEdit &&
+                  {!revealEdit && !zoneEdit && !cropEdit && !trackerEdit && !spineEdit &&
                     selectedIds.map((id) => {
                       const r = rects.find((x) => x.id === id)
                       if (!r) return null
@@ -1788,7 +1894,7 @@ export function EditorCanvas(props: Props): JSX.Element {
                       </div>
                     )
                   })}
-                  {!revealEdit && !zoneEdit && !cropEdit && !trackerEdit && single && singleRect && singleHandles.map((h) => (
+                  {!revealEdit && !zoneEdit && !cropEdit && !trackerEdit && !spineEdit && single && singleRect && singleHandles.map((h) => (
                     <div
                       key={h.k}
                       className={'handle h-' + h.k}
@@ -1796,7 +1902,7 @@ export function EditorCanvas(props: Props): JSX.Element {
                       onPointerDown={(e) => onHandlePointerDown(e, h, 'single')}
                     />
                   ))}
-                  {!revealEdit && !zoneEdit && !cropEdit && !trackerEdit && single && singleRect && (
+                  {!revealEdit && !zoneEdit && !cropEdit && !trackerEdit && !spineEdit && single && singleRect && (
                     <div
                       className="dim-badge"
                       style={{ left: singleRect.x + singleRect.w / 2, top: singleRect.y + singleRect.h, transform: `translate(-50%, 6px) scale(${1 / zoom})` }}
@@ -2079,6 +2185,105 @@ export function EditorCanvas(props: Props): JSX.Element {
                       />
                     )
                   })}
+                  {spineHint && (
+                    <>
+                      {/* Where the fold sits — visible on selection, not only in the editor. */}
+                      <div
+                        style={{
+                          position: 'absolute', left: spineHint.x - 1, top: spineHint.book.y, width: 2, height: spineHint.book.h,
+                          background: 'var(--accent)', opacity: 0.55, pointerEvents: 'none',
+                        }}
+                      />
+                      <div
+                        style={{
+                          position: 'absolute', left: spineHint.x, top: spineHint.book.y - 20, transform: 'translateX(-50%)',
+                          padding: '0 5px', borderRadius: 4, background: 'var(--accent)', color: '#fff', opacity: 0.85,
+                          font: '600 10px/1.7 system-ui, sans-serif', whiteSpace: 'nowrap', pointerEvents: 'none',
+                        }}
+                      >
+                        fold · double-click to size the book
+                      </div>
+                    </>
+                  )}
+                  {spineEdit && spineBook && (
+                    <>
+                      {/* The book itself — drag a corner to size it (the fold and the
+                          cover are measured against this box, not the element). */}
+                      <div
+                        title="Drag a corner to size the book. Esc to finish."
+                        style={{
+                          position: 'absolute', left: spineBook.x, top: spineBook.y, width: spineBook.w, height: spineBook.h,
+                          border: '1px dashed var(--accent)', boxSizing: 'border-box', pointerEvents: 'none',
+                        }}
+                      >
+                        {([[0, 0, 'nwse-resize'], [1, 0, 'nesw-resize'], [0, 1, 'nesw-resize'], [1, 1, 'nwse-resize']] as const).map(([hx, hy, cursor]) => (
+                          <div
+                            key={'bk' + hx + hy}
+                            className="handle"
+                            style={{ left: hx * spineBook.w, top: hy * spineBook.h, cursor, pointerEvents: 'auto', touchAction: 'none' }}
+                            onPointerDown={onScaleDown('book')}
+                            onPointerMove={onSpineMove}
+                            onPointerUp={onSpineUp}
+                            onPointerCancel={onSpineUp}
+                          />
+                        ))}
+                        <div
+                          style={{
+                            position: 'absolute', top: -22, left: 0,
+                            padding: '1px 6px', borderRadius: 4, background: 'var(--accent)', color: '#fff',
+                            font: '600 11px/1.5 system-ui, sans-serif', whiteSpace: 'nowrap',
+                          }}
+                        >
+                          book {Math.round(curBookScale)}%
+                        </div>
+                      </div>
+                      {/* The shut cover — drag a corner to size it (shape is locked to
+                          the art, so it scales uniformly). */}
+                      {spineCover && (
+                        <div
+                          title="Drag a corner to size the shut cover. Esc to finish."
+                          style={{
+                            position: 'absolute', left: spineCover.x, top: spineCover.y, width: spineCover.w, height: spineCover.h,
+                            border: '1.5px solid var(--accent)', background: 'rgba(80,140,255,0.08)', boxSizing: 'border-box',
+                            pointerEvents: 'none',
+                          }}
+                        >
+                          {([[0, 0, 'nwse-resize'], [1, 0, 'nesw-resize'], [0, 1, 'nesw-resize'], [1, 1, 'nwse-resize']] as const).map(([hx, hy, cursor]) => (
+                            <div
+                              key={'cov' + hx + hy}
+                              className="handle"
+                              style={{ left: hx * spineCover.w, top: hy * spineCover.h, cursor, pointerEvents: 'auto', touchAction: 'none' }}
+                              onPointerDown={onScaleDown('cover')}
+                              onPointerMove={onSpineMove}
+                              onPointerUp={onSpineUp}
+                              onPointerCancel={onSpineUp}
+                            />
+                          ))}
+                          <div
+                            style={{
+                              position: 'absolute', bottom: -22, left: '50%', transform: 'translateX(-50%)',
+                              padding: '1px 6px', borderRadius: 4, background: 'var(--accent)', color: '#fff',
+                              font: '600 11px/1.5 system-ui, sans-serif', whiteSpace: 'nowrap',
+                            }}
+                          >
+                            cover {Math.round(curCoverScale)}%
+                          </div>
+                        </div>
+                      )}
+                      {/* The cover's own pivot — the point the shut book turns about.
+                          Distinct from the fold: dashed, and measured across the COVER. */}
+                      {/* The fold: where the left and right page art meet. Derived from
+                          the art, so it's shown, not dragged. */}
+                      {spineBoxes && (
+                        <div
+                          style={{
+                            position: 'absolute', left: spineBoxes.spineX - 1, top: spineBook.y, width: 2, height: spineBook.h,
+                            background: 'var(--accent)', opacity: 0.5, pointerEvents: 'none',
+                          }}
+                        />
+                      )}
+                    </>
+                  )}
                 </div>
               ) : (
                 <div className="frame-activate" onPointerDown={(e) => activateFrame(e, sd.id)} />

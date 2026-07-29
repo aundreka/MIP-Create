@@ -453,7 +453,19 @@ export function playProject(
       // Elements opted into "hide on overlay" vanish for the overlay's lifetime, then
       // restore their prior inline display on dismiss. Saved individually so an element
       // already hidden (display:none) is left hidden on restore.
-      const hideEls = Array.from(gameRoot.querySelectorAll<HTMLElement>('.pa-el--hide-on-overlay'))
+      // IMMUNE elements (the CTA always, plus anything opted into overlayImmune /
+      // overlayTop) are not under gameRoot at all — parkImmune moved them into the
+      // stage container at mount — so they have to be collected from the park list
+      // too, or "hide on overlay" would silently do nothing for exactly the elements
+      // that stay on top of the overlay. Only THIS scene's parked nodes, never the
+      // overlay's own.
+      const parkedEls = parkedByStage.get(current.stage)?.els ?? []
+      const hideEls = [
+        ...new Set([
+          ...gameRoot.querySelectorAll<HTMLElement>('.pa-el--hide-on-overlay'),
+          ...parkedEls.filter((el) => el.classList.contains('pa-el--hide-on-overlay')),
+        ]),
+      ]
       const savedDisplay = hideEls.map((el) => el.style.display)
       hideEls.forEach((el) => { el.style.display = 'none' })
 
