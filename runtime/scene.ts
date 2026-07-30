@@ -830,6 +830,13 @@ export interface SceneDef {
   bgColor?: string  // per-scene gradient start: top (portrait) / left (landscape)
   bgColor2?: string // per-scene gradient end: bottom (portrait) / right (landscape)
   overlay?: SceneOverlay // built-in full-screen dim/blur overlay (win/lose scenes)
+  // Overlay scenes only: ALSO treat this scene as the MRAID end card. It still floats over
+  // the running game (so its dim/blur shows the game through) but gets the endscene's
+  // wrap — gameEnd signalled to the network, the whole surface tap-to-install, no date
+  // header — and is TERMINAL: its advance rule is ignored, nothing dismisses it. Use it for
+  // an end card that keeps the finished game board visible behind the dim, instead of
+  // cutting to a separate full-screen endscene. Ignored unless kind === 'overlay'.
+  asEndscene?: boolean
   elements: SceneElement[]
   advance: AdvanceRule
   transition?: Transition // how THIS scene ENTERS

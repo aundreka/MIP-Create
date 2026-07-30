@@ -1388,6 +1388,11 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
     const adv = sd.advance
     const tr = sd.transition ?? { type: 'fade' as TransitionType, durationMs: 350 }
     const others = state.project.scenes.filter((s) => s.id !== sd.id)
+    // 'win'/'custom' are pre-v2 aliases for 'overlay' (see migrate.ts) — tolerated here so an
+    // unmigrated project in memory still shows the overlay controls.
+    const isOverlayKind = sd.kind === 'overlay' || (sd.kind as string) === 'win' || (sd.kind as string) === 'custom'
+    // Acts as the MRAID end card: a real endscene, or an overlay opted into asEndscene.
+    const actsAsEndscene = sd.kind === 'endscene' || (isOverlayKind && !!sd.asEndscene)
     return (
       <div className="panel inspector">
         {variantBanner}
@@ -1405,7 +1410,9 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
           <Row label="Type">
             <Select
               value={(sd.kind as string) === 'win' || (sd.kind as string) === 'custom' ? 'overlay' : (sd.kind ?? 'overlay')}
-              onChange={(v) => patchSceneDef(sd.id, { kind: v as SceneKind })}
+              // asEndscene only means anything on an overlay — drop it on the way out so a
+              // scene switched to game/endscene and back doesn't silently come back terminal.
+              onChange={(v) => patchSceneDef(sd.id, { kind: v as SceneKind, ...(v === 'overlay' ? {} : { asEndscene: undefined }) })}
               options={[
                 { value: 'game', label: 'game scene' },
                 { value: 'overlay', label: 'overlay scene' },
@@ -1416,15 +1423,29 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
           <ColorField label={landscape ? 'BG left' : 'BG top'} value={sd.bgColor || undefined} allowNone onChange={(c) => setSceneBg(c ?? '')} />
           <ColorField label={landscape ? 'BG right' : 'BG bottom'} value={sd.bgColor2 || undefined} allowNone onChange={(c) => setSceneBg2(c)} />
         </div>
-        {state.project.meta.header && sd.kind !== 'endscene' && (
+        {isOverlayKind && (
+          <Toggle
+            label="Also the MRAID end card"
+            checked={!!sd.asEndscene}
+            onChange={(v) => patchSceneDef(sd.id, { asEndscene: v || undefined })}
+          />
+        )}
+        {isOverlayKind && sd.asEndscene && (
+          <div className="hint pad">
+            This overlay <b>is</b> the end card. It stays floated over the finished game — the dim/blur shows the board through —
+            and gets the endscene wrap: tap anywhere to install, <b>gameEnd</b> signalled to the network, no date header. It is
+            <b> terminal</b>, so its Advance rule below is ignored: nothing dismisses it and it never continues to another scene.
+          </div>
+        )}
+        {state.project.meta.header && !actsAsEndscene && (
           <Toggle
             label="Hide date header in this scene"
             checked={!!sd.hideHeader}
             onChange={(v) => patchSceneDef(sd.id, { hideHeader: v || undefined })}
           />
         )}
-        {state.project.meta.header && sd.kind === 'endscene' && (
-          <div className="hint pad">The date header never shows on an endscene.</div>
+        {state.project.meta.header && actsAsEndscene && (
+          <div className="hint pad">The date header never shows on an end card.</div>
         )}
         {sd.kind === 'endscene' && (
           <div className="hint pad">

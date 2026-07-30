@@ -150,6 +150,8 @@ export function ScenesStrip(props: { onPreviewScene: (id: string) => void; verti
             onClick={(e) => openKindPicker(e, s.id)}
           >
             {KIND_LABELS[s.kind ?? 'overlay']}
+            {/* An overlay doubling as the MRAID end card reads as both in the strip. */}
+            {s.kind === 'overlay' && s.asEndscene ? ' · End' : ''}
           </button>
           <button
             className="scene-mini"
@@ -265,7 +267,8 @@ export function ScenesStrip(props: { onPreviewScene: (id: string) => void; verti
                 key={k}
                 className={'scene-picker-item' + (k === current ? ' active' : '')}
                 onClick={() => {
-                  patchSceneDef(kindPicker.id, { kind: k })
+                  // asEndscene is overlay-only — clear it when leaving that kind (see Inspector).
+                  patchSceneDef(kindPicker.id, { kind: k, ...(k === 'overlay' ? {} : { asEndscene: undefined }) })
                   setKindPicker(null)
                 }}
               >

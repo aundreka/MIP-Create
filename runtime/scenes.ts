@@ -105,6 +105,7 @@ export function playProject(
   let unsubAdvance: (() => void) | null = null
   let unsubGoto: (() => void) | null = null
   let unsubWinPersist: (() => void) | null = null
+  let unsubOverlay: (() => void) | null = null
   // True once the (current) game has been completed. From that point the flow is
   // post-win (win overlay / next scene / end card) and a reload must RESTART the ad,
   // not resume — so the resume record stays cleared until another game scene mounts.
@@ -265,9 +266,35 @@ export function playProject(
     if (unsubAdvance) { unsubAdvance(); unsubAdvance = null }
   }
 
+  // Does this scene act as the end card? Either a real endscene, or an overlay scene opted
+  // into asEndscene — an end card that stays floated over the finished game instead of
+  // cutting to a full-screen scene. Both get the MRAID wrap; both are terminal.
+  const isEndscene = (def: SceneDef): boolean =>
+    def.kind === 'endscene' || (def.kind === 'overlay' && def.asEndscene === true)
+
   // Per-scene header visibility: scenes flagged hideHeader suppress the pinned date band while
   // they're current, and endscenes NEVER show it (an end card carries no date/countdown urgency).
-  const headerAllowed = (def: SceneDef): boolean => !def.hideHeader && def.kind !== 'endscene'
+  const headerAllowed = (def: SceneDef): boolean => !def.hideHeader && !isEndscene(def)
+
+  // A reload must never drop the player back onto a finished play-through.
+  const clearResume = (): void => {
+    try { window.sessionStorage.removeItem('pa:resume-scene') } catch { /* storage unavailable */ }
+  }
+
+  // Wrap a scene as an MRAID end card: tell the network the ad ended, and make `surface`
+  // tap-to-install. A scene carrying an 'endscene' ELEMENT wires its own tap (the video
+  // card handles it), so only a CODED end card gets the blanket handler.
+  const armEndcard = (def: SceneDef, surface: HTMLElement): void => {
+    emit('sfx', 'endscene')
+    notifyGameEnd()
+    if (def.elements.some((e) => e.type === 'endscene')) return
+    surface.style.cursor = 'pointer'
+    surface.addEventListener('pointerdown', () => {
+      emit('sfx', 'ctaClick')
+      notifyGameClose()
+      triggerCTA()
+    })
+  }
 
   const mountScene = (def: SceneDef): StageHandle => {
     header?.setVisible(headerAllowed(def))
@@ -289,7 +316,7 @@ export function playProject(
       // A scene that carries its own game re-arms resume (multi-game flows).
       if (hasGame(def)) gameWon = false
       try {
-        if (def.kind === 'endscene' || gameWon) {
+        if (isEndscene(def) || gameWon) {
           window.sessionStorage.removeItem('pa:resume-scene')
         } else {
           // Record the orientation too: resume is meant ONLY for AppLovin's reload-on-
@@ -300,20 +327,10 @@ export function playProject(
         }
       } catch { /* storage unavailable — rotation reloads restart the flow */ }
       stage.playEntrances() // onMount entrances (skipped on the static editor canvas)
-      if (def.kind === 'endscene') {
-        emit('sfx', 'endscene')
-        notifyGameEnd()
-        // A coded end card (no full-bleed video element) is wrapped as an MRAID-style
-        // click-through: tap anywhere installs, exactly like the video endcard does.
-        if (!def.elements.some((e) => e.type === 'endscene')) {
-          stage.root.style.cursor = 'pointer'
-          stage.root.addEventListener('pointerdown', () => {
-            emit('sfx', 'ctaClick')
-            notifyGameClose()
-            triggerCTA()
-          })
-        }
-      }
+      // An overlay+asEndscene scene normally reaches the player floated (see 'scene-overlay'),
+      // but it can also be mounted outright — as the start scene, or as a plain transition
+      // target — and it must still be an end card when it does.
+      if (isEndscene(def)) armEndcard(def, stage.root)
     }
     return stage
   }
@@ -327,8 +344,11 @@ export function playProject(
       const nid = nextId(def)
       if (!nid) return
       const nextDef = project.scenes.find((s) => s.id === nid)
+      // A terminal overlay end card has nowhere to go next — it IS the last thing the player
+      // sees — so it never carries a redirect, whatever scene happens to follow it in the list.
+      const afterOverlay = (ov: SceneDef): string | null => (isEndscene(ov) ? null : nextId(ov))
       if (nextDef?.kind === 'overlay' && !overlayShownThisScene) {
-        const afterId = nextId(nextDef)
+        const afterId = afterOverlay(nextDef)
         // Float overlay scene on top of the running game so the dim is visible over game content.
         emit('scene-overlay', {
           sceneId: nid,
@@ -339,7 +359,7 @@ export function playProject(
         })
       } else if (nextDef?.kind === 'overlay' && overlayShownThisScene) {
         // Game (e.g. scratch_grid) already showed the overlay via scene-overlay; skip past it.
-        const afterId = nextId(nextDef)
+        const afterId = afterOverlay(nextDef)
         if (afterId) transitionTo(afterId)
       } else {
         transitionTo(nid)
@@ -411,7 +431,9 @@ export function playProject(
         // background — i.e. solid black). `redirectTo` carries the overlay's own next
         // scene (e.g. the end scene); from here the overlay scene's OWN advance duration
         // is the single control of when it cover-fades onward — no other timer competes.
-        emit('scene-overlay', { sceneId: id, redirectTo: nextId(target) ?? undefined })
+        // A terminal overlay end card never redirects: it is where the flow stops.
+        const after = isEndscene(target) ? null : nextId(target)
+        emit('scene-overlay', { sceneId: id, redirectTo: after ?? undefined })
       } else {
         transitionTo(id)
       }
@@ -420,7 +442,11 @@ export function playProject(
     // Overlay a project scene on top of the current game scene without a transition.
     // The game stays mounted; the overlay appears above it and dismisses itself when
     // its own advance condition fires (tap, timer, etc.).
-    on('scene-overlay', ({ sceneId, onDone, redirectTo }: { sceneId: string; onDone?: () => void; redirectTo?: string }) => {
+    // Tracked so destroy() can drop it. The emitter is module-global, so a discarded
+    // unsubscribe outlived the manager: a second playProject (an editor preview remount)
+    // left the dead manager still listening, and one 'scene-overlay' then mounted the
+    // overlay once per manager ever created — against torn-down stages.
+    unsubOverlay = on('scene-overlay', ({ sceneId, onDone, redirectTo }: { sceneId: string; onDone?: () => void; redirectTo?: string }) => {
       if (!current) return
       overlayShownThisScene = true
       const def = project.scenes.find((s) => s.id === sceneId)
@@ -429,11 +455,18 @@ export function playProject(
       // mountScene. Restored to the underlying scene's setting on dismiss (see restoreImmune);
       // a redirect's mountScene sets it for the destination scene.
       if (!headerAllowed(def)) header?.setVisible(false)
+      // An overlay opted into asEndscene is the end card itself: it floats over the finished
+      // game (dim/blur showing the board through) and STAYS. Nothing dismisses it, so its
+      // advance rule is ignored below.
+      const terminal = isEndscene(def)
       // Redirect overlays (e.g. scratch win → end scene) leave the game for good. Suspend
       // the underlying game scene's still-armed advance NOW so ONLY this overlay scene's
       // own advance duration decides when we move on — otherwise the game's live timer/
       // tap trigger could fire first and redirect early, fighting the overlay's timing.
-      if (redirectTo) clearTriggers()
+      // A terminal end card does the same for a blunter reason: the game's armed advance
+      // must not navigate out from under it.
+      if (redirectTo || terminal) clearTriggers()
+      if (terminal) clearResume() // the play-through is over — a reload restarts the ad
 
       const gameRoot = current.stage.root
       const stageContainer = gameRoot.parentElement ?? gameRoot
@@ -554,6 +587,14 @@ export function playProject(
         }
       }
 
+      // Terminal end card: wire the MRAID wrap onto the overlay surface and arm NOTHING
+      // else. overlayDiv is pointer-events:all and spans the stage, so a tap anywhere over
+      // the dim installs — while the game board stays visible underneath it.
+      if (terminal) {
+        armEndcard(def, overlayDiv)
+        return
+      }
+
       const rule = def.advance
       if (rule.on === 'timer') {
         window.setTimeout(dismiss, rule.delayMs ?? 2000)
@@ -585,6 +626,7 @@ export function playProject(
       clearTriggers()
       if (unsubGoto) { unsubGoto(); unsubGoto = null }
       if (unsubWinPersist) { unsubWinPersist(); unsubWinPersist = null }
+      if (unsubOverlay) { unsubOverlay(); unsubOverlay = null }
       for (const ov of overlayStages) ov.destroy()
       overlayStages.clear()
       overlayCovers.clear() // cover divs are torn down with the container below
