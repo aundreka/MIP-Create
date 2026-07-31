@@ -4,7 +4,7 @@
 // sources are chosen at layout time so a device rotation swaps the clip;
 // object-fit cover|contain controls fill, and in 'contain' the letterbox gaps
 // are filled with the configured colour(s). `matchBgEdge` samples the clip's
-// edges to set fills automatically. Tap anywhere → CTA.
+// edges to set fills automatically. Tap anywhere → CTA (a real click: see armCtaTap).
 //
 // HTML mode: an <iframe srcdoc> loaded from an HTML asset. A shim is injected
 // that intercepts the standard ad CTA signals (gameEnd, mraid.open, etc.) and
@@ -16,10 +16,45 @@ import type { SceneElement } from '../scene'
 import type { RuntimeCtx } from '../types'
 import { triggerCTA, notifyGameClose } from '../networks'
 
+// How long an end card ignores input after it appears.
+//
+// The card mounts SYNCHRONOUSLY inside the pointerdown that finished the previous scene,
+// and on touch devices that same gesture still emits its compatibility ("ghost") mouse
+// events ~300ms later — hit-tested against whatever is under the finger BY THEN, i.e. the
+// freshly-mounted card. Without this window the player's last game tap installs for them.
+const ARM_MS = 400
+
+// Fire `run` on a deliberate click on `el`: a full press → release, and only once the
+// card has been up for ARM_MS. A bare pointerdown is not enough — see ARM_MS.
+function armCtaTap(el: HTMLElement, run: () => void): void {
+  const armedAt = Date.now()
+  let pressed = false
+  el.addEventListener('pointerdown', () => {
+    pressed = Date.now() - armedAt >= ARM_MS
+  })
+  el.addEventListener('pointercancel', () => {
+    pressed = false
+  })
+  el.addEventListener('pointerup', () => {
+    if (!pressed) return
+    pressed = false
+    run()
+  })
+}
+
 // Injected at the top of the HTML <head> (before any user scripts) so that
 // standard ad CTA signals inside the iframe bubble up to the host.
+//
+// Every hook below is gated on a real tap INSIDE the card: end-card HTML routinely calls
+// gameEnd()/mraid.open()/window.open() on load to announce "the ad finished", and those
+// must not read as "the player asked to install". Taps landing inside the arm window are
+// ignored for the same reason the host ignores them (see ARM_MS).
 const HTML_SHIM = `(function(){
-function cta(){try{parent.postMessage({__paEnd:'cta'},'*')}catch(e){}}
+var armedAt=Date.now();
+var acted=false;
+function mark(){if(Date.now()-armedAt>=${ARM_MS})acted=true}
+try{['pointerdown','mousedown','touchstart','click','keydown'].forEach(function(t){addEventListener(t,mark,true)})}catch(e){}
+function cta(){if(!acted)return;try{parent.postMessage({__paEnd:'cta'},'*')}catch(e){}}
 var noop=function(){};
 try{
   window.gameEnd=cta;window.gameClose=cta;window.install=cta;window.openAppStore=cta;
@@ -113,9 +148,14 @@ export function createEndsceneContent(el: SceneElement, ctx: RuntimeCtx): HTMLEl
     wrap.appendChild(iframe)
     wrap.appendChild(ph)
 
+    // Second gate, in case the card ships its own copies of the hooks the shim installs:
+    // a CTA signal arriving while the card is still arming is a load-time announcement,
+    // not a tap.
+    const armedAt = Date.now()
     const onMsg = (e: MessageEvent): void => {
       const d = e.data
       if (d && d.__paEnd === 'cta') {
+        if (Date.now() - armedAt < ARM_MS) return
         ctx.emit('sfx', 'ctaClick')
         notifyGameClose()
         triggerCTA()
@@ -223,7 +263,7 @@ export function createEndsceneContent(el: SceneElement, ctx: RuntimeCtx): HTMLEl
   }
 
   // tap anywhere → CTA (shielded by the selection overlay in the editor canvas)
-  wrap.addEventListener('pointerdown', () => {
+  armCtaTap(wrap, () => {
     ctx.emit('sfx', 'ctaClick')
     notifyGameClose()
     triggerCTA()
