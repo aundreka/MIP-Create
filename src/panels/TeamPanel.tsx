@@ -4,7 +4,7 @@
 // owners (PM monitoring). Read/write rules are enforced server-side by RLS; this
 // UI just hides controls the current role can't use.
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { getSession, isCloudConfigured, onAuthChange, signInWithEmail, signOut } from '../cloud/supabase'
 import {
@@ -24,11 +24,15 @@ import {
 import { currentProjectId, importProjectData, saveCurrent } from '../projects'
 import { getState } from '../store'
 import { downloadBlob } from '../export'
-import { Select } from '../ui'
+import { cmpNumber, cmpText, toggleSort, type SortState } from '../sort'
+import { Select, SortButton } from '../ui'
 import { Icon, RotateCcw, Trash2, Upload } from '../icons'
 
 const STATUSES: MipStatus[] = ['draft', 'in_review', 'approved', 'shipped']
 const errText = (e: unknown): string => String((e as Error)?.message ?? e)
+type TeamSortKey = 'mip' | 'status' | 'owner' | 'version' | 'updated'
+
+const isStakeholderGroup = (name: string): boolean => /^stakeholders?$/i.test(name.trim())
 
 // The team library body, rendered as a tab inside the Home screen. `onOpened`
 // fires after pulling a MIP into the local library (Home closes → editor opens).
@@ -42,6 +46,7 @@ export function TeamLibrary(props: { onOpened: () => void }): JSX.Element {
   const [role, setRole] = useState<Role | null>(null)
   const [mips, setMips] = useState<MipRow[]>([])
   const [profiles, setProfiles] = useState<Profile[]>([])
+  const [sort, setSort] = useState<SortState<TeamSortKey>>({ key: 'mip', dir: 'asc' })
 
   useEffect(() => {
     if (!isCloudConfigured()) {
@@ -74,7 +79,7 @@ export function TeamLibrary(props: { onOpened: () => void }): JSX.Element {
 
   const myId = session?.user?.id
   const isPm = role === 'pm' || role === 'admin'
-  const emailOf = (id: string | null): string => (id ? profiles.find((p) => p.id === id)?.email ?? id.slice(0, 8) : '-')
+  const emailOf = useCallback((id: string | null): string => (id ? profiles.find((p) => p.id === id)?.email ?? id.slice(0, 8) : '-'), [profiles])
 
   const wrap = (fn: () => Promise<void>): (() => void) => () => {
     setBusy(true)
@@ -117,14 +122,26 @@ export function TeamLibrary(props: { onOpened: () => void }): JSX.Element {
 
   const groups = useMemo(() => {
     const g = new Map<string, MipRow[]>()
+    const dir = sort.dir === 'asc' ? 1 : -1
+    const cmp = (a: MipRow, b: MipRow): number => {
+      const base =
+        sort.key === 'mip' ? cmpText(a.mip ?? a.name, b.mip ?? b.name) :
+        sort.key === 'status' ? cmpNumber(STATUSES.indexOf(a.status), STATUSES.indexOf(b.status)) :
+        sort.key === 'owner' ? cmpText(emailOf(a.owner_id), emailOf(b.owner_id)) :
+        sort.key === 'version' ? cmpNumber(a.version, b.version) :
+        cmpNumber(Date.parse(a.updated_at), Date.parse(b.updated_at))
+      return base * dir || cmpText(a.mip ?? a.name, b.mip ?? b.name)
+    }
     for (const r of mips) {
       const k = r.client_name ?? '(no client)'
       const arr = g.get(k) ?? []
       arr.push(r)
       g.set(k, arr)
     }
-    return [...g.entries()].sort((a, b) => a[0].localeCompare(b[0]))
-  }, [mips])
+    return [...g.entries()]
+      .map(([k, rows]) => [k, [...rows].sort(cmp)] as const)
+      .sort((a, b) => Number(isStakeholderGroup(a[0])) - Number(isStakeholderGroup(b[0])) || cmpText(a[0], b[0]))
+  }, [emailOf, mips, sort])
 
   return (
     <div className="team-library">
@@ -171,6 +188,14 @@ export function TeamLibrary(props: { onOpened: () => void }): JSX.Element {
               <div key={client}>
                 <div className="group-title">{client} · {rows.length} MIP{rows.length === 1 ? '' : 's'}</div>
                 <div className="team-list">
+                  <div className="team-row team-list-head">
+                    <span className="team-mip"><SortButton field="mip" sort={sort} onSort={(k) => setSort((cur) => toggleSort(cur, k))}>MIP</SortButton></span>
+                    <span className="team-status"><SortButton field="status" sort={sort} onSort={(k) => setSort((cur) => toggleSort(cur, k))}>Status</SortButton></span>
+                    {isPm && <span className="team-owner"><SortButton field="owner" sort={sort} onSort={(k) => setSort((cur) => toggleSort(cur, k))}>Owner</SortButton></span>}
+                    <span className="team-version"><SortButton field="version" sort={sort} onSort={(k) => setSort((cur) => toggleSort(cur, k))}>Ver</SortButton></span>
+                    <span className="team-updated"><SortButton field="updated" sort={sort} onSort={(k) => setSort((cur) => toggleSort(cur, k))}>Updated</SortButton></span>
+                    <span className="team-actions-head" />
+                  </div>
                   {rows.map((row) => {
                     const mine = row.owner_id === myId
                     const canStatus = isPm || mine
@@ -178,7 +203,7 @@ export function TeamLibrary(props: { onOpened: () => void }): JSX.Element {
                       <div className="team-row" key={row.id}>
                         <span className="team-mip">
                           <strong>{row.mip ?? row.name}</strong>
-                          <span className="team-sub">{row.name} · owner {emailOf(row.owner_id)} · v{row.version}</span>
+                          <span className="team-sub">{row.name} · owner {emailOf(row.owner_id)}</span>
                         </span>
                         {canStatus ? (
                           <Select
@@ -199,6 +224,8 @@ export function TeamLibrary(props: { onOpened: () => void }): JSX.Element {
                             options={profiles.map((p) => ({ value: p.id, label: p.email ?? p.id.slice(0, 8) }))}
                           />
                         )}
+                        <span className="team-version">v{row.version}</span>
+                        <span className="team-updated">{new Date(row.updated_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
                         <button disabled={busy} onClick={() => doOpen(row)} title="Download into your library and open">Open</button>
                         <button disabled={busy} onClick={() => doDownload(row)} title="Download project JSON">JSON</button>
                         {(isPm || mine) && (

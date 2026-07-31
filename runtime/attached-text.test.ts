@@ -4,7 +4,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { playProject } from './scenes'
-import { computeMetrics, setDesign } from './responsive'
+import { computeMetrics, setDesign, setVAlign } from './responsive'
 import type { Project, SceneElement } from './scene'
 
 const DESIGN_W = 1080
@@ -147,6 +147,30 @@ function makeSip3LandscapeCountdownProject(): Project {
   return project
 }
 
+function makeWideStepLandscapeCountdownProject(): Project {
+  const project = makeLegacyCountdownProject({ mode: 'dynamic', dynamicDays: 0, format: '{date}', dateStyle: 'long' })
+  project.meta.vAlign = 'center'
+  const vid = project.scenes[0].elements[0]
+  if (vid.type === 'endscene' && vid.endscene) {
+    vid.endscene.zoomL = 1
+    vid.endscene.objectFitL = 'cover'
+    vid.endscene.landscapeVideoId = 'wideL'
+  }
+  const cd = project.scenes[0].elements[1]
+  cd.x = 540
+  cd.y = 970
+  cd.scale = 1.607
+  cd.landscape = { x: 1434, y: 1383, scale: 2.035 }
+  return project
+}
+
+function makeWideStepAttachedLandscapeCountdownProject(): Project {
+  const project = makeWideStepLandscapeCountdownProject()
+  const cd = project.scenes[0].elements[1]
+  if (cd.type === 'countdown' && cd.countdown) cd.countdown.attachToId = 'vid'
+  return project
+}
+
 const fakeRect = (left: number, top: number, width: number, height: number): DOMRect =>
   ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect
 
@@ -164,11 +188,13 @@ const q = (mount: HTMLElement, id: string): HTMLElement => mount.querySelector<H
 const videoAssets = {
   pvid: { src: 'data:video/mp4;base64,', w: 1080, h: 1920, kind: 'video' as const },
   lvid: { src: 'data:video/mp4;base64,', w: 1920, h: 1080, kind: 'video' as const },
+  wideL: { src: 'data:video/mp4;base64,', w: 1138, h: 854, kind: 'video' as const },
 }
 
 describe('countdown attachToId', () => {
   beforeEach(() => {
     vi.useFakeTimers()
+    setVAlign('top')
     HTMLMediaElement.prototype.load = vi.fn()
     HTMLMediaElement.prototype.play = vi.fn(() => Promise.resolve())
   })
@@ -344,5 +370,63 @@ describe('countdown attachToId', () => {
 
     const cd = q(mount, 'cd')
     expect(parseFloat(cd.style.top)).toBe(Math.round(696 * Math.min(1022 / DESIGN_W, 944 / DESIGN_H)))
+  })
+
+  it('keeps non-16:9 landscape endscene countdowns from drifting downward', () => {
+    document.body.innerHTML = ''
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    setDesign(DESIGN_W, DESIGN_H)
+    setVAlign('center')
+    computeMetrics(844, 390)
+    const mgr = playProject(makeWideStepLandscapeCountdownProject(), videoAssets, { mount, interactive: true })
+    const vid = q(mount, 'vid')
+    const cd = q(mount, 'cd')
+
+    const measureAt = (w: number): { top: number; fontSize: number } => {
+      computeMetrics(w, 390)
+      vid.getBoundingClientRect = () => fakeRect(0, 0, w, 390)
+      mgr.relayout()
+      return {
+        top: parseFloat(cd.style.top),
+        fontSize: parseFloat(cd.querySelector<HTMLElement>('.pa-text-inner')!.style.fontSize),
+      }
+    }
+    const plainFitTop = Math.round(1383 * Math.min(844 / DESIGN_W, 390 / DESIGN_H))
+    const wide = measureAt(844)
+    const narrow = measureAt(700)
+
+    expect(wide.top).toBe(plainFitTop)
+    expect(narrow.top).toBe(plainFitTop)
+    expect(narrow.fontSize).toBeCloseTo(wide.fontSize, 1)
+  })
+
+  it('keeps explicitly attached landscape endscene countdowns at their authored y', () => {
+    document.body.innerHTML = ''
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    setDesign(DESIGN_W, DESIGN_H)
+    setVAlign('center')
+    computeMetrics(844, 390)
+    const mgr = playProject(makeWideStepAttachedLandscapeCountdownProject(), videoAssets, { mount, interactive: true })
+    const vid = q(mount, 'vid')
+    const cd = q(mount, 'cd')
+
+    const measureAt = (w: number): { top: number; fontSize: number } => {
+      computeMetrics(w, 390)
+      vid.getBoundingClientRect = () => fakeRect(0, 0, w, 390)
+      mgr.relayout()
+      return {
+        top: parseFloat(cd.style.top),
+        fontSize: parseFloat(cd.querySelector<HTMLElement>('.pa-text-inner')!.style.fontSize),
+      }
+    }
+    const expectedTop = Math.round(1383 * Math.min(844 / DESIGN_W, 390 / DESIGN_H))
+    const wide = measureAt(844)
+    const narrow = measureAt(700)
+
+    expect(wide.top).toBe(expectedTop)
+    expect(narrow.top).toBe(expectedTop)
+    expect(narrow.fontSize).toBeCloseTo(wide.fontSize, 1)
   })
 })

@@ -9,11 +9,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { buildScene } from './stage'
 import { computeMetrics, setDesign } from './responsive'
-import { triggerCTA } from './networks'
+import { notifyGameEnd, triggerCTA } from './networks'
 import type { Scene, SceneElement } from './scene'
+import type { AssetMap } from './types'
 
 vi.mock('./networks', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./networks')>()),
+  notifyGameEnd: vi.fn(),
   notifyGameClose: vi.fn(),
   triggerCTA: vi.fn(),
 }))
@@ -40,15 +42,15 @@ const scene = (els: SceneElement[]): Scene => ({
   kind: 'endscene',
 })
 
-function mountCard(): HTMLElement {
+function mountCard(el: SceneElement = endsceneEl, assets: AssetMap = { vid: { src: 'data:video/mp4;base64,', w: 1080, h: 1920, kind: 'video' } }): HTMLElement {
   document.body.innerHTML = ''
   const host = document.createElement('div')
   document.body.appendChild(host)
   setDesign(1080, 1920)
   computeMetrics(540, 960)
-  const stage = buildScene(scene([endsceneEl]), { vid: { src: 'data:video/mp4;base64,', w: 1080, h: 1920, kind: 'video' } }, { mount: host })
+  const stage = buildScene(scene([el]), assets, { mount: host })
   stage.layoutAll()
-  return stage.get('end')!.content as HTMLElement
+  return stage.get(el.id)!.content as HTMLElement
 }
 
 const press = (wrap: HTMLElement): void => {
@@ -62,6 +64,7 @@ describe('endscene tap-to-install', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.mocked(triggerCTA).mockClear()
+    vi.mocked(notifyGameEnd).mockClear()
   })
   afterEach(() => vi.useRealTimers())
 
@@ -108,6 +111,36 @@ describe('endscene tap-to-install', () => {
     press(wrap)
     release(wrap)
     release(wrap)
+    expect(triggerCTA).toHaveBeenCalledTimes(1)
+  })
+
+  it('forwards a nested HTML endscene gameEnd without installing', () => {
+    const wrap = mountCard({
+      ...endsceneEl,
+      id: 'html-end',
+      endscene: { mode: 'html', htmlId: 'html' },
+    } as SceneElement, { html: { src: 'data:text/html;base64,PGh0bWw+PGhlYWQ+PC9oZWFkPjxib2R5PjwvYm9keT48L2h0bWw+', w: 0, h: 0, kind: 'html' } })
+    const iframe = wrap.querySelector('iframe') as HTMLIFrameElement
+
+    window.dispatchEvent(new MessageEvent('message', { data: { __paEnd: 'end' }, source: iframe.contentWindow }))
+
+    expect(notifyGameEnd).toHaveBeenCalledTimes(1)
+    expect(triggerCTA).not.toHaveBeenCalled()
+  })
+
+  it('still gates nested HTML CTA messages until the card is armed', () => {
+    const wrap = mountCard({
+      ...endsceneEl,
+      id: 'html-end',
+      endscene: { mode: 'html', htmlId: 'html' },
+    } as SceneElement, { html: { src: 'data:text/html;base64,PGh0bWw+PC9odG1sPg==', w: 0, h: 0, kind: 'html' } })
+    const iframe = wrap.querySelector('iframe') as HTMLIFrameElement
+
+    window.dispatchEvent(new MessageEvent('message', { data: { __paEnd: 'cta' }, source: iframe.contentWindow }))
+    expect(triggerCTA).not.toHaveBeenCalled()
+
+    vi.advanceTimersByTime(ARM_MS)
+    window.dispatchEvent(new MessageEvent('message', { data: { __paEnd: 'cta' }, source: iframe.contentWindow }))
     expect(triggerCTA).toHaveBeenCalledTimes(1)
   })
 })

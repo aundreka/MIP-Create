@@ -438,9 +438,39 @@ button:active:not(:disabled),
 .lead-table th {
   position: sticky;
   top: 0;
-  background: var(--panel-2);
-  color: var(--muted);
+  background: var(--accent);
+  color: #fff;
   font-weight: 600;
+}
+.sort-head {
+  width: 100%;
+  min-height: 22px;
+  justify-content: flex-start;
+  gap: 4px;
+  padding: 2px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font-size: inherit;
+  font-weight: 700;
+  text-align: left;
+}
+.sort-head:hover:not(:disabled) {
+  background: transparent;
+  border-color: transparent;
+  color: inherit;
+}
+button.sort-head.on {
+  background: transparent;
+  border-color: transparent;
+  color: inherit;
+}
+.sort-head:active:not(:disabled) {
+  transform: none;
+}
+.sort-head svg {
+  flex: 0 0 auto;
 }
 .lead-table .lead-name {
   max-width: 240px;
@@ -4062,6 +4092,15 @@ svg {
   align-items: center;
   gap: 6px;
 }
+.qa-roster-head {
+  min-height: 28px;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
 .qa-mip-name {
   flex: 1;
   display: flex;
@@ -4082,6 +4121,21 @@ svg {
   flex: 0 0 110px;
   width: 110px;
   font-size: 12px;
+}
+.qa-roster-head .qa-assign {
+  display: flex;
+  align-items: center;
+  color: inherit;
+}
+.qa-findings-col {
+  flex: 0 0 58px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  font-size: 12px;
+}
+.qa-roster-head .qa-findings-col {
+  justify-content: flex-start;
 }
 
 /* ---- Team (cloud) panel ---- */
@@ -4120,6 +4174,14 @@ svg {
   background: var(--panel-2);
   font-size: 12px;
 }
+.team-list-head {
+  min-height: 30px;
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+}
 .team-mip {
   flex: 1;
   display: flex;
@@ -4137,8 +4199,36 @@ svg {
 .team-owner {
   flex: 0 0 auto;
 }
+.team-status {
+  min-width: 112px;
+}
 .team-owner select {
   max-width: 130px;
+}
+.team-version {
+  flex: 0 0 48px;
+  font-size: 11px;
+  color: var(--muted);
+  text-align: right;
+}
+.team-updated {
+  flex: 0 0 74px;
+  font-size: 11px;
+  color: var(--muted);
+  text-align: right;
+}
+.team-list-head .team-status,
+.team-list-head .team-owner,
+.team-list-head .team-version,
+.team-list-head .team-updated {
+  color: inherit;
+}
+.team-list-head .team-version,
+.team-list-head .team-updated {
+  text-align: left;
+}
+.team-actions-head {
+  flex: 0 0 120px;
 }
 .team-badge {
   flex: 0 0 auto;

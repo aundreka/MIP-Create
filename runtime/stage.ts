@@ -2402,36 +2402,34 @@ function attachedTextPos(rec: Rec, e: Effective): { left: number; top: number; k
   if (tRect.width < 1 || tRect.height < 1) return null
   const rootRect = root.getBoundingClientRect()
   const media = attachedTargetMediaRect(target, tRect)
+  const fit = target.content instanceof HTMLElement ? (isLandscape() ? target.content.dataset.fitL : target.content.dataset.fitP) || 'cover' : 'cover'
+  const keepGlobalY = fit === 'contain'
 
   if (isAutoEndscene && media) {
     const ref = autoEndsceneReferenceRect(target, e)
     if (ref) {
       const isBottomStrip = ref.normalTop > ref.height * 0.6
-      if (isBottomStrip) {
+      if (isBottomStrip && keepGlobalY) {
         const k = isLandscape() ? media.width / ref.media.width : scale() / ref.fitScale
         return {
-          left: isLandscape()
-            ? tRect.left - rootRect.left + (tRect.width - ref.width * k) / 2 + ref.normalLeft * k
-            : sx(e.x),
+          left: isLandscape() ? tRect.left - rootRect.left + (tRect.width - ref.width * k) / 2 + ref.normalLeft * k : sx(e.x),
           top: sy(e.y),
           k: isLandscape() ? ref.fitScale * k : scale(),
         }
       }
       if (isLandscape()) {
         const k = media.width / ref.media.width
-        // Legacy countdown overlays should scale with the media, but their authored
-        // vertical position must remain stable. Applying the contain/cover offset to
-        // `top` makes them visibly nudge during resize/orientation changes.
-          return {
-            left: tRect.left - rootRect.left + (tRect.width - ref.width * k) / 2 + ref.normalLeft * k,
-            top: sy(e.y),
-            k: ref.fitScale * k,
-          }
+        return {
+          left: tRect.left - rootRect.left + (tRect.width - ref.width * k) / 2 + ref.normalLeft * k,
+          top: sy(e.y),
+          k: keepGlobalY ? ref.fitScale * k : scale(),
+        }
       }
       const nx = (ref.normalLeft - ref.media.left) / ref.media.width
+      const ny = (ref.normalTop - ref.media.top) / ref.media.height
       return {
         left: media.left - rootRect.left + nx * media.width,
-        top: sy(e.y),
+        top: keepGlobalY ? sy(e.y) : media.top - rootRect.top + ny * media.height,
         k: ref.fitScale * (media.height / ref.media.height),
       }
     }
@@ -2444,10 +2442,11 @@ function attachedTextPos(rec: Rec, e: Effective): { left: number; top: number; k
   if (media) {
     const nx = (e.x - tLeftD) / targetDesignW
     const ny = (e.y - tTopD) / targetDesignH
+    const lockLandscapeY = target.el.type === 'endscene' && isLandscape() && keepGlobalY === false
     return {
       left: media.left - rootRect.left + nx * media.width,
-      top: media.top - rootRect.top + ny * media.height,
-      k: media.height / targetDesignH,
+      top: lockLandscapeY ? sy(e.y) : media.top - rootRect.top + ny * media.height,
+      k: lockLandscapeY ? scale() : media.height / targetDesignH,
     }
   }
   const k = tRect.height / targetDesignH

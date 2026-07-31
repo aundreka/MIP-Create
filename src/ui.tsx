@@ -4,7 +4,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { addToPalette, loadPalette } from './brandkit'
-import { Check, ChevronDown, ChevronLeft, ChevronRight, Icon, X } from './icons'
+import { ArrowDown, ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight, Icon, X } from './icons'
+import type { SortState } from './sort'
 import { getAccordion, getDock, setAccordion, setDock } from './uiState'
 
 // ---- confirmDestructive: gate an unrecoverable action behind a confirm -------
@@ -12,6 +13,29 @@ import { getAccordion, getDock, setAccordion, setDock } from './uiState'
 // destructive actions. Centralized so we can later swap to a styled dialog.
 export function confirmDestructive(message: string): boolean {
   return typeof window !== 'undefined' && typeof window.confirm === 'function' ? window.confirm(message) : true
+}
+
+export function SortButton<K extends string>(props: {
+  field: K
+  sort: SortState<K>
+  onSort: (field: K) => void
+  children: React.ReactNode
+  className?: string
+}): JSX.Element {
+  const active = props.sort.key === props.field
+  const nextDir = active && props.sort.dir === 'asc' ? 'descending' : 'ascending'
+  return (
+    <button
+      className={'sort-head' + (active ? ' on' : '') + (props.className ? ' ' + props.className : '')}
+      type="button"
+      aria-sort={active ? (props.sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+      title={`Sort ${String(props.children)} ${nextDir}`}
+      onClick={() => props.onSort(props.field)}
+    >
+      <span>{props.children}</span>
+      {active && <Icon icon={props.sort.dir === 'asc' ? ArrowUp : ArrowDown} size={12} strokeWidth={2.2} />}
+    </button>
+  )
 }
 
 // ---- NumField: label is draggable to scrub the value (Figma-style) ----------

@@ -3,17 +3,21 @@
 // client/MIP assignment). Clicking a finding deep-links to the offending
 // project/scene/element via the onNavigate callback wired in App.
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { buildProfiles, checkClient, groupByClient, type Finding } from '../qa/consistency'
 import { lintEngagement } from '../qa/engagement'
 import { buildLeaderboard, loadResults, METRICS, parseResultsCsv, saveResults, type Metric, type ResultRow } from '../results'
 import { deleteVersion, diffProjects, listVersions, saveVersion } from '../versions'
 import { currentProjectId, patchProjectMeta, saveCurrent } from '../projects'
 import { getState, loadProject, patchMeta } from '../store'
-import { Modal, Select } from '../ui'
+import { cmpNumber, cmpText, toggleSort, type SortState } from '../sort'
+import { Modal, Select, SortButton } from '../ui'
 import { AlertTriangle, Check, Icon } from '../icons'
 
 const UNASSIGNED = '(unassigned)'
+type ResultSortKey = 'creative' | 'matchedMip' | 'network' | 'ipm' | 'ctr' | 'installs' | 'impressions'
+type RosterSortKey = 'mip' | 'client' | 'findings'
+const clientRank = (name: string): number => name === UNASSIGNED ? 2 : /^stakeholders?$/i.test(name.trim()) ? 1 : 0
 
 export function QaPanel(props: { onClose: () => void; onNavigate: (projectId: string, sceneId?: string, elementId?: string) => void }): JSX.Element {
   // Persist the open project first so its latest client/MIP (and edits) are seen.
@@ -24,7 +28,7 @@ export function QaPanel(props: { onClose: () => void; onNavigate: (projectId: st
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nonce])
   const groups = useMemo(() => groupByClient(profiles), [profiles])
-  const clients = useMemo(() => [...groups.keys()].sort((a, b) => (a === UNASSIGNED ? 1 : b === UNASSIGNED ? -1 : a.localeCompare(b))), [groups])
+  const clients = useMemo(() => [...groups.keys()].sort((a, b) => clientRank(a) - clientRank(b) || cmpText(a, b)), [groups])
 
   const openId = currentProjectId()
   const openClient = (getState().project.meta.client ?? '').trim()
@@ -33,6 +37,7 @@ export function QaPanel(props: { onClose: () => void; onNavigate: (projectId: st
     return clients[0] ?? UNASSIGNED
   })
   const [tab, setTab] = useState<'consistency' | 'engagement' | 'results' | 'history'>('consistency')
+  const [rosterSort, setRosterSort] = useState<SortState<RosterSortKey>>({ key: 'mip', dir: 'asc' })
   const refresh = (): void => setNonce((n) => n + 1)
 
   // Engagement lint runs on the currently-open MIP (single project).
@@ -46,7 +51,22 @@ export function QaPanel(props: { onClose: () => void; onNavigate: (projectId: st
   const [results, setResults] = useState<ResultRow[]>(() => loadResults())
   const [csv, setCsv] = useState('')
   const [metric, setMetric] = useState<Metric>('ipm')
-  const board = useMemo(() => buildLeaderboard(results, metric), [results, metric])
+  const [resultSort, setResultSort] = useState<SortState<ResultSortKey>>({ key: 'ipm', dir: 'desc' })
+  const boardBase = useMemo(() => buildLeaderboard(results, metric), [results, metric])
+  const board = useMemo(() => {
+    const dir = resultSort.dir === 'asc' ? 1 : -1
+    return [...boardBase].sort((a, b) => {
+      const base =
+        resultSort.key === 'creative' ? cmpText(a.creative, b.creative) :
+        resultSort.key === 'matchedMip' ? cmpText(a.matchedMip, b.matchedMip) :
+        resultSort.key === 'network' ? cmpText(a.network, b.network) :
+        cmpNumber(a[resultSort.key], b[resultSort.key])
+      return base * dir || cmpText(a.creative, b.creative)
+    })
+  }, [boardBase, resultSort])
+  useEffect(() => {
+    setResultSort({ key: metric, dir: 'desc' })
+  }, [metric])
   const importCsv = (text: string): void => {
     const rows = parseResultsCsv(text)
     if (rows.length) {
@@ -80,13 +100,23 @@ export function QaPanel(props: { onClose: () => void; onNavigate: (projectId: st
     props.onClose()
   }
 
-  const selProfiles = groups.get(client) ?? []
+  const selProfiles = useMemo(() => groups.get(client) ?? [], [client, groups])
   const findings = useMemo(() => (client === UNASSIGNED ? [] : checkClient(selProfiles)), [client, selProfiles])
   const findingsByMip = useMemo(() => {
     const m = new Map<string, number>()
     for (const f of findings) m.set(f.projectId, (m.get(f.projectId) ?? 0) + 1)
     return m
   }, [findings])
+  const rosterProfiles = useMemo(() => {
+    const dir = rosterSort.dir === 'asc' ? 1 : -1
+    return [...selProfiles].sort((a, b) => {
+      const base =
+        rosterSort.key === 'mip' ? cmpText(a.mip, b.mip) :
+        rosterSort.key === 'client' ? cmpText(a.client, b.client) :
+        cmpNumber(findingsByMip.get(a.projectId) ?? 0, findingsByMip.get(b.projectId) ?? 0)
+      return base * dir || cmpText(a.mip, b.mip)
+    })
+  }, [findingsByMip, rosterSort, selProfiles])
 
   const assign = (projectId: string, patch: { client?: string; mip?: string }): void => {
     if (projectId === openId) {
@@ -190,12 +220,13 @@ export function QaPanel(props: { onClose: () => void; onNavigate: (projectId: st
                 <thead>
                   <tr>
                     <th>#</th>
-                    <th>Creative</th>
-                    <th>MIP</th>
-                    <th>Net</th>
-                    <th>IPM</th>
-                    <th>CTR</th>
-                    <th>Installs</th>
+                    <th><SortButton field="creative" sort={resultSort} onSort={(k) => setResultSort((cur) => toggleSort(cur, k))}>Creative</SortButton></th>
+                    <th><SortButton field="matchedMip" sort={resultSort} onSort={(k) => setResultSort((cur) => toggleSort(cur, k))}>MIP</SortButton></th>
+                    <th><SortButton field="network" sort={resultSort} onSort={(k) => setResultSort((cur) => toggleSort(cur, k))}>Net</SortButton></th>
+                    <th><SortButton field="ipm" sort={resultSort} onSort={(k) => setResultSort((cur) => toggleSort(cur, k))}>IPM</SortButton></th>
+                    <th><SortButton field="ctr" sort={resultSort} onSort={(k) => setResultSort((cur) => toggleSort(cur, k))}>CTR</SortButton></th>
+                    <th><SortButton field="installs" sort={resultSort} onSort={(k) => setResultSort((cur) => toggleSort(cur, k))}>Installs</SortButton></th>
+                    <th><SortButton field="impressions" sort={resultSort} onSort={(k) => setResultSort((cur) => toggleSort(cur, k))}>Impressions</SortButton></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -208,6 +239,7 @@ export function QaPanel(props: { onClose: () => void; onNavigate: (projectId: st
                       <td>{r.ipm ?? '-'}</td>
                       <td>{r.ctr ?? '-'}</td>
                       <td>{r.installs ?? '-'}</td>
+                      <td>{r.impressions ?? '-'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -299,12 +331,17 @@ export function QaPanel(props: { onClose: () => void; onNavigate: (projectId: st
           {/* MIP roster — also where (re)assignment happens */}
           <div className="group-title">MIPs under “{client}” ({selProfiles.length})</div>
           <div className="qa-roster">
-            {selProfiles.map((p) => (
+            <div className="qa-mip qa-roster-head">
+              <span className="qa-mip-name"><SortButton field="mip" sort={rosterSort} onSort={(k) => setRosterSort((cur) => toggleSort(cur, k))}>MIP</SortButton></span>
+              <span className="qa-assign"><SortButton field="client" sort={rosterSort} onSort={(k) => setRosterSort((cur) => toggleSort(cur, k))}>Client</SortButton></span>
+              <span className="qa-assign">MIP id</span>
+              <span className="qa-findings-col"><SortButton field="findings" sort={rosterSort} onSort={(k) => setRosterSort((cur) => toggleSort(cur, k))}>Issues</SortButton></span>
+            </div>
+            {rosterProfiles.map((p) => (
               <div className="qa-mip" key={p.projectId}>
                 <span className="qa-mip-name">
                   {p.mip}
                   {p.projectId === openId && <span className="badge">open</span>}
-                  {findingsByMip.get(p.projectId) ? <span className="qa-mip-count">{findingsByMip.get(p.projectId)}</span> : null}
                 </span>
                 <input
                   className="qa-assign"
@@ -326,6 +363,7 @@ export function QaPanel(props: { onClose: () => void; onNavigate: (projectId: st
                     if (v && v !== p.mip) assign(p.projectId, { mip: v })
                   }}
                 />
+                <span className="qa-findings-col">{findingsByMip.get(p.projectId) ? <span className="qa-mip-count">{findingsByMip.get(p.projectId)}</span> : '-'}</span>
               </div>
             ))}
           </div>

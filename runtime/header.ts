@@ -36,10 +36,14 @@ interface HeaderHandle {
   destroy(): void
 }
 
-const monthFormatter = new Intl.DateTimeFormat('en-US', { month: 'long' })
+const LEGACY_DATE_OPTS: Intl.DateTimeFormatOptions = { month: 'long', day: 'numeric', year: 'numeric' }
 
-function formatHeaderDate(d = new Date()): string {
-  return `${monthFormatter.format(d).toUpperCase()} ${d.getDate()}, ${d.getFullYear()}`
+function formatHeaderDate(d = new Date(), locale = 'en-US'): string {
+  try {
+    return d.toLocaleDateString(locale, LEGACY_DATE_OPTS).toUpperCase()
+  } catch {
+    return d.toLocaleDateString('en-US', LEGACY_DATE_OPTS).toUpperCase()
+  }
 }
 
 export function mountHeader(container: HTMLElement, opts: HeaderConfig): HeaderHandle {
@@ -95,7 +99,7 @@ export function mountHeader(container: HTMLElement, opts: HeaderConfig): HeaderH
     // Custom layouts render today via the shared token formatter (deadline=now
     // makes the date tokens target today); empty keeps the legacy fixed style.
     const now = Date.now()
-    const date = opts.dateFormat ? renderCountdownFormat(braceBareTokens(opts.dateFormat), now, now, opts) : formatHeaderDate()
+    const date = opts.dateFormat ? renderCountdownFormat(braceBareTokens(opts.dateFormat), now, now, opts) : formatHeaderDate(new Date(now), opts.dateLocale)
     text.textContent = (opts.prefix ?? '') + date + (opts.suffix ?? '')
   }
 

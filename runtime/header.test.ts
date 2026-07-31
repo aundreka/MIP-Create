@@ -26,13 +26,23 @@ describe('header modes', () => {
   it('date mode (default) renders the current date with prefix/suffix', () => {
     mount({ prefix: 'DAY ', suffix: ' !' })
     const now = new Date()
-    expect(bandText()).toBe(`DAY ${now.toLocaleDateString('en-US', { month: 'long' }).toUpperCase()} ${now.getDate()}, ${now.getFullYear()} !`)
+    expect(bandText()).toBe(`DAY ${now.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }).toUpperCase()} !`)
   })
 
   it('date mode honours a custom format with bare tokens', () => {
     mount({ dateFormat: 'MMMM D, YYYY' })
     const now = new Date()
     expect(bandText()).toBe(`${now.toLocaleDateString('en-US', { month: 'long' })} ${now.getDate()}, ${now.getFullYear()}`)
+  })
+
+  it('date mode localizes the default and custom header formats', () => {
+    const now = new Date()
+    mount({ dateLocale: 'de' })
+    expect(bandText()).toBe(now.toLocaleDateString('de', { month: 'long', day: 'numeric', year: 'numeric' }).toUpperCase())
+
+    document.body.innerHTML = ''
+    mount({ dateFormat: 'MMMM D, YYYY', dateLocale: 'es' })
+    expect(bandText()).toBe(`${now.toLocaleDateString('es', { month: 'long' })} ${now.getDate()}, ${now.getFullYear()}`)
   })
 
   it('date-format tokens work bare or braced, long or short', () => {

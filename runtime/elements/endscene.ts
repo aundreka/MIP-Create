@@ -14,7 +14,7 @@
 
 import type { SceneElement } from '../scene'
 import type { RuntimeCtx } from '../types'
-import { triggerCTA, notifyGameClose } from '../networks'
+import { triggerCTA, notifyGameClose, notifyGameEnd } from '../networks'
 
 // How long an end card ignores input after it appears.
 //
@@ -52,16 +52,18 @@ function armCtaTap(el: HTMLElement, run: () => void): void {
 const HTML_SHIM = `(function(){
 var armedAt=Date.now();
 var acted=false;
+var ended=false;
 function mark(){if(Date.now()-armedAt>=${ARM_MS})acted=true}
 try{['pointerdown','mousedown','touchstart','click','keydown'].forEach(function(t){addEventListener(t,mark,true)})}catch(e){}
 function cta(){if(!acted)return;try{parent.postMessage({__paEnd:'cta'},'*')}catch(e){}}
+function end(){if(ended)return;ended=true;try{parent.postMessage({__paEnd:'end'},'*')}catch(e){}}
 var noop=function(){};
 try{
-  window.gameEnd=cta;window.gameClose=cta;window.install=cta;window.openAppStore=cta;
+  window.gameEnd=end;window.gameClose=cta;window.install=cta;window.openAppStore=cta;
   window.open=function(){cta();return null};
   window.ExitApi={exit:cta};
   window.FbPlayableAd={onCTAClick:cta,onPause:noop,onResume:noop};
-  window.playableSDK={openAppStore:cta,gameReady:noop,gameStart:noop,gameEnd:cta};
+  window.playableSDK={openAppStore:cta,gameReady:noop,gameStart:noop,gameEnd:end};
   window.mraid={isViewable:function(){return true},getState:function(){return 'default'},getPlacementType:function(){return 'interstitial'},addEventListener:noop,removeEventListener:noop,open:function(){cta()},close:noop,useCustomClose:noop,expand:noop,getVersion:function(){return '3.0'},supports:function(){return false},getScreenSize:function(){return {width:innerWidth,height:innerHeight}}};
   window.Luna={Unity:{Playable:{openStoreUrl:cta,install:cta,InstallFullGame:cta}}};
 }catch(e){}
@@ -153,23 +155,29 @@ export function createEndsceneContent(el: SceneElement, ctx: RuntimeCtx): HTMLEl
     // not a tap.
     const armedAt = Date.now()
     const onMsg = (e: MessageEvent): void => {
+      if (e.source && iframe.contentWindow && e.source !== iframe.contentWindow) return
       const d = e.data
-      if (d && d.__paEnd === 'cta') {
+      if (d && d.__paEnd === 'end') {
+        notifyGameEnd()
+      } else if (d && d.__paEnd === 'cta') {
         if (Date.now() - armedAt < ARM_MS) return
         ctx.emit('sfx', 'ctaClick')
         notifyGameClose()
         triggerCTA()
       }
     }
-    window.addEventListener('message', onMsg)
+    const view = wrap.ownerDocument.defaultView ?? window
+    const addMessage = view.addEventListener.bind(view)
+    const removeMessage = view.removeEventListener.bind(view)
+    addMessage('message', onMsg)
     // Clean up when the wrap is removed from the DOM
     const obs = new MutationObserver(() => {
       if (!wrap.isConnected) {
-        window.removeEventListener('message', onMsg)
+        try { removeMessage('message', onMsg) } catch { /* jsdom teardown */ }
         obs.disconnect()
       }
     })
-    obs.observe(document, { childList: true, subtree: true })
+    obs.observe(wrap.ownerDocument, { childList: true, subtree: true })
 
     return wrap
   }

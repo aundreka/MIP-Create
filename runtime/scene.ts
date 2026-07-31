@@ -706,9 +706,11 @@ export interface HeaderConfig {
   countdownFormat?: string // token string, e.g. '{mm} {ss}' (default '{mm}:{ss}')
   // Custom layout for date mode, e.g. 'MMMM D, YYYY' → "July 15, 2026". Tokens
   // (bare or {braced}): MMMM full month, MMM short month, MM/M numeric month,
-  // DD/D day, Do ordinal day (21st), YYYY/YY year. Empty → the legacy
-  // "JULY 15, 2026" rendering.
+  // DD/D day, Do ordinal day (21st), YYYY/YY year. Empty → localized full date,
+  // uppercased (legacy English shape: "JULY 15, 2026").
   dateFormat?: string
+  dateLocale?: string // BCP-47 tag for date/month rendering (default 'en-US')
+  dateStyle?: 'short' | 'long' | 'numeric' | 'monthDay' // how {date} renders in custom formats
   // Case applied to the rendered date/timer. 'upper' is what turns "Jul" into "JUL" —
   // Intl hands back month names already title-cased, so 'title' is a no-op on them.
   textCase?: 'none' | 'title' | 'upper' | 'lower'

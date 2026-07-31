@@ -56,6 +56,7 @@ import {
   X,
 } from '../icons'
 import { AssetPicker } from './AssetPicker'
+import { DATE_LOCALE_OPTIONS } from '../dateLocales'
 
 // Tap feedback options, shared by the button element and images marked as buttons.
 const TAP_EFFECTS = [
@@ -2459,11 +2460,8 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 <Row label="Date language">
                   <Select
                     value={cfg.dateLocale ?? 'en-US'}
-                    onChange={(v) => setCd({ dateLocale: v })}
-                    options={[
-                      { value: 'en-US', label: 'English' },
-                      { value: 'es', label: 'Español (12 de julio)' },
-                    ]}
+                    onChange={(v) => setCd({ dateLocale: v === 'en-US' ? undefined : v })}
+                    options={DATE_LOCALE_OPTIONS}
                   />
                 </Row>
               )}
