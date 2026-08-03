@@ -238,7 +238,7 @@ export function attachScratchCover(
 
     if (revealed.size >= candidates().length && (cover.el.scratch?.advanceOnAllRevealed ?? true)) {
       fadeOut()
-      emit('game-complete')
+      emit('game-win')
     }
   }
 

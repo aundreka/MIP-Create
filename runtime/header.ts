@@ -37,6 +37,9 @@ interface HeaderHandle {
 }
 
 const LEGACY_DATE_OPTS: Intl.DateTimeFormatOptions = { month: 'long', day: 'numeric', year: 'numeric' }
+// Keep the pinned header above every runtime overlay tier, including lifted
+// overlayTop elements (10050) and redirect cover scenes (11000).
+const HEADER_OVERLAY_Z = 20000
 
 function formatHeaderDate(d = new Date(), locale = 'en-US'): string {
   try {
@@ -67,7 +70,7 @@ export function mountHeader(container: HTMLElement, opts: HeaderConfig): HeaderH
   band.style.textAlign = align
   band.style.padding = (topPadded ? opts.topPaddingPx : 0) + 'px 24px 0'
   band.style.height = height + 'px'
-  band.style.zIndex = String(opts.zIndex ?? 9999)
+  band.style.zIndex = String(Math.max(opts.zIndex ?? 0, HEADER_OVERLAY_Z))
   if (opts.bgColor) band.style.backgroundColor = opts.bgColor
   band.style.color = opts.color ?? '#ffffff'
   band.style.fontSize = (opts.fontSizePx ?? 64) + 'px'

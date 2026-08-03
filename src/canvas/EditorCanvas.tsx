@@ -15,6 +15,7 @@ import { isSceneHidden, useCanvasView } from '../canvasView'
 import { useActiveVariant } from '../variantMode'
 import { endPathDraw, pathDrawTarget, usePathDraw } from '../drawMode'
 import { useEditLocale } from '../locale'
+import { localizeElement, localizeSceneDef } from '../../runtime/i18n'
 import { setSceneMediaMs, useTimeline } from '../timeline'
 import { sceneAssetIds } from '../export'
 import {
@@ -74,9 +75,10 @@ const EDGES: Handle[] = [
 const landscapeCount = (sd: SceneDef): number =>
   sd.elements.filter((e) => e.landscape && Object.keys(e.landscape).length > 0).length
 
-function effGeom(el: SceneElement, landscape: boolean) {
-  const ov = landscape ? el.landscape : undefined
-  return { x: ov?.x ?? el.x, y: ov?.y ?? el.y, scale: ov?.scale ?? el.scale ?? 1, w: ov?.w ?? el.w, h: ov?.h ?? el.h }
+function effGeom(el: SceneElement, landscape: boolean, locale?: string | null) {
+  const localized = localizeElement(el, locale)
+  const ov = landscape ? localized.landscape : undefined
+  return { x: ov?.x ?? localized.x, y: ov?.y ?? localized.y, scale: ov?.scale ?? localized.scale ?? 1, w: ov?.w ?? localized.w, h: ov?.h ?? localized.h, anchor: ov?.anchor ?? localized.anchor }
 }
 // Anchor point as a fraction of the box (x, y); mirrors the runtime ANCHOR map.
 const ANCHOR_FRAC: Record<Anchor, [number, number]> = {
@@ -121,6 +123,7 @@ function CanvasFrame(props: {
   iframeRef?: (el: HTMLIFrameElement | null) => void
 }): JSX.Element {
   const { sceneId, def, meta, assets, renderKey, locale, onLayout, iframeRef } = props
+  const displayDef = useMemo(() => localizeSceneDef(def, locale), [def, locale])
   const ref = useRef<HTMLIFrameElement>(null)
   const ready = useRef(false)
   // Track the last assets reference sent — only include assets in the message when
@@ -132,18 +135,18 @@ function CanvasFrame(props: {
   // image/video (the main out-of-memory cause). The key keeps the memo identity
   // stable across position edits so `changed` stays false and we don't re-clone the
   // map on each structural render (which would stall live drags).
-  const assetKey = useMemo(() => sceneAssetIds(def, assets).sort().join('|'), [def, assets])
+  const assetKey = useMemo(() => sceneAssetIds(displayDef, assets).sort().join('|'), [displayDef, assets])
   const frameAssets = useMemo(() => {
     const out: AssetMap = {}
     for (const id of assetKey ? assetKey.split('|') : []) if (assets[id]) out[id] = assets[id]
     return out
   }, [assetKey, assets])
   const post = useCallback(() => {
-    const scene: Scene = { meta: { ...meta, bgMatchColor: def.bgColor !== undefined ? def.bgColor : meta.bgMatchColor }, elements: def.elements, kind: def.kind, overlay: def.overlay }
+    const scene: Scene = { meta: { ...meta, bgMatchColor: displayDef.bgColor !== undefined ? displayDef.bgColor : meta.bgMatchColor }, elements: displayDef.elements, kind: displayDef.kind, overlay: displayDef.overlay }
     const changed = lastSentAssets.current !== frameAssets
     lastSentAssets.current = frameAssets
     ref.current?.contentWindow?.postMessage({ type: 'pa:render', scene, assets: changed ? frameAssets : undefined, interactive: false, locale }, '*')
-  }, [def, meta, frameAssets, locale])
+  }, [displayDef, meta, frameAssets, locale])
   useEffect(() => {
     if (ready.current) post()
   }, [post, renderKey])
@@ -296,8 +299,8 @@ export function EditorCanvas(props: Props): JSX.Element {
 
   const rects = rectsByScene[activeSceneId] ?? EMPTY_RECTS
 
-  const liveRef = useRef({ scene, selectedIds, landscape, rects, zoom, pan, activeSceneId })
-  liveRef.current = { scene, selectedIds, landscape, rects, zoom, pan, activeSceneId }
+  const liveRef = useRef({ scene, selectedIds, landscape, rects, zoom, pan, activeSceneId, editLocale })
+  liveRef.current = { scene, selectedIds, landscape, rects, zoom, pan, activeSceneId, editLocale }
 
   // Sends the current scene state directly to the active iframe without going through
   // the React render / useEffect cycle. Called after every drag mutation so the canvas
@@ -482,23 +485,24 @@ export function EditorCanvas(props: Props): JSX.Element {
     const el = st.scene.elements.find((x) => x.id === rawId)
     if (!el || el.type !== 'image' || !el.assetId || el.container) return
     const ls = st.orientation === 'landscape'
-    const g = effGeom(el, ls)
+    const localized = localizeElement(el, editLocaleRef.current)
+    const g = effGeom(el, ls, editLocaleRef.current)
     let w = g.w
     let h = g.h
     if (w == null || h == null) {
-      const a = st.assets[el.assetId]
+      const a = st.assets[localized.assetId ?? '']
       const sc = g.scale || 1
       w = Math.max(1, Math.round((a?.w ?? 300) * sc))
       h = Math.max(1, Math.round((a?.h ?? 300) * sc))
     }
     let x = g.x
     let y = g.y
-    if (el.anchor !== 'top-left') {
-      const [fx, fy] = ANCHOR_FRAC[el.anchor]
+    if (g.anchor !== 'top-left') {
+      const [fx, fy] = ANCHOR_FRAC[g.anchor]
       x = Math.round(g.x - fx * w)
       y = Math.round(g.y - fy * h)
     }
-    const a = st.assets[el.assetId]
+    const a = st.assets[localized.assetId ?? '']
     const natR = a && a.w > 0 ? a.h / a.w : 1
     const cur = el.crop ?? {}
     const cl = clampCrop(w, h, cur.scale ?? 1, cur.x ?? 0, cur.y ?? 0, natR)
@@ -787,7 +791,7 @@ export function EditorCanvas(props: Props): JSX.Element {
       const base: Record<string, { x: number; y: number }> = {}
       for (const id of ids) {
         const el = liveRef.current.scene.elements.find((x) => x.id === id)
-        if (el) base[id] = { x: effGeom(el, liveRef.current.landscape).x, y: effGeom(el, liveRef.current.landscape).y }
+        if (el) base[id] = { x: effGeom(el, liveRef.current.landscape, liveRef.current.editLocale).x, y: effGeom(el, liveRef.current.landscape, liveRef.current.editLocale).y }
       }
       beginTransaction()
       drag.current = { mode: 'move', start: { px, py }, base, bbox: bboxOf(ids) ?? { x: hit.x, y: hit.y, w: hit.w, h: hit.h } }
@@ -813,10 +817,10 @@ export function EditorCanvas(props: Props): JSX.Element {
         .map((id) => liveRef.current.scene.elements.find((x) => x.id === id))
         .filter(Boolean)
         .map((el) => {
-          const ge = effGeom(el as SceneElement, liveRef.current.landscape)
+          const ge = effGeom(el as SceneElement, liveRef.current.landscape, liveRef.current.editLocale)
           // scale: the EFFECTIVE value (landscape override included) so scaling in
           // landscape multiplies the landscape size, not the portrait one.
-          const baseScale = liveRef.current.landscape ? ge.scale : (el as SceneElement).scale
+          const baseScale = ge.scale
           return { id: (el as SceneElement).id, x: ge.x, y: ge.y, w: ge.w, h: ge.h, scale: baseScale, font: (el as SceneElement).text?.fontSizePx, isText: (el as SceneElement).type === 'text' }
         })
       beginTransaction()
@@ -827,14 +831,15 @@ export function EditorCanvas(props: Props): JSX.Element {
     const el = liveRef.current.scene.elements.find((x) => x.id === id)
     const rect = liveRef.current.rects.find((r) => r.id === id)
     if (!el || !rect) return
-    const g = effGeom(el, liveRef.current.landscape)
+    const localized = localizeElement(el, liveRef.current.editLocale)
+    const g = effGeom(el, liveRef.current.landscape, liveRef.current.editLocale)
     let kind: 'wh' | 'scale' | 'font' = 'scale'
     let sw = rect.w / s
     let sh = rect.h / s
     let sScale = g.scale
     let sFont = el.text?.fontSizePx ?? 48
-    const nativeW = (assets[el.assetId ?? ''] ?? { w: 100 }).w
-    if (boxSizable(el)) {
+    const nativeW = (assets[localized.assetId ?? ''] ?? { w: 100 }).w
+    if (boxSizable(localized)) {
       kind = 'wh'
       sw = g.w ?? sw
       sh = g.h ?? sh
@@ -842,7 +847,7 @@ export function EditorCanvas(props: Props): JSX.Element {
     } else if (el.type === 'text') {
       // fontSizePx is SHARED config (both orientations) — resizing text in landscape
       // must go through the landscape `scale` override instead, or portrait moves too.
-      kind = liveRef.current.landscape ? 'scale' : 'font'
+      kind = liveRef.current.landscape || !!liveRef.current.editLocale ? 'scale' : 'font'
     } else {
       kind = 'scale'
       sScale = g.scale
@@ -850,7 +855,7 @@ export function EditorCanvas(props: Props): JSX.Element {
     const cx = rect.x + rect.w / 2 // intrinsic center → distance-based scale/font
     const cy = rect.y + rect.h / 2
     beginTransaction()
-    drag.current = { mode: 'resize', id, h, start: { px, py }, kind, sw, sh, sScale, sFont, nativeW, sx: g.x, sy: g.y, anchor: el.anchor, cx, cy, sDist: Math.hypot(px - cx, py - cy) || 1 }
+    drag.current = { mode: 'resize', id, h, start: { px, py }, kind, sw, sh, sScale, sFont, nativeW, sx: g.x, sy: g.y, anchor: g.anchor, cx, cy, sDist: Math.hypot(px - cx, py - cy) || 1 }
   }
 
   const onPointerMove = (e: React.PointerEvent): void => {
@@ -871,7 +876,7 @@ export function EditorCanvas(props: Props): JSX.Element {
       const dd = designDelta(snapped.dx, snapped.dy)
       const patches: Record<string, Partial<SceneElement>> = {}
       for (const id of Object.keys(d.base)) patches[id] = { x: Math.round(d.base[id].x + dd.dx), y: Math.round(d.base[id].y + dd.dy) }
-      if (liveRef.current.landscape) for (const id of Object.keys(patches)) patchGeometry(id, patches[id])
+      if (liveRef.current.landscape || liveRef.current.editLocale) for (const id of Object.keys(patches)) patchGeometry(id, patches[id])
       else bulkPatch(patches)
       sendToActiveFrame()
       // Spacing readout to the nearest neighbours (or canvas edges) at the snapped pos.
@@ -897,7 +902,7 @@ export function EditorCanvas(props: Props): JSX.Element {
       sendToActiveFrame()
     } else if (d.mode === 'group-scale') {
       const f = Math.max(0.1, Math.hypot(px - (d.cx * metricsRef.current.s + metricsRef.current.offX), py - (d.cy * metricsRef.current.s + metricsRef.current.offY)) / d.sDist)
-      if (liveRef.current.landscape) {
+      if (liveRef.current.landscape || liveRef.current.editLocale) {
         // Landscape group-scale writes ONLY landscape overrides — never the base
         // (portrait) fields. Text has no per-orientation font size, so its size is
         // driven by the landscape `scale` override instead (w/h skipped: the runtime
@@ -985,7 +990,7 @@ export function EditorCanvas(props: Props): JSX.Element {
         const place: Record<string, { x: number; y: number }> = {}
         for (const id of Object.keys(d.base)) {
           const el = liveRef.current.scene.elements.find((x) => x.id === id)
-          if (el) { const g = effGeom(el, liveRef.current.landscape); place[id] = { x: g.x + ddx, y: g.y + ddy } }
+          if (el) { const g = effGeom(el, liveRef.current.landscape, liveRef.current.editLocale); place[id] = { x: g.x + ddx, y: g.y + ddy } }
         }
         moveSelectedToScene(dropId, place)
       }
@@ -1230,7 +1235,7 @@ export function EditorCanvas(props: Props): JSX.Element {
         for (const id of ids) {
           const el = liveRef.current.scene.elements.find((x) => x.id === id)
           if (!el) continue
-          const g = effGeom(el, liveRef.current.landscape)
+          const g = effGeom(el, liveRef.current.landscape, liveRef.current.editLocale)
           if (e.key === 'ArrowLeft') patchGeometry(id, { x: g.x - step })
           else if (e.key === 'ArrowRight') patchGeometry(id, { x: g.x + step })
           else if (e.key === 'ArrowUp') patchGeometry(id, { y: g.y - step })
@@ -1256,7 +1261,7 @@ export function EditorCanvas(props: Props): JSX.Element {
   // ---- render helpers (active frame) ----------------------------------------
   const single = selectedIds.length === 1 ? scene.elements.find((e) => e.id === selectedIds[0]) ?? null : null
   const singleRect = single ? rects.find((r) => r.id === single.id) ?? null : null
-  const singleHandles: Handle[] = single ? (boxSizable(single) ? [...CORNERS, ...EDGES] : CORNERS) : []
+  const singleHandles: Handle[] = single ? (boxSizable(localizeElement(single, editLocale)) ? [...CORNERS, ...EDGES] : CORNERS) : []
   // Handguide slide path (design coords -> intrinsic) for the selected handguide:
   // a polyline from the hand's center through each waypoint.
   const hgPath = (() => {
@@ -1326,7 +1331,8 @@ export function EditorCanvas(props: Props): JSX.Element {
 
   // ---- Canva-style image crop editor ----------------------------------------
   const cropEl = cropEdit ? scene.elements.find((e) => e.id === cropEdit) ?? null : null
-  const cropSrc = cropEl?.assetId ? assets[cropEl.assetId]?.src : undefined
+  const localizedCropEl = cropEl ? localizeElement(cropEl, editLocale) : null
+  const cropSrc = localizedCropEl?.assetId ? assets[localizedCropEl.assetId]?.src : undefined
   const writeCrop = (v: CropView, box: boolean): void => {
     setCropView(v)
     cropViewRef.current = v
@@ -1839,7 +1845,7 @@ export function EditorCanvas(props: Props): JSX.Element {
                   shown only on the active frame, in landscape, while the scene still
                   mirrors portrait. Seeding snapshots portrait geometry per element and
                   the banner disappears (overrides now exist). */}
-              {active && landscape && lsN === 0 && sd.elements.length > 0 && !activeVariant && !lsBannerClosed[sd.id] &&
+              {active && landscape && lsN === 0 && sd.elements.length > 0 && !activeVariant && !editLocale && !lsBannerClosed[sd.id] &&
                 !revealEdit && !zoneEdit && !cropEdit && !trackerEdit && !spineEdit && (
                 <div className="ls-banner" onPointerDown={(e) => e.stopPropagation()}>
                   <span>Landscape mirrors portrait</span>
@@ -1987,7 +1993,7 @@ export function EditorCanvas(props: Props): JSX.Element {
                     <textarea
                       className="inline-edit"
                       autoFocus
-                      defaultValue={editEl.text.value}
+                      defaultValue={editLocale ? (editEl.text.i18n?.[editLocale] ?? editEl.text.value) : editEl.text.value}
                       style={{
                         left: editRect.x,
                         top: editRect.y,
@@ -1997,7 +2003,11 @@ export function EditorCanvas(props: Props): JSX.Element {
                         color: editEl.text.color ?? '#fff',
                         textAlign: editEl.text.align ?? 'center',
                       }}
-                      onChange={(e) => patchElement(editEl.id, { text: { ...editEl.text!, value: e.target.value } })}
+                      onChange={(e) => patchElement(editEl.id, {
+                        text: editLocale
+                          ? { ...editEl.text!, i18n: { ...(editEl.text!.i18n ?? {}), [editLocale]: e.target.value } }
+                          : { ...editEl.text!, value: e.target.value },
+                      })}
                       onBlur={() => setEditing(null)}
                       onKeyDown={(e) => {
                         if (e.key === 'Escape' || (e.key === 'Enter' && !e.shiftKey)) {

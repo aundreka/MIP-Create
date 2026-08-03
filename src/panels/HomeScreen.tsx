@@ -1,18 +1,20 @@
 // Home / project menu — work on multiple playables. Lists every saved project
-// (localStorage library), opens / creates / renames / duplicates / deletes them,
+// (localStorage library), opens / creates / renames / asset-flips / deletes them,
 // and starts new ones blank or from a built-in starter. Opening switches the
 // editor to that project (persisting the current one first).
 
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { createProject, currentProjectId, deleteProject, duplicateProject, listProjects, loadProjectPreview, openProject, renameProject, saveCurrent, type ProjectRecord } from '../projects'
+import { createProject, currentProjectId, deleteProject, listProjects, loadProjectPreview, openProject, renameProject, saveCurrent, type ProjectRecord } from '../projects'
 import type { ProjectData } from '../bridge'
 import { gameTemplateStarters, STARTERS, type Starter } from '../templates'
 import { SceneThumb } from '../preview/SceneThumb'
 import { allBrands, brandsFor, usagesFor } from '../templateUsage'
 import { TemplateCard } from './TemplateCard'
+import { AssetFlipModal } from './AssetFlipModal'
+import { TranslationMergeModal } from './TranslationMergeModal'
 import { exportAllData, backupFilename, importAllData, readBackupInfo } from '../backup'
 import { downloadBlob } from '../export'
-import { ArrowDownToLine, ArrowUpToLine, Copy, Diamond, FolderOpen, Icon, LayoutGrid, ListChecks, Pencil, Plus, ScanSearch, Search, Share2, Star, Upload, User, X } from '../icons'
+import { ArrowDownToLine, ArrowUpToLine, Copy, Diamond, FolderOpen, Icon, Languages, LayoutGrid, ListChecks, Pencil, Plus, ScanSearch, Search, Share2, Star, Upload, User, X } from '../icons'
 
 // Team library loads lazily (keeps Supabase out of the Home chunk until the tab opens).
 const TeamLibrary = lazy(() => import('./TeamPanel').then((m) => ({ default: m.TeamLibrary })))
@@ -79,11 +81,13 @@ function when(ts: number): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 }
 
-export function HomeScreen(props: { onClose: () => void; onProfile: () => void; onGenerate?: () => void; onQuizFunnel?: () => void; onImportBuilt?: () => void; onShare?: () => void; onShareProject?: (id: string, name: string) => void; onQaCheck?: () => void; initialTab?: 'projects' | 'team' }): JSX.Element {
+export function HomeScreen(props: { onClose: () => void; onProfile: () => void; onGenerate?: () => void; onQuizFunnel?: () => void; onImportBuilt?: () => void; onShare?: () => void; onShareProject?: (id: string, name: string) => void; onUploadProject?: (projectIds: string[], label: string) => void; onQaCheck?: () => void; initialTab?: 'projects' | 'team' }): JSX.Element {
   const [tick, force] = useState(0)
   const refresh = (): void => force((n) => n + 1)
   const [editId, setEditId] = useState<string | null>(null)
   const [view, setView] = useState<'projects' | 'team'>(props.initialTab ?? 'projects')
+  const [assetFlipSource, setAssetFlipSource] = useState<string | null>(null)
+  const [translationMergeIds, setTranslationMergeIds] = useState<string[] | null>(null)
 
   // make sure the current project's card shows its latest name/time
   useEffect(() => {
@@ -107,6 +111,14 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
 
   const projects = listProjects()
   const curId = currentProjectId()
+  const convenientTranslationIds = (): string[] => {
+    const current = projects.find((project) => project.id === curId)
+    if (current?.projectId) {
+      const siblings = projects.filter((project) => project.projectId === current.projectId).map((project) => project.id)
+      if (siblings.length >= 2) return siblings
+    }
+    return curId ? [curId] : projects[0] ? [projects[0].id] : []
+  }
   const [query, setQuery] = useState('')
   const [brand, setBrand] = useState<string | null>(null)
   const gameCards = useMemo(() => gameTemplateStarters().map((s) => ({ starter: s, data: s.build() })), [])
@@ -233,9 +245,14 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
         <button title="Rename" onClick={() => setEditId(p.id)}>
           <Icon icon={Pencil} size={13} />
         </button>
-        <button title="Duplicate" onClick={() => void duplicateProject(p.id).then(() => refresh())}>
+        <button title="Copy / Asset flip" onClick={() => setAssetFlipSource(p.id)}>
           <Icon icon={Copy} size={13} />
         </button>
+        {props.onUploadProject && (
+          <button title="Build and upload this playable" onClick={() => props.onUploadProject!([p.id], p.name)}>
+            <Icon icon={Upload} size={13} />
+          </button>
+        )}
         {props.onShareProject && (
           <button title="Share this playable — get a code / link to hand someone an editable copy" onClick={() => props.onShareProject!(p.id, p.name)}>
             <Icon icon={Share2} size={13} />
@@ -313,6 +330,18 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
                 </span>
                 <span>New blank playable</span>
               </button>
+              <button className="new-card" onClick={() => setAssetFlipSource(curId ?? projects[0]?.id ?? '')} title="Copy a playable as-is or bulk-replace its image assets by filename">
+                <span className="plus">
+                  <Icon icon={Copy} size={22} />
+                </span>
+                <span>Copy / Asset flip</span>
+              </button>
+              <button className="new-card" disabled={projects.length < 2} onClick={() => setTranslationMergeIds(convenientTranslationIds())} title="Select language copies and combine them into one browser-language-aware playable">
+                <span className="plus">
+                  <Icon icon={Languages} size={22} />
+                </span>
+                <span>Combine translations</span>
+              </button>
               {props.onGenerate && (
                 <button className="new-card" onClick={() => props.onGenerate!()} title="Scaffold a MIP from a logo + product (coded SVG art + MRAID end card)">
                   <span className="plus">
@@ -356,6 +385,22 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
               <div key={'g:' + b.id} className="proj-group">
                 <div className="proj-group-head">
                   <Icon icon={FolderOpen} size={14} /> {b.name} <span className="proj-group-count">{b.items.length}</span>
+                  {props.onUploadProject && (
+                    <>
+                      <span className="spacer" />
+                      <button onClick={() => props.onUploadProject!(b.items.map((item) => item.id), b.name)} title={`Build and upload all ${b.items.length} MIPs in this project`}>
+                        <Icon icon={Upload} size={13} /> Upload project
+                      </button>
+                    </>
+                  )}
+                  {b.items.length >= 2 && (
+                    <>
+                      <span className={props.onUploadProject ? '' : 'spacer'} />
+                      <button onClick={() => setTranslationMergeIds(b.items.map((item) => item.id))} title={`Use these ${b.items.length} playables as language copies of one dynamic playable`}>
+                        <Icon icon={Languages} size={13} /> Combine translations
+                      </button>
+                    </>
+                  )}
                 </div>
                 <div className="home-grid">{b.items.map(renderCard)}</div>
               </div>
@@ -435,6 +480,22 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
           )}
         </div>
       </div>
+      {assetFlipSource !== null && projects.length > 0 && (
+        <AssetFlipModal
+          projects={projects}
+          initialSourceId={assetFlipSource || projects[0].id}
+          onClose={() => setAssetFlipSource(null)}
+          onCreated={() => { setAssetFlipSource(null); props.onClose() }}
+        />
+      )}
+      {translationMergeIds !== null && projects.length >= 2 && (
+        <TranslationMergeModal
+          projects={projects}
+          initialSelectedIds={translationMergeIds}
+          onClose={() => setTranslationMergeIds(null)}
+          onCreated={() => { setTranslationMergeIds(null); props.onClose() }}
+        />
+      )}
     </div>
   )
 }

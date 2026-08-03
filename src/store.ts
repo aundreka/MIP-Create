@@ -13,6 +13,8 @@ import { GAME_TEMPLATES } from '../runtime/games/registry'
 import { sfxPreviewUrl } from './sfxLibrary'
 import { deleteSharedElement, ensureGroupByName, putSharedElement } from './projectGroups'
 import { syncMipName } from './mipName'
+import { getEditLocale, subscribeEditLocale } from './locale'
+import { localizeElement, localizeHeader, localizeSceneDef } from '../runtime/i18n'
 
 export type Orientation = 'portrait' | 'landscape'
 
@@ -61,6 +63,7 @@ function starterMeta(): ProjectMeta {
     },
     baseW: 1080,
     baseH: 1920,
+    defaultLocale: 'en',
     bgMatchColor: '#101a33',
   }
 }
@@ -84,7 +87,8 @@ export function blankProject(): { project: Project; assets: AssetMap; trace?: Tr
 }
 
 function deriveScene(project: Project, activeSceneId: string): Scene {
-  const sd = project.scenes.find((s) => s.id === activeSceneId) ?? project.scenes[0]
+  const base = project.scenes.find((s) => s.id === activeSceneId) ?? project.scenes[0]
+  const sd = base ? localizeSceneDef(base, getEditLocale()) : undefined
   let elements = sd?.elements ?? []
   // when editing a variant, the canvas/inspector show base + that variant's overrides
   const vid = getActiveVariant()
@@ -95,6 +99,7 @@ function deriveScene(project: Project, activeSceneId: string): Scene {
   return {
     meta: {
       ...project.meta,
+      header: localizeHeader(project.meta, getEditLocale()),
       // undefined = not set, fall back to project default; '' = explicitly transparent
       bgMatchColor: sd?.bgColor !== undefined ? sd.bgColor : project.meta.bgMatchColor,
       bgMatchColor2: sd?.bgColor2 !== undefined ? sd.bgColor2 : project.meta.bgMatchColor2,
@@ -119,6 +124,14 @@ let state: EditorState = {
   canUndo: false,
   canRedo: false,
 }
+
+// Locale selection lives outside undo history, but a whole-scene translation
+// changes the derived render scene. Keep that view fresh immediately when the
+// language picker changes.
+subscribeEditLocale(() => {
+  state = { ...state, scene: deriveScene(state.project, state.activeSceneId) }
+  emit()
+})
 
 const listeners = new Set<() => void>()
 function emit(): void {
@@ -213,7 +226,20 @@ export function activeSceneDef(s: EditorState = state): SceneDef {
   return s.project.scenes.find((x) => x.id === s.activeSceneId) ?? s.project.scenes[0]
 }
 function mapActiveScene(fn: (sd: SceneDef) => SceneDef): void {
-  set({ dirty: true, project: { ...state.project, scenes: state.project.scenes.map((s) => (s.id === state.activeSceneId ? fn(s) : s)) } })
+  const locale = getEditLocale()
+  set({ dirty: true, project: { ...state.project, scenes: state.project.scenes.map((s) => {
+    if (s.id !== state.activeSceneId) return s
+    const localized = locale ? s.localeOverrides?.[locale]?.source : undefined
+    if (!locale || !localized) return fn(s)
+    const edited = fn(localized)
+    return {
+      ...s,
+      localeOverrides: {
+        ...s.localeOverrides,
+        [locale]: { source: { ...edited, id: s.id, advance: s.advance, transition: s.transition, localeOverrides: undefined } },
+      },
+    }
+  }) } })
 }
 function mapEl(id: string, fn: (e: SceneElement) => SceneElement): void {
   mapActiveScene((sd) => ({ ...sd, elements: sd.elements.map((e) => (e.id === id ? fn(e) : e)) }))
@@ -286,8 +312,59 @@ export function patchLandscape(id: string, patch: OrientationOverride): void {
   }
   mapEl(id, (e) => ({ ...e, landscape: { ...(e.landscape ?? {}), ...patch } }))
 }
+
+/** Patch one language's optional asset/layout layer; absent fields inherit default. */
+export function patchLocaleOverride(id: string, locale: string, patch: Partial<NonNullable<SceneElement['localeOverrides']>[string]>): void {
+  const el = state.scene.elements.find((e) => e.id === id)
+  if (!el) return
+  const current = el.localeOverrides?.[locale] ?? {}
+  patchElement(id, { localeOverrides: { ...(el.localeOverrides ?? {}), [locale]: { ...current, ...patch } } })
+}
+
+export function setLocaleAsset(id: string, locale: string, assetId: string | undefined): void {
+  const el = state.scene.elements.find((e) => e.id === id)
+  if (!el) return
+  const overrides = { ...(el.localeOverrides ?? {}) }
+  const current = { ...(overrides[locale] ?? {}) }
+  if (assetId) current.assetId = assetId
+  else delete current.assetId
+  if (Object.keys(current).length) overrides[locale] = current
+  else delete overrides[locale]
+  patchElement(id, { localeOverrides: Object.keys(overrides).length ? overrides : undefined })
+}
+
+export function resetLocaleOverride(id: string, locale: string): void {
+  const el = state.scene.elements.find((e) => e.id === id)
+  if (!el?.localeOverrides?.[locale]) return
+  const overrides = { ...el.localeOverrides }
+  delete overrides[locale]
+  patchElement(id, { localeOverrides: Object.keys(overrides).length ? overrides : undefined })
+}
+
+export function resetLocaleLayout(id: string, locale: string, orientation: Orientation): void {
+  const el = state.scene.elements.find((e) => e.id === id)
+  if (!el) return
+  const overrides = { ...(el.localeOverrides ?? {}) }
+  const current = { ...(overrides[locale] ?? {}) }
+  delete current[orientation]
+  if (Object.keys(current).length) overrides[locale] = current
+  else delete overrides[locale]
+  patchElement(id, { localeOverrides: Object.keys(overrides).length ? overrides : undefined })
+}
+
 export function patchGeometry(id: string, patch: OrientationOverride): void {
-  if (state.orientation === 'landscape') patchLandscape(id, patch)
+  const locale = getEditLocale()
+  const wholeSceneLocale = locale && activeSceneDef().localeOverrides?.[locale]?.source
+  if (wholeSceneLocale) {
+    if (state.orientation === 'landscape') patchLandscape(id, patch)
+    else patchElement(id, patch as Partial<SceneElement>)
+  } else if (locale) {
+    const el = state.scene.elements.find((e) => e.id === id)
+    if (!el) return
+    const current = el.localeOverrides?.[locale] ?? {}
+    const key: Orientation = state.orientation
+    patchLocaleOverride(id, locale, { [key]: { ...(current[key] ?? {}), ...patch } })
+  } else if (state.orientation === 'landscape') patchLandscape(id, patch)
   else patchElement(id, patch as Partial<SceneElement>)
 }
 export function addElement(el: SceneElement): void {
@@ -587,11 +664,12 @@ export function alignSelected(op: AlignOp): void {
   for (const id of ids) {
     const e = state.scene.elements.find((x) => x.id === id)
     if (!e) continue
-    const ov = landscape ? e.landscape ?? {} : {}
-    const [h, v] = A_DECOMP[ov.anchor ?? e.anchor] ?? ['center', 'center']
-    let x = ov.x ?? e.x
-    let y = ov.y ?? e.y
-    let anchor = ov.anchor ?? e.anchor
+    const localized = localizeElement(e, getEditLocale())
+    const ov = landscape ? localized.landscape ?? {} : {}
+    const [h, v] = A_DECOMP[ov.anchor ?? localized.anchor] ?? ['center', 'center']
+    let x = ov.x ?? localized.x
+    let y = ov.y ?? localized.y
+    let anchor = ov.anchor ?? localized.anchor
     if (op === 'left') ((x = 0), (anchor = recompose('left', v)))
     else if (op === 'centerH') ((x = Math.round(m.baseW / 2)), (anchor = recompose('center', v)))
     else if (op === 'right') ((x = m.baseW), (anchor = recompose('right', v)))
@@ -789,7 +867,7 @@ export function convertElement(id: string, to: ConvertTo): void {
 // ---- project / scene meta -------------------------------------------------
 export function patchMeta(patch: Partial<ProjectMeta>): void {
   // Keep meta.name canonical ("<Client> <MIP> <Date>") after every edit so the
-  // topbar, Home, team library, JSON download and export filename all agree.
+  // topbar, Home, team library, and JSON download all agree.
   const meta = syncMipName({ ...state.project.meta, ...patch })
   set({ dirty: true, project: { ...state.project, meta } })
 }
@@ -880,6 +958,52 @@ export function setStartScene(id: string): void {
 export function patchSceneDef(id: string, patch: Partial<SceneDef>): void {
   if (getActiveVariant()) return // scene name/advance/transition are base-only (disabled in variant mode)
   set({ dirty: true, project: { ...state.project, scenes: state.project.scenes.map((s) => (s.id === id ? { ...s, ...patch } : s)) } })
+}
+export function setSceneLocaleSource(id: string, locale: string, source: SceneDef, assets: AssetMap, header?: ProjectMeta['header']): void {
+  const code = locale.trim().replace(/_/g, '-')
+  if (!code) return
+  const locales = [...new Set([...(state.project.meta.locales ?? []), code])]
+  set({
+    dirty: true,
+    assets,
+    project: {
+      ...state.project,
+      meta: {
+        ...state.project.meta,
+        defaultLocale: state.project.meta.defaultLocale || 'en',
+        locales,
+        ...(header ? { headerI18n: { ...(state.project.meta.headerI18n ?? {}), [code]: header } } : {}),
+      },
+      scenes: state.project.scenes.map((scene) => scene.id === id ? {
+        ...scene,
+        localeOverrides: { ...(scene.localeOverrides ?? {}), [code]: { source } },
+      } : scene),
+    },
+  })
+}
+export function setLocaleHeader(locale: string, header: NonNullable<ProjectMeta['header']>, assets: AssetMap): void {
+  const code = locale.trim().replace(/_/g, '-')
+  if (!code) return
+  set({
+    dirty: true,
+    assets,
+    project: {
+      ...state.project,
+      meta: {
+        ...state.project.meta,
+        defaultLocale: state.project.meta.defaultLocale || 'en',
+        locales: [...new Set([...(state.project.meta.locales ?? []), code])],
+        headerI18n: { ...(state.project.meta.headerI18n ?? {}), [code]: header },
+      },
+    },
+  })
+}
+export function removeSceneLocaleSource(id: string, locale: string): void {
+  const scene = state.project.scenes.find((item) => item.id === id)
+  if (!scene?.localeOverrides?.[locale]) return
+  const overrides = { ...scene.localeOverrides }
+  delete overrides[locale]
+  patchSceneDef(id, { localeOverrides: Object.keys(overrides).length ? overrides : undefined })
 }
 export function reorderScenes(ids: string[]): void {
   const byId = new Map(state.project.scenes.map((s) => [s.id, s]))

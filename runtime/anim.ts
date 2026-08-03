@@ -177,24 +177,33 @@ export function ctaPulseAnimation(cta: import('./scene').CtaConfig | undefined):
   return `${name} ${dur}ms ease-in-out infinite`
 }
 
-// A phase can hold MULTIPLE stacked specs: the primary (`entrance`/`loop`/`exit`) plus any
+// A phase can hold MULTIPLE stacked specs: the primary (`entrance`/`loop`/`exit`/`gameWin`) plus any
 // `…Extra[]` played together with it (e.g. entrance = pop + shine). Collect them in order.
-type Phase = 'entrance' | 'loop' | 'exit'
+type Phase = 'entrance' | 'loop' | 'exit' | 'gameWin'
 export function phaseSpecs(el: SceneElement, phase: Phase): AnimSpec[] {
   const a = el.animations
   if (!a) return []
   const out: AnimSpec[] = []
-  const primary = a[phase]
+  const legacyGameWin = phase === 'gameWin' && a.entrance?.trigger === 'onGameWin'
+  const legacyPrimary = legacyGameWin ? a.entrance : undefined
+  const primary =
+    phase === 'entrance'
+      ? (a.entrance?.trigger === 'onGameWin' ? undefined : a.entrance)
+      : (a[phase] ?? legacyPrimary)
   if (primary) out.push(primary)
-  const extra = a[(phase + 'Extra') as 'entranceExtra' | 'loopExtra' | 'exitExtra']
+  const legacyExtra = legacyGameWin ? a.entranceExtra : undefined
+  const extra =
+    phase === 'entrance'
+      ? (a.entrance?.trigger === 'onGameWin' ? undefined : a.entranceExtra)
+      : (a[(phase + 'Extra') as 'entranceExtra' | 'loopExtra' | 'exitExtra' | 'gameWinExtra'] ?? legacyExtra)
   if (Array.isArray(extra)) for (const s of extra) if (s) out.push(s)
   return out
 }
 
-/** The lightray spec from ANY phase (entrance/loop/exit) — drives the .pa-lightray pseudo sweep.
+/** The lightray spec from ANY phase (entrance/loop/exit/gameWin) — drives the .pa-lightray pseudo sweep.
  * The reflection is an ambient class-driven effect, so it can be added in any phase, not just loop. */
 export function lightraySpec(el: SceneElement): AnimSpec | undefined {
-  return (['entrance', 'loop', 'exit'] as const).flatMap((p) => phaseSpecs(el, p)).find((s) => s.preset === 'lightray')
+  return (['entrance', 'loop', 'exit', 'gameWin'] as const).flatMap((p) => phaseSpecs(el, p)).find((s) => s.preset === 'lightray')
 }
 
 /** Total wall time a phase occupies (the latest `delay + duration` across its stacked
@@ -230,9 +239,14 @@ export function phaseFrameCss(el: SceneElement, phase: Phase, elapsedMs: number)
 
 /** Earliest entrance start (min delay across stacked entrance specs) — when the element first appears. */
 export function entranceLeadDelayMs(el: SceneElement): number {
-  const ents = phaseSpecs(el, 'entrance')
-  if (!ents.length) return 0
-  return Math.max(0, Math.min(...ents.map((e) => e.delayMs || 0)))
+  return phaseLeadDelayMs(el, 'entrance')
+}
+
+/** Earliest start inside a phase (min delay across stacked specs). */
+export function phaseLeadDelayMs(el: SceneElement, phase: Phase): number {
+  const specs = phaseSpecs(el, phase)
+  if (!specs.length) return 0
+  return Math.max(0, Math.min(...specs.map((s) => s.delayMs || 0)))
 }
 
 /** The CTA's default pulse shorthand (used only when the element has no explicit loop spec). */
@@ -298,4 +312,29 @@ export function entranceTriggers(el: SceneElement, trigger: 'onMount' | 'onGameW
   const e = el.animations?.entrance
   if (!e) return false
   return (e.trigger ?? 'onMount') === trigger
+}
+
+/** Win animation shorthand: game-win phase, then the ordinary loop delayed until the win phase ends. */
+export function composeGameWinAnim(el: SceneElement): string {
+  const parts: string[] = []
+  let loopDelay = 0
+  for (const e of phaseSpecs(el, 'gameWin')) {
+    if (e.preset === 'lightray') continue
+    if (e.preset === 'typewriter') continue
+    const css = animationCss(e, false)
+    if (css) parts.push(css)
+    loopDelay = Math.max(loopDelay, (e.delayMs || 0) + e.durationMs)
+  }
+  const loops = phaseSpecs(el, 'loop')
+  const nodeLoops = loops.filter((s) => s.preset !== 'lightray')
+  if (loops.length) {
+    for (const l of nodeLoops) {
+      const css = animationCss(l, true, loopDelay)
+      if (css) parts.push(css)
+    }
+  } else {
+    const pulse = ctaPulseCss(el, loopDelay)
+    if (pulse) parts.push(pulse)
+  }
+  return parts.join(', ') || 'none'
 }

@@ -1,6 +1,6 @@
 // Mystery-box grid — two-tap reveal (wins) / one-tap in-place reveal (losses).
 //
-// Win flow:  tap box → flies to center → tap again → lid off + product rises → game-complete
+// Win flow:  tap box → flies to center → tap again → lid off + product rises → game-win
 // Lose flow: tap box → lid flies off in place → product rises in cell → stays open, others still clickable
 //
 // All pixel calculations use offsetWidth/offsetHeight/offsetLeft/offsetTop (design-space)
@@ -267,14 +267,12 @@ export function createUnboxingContent(el: SceneElement, ctx: RuntimeCtx): HTMLDi
 
     if (anim) {
       anim.finished.then(() => {
-        ctx.emit('sfx', 'gameWin')
-        ctx.emit('game-complete')
+        ctx.emit('game-win')
       }).catch(() => {})
     } else {
       const lidDur = (cfg.top?.durationMs ?? 700) + (cfg.top?.delayMs ?? 0)
       setTimeout(() => {
-        ctx.emit('sfx', 'gameWin')
-        ctx.emit('game-complete')
+        ctx.emit('game-win')
       }, lidDur)
     }
 

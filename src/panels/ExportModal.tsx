@@ -14,7 +14,6 @@ import {
   processAssetsAutoFit,
   pruneAssets,
   transformForNetwork,
-  DEFAULT_MEDIA,
   type AssetReport,
   type MediaDefaults,
 } from '../export'
@@ -23,6 +22,7 @@ import { lintEngagement, type EngagementFinding } from '../qa/engagement'
 import { setAssetCompress, useEditorState } from '../store'
 import { applyVariant, stripVariants } from '../variants'
 import { fileBaseName } from '../mipName'
+import { readExportPrefs, readStoredMediaDefaults, writeExportPrefs } from '../exportPrefs'
 import { applovinOpen, applovinProbe, applovinUpload, canApplovin, compressHtmlScript, type ApplovinFile } from '../bridge'
 import { Modal, NumField, Slider, Toggle } from '../ui'
 import { AlertTriangle, Check, Icon, ScanSearch } from '../icons'
@@ -69,14 +69,12 @@ const slug = (s: string): string => s.replace(/[^a-z0-9_-]+/gi, '_').replace(/^_
 
 export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void }): JSX.Element {
   const { project, assets } = useEditorState()
-  const [optimize, setOptimize] = useState(true)
-  const [quality, setQuality] = useState(82)
-  const [vid, setVid] = useState<CompressProfile>(() => {
-    try { return { ...DEFAULT_MEDIA.video, ...JSON.parse(localStorage.getItem('pa:vidCompress') || '{}') } } catch { return { ...DEFAULT_MEDIA.video } }
-  })
-  const [aud, setAud] = useState<CompressProfile>(() => {
-    try { return { ...DEFAULT_MEDIA.audio, ...JSON.parse(localStorage.getItem('pa:audCompress') || '{}') } } catch { return { ...DEFAULT_MEDIA.audio } }
-  })
+  const prefs = readExportPrefs()
+  const storedMedia = readStoredMediaDefaults()
+  const [optimize, setOptimize] = useState(prefs.optimize)
+  const [quality, setQuality] = useState(prefs.quality)
+  const [vid, setVid] = useState<CompressProfile>(storedMedia.video ?? {})
+  const [aud, setAud] = useState<CompressProfile>(storedMedia.audio ?? {})
   const [openRow, setOpenRow] = useState<string | null>(null)
   const media = useMemo<MediaDefaults>(() => ({ video: vid, audio: aud }), [vid, aud])
   const hasVideo = useMemo(() => Object.values(assets).some((a) => a.kind === 'video'), [assets])
@@ -85,7 +83,10 @@ export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void
     localStorage.setItem('pa:vidCompress', JSON.stringify(vid))
     localStorage.setItem('pa:audCompress', JSON.stringify(aud))
   }, [vid, aud])
-  const [nets, setNets] = useState<Set<string>>(() => new Set(['AppLovin']))
+  const [nets, setNets] = useState<Set<string>>(() => new Set(prefs.networks))
+  useEffect(() => {
+    writeExportPrefs({ optimize, quality, networks: [...nets] })
+  }, [optimize, quality, nets])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [report, setReport] = useState<AssetReport[]>([])
@@ -104,6 +105,14 @@ export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void
   const [alBusy, setAlBusy] = useState(false)
   const [alStatus, setAlStatus] = useState<string | null>(null)
   const alSelectors = { addButtonText: alAddText, uploadButtonText: alUploadText }
+  const [fuUrl, setFuUrl] = useState(() => localStorage.getItem('pa:fileUploadUrl') || 'http://20.255.60.183/file-upload/')
+  const [fuAddText, setFuAddText] = useState(() => localStorage.getItem('pa:fileUploadAdd') || 'Add Another Upload')
+  const [fuUploadText, setFuUploadText] = useState(() => localStorage.getItem('pa:fileUploadSubmit') || 'Upload')
+  const [fuSubmit, setFuSubmit] = useState(false)
+  const [fuAdvanced, setFuAdvanced] = useState(false)
+  const [fuBusy, setFuBusy] = useState(false)
+  const [fuStatus, setFuStatus] = useState<string | null>(null)
+  const fuSelectors = { addButtonText: fuAddText, uploadButtonText: fuUploadText }
   // Shared runtime snapshot: set by the preview effect, reused by doExportAll so
   // both compute sizes with the same runtime binary (avoids a 0.5 MB gap when the
   // runtime is rebuilt between the preview run and the export click).
@@ -176,9 +185,9 @@ export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void
     for (const o of outputs) downloadBlob(o.filename, await o.make())
   }
 
-  // The exported file is always named "<Client>_<MIP>" — nothing else (no date,
-  // no free-text rename). Variant files append "_<variant>" below.
-  const baseName = fileBaseName(project.meta)
+  // The exported file follows the delivery naming convention; variant files
+  // append "_<variant>" below to keep each download distinct.
+  const baseName = fileBaseName(project)
   const doExportAll = async (): Promise<void> => {
     if (!confirmIfBlocked()) return
     setBusy(true)
@@ -227,7 +236,56 @@ export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void
     return out
   }
 
+  const uploadBatchCount = 1 + (variants.length ? selVars.size : 0)
+
+  const fillUploadForm = async (props: {
+    url: string
+    submit: boolean
+    selectors: { addButtonText: string; uploadButtonText: string }
+    setBusy: (busy: boolean) => void
+    setStatus: (status: string | null) => void
+  }): Promise<void> => {
+    if (!confirmIfBlocked()) return
+    props.setBusy(true)
+    props.setStatus('Building playables...')
+    try {
+      const files = await buildUploadBatch()
+      if (!files.length) {
+        props.setStatus('Nothing to upload (all over budget?).')
+        return
+      }
+      props.setStatus('Filling the upload form...')
+      const r = await applovinUpload({ url: props.url, files, submit: props.submit, ...props.selectors })
+      props.setStatus(r.ok ? `Filled ${r.files} file(s)${r.submitted ? ' and submitted.' : '. Review the window and click Upload.'}` : 'Error: ' + r.error)
+    } catch (e) {
+      props.setStatus('Error: ' + (e as Error).message)
+    } finally {
+      props.setBusy(false)
+    }
+  }
+
+  const detectUploadForm = async (props: {
+    url: string
+    selectors: { addButtonText: string; uploadButtonText: string }
+    setStatus: (status: string | null) => void
+  }): Promise<void> => {
+    props.setStatus('Detecting form...')
+    const p = await applovinProbe({ url: props.url, ...props.selectors })
+    if (!p.ok) {
+      props.setStatus('Detect failed: ' + (p.error ?? 'open the page first'))
+      return
+    }
+    const ok = p.fileInputs && p.addButton
+    props.setStatus(
+      `${ok ? 'OK' : 'Warn'} ${p.title || p.url}: ${p.fileInputs} file input(s), ${p.textInputs} name field(s); ` +
+        `Add button ${p.addButton ? 'yes' : 'no'}, Upload button ${p.uploadButton ? 'yes' : 'no'}.` +
+        (ok ? '' : ' Open the Upload File page, or adjust the selectors below.'),
+    )
+  }
+
   const doApplovin = async (): Promise<void> => {
+    await fillUploadForm({ url: alUrl, submit: alSubmit, selectors: alSelectors, setBusy: setAlBusy, setStatus: setAlStatus })
+    return
     if (!confirmIfBlocked()) return
     setAlBusy(true)
     setAlStatus('Building playables…')
@@ -261,6 +319,14 @@ export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void
         `Add button ${p.addButton ? '✓' : '✗'}, Upload button ${p.uploadButton ? '✓' : '✗'}.` +
         (ok ? '' : ' Open the Upload File page, or adjust the selectors below.'),
     )
+  }
+
+  const doFileUpload = async (): Promise<void> => {
+    await fillUploadForm({ url: fuUrl, submit: fuSubmit, selectors: fuSelectors, setBusy: setFuBusy, setStatus: setFuStatus })
+  }
+
+  const doFileUploadProbe = async (): Promise<void> => {
+    await detectUploadForm({ url: fuUrl, selectors: fuSelectors, setStatus: setFuStatus })
   }
 
   const doExport = async (): Promise<void> => {
@@ -556,6 +622,44 @@ export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void
             page matches (file inputs + buttons); adjust the selectors if not. Then <b>Auto-fill</b> drops your base + selected
             variants into the batch form (one row each; Iteration Name = variant). Review and click Upload, or enable auto-submit.
             Uploads the AppLovin (MRAID) build of each.
+          </div>
+          <div className="group-title">Upload to File Server</div>
+          <label className="field">
+            <span>Upload site URL</span>
+            <input
+              className="text-input"
+              value={fuUrl}
+              onChange={(e) => {
+                setFuUrl(e.target.value)
+                localStorage.setItem('pa:fileUploadUrl', e.target.value)
+              }}
+            />
+          </label>
+          <Toggle label="Submit automatically (otherwise it fills the form and you click Upload)" checked={fuSubmit} onChange={setFuSubmit} />
+          <div className="grid2">
+            <button onClick={() => void applovinOpen(fuUrl)}>Open / log in</button>
+            <button onClick={() => void doFileUploadProbe()}>Detect form</button>
+          </div>
+          <button className="primary wide" disabled={fuBusy} onClick={() => void doFileUpload()}>
+            {fuBusy ? 'Filling...' : `Auto-fill upload form (${uploadBatchCount})`}
+          </button>
+          {fuStatus && <div className="figma-status">{fuStatus}</div>}
+          <button className="link-btn" onClick={() => setFuAdvanced((v) => !v)}>{fuAdvanced ? 'Hide' : 'Form selectors'}</button>
+          {fuAdvanced && (
+            <div className="grid2">
+              <label className="field">
+                <span>Add row button text</span>
+                <input className="text-input" value={fuAddText} onChange={(e) => { setFuAddText(e.target.value); localStorage.setItem('pa:fileUploadAdd', e.target.value) }} />
+              </label>
+              <label className="field">
+                <span>Upload button text</span>
+                <input className="text-input" value={fuUploadText} onChange={(e) => { setFuUploadText(e.target.value); localStorage.setItem('pa:fileUploadSubmit', e.target.value) }} />
+              </label>
+            </div>
+          )}
+          <div className="hint pad">
+            Uses the same desktop automation flow as AppLovin, pointed at <b>http://20.255.60.183/file-upload/</b> by default.
+            Log in, open the upload form, confirm the detected controls, then auto-fill the AppLovin-ready HTML batch.
           </div>
         </>
       )}

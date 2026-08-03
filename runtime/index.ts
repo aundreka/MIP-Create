@@ -42,7 +42,8 @@ export async function boot(project: Project, assets: AssetMap, opts: { mount?: H
     setStoreUrl(project.meta.clickUrl)
   }
   // pick the playable's language from the browser (falls back to the base copy)
-  setActiveLocale(resolveLocale(project.meta.locales))
+  let currentLocale = resolveLocale(project.meta.locales)
+  setActiveLocale(currentLocale)
 
   await initMraid()
 
@@ -69,6 +70,21 @@ export async function boot(project: Project, assets: AssetMap, opts: { mount?: H
   } catch { /* storage unavailable */ }
 
   const manager = playProject(project, assets, { mount: opts.mount ?? document.body, interactive: true, startSceneId: resumeSceneId })
+
+  // Update the current screen when the browser's preferred-language list changes.
+  const onLanguageChange = (): void => {
+    const nextLocale = resolveLocale(project.meta.locales)
+    if (nextLocale === currentLocale) return
+    currentLocale = nextLocale
+    setActiveLocale(nextLocale)
+    manager.refreshLocale()
+  }
+  window.addEventListener('languagechange', onLanguageChange)
+  const destroyManager = manager.destroy.bind(manager)
+  manager.destroy = () => {
+    window.removeEventListener('languagechange', onLanguageChange)
+    destroyManager()
+  }
 
   bindLifecycle()
 

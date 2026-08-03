@@ -8,7 +8,7 @@ import { getState, joinProjectGroup, loadProject as storeLoad, markSaved, redo, 
 import { createProject, currentProjectId, openProject, projectsInGroup, saveCurrent } from '../projects'
 import { ContextMenu, type MenuItem } from './ContextMenu'
 import { HeaderPopover } from './HeaderPopover'
-import { CalendarDays, ChevronDown, FolderOpen, Icon, Menu, Minus, Play, Plus, Redo2, Undo2 } from '../icons'
+import { CalendarDays, ChevronDown, FolderOpen, Icon, Menu, Minus, Play, Plus, Redo2, Undo2, Upload } from '../icons'
 import { toggleTheme, useTheme } from '../theme'
 import { setEditLocale, useEditLocale } from '../locale'
 import { setActiveVariant, useActiveVariant } from '../variantMode'
@@ -33,7 +33,10 @@ export function Topbar(props: {
   onHome: () => void
   onProfile: () => void
   onProjectSettings: () => void
+  onQuickExport: () => void
+  quickExportBusy: boolean
   onExport: () => void
+  onUpload: () => void
   onQa: () => void
   onQaCheck: () => void
   onShare: () => void
@@ -129,7 +132,7 @@ export function Topbar(props: {
           title="Editing / preview language (runtime auto-detects from the browser)"
           onChange={(e) => setEditLocale(e.target.value || null)}
         >
-          <option value="">{scene.meta.defaultLocale ? `Base (${scene.meta.defaultLocale})` : 'Base'}</option>
+          <option value="">Default ({scene.meta.defaultLocale || 'en'})</option>
           {locales.map((l) => (
             <option key={l} value={l}>
               {l}
@@ -187,8 +190,14 @@ export function Topbar(props: {
       <button onClick={props.onPreview} title="Preview the ad">
         <Icon icon={Play} size={14} /> Preview
       </button>
+      <button onClick={props.onQuickExport} disabled={props.quickExportBusy} title="Quick export using your saved Export modal settings">
+        <Icon icon={Upload} size={14} /> {props.quickExportBusy ? 'Quick exportingâ€¦' : 'Quick export'}
+      </button>
       <button className="primary" onClick={props.onExport}>
         Export
+      </button>
+      <button onClick={props.onUpload} title="Build and upload the current playable">
+        Upload
       </button>
       <span className="hint">{platformLabel}{projectPath ? ' · ' + projectPath.split(/[\\/]/).pop() : ''}</span>
 

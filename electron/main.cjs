@@ -122,6 +122,25 @@ ipcMain.handle('project:save', async (_e, json, currentPath) => {
   }
 })
 
+// Write an exported playable directly to the user's Downloads folder. Desktop
+// exports replace any same-name file instead of letting Chromium create
+// " (1)" duplicates, so repeated deliveries keep a stable path.
+ipcMain.handle('export:write', async (_e, payload = {}) => {
+  try {
+    const raw = String(payload.filename || '').trim()
+    const filename = path.basename(raw).replace(/[<>:"/\\|?*\x00-\x1f]+/g, '_')
+    if (!filename) return { ok: false, error: 'invalid filename' }
+    const bytes = payload.bytes
+    if (!(bytes instanceof ArrayBuffer)) return { ok: false, error: 'invalid bytes' }
+    const target = path.join(app.getPath('downloads'), filename)
+    try { fs.rmSync(target, { force: true }) } catch { /* ignore */ }
+    fs.writeFileSync(target, Buffer.from(bytes))
+    return { ok: true, path: target }
+  } catch (e) {
+    return { ok: false, error: String(e) }
+  }
+})
+
 // Re-encode a video/audio data URL with ffmpeg to shrink it for the <5MB budget.
 // Video → H.264 MP4 (capped width, faststart); audio → mono MP3. Returns the
 // smaller of {original, re-encoded}. No-ops (returns the input) without ffmpeg.
@@ -387,7 +406,36 @@ ipcMain.handle('applovin:upload', async (_e, payload = {}) => {
       })()`)
     }
 
-    return { ok: true, files: n, submitted }
+    const waitMs = Math.max(0, Math.min(15000, Number(payload.waitForResultMs) || 0))
+    if (waitMs) await new Promise((r) => setTimeout(r, waitMs))
+    const result = await wc.executeJavaScript(`(function(){
+      var selector=${JSON.stringify(payload.resultLinkSelector || '')};
+      var hrefIncludes=${JSON.stringify(payload.resultLinkHrefIncludes || '')}.toLowerCase();
+      function keep(url){
+        if(!url || !/^https?:/i.test(url)) return false;
+        return !hrefIncludes || url.toLowerCase().indexOf(hrefIncludes) >= 0;
+      }
+      function push(list, value){
+        if(keep(value) && list.indexOf(value) < 0) list.push(value);
+      }
+      var out=[];
+      if(selector){
+        try {
+          var picked=document.querySelector(selector);
+          if(picked){
+            push(out, picked.href || picked.value || picked.textContent || '');
+          }
+        } catch {}
+      }
+      document.querySelectorAll('a[href]').forEach(function(el){ push(out, el.href || ''); });
+      document.querySelectorAll('input[type=text], input:not([type]), textarea').forEach(function(el){ push(out, el.value || ''); });
+      var text=(document.body && document.body.innerText) || '';
+      var matches=text.match(/https?:\\/\\/[^\\s"'<>]+/g) || [];
+      matches.forEach(function(v){ push(out, v); });
+      return { pageUrl: location.href, link: out[0] || '' };
+    })()`)
+
+    return { ok: true, files: n, submitted, pageUrl: result.pageUrl, link: result.link || undefined }
   } catch (e) {
     return { ok: false, error: String(e) }
   }

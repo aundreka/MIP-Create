@@ -1,10 +1,10 @@
 // Canonical MIP naming. A MIP's name is always "<Client> <MIP> <Date>", e.g.
-// "Blackgirl Vitamins MIP2 2026-07-01". That same name is what the export writes
-// as the file name, so identity stays consistent across the editor, the team
-// library and the delivered file. The date is fixed per-MIP (set once, then
-// editable in Project settings) — it does not silently change day-to-day.
+// "Blackgirl Vitamins MIP2 2026-07-01". The export filename uses its own
+// delivery-oriented format, but the human-readable MIP identity stays consistent
+// across the editor and the team library. The date is fixed per-MIP (set once,
+// then editable in Project settings) - it does not silently change day-to-day.
 
-import type { ProjectMeta } from '../runtime/scene'
+import type { Project, ProjectMeta } from '../runtime/scene'
 
 /** Today as an ISO date label (YYYY-MM-DD), in local time. */
 export function todayLabel(): string {
@@ -36,13 +36,54 @@ export function syncMipName(meta: ProjectMeta): ProjectMeta {
   return name === m.name ? m : { ...m, name }
 }
 
+function slugToken(value: string | undefined, fallback: string): string {
+  const safe = (value ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+  return safe || fallback
+}
+
+function compactDateToken(value: string | undefined): string {
+  const digits = (value ?? '').replace(/\D+/g, '')
+  if (digits.length >= 8) return digits.slice(0, 8)
+  return todayLabel().replace(/\D+/g, '')
+}
+
+function mipVersionToken(meta: Pick<ProjectMeta, 'mip'>): string {
+  const raw = (meta.mip ?? '').trim()
+  const digits = raw.match(/\d+/g)?.join('') ?? ''
+  return digits ? digits.padStart(2, '0') : '00'
+}
+
+function firstGameTemplateId(project: Pick<Project, 'scenes'>): string | undefined {
+  for (const scene of project.scenes) {
+    for (const el of scene.elements) {
+      if (el.type === 'game-mount' && el.game?.templateId) return el.game.templateId
+    }
+  }
+  return undefined
+}
+
+function exportMechanicToken(project: Pick<Project, 'scenes'>): string {
+  const templateId = firstGameTemplateId(project)
+  if (!templateId) return 'game'
+  const aliases: Record<string, string> = {
+    scratch: 'scratch',
+    scratch_grid: 'scratch',
+    match3: 'match3',
+    match_3: 'match3',
+    'match-three': 'match3',
+  }
+  return aliases[templateId] ?? slugToken(templateId, 'game')
+}
+
 /**
- * The export file's base name: "<Client>_<MIP>" only — no date, no free-text
- * name. Falls back to the canonical mipName() when client/MIP aren't set.
+ * The export file base name. Format:
+ * "<client>_acslanot_mip_<date>_<version>_emily_game_<mechanic>_human_unique"
  */
-export function fileBaseName(meta: Pick<ProjectMeta, 'client' | 'mip' | 'mipDate' | 'name'>): string {
-  const client = (meta.client ?? '').trim()
-  const mip = (meta.mip ?? '').trim()
-  const base = [client, mip].filter(Boolean).join('_') || mipName(meta)
-  return base.replace(/[^a-z0-9_-]+/gi, '_').replace(/^_+|_+$/g, '') || 'playable'
+export function fileBaseName(project: Pick<Project, 'meta' | 'scenes'>): string {
+  const meta = project.meta
+  const client = slugToken(meta.client, 'client')
+  const date = compactDateToken(meta.exportDate || meta.mipDate)
+  const version = mipVersionToken(meta)
+  const mechanic = exportMechanicToken(project)
+  return `${client}_acslanot_mip_${date}_${version}_emily_game_${mechanic}_human_unique`
 }

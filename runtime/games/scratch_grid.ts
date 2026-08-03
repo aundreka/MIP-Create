@@ -852,11 +852,12 @@ export function createScratchGrid(): GameModule {
       fadeBrush() // prize revealed — fade the brush out
       winCb?.()
       if (cell.winSceneId) {
-        // Redirect straight INTO the win scene (a full transition that covers the game)
-        // rather than floating it as a dismissable overlay — the overlay path faded back
-        // to the game scene before advancing, causing a game-scene flash. The win scene's
-        // own Advance setting now drives the next hop (e.g. tap/timer → end scene).
-        window.setTimeout(() => emit('scene-goto', cell.winSceneId), 350)
+        // Record the chosen win scene, then finish through the ordinary scene-level
+        // game-win flow so the current scene's authored Advance delay still applies.
+        window.setTimeout(() => {
+          emit('scene-goto-after-win', cell.winSceneId)
+          completeCb?.()
+        }, 350)
       } else if (cell.winOverlayImage) {
         window.setTimeout(() => showOverlay(cell.winOverlayImage, cell.winOverlayDurationMs, () => completeCb?.()), 350)
       } else {

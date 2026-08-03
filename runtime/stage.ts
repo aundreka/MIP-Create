@@ -13,14 +13,14 @@
 import type { Anchor, AnimSpec, Scene, SceneElement, SceneOverlay } from './scene'
 import type { AssetEntry, AssetMap, RuntimeCtx } from './types'
 import { designH, designW as baseDesignW, isLandscape, scale, sx, sy, viewH } from './responsive'
-import { composeElementAnim, entranceLeadDelayMs, entranceTriggers, exitCss, injectAnimStyles, lightraySpec, phaseFrameCss, phaseTotalMs } from './anim'
+import { composeElementAnim, composeGameWinAnim, entranceLeadDelayMs, entranceTriggers, exitCss, injectAnimStyles, lightraySpec, phaseFrameCss, phaseLeadDelayMs, phaseTotalMs } from './anim'
 import { applyImageCrop, createContainerContent, createImageContent, styleContainer } from './elements/image'
 import { applyBarFill, createBarContent } from './elements/bar'
 import { createTextContent } from './elements/text'
 import { createCtaContent } from './elements/cta'
 import { createButtonContent, wireSceneNav } from './elements/button'
 import { createChoiceContent } from './elements/choice'
-import { localize } from './i18n'
+import { localize, localizeElement } from './i18n'
 import { getPicks, isPicked, togglePick } from './selection'
 import { createEndsceneContent, updateEndsceneMedia } from './elements/endscene'
 import { applyUnboxingImages, createUnboxingContent } from './elements/unboxing'
@@ -633,6 +633,12 @@ function runEntrance(rec: Rec): void {
   const cfg = phaseTypingConfig(rec.el, 'entrance') ?? rec.el.typing
   if (cfg) startTyping(rec, 0, cfg) // the typewriter shares the entrance's origin
 }
+function runGameWin(rec: Rec): void {
+  const css = composeGameWinAnim(rec.el)
+  if (css !== 'none') restartAnim(rec.anim, css)
+  const cfg = phaseTypingConfig(rec.el, 'gameWin')
+  if (cfg) startTyping(rec, 0, cfg)
+}
 
 // ---------------------------------------------------------------------------
 // Typewriter reveal (see TypingConfig in scene.ts).
@@ -645,11 +651,16 @@ function fullTextOf(rec: Rec): string {
 }
 const textChars = (s: string): string[] => Array.from(s)
 const sliceText = (s: string, chars: number): string => textChars(s).slice(0, chars).join('')
-const phaseTypingSpec = (el: SceneElement, phase: 'entrance' | 'exit'): AnimSpec | undefined =>
-  [el.animations?.[phase], ...((el.animations?.[(phase + 'Extra') as 'entranceExtra' | 'exitExtra'] ?? []) as AnimSpec[])]
+const phaseTypingSpec = (el: SceneElement, phase: 'entrance' | 'exit' | 'gameWin'): AnimSpec | undefined =>
+  (phase === 'gameWin'
+    ? [
+        el.animations?.gameWin ?? (el.animations?.entrance?.trigger === 'onGameWin' ? el.animations.entrance : undefined),
+        ...(((el.animations?.gameWinExtra ?? (el.animations?.entrance?.trigger === 'onGameWin' ? el.animations?.entranceExtra : undefined)) ?? []) as AnimSpec[]),
+      ]
+    : [el.animations?.[phase], ...((el.animations?.[(phase + 'Extra') as 'entranceExtra' | 'exitExtra'] ?? []) as AnimSpec[])])
     .filter((s): s is AnimSpec => !!s)
     .find((s) => s.preset === 'typewriter')
-const phaseTypingConfig = (el: SceneElement, phase: 'entrance' | 'exit'): NonNullable<SceneElement['typing']> | null => {
+const phaseTypingConfig = (el: SceneElement, phase: 'entrance' | 'exit' | 'gameWin'): NonNullable<SceneElement['typing']> | null => {
   const spec = phaseTypingSpec(el, phase)
   if (!spec) return null
   return { caret: true, ...(el.typing ?? {}), durationMs: spec.durationMs, delayMs: spec.delayMs }
@@ -896,12 +907,21 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
   root.style.setProperty('--pa-bg', scene.meta.bgMatchColor || '#000000')
   if (scene.meta.cursor) root.style.cursor = scene.meta.cursor
 
+  let stageWon = false
+  function stageEmit(event: string, ...args: unknown[]): void {
+    if (event === 'game-win') {
+      revealOnWin()
+      return
+    }
+    emit(event, ...args)
+  }
+
   const ctx: RuntimeCtx = {
     scene,
     assets,
     src: (id?: string) => (id && assets[id] ? assets[id].src : ''),
     asset: (id?: string): AssetEntry | undefined => (id ? assets[id] : undefined),
-    emit: (event: string, ...args: unknown[]) => emit(event, ...args), // → emitter (SFX etc.)
+    emit: stageEmit, // → emitter (SFX etc.), with stage-local game-win handling
   }
 
   const recs: Rec[] = []
@@ -945,7 +965,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     }
   }
 
-  const ordered = [...scene.elements].sort((a, b) => a.zIndex - b.zIndex)
+  const ordered = scene.elements.map((el) => localizeElement(el)).sort((a, b) => a.zIndex - b.zIndex)
   for (const el of ordered) {
     const outer = document.createElement('div')
     outer.className = 'pa-el'
@@ -1045,10 +1065,15 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
   // entrance's own delay so staggered elements each pop with their sound in sync with the
   // visual (delay 0 = element has no entrance → fires immediately). Used for staggered pop-ins.
   const enterSfxTimers: number[] = []
-  const fireEnterSfx = (rec: Rec): void => {
+  const GAME_WIN_SFX_BIAS_MS = 500
+  const gameWinSoundDelayMs = (rec?: Rec): number => {
+    const phaseDelay = rec ? phaseLeadDelayMs(rec.el, 'gameWin') : 0
+    return Math.max(0, phaseDelay + GAME_WIN_SFX_BIAS_MS)
+  }
+  const fireEnterSfx = (rec: Rec, phase: 'entrance' | 'gameWin' = 'entrance'): void => {
     const binds = (rec.el.sfx ?? []).filter((b) => b.event === 'elementEnter' && b.assetId)
     if (!binds.length) return
-    const delay = entranceLeadDelayMs(rec.el)
+    const delay = phase === 'gameWin' ? phaseLeadDelayMs(rec.el, 'gameWin') : entranceLeadDelayMs(rec.el)
     for (const b of binds)
       enterSfxTimers.push(window.setTimeout(() => emit('sfx-asset', b.assetId, b.volume ?? 1), delay))
   }
@@ -1295,25 +1320,30 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
   }
   root.addEventListener('pa-endscene-media-reset', onEndsceneMediaReset)
 
-  let stageWon = false
   const revealOnWin = (): void => {
     if (stageWon) return // idempotent: a game may report completion more than once
     stageWon = true
+    let winSfxDelay = Number.POSITIVE_INFINITY
     for (const rec of recs) {
       if (rec.el.showOnWin && rec.el.hidden) {
         rec.el.hidden = false
         layoutRec(rec)
         runEntrance(rec) // a revealed element animates in
         fireEnterSfx(rec)
-      } else if (entranceTriggers(rec.el, 'onGameWin')) {
-        runEntrance(rec)
-        fireEnterSfx(rec)
+        winSfxDelay = Math.min(winSfxDelay, entranceLeadDelayMs(rec.el))
+      } else if (rec.el.animations?.gameWin || rec.el.animations?.gameWinExtra?.length || entranceTriggers(rec.el, 'onGameWin')) {
+        runGameWin(rec)
+        fireEnterSfx(rec, 'gameWin')
+        winSfxDelay = Math.min(winSfxDelay, phaseLeadDelayMs(rec.el, 'gameWin'))
       }
     }
     for (const rec of recs)
       if (rec.el.type === 'confetti' && rec.confetti && (rec.el.confetti?.trigger ?? 'sceneEnter') === 'onGameWin')
         rec.confetti.start()
-    emit('sfx', 'gameWin') // central win sound (every game template)
+    const playWinSfx = (): void => emit('sfx', 'gameWin') // central win sound (every game template)
+    const delayedBy = (Number.isFinite(winSfxDelay) ? Math.max(0, winSfxDelay) : 0) + GAME_WIN_SFX_BIAS_MS
+    if (delayedBy > 0) enterSfxTimers.push(window.setTimeout(playWinSfx, delayedBy))
+    else playWinSfx()
     emit('game-complete')
   }
 
@@ -1366,6 +1396,9 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
             // A same-named binding on the game-mount element overrides the
             // project-wide event sound (e.g. a custom "On card flip" asset).
             sfx: (event) => {
+              // Win SFX is timed centrally in revealOnWin so it can line up with the
+              // dedicated "On game won" animation phase instead of firing early here.
+              if (event === 'gameWin') return
               const bind = (rec.el.sfx ?? []).find((b) => b.event === event && b.assetId)
               if (bind) emit('sfx-asset', bind.assetId, bind.volume ?? 1)
               else emit('sfx', event)
@@ -1382,10 +1415,11 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
             },
             onWin: () => {
               for (const b of rec.el.sfx ?? [])
-                if (b.event === 'onReveal' && b.assetId) emit('sfx-asset', b.assetId, b.volume ?? 1)
+                if (b.event === 'onReveal' && b.assetId)
+                  enterSfxTimers.push(window.setTimeout(() => emit('sfx-asset', b.assetId, b.volume ?? 1), gameWinSoundDelayMs(rec)))
             },
             onComplete: () => {
-              revealOnWin()
+              stageEmit('game-win')
             },
           })
           rec.host?.relayout()
@@ -1482,8 +1516,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
             for (const g of groups) {
               const gs = slots.filter((s) => groupOf(s) === g)
               if (gs.length && gs.every((s) => slotItem.get(s))) {
-                emit('sfx', 'gameWin')
-                emit('game-complete')
+                stageEmit('game-win')
                 return
               }
             }
@@ -1646,8 +1679,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
                 wrap.remove()
                 const a = ctx.asset(cfg.resultId)
                 if (a) fillInto(rec, a.src, a.kind === 'video')
-                emit('sfx', 'gameWin')
-                emit('game-complete')
+                stageEmit('game-win')
               }
             }
             requestAnimationFrame(tick)
@@ -1750,7 +1782,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       layoutRec(rec)
     },
     update(nextScene, nextAssets) {
-      const ordered = [...nextScene.elements].sort((a, b) => a.zIndex - b.zIndex)
+      const ordered = nextScene.elements.map((el) => localizeElement(el)).sort((a, b) => a.zIndex - b.zIndex)
       if (ordered.length !== recs.length) return false
       for (let i = 0; i < ordered.length; i++) {
         const nel = ordered[i]

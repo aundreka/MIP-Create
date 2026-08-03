@@ -66,8 +66,20 @@ function addSceneAssets(scene: SceneDef, assets: AssetMap, used: Set<string>, au
   const add = (v: unknown): void => {
     if (typeof v === 'string' && assets[v]) used.add(v)
   }
+  const addNested = (value: unknown, seen = new Set<unknown>()): void => {
+    if (typeof value === 'string') { add(value); return }
+    if (!value || typeof value !== 'object' || seen.has(value)) return
+    seen.add(value)
+    if (Array.isArray(value)) value.forEach((item) => addNested(item, seen))
+    else Object.values(value as Record<string, unknown>).forEach((item) => addNested(item, seen))
+  }
+  for (const override of Object.values(scene.localeOverrides ?? {})) addSceneAssets(override.source, assets, used, audio)
   for (const el of scene.elements) {
     add(el.assetId)
+    for (const override of Object.values(el.localeOverrides ?? {})) {
+      add(override.assetId)
+      addNested(override.source)
+    }
     if (el.background?.landscapeAssetId) add(el.background.landscapeAssetId)
     if (el.text?.fontFamily) add(el.text.fontFamily)
     if (el.container?.imageId) add(el.container.imageId)
@@ -113,6 +125,7 @@ export function pruneAssets(project: Project, assets: AssetMap): AssetMap {
   // The pinned header can use an uploaded font (meta.header.fontFamily = font
   // asset id) without any element referencing it.
   if (project.meta.header?.fontFamily) add(project.meta.header.fontFamily)
+  for (const header of Object.values(project.meta.headerI18n ?? {})) add(header.fontFamily)
   const out: AssetMap = {}
   for (const id of used) out[id] = assets[id]
   return out
@@ -599,6 +612,19 @@ export function buildOutputs(project: Project, assets: AssetMap, networks: Netwo
 }
 
 export function downloadBlob(filename: string, blob: Blob): void {
+  const nativeApi = (window as unknown as {
+    editorAPI?: {
+      saveExportFile?(name: string, bytes: ArrayBuffer): Promise<{ ok: boolean; path?: string; error?: string }>
+    }
+  }).editorAPI
+  if (nativeApi?.saveExportFile) {
+    void blob.arrayBuffer().then((bytes) => nativeApi.saveExportFile!(filename, bytes)).then((r) => {
+      if (!r.ok) throw new Error(r.error || 'export save failed')
+    }).catch((e) => {
+      alert('Export failed: ' + String((e as Error)?.message ?? e))
+    })
+    return
+  }
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url

@@ -44,6 +44,16 @@ describe('pruneAssets', () => {
     }
     expect(Object.keys(pruneAssets(proj, assets)).sort()).toEqual(['l', 'p'])
   })
+
+  it('keeps optional per-language element assets', () => {
+    const assets: AssetMap = { en: { src: 'a', w: 1, h: 1 }, es: { src: 'b', w: 1, h: 1 }, unused: { src: 'c', w: 1, h: 1 } }
+    const proj: Project = {
+      meta: { schemaVersion: 2, name: 'p', clickUrl: { ios: '', android: '' }, baseW: 1080, baseH: 1920, locales: ['es'] },
+      scenes: [{ id: 's1', name: 's1', kind: 'game', advance: { on: 'manual' }, elements: [{ id: 'hero', type: 'image', name: 'Hero', x: 0, y: 0, anchor: 'center', zIndex: 0, mode: 'fit', assetId: 'en', localeOverrides: { es: { assetId: 'es' } } }] }],
+      startSceneId: 's1',
+    }
+    expect(Object.keys(pruneAssets(proj, assets)).sort()).toEqual(['en', 'es'])
+  })
 })
 
 describe('source map stripping', () => {

@@ -44,6 +44,9 @@ export interface ApplovinUploadOpts {
   submit?: boolean
   addButtonText?: string
   uploadButtonText?: string
+  resultLinkSelector?: string
+  resultLinkHrefIncludes?: string
+  waitForResultMs?: number
 }
 export interface ApplovinProbe {
   ok: boolean
@@ -79,7 +82,7 @@ interface NativeAPI {
   captureRect?(rect: { x: number; y: number; width: number; height: number }): Promise<{ ok: boolean; dataUrl?: string; error?: string }>
   applovinOpen?(url: string): Promise<{ ok: boolean; error?: string }>
   applovinProbe?(opts: { url?: string; addButtonText?: string; uploadButtonText?: string }): Promise<ApplovinProbe>
-  applovinUpload?(opts: ApplovinUploadOpts): Promise<{ ok: boolean; files?: number; submitted?: boolean; error?: string }>
+  applovinUpload?(opts: ApplovinUploadOpts): Promise<{ ok: boolean; files?: number; submitted?: boolean; pageUrl?: string; link?: string; error?: string }>
 }
 
 const native: NativeAPI | undefined = (window as unknown as { editorAPI?: NativeAPI }).editorAPI
@@ -119,7 +122,7 @@ export async function applovinProbe(opts: { url?: string; addButtonText?: string
 
 /** Auto-fill the AppLovin batch upload form with the given playables. Desktop
  * only. Returns a status message. */
-export async function applovinUpload(opts: ApplovinUploadOpts): Promise<{ ok: boolean; files?: number; submitted?: boolean; error?: string }> {
+export async function applovinUpload(opts: ApplovinUploadOpts): Promise<{ ok: boolean; files?: number; submitted?: boolean; pageUrl?: string; link?: string; error?: string }> {
   if (!native?.applovinUpload) return { ok: false, error: 'desktop app only' }
   return native.applovinUpload(opts)
 }

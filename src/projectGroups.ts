@@ -101,6 +101,17 @@ export function ensureGroupByName(name: string): ProjectGroup {
 // kept here so this module has no store dependency.
 function referencedAssetIds(el: Partial<SceneElement>): string[] {
   const ids: (string | undefined)[] = [el.assetId, el.container?.imageId, el.generate?.resultId]
+  const nestedStrings = (value: unknown, seen = new Set<unknown>()): void => {
+    if (typeof value === 'string') { ids.push(value); return }
+    if (!value || typeof value !== 'object' || seen.has(value)) return
+    seen.add(value)
+    if (Array.isArray(value)) value.forEach((item) => nestedStrings(item, seen))
+    else Object.values(value as Record<string, unknown>).forEach((item) => nestedStrings(item, seen))
+  }
+  for (const override of Object.values(el.localeOverrides ?? {})) {
+    ids.push(override.assetId)
+    nestedStrings(override.source)
+  }
   if (el.sfx) for (const b of el.sfx) ids.push(b.assetId)
   if (el.game?.params) for (const v of Object.values(el.game.params)) (Array.isArray(v) ? ids.push(...(v as string[])) : ids.push(v as string))
   if (el.endscene) ids.push(el.endscene.portraitVideoId, el.endscene.landscapeVideoId, el.endscene.portraitImageId, el.endscene.landscapeImageId)

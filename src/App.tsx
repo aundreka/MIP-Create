@@ -31,6 +31,7 @@ const ProfilePanel = lazy(() => import('./panels/ProfilePanel').then((m) => ({ d
 const QaPanel = lazy(() => import('./panels/QaPanel').then((m) => ({ default: m.QaPanel })))
 const QaCheckPanel = lazy(() => import('./panels/QaCheckPanel').then((m) => ({ default: m.QaCheckPanel })))
 const PreviewOverlay = lazy(() => import('./preview/PreviewOverlay').then((m) => ({ default: m.PreviewOverlay })))
+const UploadModal = lazy(() => import('./panels/UploadModal').then((m) => ({ default: m.UploadModal })))
 
 const clampZoom = (z: number): number => Math.max(0.05, Math.min(3, z)) // matches the canvas wheel-zoom range
 
@@ -64,6 +65,8 @@ export function App(): JSX.Element {
   const [shareTarget, setShareTarget] = useState<{ id: string; name: string } | null>(null)
   const closeShare = (): void => { setShare(false); setShareTarget(null) }
   const [cmdK, setCmdK] = useState(false)
+  const [quickExportBusy, setQuickExportBusy] = useState(false)
+  const [uploadRequest, setUploadRequest] = useState<{ projectIds?: string[]; label?: string } | null>(null)
 
   // Deep-link from a QA finding to the offending project/scene/element.
   const qaNavigate = async (projectId: string, sceneId?: string, elementId?: string): Promise<void> => {
@@ -105,6 +108,18 @@ export function App(): JSX.Element {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
+
+  const doQuickExport = async (): Promise<void> => {
+    setQuickExportBusy(true)
+    try {
+      const mod = await import('./quickExport')
+      await mod.quickExportCurrent(true)
+    } catch (e) {
+      alert('Quick export failed: ' + String(e))
+    } finally {
+      setQuickExportBusy(false)
+    }
+  }
 
   // Paste straight from Figma: Copy as PNG (or Copy as SVG) on a frame, then Ctrl+V
   // here drops it in — a full-screen-aspect image becomes the scene background, a
@@ -163,7 +178,7 @@ export function App(): JSX.Element {
         // Home route — the editor is unmounted behind it (its state lives in the
         // module-level store, so nothing is lost). Opening a project enters the editor.
         <Suspense fallback={null}>
-          <HomeScreen onClose={() => setHome(false)} initialTab={homeTab} onProfile={() => setProfile(true)} onGenerate={() => { setHome(false); setGenMip(true) }} onQuizFunnel={() => { setHome(false); setQuiz(true) }} onImportBuilt={() => { setHome(false); setImportBuilt(true) }} onShare={() => setShare(true)} onShareProject={(id, name) => { setShareTarget({ id, name }); setShare(true) }} onQaCheck={() => setQaCheck(true)} />
+          <HomeScreen onClose={() => setHome(false)} initialTab={homeTab} onProfile={() => setProfile(true)} onGenerate={() => { setHome(false); setGenMip(true) }} onQuizFunnel={() => { setHome(false); setQuiz(true) }} onImportBuilt={() => { setHome(false); setImportBuilt(true) }} onShare={() => setShare(true)} onShareProject={(id, name) => { setShareTarget({ id, name }); setShare(true) }} onUploadProject={(projectIds, label) => setUploadRequest({ projectIds, label })} onQaCheck={() => setQaCheck(true)} />
         </Suspense>
       ) : (
         <>
@@ -176,7 +191,10 @@ export function App(): JSX.Element {
             onHome={() => { setHomeTab('projects'); setHome(true) }}
             onProfile={() => setProfile(true)}
             onProjectSettings={() => setSettings(true)}
+            onQuickExport={() => void doQuickExport()}
+            quickExportBusy={quickExportBusy}
             onExport={() => setExportOpen(true)}
+            onUpload={() => setUploadRequest({})}
             onQa={() => setQa(true)}
             onQaCheck={() => setQaCheck(true)}
             onShare={() => setShare(true)}
@@ -208,6 +226,7 @@ export function App(): JSX.Element {
         {genMip && <GenerateMip onClose={() => setGenMip(false)} onQaCheck={() => { setGenMip(false); setHome(false); setQaCheck(true) }} />}
         {profile && <ProfilePanel onClose={() => setProfile(false)} />}
         {exportOpen && <ExportModal onClose={() => setExportOpen(false)} onQaCheck={() => setQaCheck(true)} />}
+        {uploadRequest && <UploadModal onClose={() => setUploadRequest(null)} projectIds={uploadRequest.projectIds} label={uploadRequest.label} />}
         {qa && <QaPanel onClose={() => setQa(false)} onNavigate={qaNavigate} />}
         {qaCheck && <QaCheckPanel onClose={() => setQaCheck(false)} />}
         {share && <ShareModal initialCode={shareCode} target={shareTarget ?? undefined} onClose={closeShare} onImported={() => { closeShare(); setHome(false) }} />}

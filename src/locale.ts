@@ -26,3 +26,8 @@ export function useEditLocale(): string | null {
     () => active,
   )
 }
+
+export function subscribeEditLocale(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => listeners.delete(listener)
+}

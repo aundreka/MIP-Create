@@ -6,6 +6,7 @@ const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('editorAPI', {
   saveProject: (json, currentPath) => ipcRenderer.invoke('project:save', json, currentPath),
+  saveExportFile: (filename, bytes) => ipcRenderer.invoke('export:write', { filename, bytes }),
   loadProject: () => ipcRenderer.invoke('project:load'),
   fetchDataUrl: (url) => ipcRenderer.invoke('net:fetch', url),
   transcodeMedia: (dataUrl, kind, opts) => ipcRenderer.invoke('media:transcode', dataUrl, kind, opts),

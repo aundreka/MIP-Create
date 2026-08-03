@@ -57,6 +57,11 @@ export function lintEngagement(project: Project, assets: AssetMap): EngagementFi
       if (e.assetId && !assets[e.assetId]) {
         out.push({ id: `asset:${e.id}`, severity: 'error', message: `“${e.name}” references a missing asset (${e.assetId}).`, ...at(s, { elementId: e.id }) })
       }
+      for (const [locale, override] of Object.entries(e.localeOverrides ?? {})) {
+        if (override.assetId && !assets[override.assetId]) {
+          out.push({ id: `asset:${e.id}:${locale}`, severity: 'error', message: `“${e.name}” references a missing ${locale} asset (${override.assetId}).`, ...at(s, { elementId: e.id }) })
+        }
+      }
       // 6) small tap target on a tappable element
       if ((e.type === 'cta' || e.type === 'choice') && e.h != null && e.h < baseH * 0.055) {
         out.push({ id: `tap:${e.id}`, severity: 'warn', message: `“${e.name}” is a small tap target (${Math.round(e.h)}px tall); easy to miss on a phone.`, ...at(s, { elementId: e.id }) })

@@ -10,11 +10,14 @@ import { notifyGameClose, notifyGameEnd, triggerCTA } from './networks'
 import { createSfxManager, type SfxManager } from './sfx'
 import { mountHeader } from './header'
 import { preloadScratchCover } from './games/scratch'
+import { localizeHeader, localizeSceneDef } from './i18n'
 import type { Project, Scene, SceneDef, Transition } from './scene'
 import type { AssetMap } from './types'
 
 export interface SceneManager {
   relayout(): void
+  /** Rebuild the current screen after navigator.language changes. */
+  refreshLocale(): void
   destroy(): void
 }
 
@@ -82,18 +85,26 @@ export function playProject(
   // mounts — no transparent gap where the reveal/background flashes through (a scratch scene
   // is usually reached mid-flow, so there's ample time to decode before the player gets there).
   if (opts.interactive) {
-    for (const s of project.scenes)
+    for (const base of project.scenes) {
+      const s = localizeSceneDef(base)
       for (const e of s.elements)
         if (e.type === 'game-mount' && e.game?.templateId === 'scratch') {
           const coverId = e.game.params?.cover
           const src = typeof coverId === 'string' ? assets[coverId]?.src : ''
           if (src) preloadScratchCover(src)
         }
+    }
   }
 
   // The pinned date header is opt-in: only mount it when the project explicitly
   // configures `meta.header`. Projects without it export with no date band.
-  const header = project.meta.header ? mountHeader(container, project.meta.header) : null
+  const headerConfig = () => localizeHeader(project.meta)
+  let header = headerConfig() ? mountHeader(container, headerConfig()!) : null
+  const refreshHeader = (): void => {
+    header?.destroy()
+    const config = headerConfig()
+    header = config ? mountHeader(container, config) : null
+  }
 
   const sfx: SfxManager | null = opts.interactive ? createSfxManager(project, assets, container) : null
 
@@ -104,6 +115,7 @@ export function playProject(
   let unsubGameDone: (() => void) | null = null
   let unsubAdvance: (() => void) | null = null
   let unsubGoto: (() => void) | null = null
+  let unsubWinRoute: (() => void) | null = null
   let unsubWinPersist: (() => void) | null = null
   let unsubOverlay: (() => void) | null = null
   // True once the (current) game has been completed. From that point the flow is
@@ -114,9 +126,15 @@ export function playProject(
   // cells — everything that can emit 'game-complete'.) Mounting one re-arms resume.
   const hasGame = (def: SceneDef): boolean =>
     def.elements.some((e) => e.type === 'game-mount' || e.type === 'unboxing' || !!e.scratch || !!e.reveal)
-  // Set to true when a scene-overlay is emitted for the current game scene (e.g. by scratch_grid).
-  // Prevents go() from emitting a second scene-overlay when game-complete fires after dismiss.
+  // Set to true once THIS scene's game-win advance has already floated its target overlay.
+  // Prevents duplicate win overlays if 'game-complete' fires again after the overlay dismisses.
+  // Plain overlays shown during the same game scene (for example scratch-grid lose feedback)
+  // must NOT flip this on, or a later real win would skip its authored overlay.
   let overlayShownThisScene = false
+  // Some games choose the destination scene at the moment the player wins (e.g. a per-cell
+  // scratch-grid win scene). Store that choice here so the ordinary scene-level
+  // "Advance on game won" rule can still apply its authored delay before leaving.
+  let pendingWinSceneId: string | null = null
   // Active floating overlay stages (win/lose scenes shown over the running game). Tracked so
   // relayout() re-lays them out on resize / zoom / orientation — otherwise an overlay keeps the
   // metrics it was mounted with and drifts (e.g. the badge shrinks + slides toward a corner when
@@ -256,6 +274,8 @@ export function playProject(
     return project.scenes[i + 1]?.id ?? null
   }
 
+  const afterOverlay = (ov: SceneDef): string | null => (isEndscene(ov) ? null : nextId(ov))
+
   const clearTriggers = (): void => {
     window.clearTimeout(advanceTimer)
     if (tapHandler) {
@@ -297,8 +317,9 @@ export function playProject(
   }
 
   const mountScene = (def: SceneDef): StageHandle => {
-    header?.setVisible(headerAllowed(def))
-    const stage = buildScene(toScene(def), assets, { mount: container })
+    const displayDef = localizeSceneDef(def)
+    header?.setVisible(headerAllowed(displayDef))
+    const stage = buildScene(toScene(displayDef), assets, { mount: container })
     stage.layoutAll()
     parkImmune(stage)
     stage.startGames(opts.interactive)
@@ -314,9 +335,9 @@ export function playProject(
       // The same applies to every scene AFTER a game win (win overlay redirect target,
       // "next" scene, …): the play-through is over, so a reload restarts the flow.
       // A scene that carries its own game re-arms resume (multi-game flows).
-      if (hasGame(def)) gameWon = false
+      if (hasGame(displayDef)) gameWon = false
       try {
-        if (isEndscene(def) || gameWon) {
+        if (isEndscene(displayDef) || gameWon) {
           window.sessionStorage.removeItem('pa:resume-scene')
         } else {
           // Record the orientation too: resume is meant ONLY for AppLovin's reload-on-
@@ -330,7 +351,7 @@ export function playProject(
       // An overlay+asEndscene scene normally reaches the player floated (see 'scene-overlay'),
       // but it can also be mounted outright — as the start scene, or as a plain transition
       // target — and it must still be an end card when it does.
-      if (isEndscene(def)) armEndcard(def, stage.root)
+      if (isEndscene(displayDef)) armEndcard(displayDef, stage.root)
     }
     return stage
   }
@@ -338,17 +359,17 @@ export function playProject(
   const armAdvance = (def: SceneDef): void => {
     clearTriggers()
     overlayShownThisScene = false // reset per-scene flag
+    pendingWinSceneId = null
     if (!opts.interactive) return
     const rule = def.advance
     const go = (): void => {
-      const nid = nextId(def)
+      const nid = pendingWinSceneId ?? nextId(def)
+      pendingWinSceneId = null
       if (!nid) return
       const nextDef = project.scenes.find((s) => s.id === nid)
-      // A terminal overlay end card has nowhere to go next — it IS the last thing the player
-      // sees — so it never carries a redirect, whatever scene happens to follow it in the list.
-      const afterOverlay = (ov: SceneDef): string | null => (isEndscene(ov) ? null : nextId(ov))
       if (nextDef?.kind === 'overlay' && !overlayShownThisScene) {
         const afterId = afterOverlay(nextDef)
+        overlayShownThisScene = true
         // Float overlay scene on top of the running game so the dim is visible over game content.
         emit('scene-overlay', {
           sceneId: nid,
@@ -412,6 +433,17 @@ export function playProject(
     armAdvance(def)
   }
 
+  const navigateTo = (id: string): void => {
+    if (transitioning) return
+    const target = project.scenes.find((s) => s.id === id)
+    if (target?.kind === 'overlay' && current) {
+      const after = afterOverlay(target)
+      emit('scene-overlay', { sceneId: id, redirectTo: after ?? undefined })
+    } else {
+      transitionTo(id)
+    }
+  }
+
   // Game-driven navigation (e.g. scratch-grid lose cell → lose scene, then back).
   if (opts.interactive) {
     // The moment the game is won the resume record dies: a refresh during the win
@@ -422,21 +454,11 @@ export function playProject(
       gameWon = true
       try { window.sessionStorage.removeItem('pa:resume-scene') } catch { /* ignore */ }
     })
+    unsubWinRoute = on('scene-goto-after-win', (id: string) => {
+      pendingWinSceneId = id || null
+    })
     unsubGoto = on('scene-goto', (id: string) => {
-      if (transitioning) return
-      const target = project.scenes.find((s) => s.id === id)
-      if (target?.kind === 'overlay' && current) {
-        // Float an overlay-kind target over the running scene so its dim/blur shows the
-        // game through (mounting it as a full scene would paint the dim over a blank
-        // background — i.e. solid black). `redirectTo` carries the overlay's own next
-        // scene (e.g. the end scene); from here the overlay scene's OWN advance duration
-        // is the single control of when it cover-fades onward — no other timer competes.
-        // A terminal overlay end card never redirects: it is where the flow stops.
-        const after = isEndscene(target) ? null : nextId(target)
-        emit('scene-overlay', { sceneId: id, redirectTo: after ?? undefined })
-      } else {
-        transitionTo(id)
-      }
+      navigateTo(id)
     })
 
     // Overlay a project scene on top of the current game scene without a transition.
@@ -448,9 +470,9 @@ export function playProject(
     // overlay once per manager ever created — against torn-down stages.
     unsubOverlay = on('scene-overlay', ({ sceneId, onDone, redirectTo }: { sceneId: string; onDone?: () => void; redirectTo?: string }) => {
       if (!current) return
-      overlayShownThisScene = true
-      const def = project.scenes.find((s) => s.id === sceneId)
-      if (!def) { onDone?.(); return }
+      const masterDef = project.scenes.find((s) => s.id === sceneId)
+      if (!masterDef) { onDone?.(); return }
+      const def = localizeSceneDef(masterDef)
       // Per-scene header hide applies to floated overlay scenes too — they never pass through
       // mountScene. Restored to the underlying scene's setting on dismiss (see restoreImmune);
       // a redirect's mountScene sets it for the destination scene.
@@ -622,9 +644,22 @@ export function playProject(
       // the viewport on resize instead of keeping its mount-time size.
       syncCovers()
     },
+    refreshLocale() {
+      if (!current) return
+      const def = current.def
+      clearTriggers()
+      for (const ov of overlayStages) ov.destroy()
+      overlayStages.clear()
+      unparkInto(current.stage)
+      current.stage.destroy()
+      refreshHeader()
+      current = { def, stage: mountScene(def) }
+      armAdvance(def)
+    },
     destroy() {
       clearTriggers()
       if (unsubGoto) { unsubGoto(); unsubGoto = null }
+      if (unsubWinRoute) { unsubWinRoute(); unsubWinRoute = null }
       if (unsubWinPersist) { unsubWinPersist(); unsubWinPersist = null }
       if (unsubOverlay) { unsubOverlay(); unsubOverlay = null }
       for (const ov of overlayStages) ov.destroy()

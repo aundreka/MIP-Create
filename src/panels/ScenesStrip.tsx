@@ -5,12 +5,13 @@
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { addScene, addGameScene, duplicateScene, patchSceneDef, removeScene, reorderScenes, setActiveScene, setStartScene, useEditorState } from '../store'
-import { Copy, Eye, EyeOff, Icon, LayoutGrid, Pencil, Play, SCENE_KIND_ICON, Star, X } from '../icons'
+import { Copy, Eye, EyeOff, Icon, Languages, LayoutGrid, Pencil, Play, SCENE_KIND_ICON, Star, X } from '../icons'
 import { SceneThumb } from '../preview/SceneThumb'
 import { confirmDestructive } from '../ui'
 import { hiddenCount, isSceneHidden, showAllScenes, soloScene, toggleSceneHidden, useCanvasView } from '../canvasView'
 import { GAME_TEMPLATES } from '../../runtime/games/registry'
 import type { SceneKind } from '../../runtime/scene'
+import { SceneTranslationModal } from './SceneTranslationModal'
 
 const MAX_THUMBS = 8
 
@@ -28,6 +29,7 @@ export function ScenesStrip(props: { onPreviewScene: (id: string) => void; verti
   const [editId, setEditId] = useState<string | null>(null)
   const [gamePicker, setGamePicker] = useState<PickerPos | null>(null)
   const [kindPicker, setKindPicker] = useState<KindPickerPos | null>(null)
+  const [translationSceneId, setTranslationSceneId] = useState<string | null>(null)
   const showThumbs = project.scenes.length <= MAX_THUMBS
   const allIds = project.scenes.map((s) => s.id)
   const anyPickerOpen = gamePicker !== null || kindPicker !== null
@@ -154,6 +156,17 @@ export function ScenesStrip(props: { onPreviewScene: (id: string) => void; verti
             {s.kind === 'overlay' && s.asEndscene ? ' · End' : ''}
           </button>
           <button
+            className={'scene-mini scene-language-action' + (Object.keys(s.localeOverrides ?? {}).length ? ' has-language' : '')}
+            title={Object.keys(s.localeOverrides ?? {}).length ? `Language scenes: ${Object.keys(s.localeOverrides ?? {}).join(', ')}` : 'Use a scene from another playable for a language'}
+            onClick={(e) => {
+              e.stopPropagation()
+              setActiveScene(s.id)
+              setTranslationSceneId(s.id)
+            }}
+          >
+            <Icon icon={Languages} size={13} /><span className="scene-language-label">+ Language</span>
+          </button>
+          <button
             className="scene-mini"
             title={isSceneHidden(s.id) ? 'Show on canvas (Alt-click: solo)' : 'Hide from canvas (Alt-click: solo)'}
             onClick={(e) => {
@@ -229,6 +242,8 @@ export function ScenesStrip(props: { onPreviewScene: (id: string) => void; verti
           + End
         </button>
       </span>
+
+      {translationSceneId && <SceneTranslationModal sceneId={translationSceneId} onClose={() => setTranslationSceneId(null)} />}
 
       {/* Game template picker popup */}
       {gamePicker && createPortal(

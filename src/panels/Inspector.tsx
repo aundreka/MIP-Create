@@ -22,11 +22,14 @@ import {
   pasteStyle,
   patchElement,
   patchGeometry,
+  resetLocaleLayout,
+  resetLocaleOverride,
   patchSceneDef,
   refreshScene,
   removeSelected,
   seedLandscapeLayout,
   setOrientation,
+  setLocaleAsset,
   setSceneBg,
   setSceneBg2,
   setSyncScope,
@@ -48,6 +51,7 @@ import {
   AlignStartHorizontal,
   AlignStartVertical,
   Icon,
+  Languages,
   Plus,
   type LucideIcon,
   Trash2,
@@ -67,10 +71,12 @@ const TAP_EFFECTS = [
 ]
 import { SfxLibrary } from './SfxLibrary'
 import { startPathDraw } from '../drawMode'
-import { useEditLocale } from '../locale'
+import { setEditLocale, useEditLocale } from '../locale'
+import { localizeElement } from '../../runtime/i18n'
 import { setActiveVariant, useActiveVariant } from '../variantMode'
 import { getTimeline, setTimeline } from '../timeline'
 import { KeyframeEditor } from './KeyframeEditor'
+import { SceneTranslationModal } from './SceneTranslationModal'
 
 const ANCHORS: Anchor[] = ['center', 'top', 'bottom', 'left', 'right', 'top-left', 'top-right', 'bottom-left', 'bottom-right']
 
@@ -571,7 +577,7 @@ function AnimRow(props: {
                 onChange={(v) => patch({ trigger: v as AnimTrigger })}
                 options={[
                   { value: 'onMount', label: 'on scene enter' },
-                  { value: 'onGameWin', label: 'on game win' },
+                  { value: 'onGameWin', label: 'on game won' },
                 ]}
               />
             </Row>
@@ -1297,6 +1303,7 @@ function CatchPopupControls({ params, setParam }: CatchPopupControlsProps): JSX.
 
 export function Inspector(props: { onProjectSettings: () => void }): JSX.Element {
   const state = useEditorState()
+  const [sceneTranslationId, setSceneTranslationId] = useState<string | null>(null)
   const editLocale = useEditLocale()
   const activeVariant = useActiveVariant()
   const variantName = state.project.meta.variants?.find((v) => v.id === activeVariant)?.name
@@ -1314,15 +1321,31 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
     // first selected element's spec; any change writes that same spec to every
     // selected element, so identical timing makes them animate in sync as a group.
     const first = state.scene.elements.find((e) => e.id === state.selectedIds[0]) ?? state.scene.elements.find((e) => state.selectedIds.includes(e.id))
-    const patchAllPhase = (phase: 'entrance' | 'loop' | 'exit', primary: AnimSpec | undefined, extra: AnimSpec[]): void => {
+    const patchAllPhase = (phase: 'entrance' | 'loop' | 'exit' | 'gameWin', primary: AnimSpec | undefined, extra: AnimSpec[]): void => {
       beginTransaction()
       for (const id of state.selectedIds) {
         const e = state.scene.elements.find((x) => x.id === id)
         if (!e) continue
-        patchElement(id, { animations: { ...(e.animations ?? {}), [phase]: primary, [`${phase}Extra`]: extra.length ? extra : undefined } })
+        const legacyWin = e.animations?.entrance?.trigger === 'onGameWin'
+        const legacyWinPrimary = legacyWin ? e.animations?.entrance : undefined
+        const legacyWinExtra = legacyWin ? e.animations?.entranceExtra : undefined
+        patchElement(id, {
+          animations: {
+            ...(e.animations ?? {}),
+            [phase]: primary,
+            [`${phase}Extra`]: extra.length ? extra : undefined,
+            ...(phase === 'gameWin' && legacyWin ? { entrance: undefined, entranceExtra: undefined } : {}),
+            ...(phase === 'entrance' && legacyWin && !e.animations?.gameWin ? { gameWin: legacyWinPrimary, gameWinExtra: legacyWinExtra } : {}),
+          },
+        })
       }
       endTransaction()
     }
+    const legacyWin = first?.animations?.entrance?.trigger === 'onGameWin'
+    const firstEntrance = legacyWin ? undefined : first?.animations?.entrance
+    const firstEntranceExtra = legacyWin ? undefined : first?.animations?.entranceExtra
+    const firstGameWin = first?.animations?.gameWin ?? (legacyWin ? first?.animations?.entrance : undefined)
+    const firstGameWinExtra = first?.animations?.gameWinExtra ?? (legacyWin ? first?.animations?.entranceExtra : undefined)
     return (
       <div className="panel inspector">
         {variantBanner}
@@ -1333,14 +1356,23 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
           <div className="hint pad">Applies the same animation(s) to every selected element — stack multiple per phase with “+ Add another”, and they animate together as a group.</div>
           <AnimPhase
             title="Entrance"
-            trigger
-            primary={first?.animations?.entrance}
-            extra={first?.animations?.entranceExtra}
+            primary={firstEntrance}
+            extra={firstEntranceExtra}
             presets={ENTRANCE_PRESETS}
             extraPresets={NODE_PRESETS}
-            defaultSpec={{ preset: 'slide-up', durationMs: 520, delayMs: 0, easing: 'ease-out', trigger: 'onMount' }}
+            defaultSpec={{ preset: 'slide-up', durationMs: 520, delayMs: 0, easing: 'ease-out' }}
             defaultExtraSpec={{ preset: 'shine', durationMs: 900, delayMs: 0, easing: 'ease-in-out' }}
             onChange={(primary, ex) => patchAllPhase('entrance', primary, ex)}
+          />
+          <AnimPhase
+            title="On game won"
+            primary={firstGameWin}
+            extra={firstGameWinExtra}
+            presets={NODE_PRESETS}
+            extraPresets={NODE_PRESETS}
+            defaultSpec={{ preset: 'pop', durationMs: 420, delayMs: 0, easing: 'ease-out' }}
+            defaultExtraSpec={{ preset: 'shine', durationMs: 900, delayMs: 0, easing: 'ease-in-out' }}
+            onChange={(primary, ex) => patchAllPhase('gameWin', primary, ex)}
           />
           <AnimPhase
             title="Loop"
@@ -1407,6 +1439,15 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
         <Row label="Scene name">
           <input value={sd.name} onChange={(e) => patchSceneDef(sd.id, { name: e.target.value })} />
         </Row>
+        <button className="wide primary scene-language-inspector" onClick={() => setSceneTranslationId(sd.id)}>
+          <Icon icon={Languages} size={15} />
+          {Object.keys(sd.localeOverrides ?? {}).length
+            ? `Language versions (${Object.keys(sd.localeOverrides ?? {}).join(', ')})`
+            : '+ Add language version for this scene'}
+        </button>
+        {sceneTranslationId === sd.id && (
+          <SceneTranslationModal sceneId={sd.id} onClose={() => setSceneTranslationId(null)} />
+        )}
         <div className="scene-meta-row">
           <Row label="Type">
             <Select
@@ -1438,14 +1479,14 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
             <b> terminal</b>, so its Advance rule below is ignored: nothing dismisses it and it never continues to another scene.
           </div>
         )}
-        {state.project.meta.header && !actsAsEndscene && (
+        {state.scene.meta.header && !actsAsEndscene && (
           <Toggle
             label="Hide date header in this scene"
             checked={!!sd.hideHeader}
             onChange={(v) => patchSceneDef(sd.id, { hideHeader: v || undefined })}
           />
         )}
-        {state.project.meta.header && actsAsEndscene && (
+        {state.scene.meta.header && actsAsEndscene && (
           <div className="hint pad">The date header never shows on an end card.</div>
         )}
         {sd.kind === 'endscene' && (
@@ -1622,17 +1663,47 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
     )
   }
 
-  const ov = landscape ? el.landscape ?? {} : {}
+  const localizedEl = localizeElement(el, editLocale)
+  const ov = landscape ? localizedEl.landscape ?? {} : {}
   const g = {
-    x: ov.x ?? el.x,
-    y: ov.y ?? el.y,
-    scale: ov.scale ?? el.scale ?? 1,
-    w: ov.w ?? el.w,
-    h: ov.h ?? el.h,
-    anchor: ov.anchor ?? el.anchor,
-    mode: ov.mode ?? el.mode,
+    x: ov.x ?? localizedEl.x,
+    y: ov.y ?? localizedEl.y,
+    scale: ov.scale ?? localizedEl.scale ?? 1,
+    w: ov.w ?? localizedEl.w,
+    h: ov.h ?? localizedEl.h,
+    anchor: ov.anchor ?? localizedEl.anchor,
+    mode: ov.mode ?? localizedEl.mode,
   }
   const id = el.id
+  const legacyWinAnim = el.animations?.entrance?.trigger === 'onGameWin'
+  const entranceAnim = legacyWinAnim ? undefined : el.animations?.entrance
+  const entranceExtra = legacyWinAnim ? undefined : el.animations?.entranceExtra
+  const gameWinAnim = el.animations?.gameWin ?? (legacyWinAnim ? el.animations?.entrance : undefined)
+  const gameWinExtra = el.animations?.gameWinExtra ?? (legacyWinAnim ? el.animations?.entranceExtra : undefined)
+  const patchEntranceAnimations = (patch: Partial<AnimSpec> | null): void => {
+    const nextEntrance =
+      patch === null
+        ? undefined
+        : { ...(entranceAnim ?? { preset: 'fade' as AnimSpec['preset'], durationMs: 520, delayMs: 0, easing: 'ease-out' }), ...patch }
+    patchElement(id, {
+      animations: {
+        ...(el.animations ?? {}),
+        entrance: nextEntrance,
+        entranceExtra: patch === null ? undefined : entranceExtra,
+        ...(legacyWinAnim && !el.animations?.gameWin ? { gameWin: el.animations?.entrance, gameWinExtra: el.animations?.entranceExtra } : {}),
+      },
+    })
+  }
+  const patchGameWinAnimations = (primary: AnimSpec | undefined, extra: AnimSpec[]): void => {
+    patchElement(id, {
+      animations: {
+        ...(el.animations ?? {}),
+        gameWin: primary,
+        gameWinExtra: extra.length ? extra : undefined,
+        ...(legacyWinAnim ? { entrance: undefined, entranceExtra: undefined } : {}),
+      },
+    })
+  }
   const setText = (patch: Partial<TextConfig>): void =>
     patchElement(id, { text: { ...(el.text ?? { value: '', fontSizePx: 48 }), ...patch } })
   const setBox = (patch: Partial<BoxStyle>): void => patchElement(id, { box: { ...(el.box ?? {}), ...patch } })
@@ -1688,16 +1759,65 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
     { key: 'soft', label: 'Soft', box: { bgColor: '#ffffff', radiusPx: 26, paddingXPx: 40, paddingYPx: 24, shadow: 'medium' } },
     { key: 'glass', label: 'Glass', box: { bgColor: 'rgba(255,255,255,0.16)', radiusPx: 24, borderPx: 1.5, borderColor: 'rgba(255,255,255,0.55)', paddingXPx: 36, paddingYPx: 20, shadow: 'soft' } },
   ]
+  const locales = state.project.meta.locales ?? []
+  const defaultLanguage = state.project.meta.defaultLocale || 'en'
+  const localeOverride = editLocale ? el.localeOverrides?.[editLocale] : undefined
+  const hasLocaleText = !!(editLocale && el.text?.i18n && Object.prototype.hasOwnProperty.call(el.text.i18n, editLocale))
+  const canLocalizeAsset =
+    !!el.assetId || el.type === 'image' || el.type === 'background' || el.type === 'bar' ||
+    el.type === 'handguide' || el.type === 'cta' || el.type === 'button' || el.type === 'choice'
+  const resetCurrentLanguage = (): void => {
+    if (!editLocale) return
+    beginTransaction()
+    resetLocaleOverride(id, editLocale)
+    if (el.text?.i18n && Object.prototype.hasOwnProperty.call(el.text.i18n, editLocale)) {
+      const i18n = { ...el.text.i18n }
+      delete i18n[editLocale]
+      patchElement(id, { text: { ...el.text, i18n: Object.keys(i18n).length ? i18n : undefined } })
+    }
+    endTransaction()
+  }
   return (
     <div className="panel inspector">
       {variantBanner}
       <div className="panel-title">
-        {el.type === 'bar' && el.mode === 'fit' ? 'rectangle' : el.type} {landscape && <span className="badge">landscape</span>}
+        {el.type === 'bar' && el.mode === 'fit' ? 'rectangle' : el.type} {editLocale && <span className="badge">{editLocale}</span>} {landscape && <span className="badge">landscape</span>}
       </div>
 
       <Row label="Name (layers)">
         <input value={el.name ?? ''} onChange={(e) => patchElement(id, { name: e.target.value })} />
       </Row>
+
+      <div className="group-title">Languages</div>
+      {locales.length ? (
+        <>
+          <Chips
+            items={[
+              { key: '', label: `Default (${defaultLanguage})`, active: !editLocale, onClick: () => setEditLocale(null) },
+              ...locales.map((locale) => ({ key: locale, label: locale, active: editLocale === locale, onClick: () => setEditLocale(locale) })),
+            ]}
+          />
+          {editLocale ? (
+            <>
+              {canLocalizeAsset && (
+                <AssetPicker label={`${editLocale} asset (optional)`} allowNone value={localeOverride?.assetId} onChange={(assetId) => setLocaleAsset(id, editLocale, assetId ?? undefined)} />
+              )}
+              <div className="hint pad">
+                Drag, resize, or edit Position below to save a <b>{editLocale} {landscape ? 'landscape' : 'portrait'}</b> layout.
+                Unset asset and layout fields automatically use the default ({defaultLanguage}) element.
+              </div>
+              {(localeOverride || hasLocaleText) && <button className="wide" onClick={resetCurrentLanguage}>Reset {editLocale} to default ({defaultLanguage})</button>}
+            </>
+          ) : (
+            <div className="hint pad">This is the default ({defaultLanguage}) element. Pick a language above to add only the differences.</div>
+          )}
+        </>
+      ) : (
+        <>
+          <div className="hint pad">No extra build languages yet. The default is {defaultLanguage}.</div>
+          <button className="wide" onClick={props.onProjectSettings}>Choose build languages…</button>
+        </>
+      )}
       {!activeVariant && <Toggle label="Lock element" checked={!!el.locked} onChange={() => toggleLock(id)} />}
       <Toggle label="Show on game win" checked={!!el.showOnWin} onChange={(v) => patchElement(id, { showOnWin: v })} />
       {(el.type === 'text' || el.type === 'image' || (el.type === 'bar' && el.mode === 'fit')) && sceneHasCatch && (
@@ -1825,12 +1945,15 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
       <AlignRow />
 
       {landscape && (
-        <button className="wide" onClick={() => patchElement(id, { landscape: undefined })}>
-          Reset landscape overrides
+        <button className="wide" onClick={() => editLocale ? resetLocaleLayout(id, editLocale, 'landscape') : patchElement(id, { landscape: undefined })}>
+          Reset {editLocale ? `${editLocale} ` : ''}landscape overrides
         </button>
       )}
 
-      <div className="group-title">Position {landscape ? '(landscape)' : ''}</div>
+      <div className="group-title">Position {editLocale ? `(${editLocale}, ${landscape ? 'landscape' : 'portrait'})` : landscape ? '(landscape)' : ''}</div>
+      {editLocale && !landscape && localeOverride?.portrait && (
+        <button className="wide" onClick={() => resetLocaleLayout(id, editLocale, 'portrait')}>Reset {editLocale} portrait layout</button>
+      )}
       <div className="grid2">
         <NumField label="X" value={g.x} suffix="px" onChange={(n) => patchGeometry(id, { x: n })} />
         <NumField label="Y" value={g.y} suffix="px" onChange={(n) => patchGeometry(id, { y: n })} />
@@ -3060,43 +3183,32 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
             </div>
             <Row label="Animate in">
               <Select
-                value={(el.animations?.entrance?.preset ?? 'none') as string}
+                value={(entranceAnim?.preset ?? 'none') as string}
                 onChange={(v) =>
-                  patchElement(id, {
-                    animations: {
-                      ...(el.animations ?? {}),
-                      entrance:
-                        v === 'none'
-                          ? undefined
-                          : { ...(el.animations?.entrance ?? { durationMs: 520, delayMs: 0, easing: 'ease-out', trigger: 'onMount' }), preset: v as AnimSpec['preset'] },
-                      entranceExtra: v === 'none' ? undefined : el.animations?.entranceExtra,
-                    },
-                  })
+                  patchEntranceAnimations(v === 'none' ? null : { preset: v as AnimSpec['preset'] })
                 }
                 options={[{ value: 'none', label: 'none (just appears)' }, ...ENTRANCE_PRESETS.map((p) => ({ value: p as string, label: presetLabel(p) }))]}
               />
             </Row>
-            {el.animations?.entrance && (
-              <div className="grid2">
-                <NumField
-                  label="In speed (ms)"
-                  value={el.animations.entrance.durationMs}
-                  step={50}
-                  min={0}
-                  onChange={(n) =>
-                    patchElement(id, { animations: { ...(el.animations ?? {}), entrance: { ...el.animations!.entrance!, durationMs: Math.max(0, n) } } })
-                  }
-                />
-                <NumField
-                  label="In delay (ms)"
-                  value={el.animations.entrance.delayMs}
-                  step={50}
-                  min={0}
-                  onChange={(n) =>
-                    patchElement(id, { animations: { ...(el.animations ?? {}), entrance: { ...el.animations!.entrance!, delayMs: Math.max(0, n) } } })
-                  }
-                />
-              </div>
+            {entranceAnim && (
+              <>
+                <div className="grid2">
+                  <NumField
+                    label="In speed (ms)"
+                    value={entranceAnim.durationMs}
+                    step={50}
+                    min={0}
+                    onChange={(n) => patchEntranceAnimations({ durationMs: Math.max(0, n) })}
+                  />
+                  <NumField
+                    label="In delay (ms)"
+                    value={entranceAnim.delayMs}
+                    step={50}
+                    min={0}
+                    onChange={(n) => patchEntranceAnimations({ delayMs: Math.max(0, n) })}
+                  />
+                </div>
+              </>
             )}
             <Row label="Animate out">
               <Select
@@ -3149,14 +3261,32 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
         <div className="hint pad">Stack multiple animations per phase with “+ Add another” — e.g. an entrance that pops in AND shines.</div>
         <AnimPhase
           title="Entrance"
-          trigger
-          primary={el.animations?.entrance}
-          extra={el.animations?.entranceExtra}
+          primary={entranceAnim}
+          extra={entranceExtra}
           presets={ENTRANCE_PRESETS}
           extraPresets={NODE_PRESETS}
-          defaultSpec={{ preset: 'fade', durationMs: 520, delayMs: 0, easing: 'ease-out', trigger: 'onMount' }}
+          defaultSpec={{ preset: 'fade', durationMs: 520, delayMs: 0, easing: 'ease-out' }}
           defaultExtraSpec={{ preset: 'shine', durationMs: 900, delayMs: 0, easing: 'ease-in-out' }}
-          onChange={(primary, ex) => patchElement(id, { animations: { ...(el.animations ?? {}), entrance: primary, entranceExtra: ex.length ? ex : undefined } })}
+          onChange={(primary, ex) =>
+            patchElement(id, {
+              animations: {
+                ...(el.animations ?? {}),
+                entrance: primary,
+                entranceExtra: ex.length ? ex : undefined,
+                ...(legacyWinAnim && !el.animations?.gameWin ? { gameWin: el.animations?.entrance, gameWinExtra: el.animations?.entranceExtra } : {}),
+              },
+            })
+          }
+        />
+        <AnimPhase
+          title="On game won"
+          primary={gameWinAnim}
+          extra={gameWinExtra}
+          presets={NODE_PRESETS}
+          extraPresets={NODE_PRESETS}
+          defaultSpec={{ preset: 'pop', durationMs: 420, delayMs: 0, easing: 'ease-out' }}
+          defaultExtraSpec={{ preset: 'shine', durationMs: 900, delayMs: 0, easing: 'ease-in-out' }}
+          onChange={patchGameWinAnimations}
         />
         <AnimPhase
           title="Loop"

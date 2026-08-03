@@ -8,6 +8,7 @@ import { setDesign } from './responsive'
 
 setDesign(1080, 1920)
 
+const bandEl = (): HTMLDivElement | null => document.querySelector('.pa-test-mount > div')
 const bandText = (): string => document.querySelector('.pa-test-mount div div')?.textContent ?? ''
 
 function mount(opts: Parameters<typeof mountHeader>[1]): ReturnType<typeof mountHeader> {
@@ -80,5 +81,10 @@ describe('header modes', () => {
     mount({ mode: 'countdown', countdownSeconds: 60, countdownFormat: 'HURRY' })
     expect(bandText()).toBe('HURRY')
     expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('stays above every runtime overlay tier by default', () => {
+    mount({})
+    expect(bandEl()?.style.zIndex).toBe('20000')
   })
 })

@@ -100,12 +100,14 @@ export interface ElementAnimations {
   entrance?: AnimSpec
   loop?: AnimSpec
   exit?: AnimSpec
+  gameWin?: AnimSpec
   // Additional specs stacked ON TOP of the primary one in each phase, played together with it
   // (e.g. entrance = pop + shine). Empty/absent = just the primary. The primary must exist for
   // extras to apply; extras share the primary entrance's trigger.
   entranceExtra?: AnimSpec[]
   loopExtra?: AnimSpec[]
   exitExtra?: AnimSpec[]
+  gameWinExtra?: AnimSpec[]
 }
 
 /**
@@ -591,6 +593,22 @@ export interface OrientationOverride {
   hidden?: boolean
 }
 
+// Optional content/layout overrides for one browser language. Asset swaps are
+// shared by both orientations; geometry is independent so translated artwork or
+// longer copy can be composed separately in portrait and landscape. Every field
+// falls back to the ordinary element when absent.
+export interface LocaleElementOverride {
+  assetId?: string
+  portrait?: OrientationOverride
+  landscape?: OrientationOverride
+  // A complete element authored in another playable. This is used by the
+  // "combine translated playables" workflow so text, art, game settings,
+  // animations, and orientation layouts can travel together. Manual asset or
+  // geometry overrides above are still applied last, making the result editable
+  // with the ordinary Languages controls.
+  source?: SceneElement
+}
+
 export interface SceneElement {
   id: string
   type: ElementType
@@ -646,6 +664,10 @@ export interface SceneElement {
   backdropBlurDir?: 'up' | 'down' | 'left' | 'right' // progressive ramp direction (default 'down')
 
   sync?: SyncConfig // shared across all MIPs in the project group (editor-only marker)
+
+  // Per-language asset and layout overrides, keyed by BCP-47 code ("es",
+  // "pt-BR", ...). The base element is the default-language/English fallback.
+  localeOverrides?: Record<string, LocaleElementOverride>
 
   landscape?: OrientationOverride
   timing?: TimingConfig // scene-timeline in/out window (see TimingConfig)
@@ -728,6 +750,9 @@ export interface ProjectMeta {
   networks?: string[]
   iterations?: string[]
   header?: HeaderConfig
+  // Optional complete header configurations for browser languages. Missing
+  // entries inherit `header`, just like localized elements inherit their base.
+  headerI18n?: Record<string, HeaderConfig>
   // First-class identity for cross-MIP QA (and, later, the shared team library).
   // A "MIP" is one playable variant; many MIPs belong to one client and are
   // checked for style/SFX/animation consistency against each other. Optional and
@@ -737,9 +762,13 @@ export interface ProjectMeta {
   mipVersion?: string
   // Fixed per-MIP date label (YYYY-MM-DD), set once when the MIP first gets a
   // client/MIP id and editable in Project settings. Part of the canonical MIP
-  // name "<client> <mip> <mipDate>" that also drives the export filename
-  // (see src/mipName.ts).
+  // name "<client> <mip> <mipDate>".
   mipDate?: string
+  // Export filename date token (YYYY-MM-DD in Project settings; written as
+  // YYYYMMDD in the delivered filename). Kept separate from `mipDate` because
+  // delivery naming can follow a different schedule than the MIP's canonical
+  // identity date.
+  exportDate?: string
   // Project grouping: several MIPs (each a `Project` in the code) belong to one
   // real-world "project" (brand + date + theme, e.g. "Bioma 2026-07 Scratch").
   // `projectId` is the stable group id (see src/projectGroups.ts); `projectName`
@@ -847,6 +876,14 @@ export interface SceneDef {
   // the runtime never reads it; element timing windows are absolute). Absent =
   // the timeline sizes itself to the longest clip.
   timelineMs?: number
+  // Optional complete visual/content versions of this scene for individual
+  // browser languages. Flow (`advance`) and transition stay owned by the master
+  // scene so importing a translated scene cannot break navigation.
+  localeOverrides?: Record<string, LocaleSceneOverride>
+}
+
+export interface LocaleSceneOverride {
+  source: SceneDef
 }
 
 export interface Project {

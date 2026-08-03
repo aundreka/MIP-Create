@@ -3,15 +3,16 @@
 // formerly the "Sound" modal), Languages (locales), and Variants. Opened from the
 // ≡ App menu and from the no-selection Inspector.
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { addVariant, assignProjectGroup, patchMeta, removeVariant, renameVariant, refreshScene, setBgm, setSfxBinding, useEditorState } from '../store'
 import { setActiveVariant } from '../variantMode'
 import { listGroups } from '../projectGroups'
 import { projectsInGroup } from '../projects'
-import { mipName, todayLabel } from '../mipName'
-import { ColorField, Drawer, NumField, Row, Select, Slider } from '../ui'
+import { fileBaseName, mipName, todayLabel } from '../mipName'
+import { Chips, ColorField, Drawer, NumField, Row, Select, Slider } from '../ui'
 import { Check, Icon, Play, X } from '../icons'
 import { AssetPicker } from './AssetPicker'
+import { getEditLocale, setEditLocale } from '../locale'
 
 // Events the runtime fires are marked ✓; the rest await game templates that emit them.
 const EVENTS: { key: string; label: string; wired?: boolean }[] = [
@@ -36,10 +37,25 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
   const { project, assets } = useEditorState()
   const m = project.meta
   const bgm = project.bgm
+  const [localeDraft, setLocaleDraft] = useState(() => (project.meta.locales ?? []).join(', '))
   const bindingFor = (event: string): string | undefined => project.sfx?.find((b) => b.event === event)?.assetId
+  const setLocales = (values: string[]): void => {
+    const base = (m.defaultLocale || 'en').toLowerCase()
+    const seen = new Set<string>()
+    const locales = values.map((value) => value.trim()).filter((value) => {
+      const key = value.toLowerCase()
+      if (!key || key === base || seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    patchMeta({ locales })
+    setLocaleDraft(locales.join(', '))
+    const active = getEditLocale()
+    if (active && !locales.includes(active)) setEditLocale(null)
+  }
 
   // Give the MIP a fixed date the first time it has a Client/MIP identity, so its
-  // canonical name (and the export filename) carry one. Stays editable below.
+  // canonical name carries one. Stays editable below.
   useEffect(() => {
     if ((m.mipDate ?? '').trim() === '' && ((m.client ?? '').trim() !== '' || (m.mip ?? '').trim() !== '')) {
       patchMeta({ mipDate: todayLabel() })
@@ -92,13 +108,19 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
           <input value={m.mip ?? ''} placeholder="e.g. MIP3" onChange={(e) => patchMeta({ mip: e.target.value })} />
         </Row>
       </div>
+      <Row label="Export date">
+        <input type="date" value={m.exportDate ?? ''} onChange={(e) => patchMeta({ exportDate: e.target.value })} />
+      </Row>
       <Row label="Date">
         <input type="date" value={m.mipDate ?? ''} onChange={(e) => patchMeta({ mipDate: e.target.value })} />
       </Row>
       <Row label="MIP name">
         <input value={mipName(m)} readOnly title="Auto-named from Client + MIP + Date" />
       </Row>
-      <div className="hint pad">Auto-named <b>Client + MIP + Date</b>. This is also the exported file name.</div>
+      <Row label="Export file">
+        <input value={fileBaseName(project)} readOnly title="Export filename stem" />
+      </Row>
+      <div className="hint pad">Auto-named <b>Client + MIP + Date</b>. Export files use <b>client_acslanot_mip_date_mip_emily_game_mechanic_human_unique</b>.</div>
       <div className="grid2">
         <NumField label="Base W" value={m.baseW} suffix="px" onChange={(n) => patchMeta({ baseW: n })} />
         <NumField label="Base H" value={m.baseH} suffix="px" onChange={(n) => patchMeta({ baseH: n })} />
@@ -189,16 +211,38 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
       <div className="hint pad">Sound is muted until the player’s first tap (ad networks block autoplay); volume/mute follow the ad container (MRAID). “soon” events await game templates that emit them.</div>
 
       <div className="group-title">Languages</div>
-      <Row label="Locales">
+      <Row label="Default">
+        <input value={m.defaultLocale || 'en'} placeholder="en" onChange={(e) => patchMeta({ defaultLocale: e.target.value.trim() || 'en' })} />
+      </Row>
+      <Row label="Build languages">
         <input
-          value={(m.locales ?? []).join(', ')}
+          value={localeDraft}
           placeholder="es, fr, de"
-          onChange={(e) => patchMeta({ locales: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) })}
+          onChange={(e) => setLocaleDraft(e.target.value)}
+          onBlur={() => setLocales(localeDraft.split(','))}
+          onKeyDown={(e) => { if (e.key === 'Enter') setLocales(localeDraft.split(',')) }}
         />
       </Row>
+      <Chips
+        items={[
+          ['es', 'Spanish'],
+          ['de', 'German'],
+          ['ar', 'Arabic'],
+          ['fr', 'French'],
+          ['pt-BR', 'Portuguese (BR)'],
+          ['ja', 'Japanese'],
+          ['ko', 'Korean'],
+          ['zh-CN', 'Chinese (Simplified)'],
+        ].map(([locale, label]) => ({
+          key: locale,
+          label,
+          active: (m.locales ?? []).includes(locale),
+          onClick: () => setLocales((m.locales ?? []).includes(locale) ? (m.locales ?? []).filter((item) => item !== locale) : [...(m.locales ?? []), locale]),
+        }))}
+      />
       <div className="hint pad">
-        Extra languages this playable carries. Base copy is what you type with no language selected; pick a language in the top bar
-        to translate each text. At runtime it auto-selects by the viewer’s browser language, falling back to base.
+        Pick common languages above or type any BCP-47 codes. Each selected element exposes language-specific text, assets, and
+        portrait/landscape layouts. The exported playable detects the browser language and falls back to the default for anything unset.
       </div>
 
       <div className="group-title">Variants</div>

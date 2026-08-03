@@ -9,10 +9,14 @@ import { ColorField, NumField, Row, Select, Toggle } from '../ui'
 import { Icon, Upload, X } from '../icons'
 import { importFont } from '../bridge'
 import { DATE_LOCALE_OPTIONS } from '../dateLocales'
+import { useEditLocale } from '../locale'
+import { localeEntry } from '../../runtime/i18n'
 
 export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): JSX.Element {
   const { project, assets } = useEditorState()
-  const h = project.meta.header
+  const editLocale = useEditLocale()
+  const localizedHeader = localeEntry(project.meta.headerI18n, editLocale)
+  const h = editLocale ? localizedHeader ?? project.meta.header : project.meta.header
   const ref = useRef<HTMLDivElement>(null)
 
   // Anchor the panel under the button, right-aligned so it stays on-screen.
@@ -38,24 +42,42 @@ export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): 
     }
   }, [])
 
-  // Merge a patch into meta.header (enabling the header if it was off).
-  const set = (patch: Record<string, unknown>): void => patchMeta({ header: { ...h, ...patch } })
+  // Merge into the active language's complete header, or the default header.
+  const set = (patch: Record<string, unknown>): void => {
+    if (!editLocale) { patchMeta({ header: { ...h, ...patch } }); return }
+    patchMeta({
+      headerI18n: {
+        ...(project.meta.headerI18n ?? {}),
+        [editLocale]: { ...(project.meta.header ?? {}), ...(localizedHeader ?? {}), ...patch },
+      },
+    })
+  }
+  const toggleHeader = (on: boolean): void => {
+    if (!editLocale) { patchMeta({ header: on ? (h ?? {}) : undefined }); return }
+    const headers = { ...(project.meta.headerI18n ?? {}) }
+    if (on) headers[editLocale] = { ...(project.meta.header ?? {}), ...(localizedHeader ?? {}) }
+    else delete headers[editLocale]
+    patchMeta({ headerI18n: Object.keys(headers).length ? headers : undefined })
+  }
 
   return createPortal(
     <div ref={ref} className="header-pop" style={{ top: pos.top, right: pos.right }} role="dialog" aria-label="Header">
       <div className="header-pop-head">
-        <strong>Header</strong>
+        <strong>Header{editLocale ? ` · ${editLocale}` : ''}</strong>
         <button className="icon" onClick={props.onClose} title="Close (Esc)" aria-label="Close">
           <Icon icon={X} size={15} />
         </button>
       </div>
       <div className="header-pop-body">
         <Toggle
-          label="Show header"
-          checked={!!h}
-          onChange={(on) => patchMeta({ header: on ? (h ?? {}) : undefined })}
+          label={editLocale ? `Custom ${editLocale} header` : 'Show header'}
+          checked={editLocale ? !!localizedHeader : !!h}
+          onChange={toggleHeader}
         />
-        {h && (
+        {editLocale && !localizedHeader && project.meta.header && (
+          <div className="hint pad">Using the default header. Turn on the custom header above to translate its prefix, suffix, date language, or styling.</div>
+        )}
+        {h && (!editLocale || !!localizedHeader) && (
           <>
             <Row label="Content">
               <Select
