@@ -1,5 +1,5 @@
-// Top bar — edit-mode context + primary actions only. App-level actions (Home,
-// file I/O, save-as-template, Profile, theme) live in the ≡ App menu on the brand
+// Top bar - edit-mode context + primary actions only. App-level actions (Home,
+// file I/O, save-as-template, Profile, theme) live in the app menu on the brand
 // button. Create methods live on Home's Create gallery; insert is on the tool rail.
 
 import { useRef, useState } from 'react'
@@ -19,6 +19,7 @@ async function doSave(): Promise<void> {
   if (r.ok) markSaved(r.path ?? null)
   else if (r.error && r.error !== 'canceled') alert('Save failed: ' + r.error)
 }
+
 async function doOpen(): Promise<void> {
   const r = await bridgeLoad()
   if (r) storeLoad(r.data.project, r.data.assets, r.path, r.data.trace)
@@ -35,6 +36,10 @@ export function Topbar(props: {
   onProjectSettings: () => void
   onQuickExport: () => void
   quickExportBusy: boolean
+  onQuickViteExport: () => void
+  quickViteExportBusy: boolean
+  onQuickProjectViteExport: () => void
+  quickProjectViteExportBusy: boolean
   onExport: () => void
   onUpload: () => void
   onQa: () => void
@@ -48,7 +53,6 @@ export function Topbar(props: {
   const activeVariant = useActiveVariant()
   const variants = scene.meta.variants ?? []
 
-  // ---- date-header popover: quick-access date band customization -------------
   const headerBtn = useRef<HTMLButtonElement>(null)
   const [headerPop, setHeaderPop] = useState<DOMRect | null>(null)
   const toggleHeaderPop = (): void => {
@@ -62,7 +66,6 @@ export function Topbar(props: {
     if (r) setAppMenu({ x: r.left, y: r.bottom + 4 })
   }
 
-  // ---- project switcher: hop between MIPs of the same project group ----------
   const projBtn = useRef<HTMLButtonElement>(null)
   const [projMenu, setProjMenu] = useState<{ x: number; y: number } | null>(null)
   const projectId = scene.meta.projectId
@@ -72,35 +75,38 @@ export function Topbar(props: {
     const r = projBtn.current?.getBoundingClientRect()
     if (r) setProjMenu({ x: r.left, y: r.bottom + 4 })
   }
+
   const newMipInProject = async (): Promise<void> => {
     if (!projectId || !projectName) return
-    const id = await createProject() // blank MIP, switches to it (persists the current one first)
+    const id = await createProject()
     joinProjectGroup(projectId, projectName)
-    await saveCurrent() // persist membership so the switcher lists it
-    await openProject(id) // reconcile the project's shared elements into the new MIP
+    await saveCurrent()
+    await openProject(id)
   }
+
   const projItems: MenuItem[] = projectId
     ? [
         ...projectsInGroup(projectId).map((r) => ({
-          label: (r.id === curId ? '● ' : '○ ') + r.name,
+          label: (r.id === curId ? '* ' : 'o ') + r.name,
           onClick: () => { if (r.id !== curId) void openProject(r.id) },
         })),
         { sep: true, label: '' },
         { label: '+ New MIP in this project', onClick: () => void newMipInProject() },
       ]
     : []
+
   const appItems: MenuItem[] = [
-    { label: 'Home / Projects…', onClick: props.onHome },
+    { label: 'Home / Projects...', onClick: props.onHome },
     { sep: true, label: '' },
-    { label: 'Save…', onClick: () => void doSave() },
-    { label: 'Open…', onClick: () => void doOpen() },
-    { label: 'Save as template…', onClick: props.onSaveTemplate },
+    { label: 'Save...', onClick: () => void doSave() },
+    { label: 'Open...', onClick: () => void doOpen() },
+    { label: 'Save as template...', onClick: props.onSaveTemplate },
     { sep: true, label: '' },
-    { label: 'Project settings…', onClick: props.onProjectSettings },
-    { label: 'Share / import by code…', onClick: props.onShare },
-    { label: 'QA & reports…', onClick: props.onQa },
-    { label: 'QA checker (vs Figma mockup)…', onClick: props.onQaCheck },
-    { label: 'Profile…', onClick: props.onProfile },
+    { label: 'Project settings...', onClick: props.onProjectSettings },
+    { label: 'Share / import by code...', onClick: props.onShare },
+    { label: 'QA & reports...', onClick: props.onQa },
+    { label: 'QA checker (vs Figma mockup)...', onClick: props.onQaCheck },
+    { label: 'Profile...', onClick: props.onProfile },
     { label: theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme', onClick: () => toggleTheme() },
   ]
 
@@ -110,7 +116,7 @@ export function Topbar(props: {
         <Icon icon={Menu} size={16} /> {scene.meta.name || 'untitled'} <Icon icon={ChevronDown} size={12} />
       </button>
       {projectId && (
-        <button className="proj-switch" ref={projBtn} onClick={openProjMenu} title={`Switch MIPs in “${projectName}”`}>
+        <button className="proj-switch" ref={projBtn} onClick={openProjMenu} title={`Switch MIPs in "${projectName}"`}>
           <Icon icon={FolderOpen} size={13} /> {projectName} <Icon icon={ChevronDown} size={11} />
         </button>
       )}
@@ -191,7 +197,13 @@ export function Topbar(props: {
         <Icon icon={Play} size={14} /> Preview
       </button>
       <button onClick={props.onQuickExport} disabled={props.quickExportBusy} title="Quick export using your saved Export modal settings">
-        <Icon icon={Upload} size={14} /> {props.quickExportBusy ? 'Quick exportingâ€¦' : 'Quick export'}
+        <Icon icon={Upload} size={14} /> {props.quickExportBusy ? 'Quick exporting...' : 'Quick export'}
+      </button>
+      <button onClick={props.onQuickViteExport} disabled={props.quickViteExportBusy} title="Quick Vite source export for the current playable">
+        <Icon icon={FolderOpen} size={14} /> {props.quickViteExportBusy ? 'Quick Vite...' : 'Quick Vite'}
+      </button>
+      <button onClick={props.onQuickProjectViteExport} disabled={props.quickProjectViteExportBusy} title="Quick Vite source export for every MIP in this project">
+        <Icon icon={FolderOpen} size={14} /> {props.quickProjectViteExportBusy ? 'Quick Project...' : 'Quick Project'}
       </button>
       <button className="primary" onClick={props.onExport}>
         Export
@@ -199,7 +211,7 @@ export function Topbar(props: {
       <button onClick={props.onUpload} title="Build and upload the current playable">
         Upload
       </button>
-      <span className="hint">{platformLabel}{projectPath ? ' · ' + projectPath.split(/[\\/]/).pop() : ''}</span>
+      <span className="hint">{platformLabel}{projectPath ? ' - ' + projectPath.split(/[\\/]/).pop() : ''}</span>
 
       {appMenu && <ContextMenu x={appMenu.x} y={appMenu.y} items={appItems} onClose={() => setAppMenu(null)} />}
       {projMenu && <ContextMenu x={projMenu.x} y={projMenu.y} items={projItems} onClose={() => setProjMenu(null)} />}

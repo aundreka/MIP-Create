@@ -95,6 +95,7 @@ export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void
   const [warns, setWarns] = useState<string[]>([])
   const [autoQ, setAutoQ] = useState<number | null>(null)
   const [srcBusy, setSrcBusy] = useState(false)
+  const [srcProjectBusy, setSrcProjectBusy] = useState(false)
   const variants = project.meta.variants ?? []
   const [selVars, setSelVars] = useState<Set<string>>(() => new Set(variants.map((v) => v.id)))
   const [alUrl, setAlUrl] = useState(() => localStorage.getItem('pa:applovinUrl') || 'http://167.99.227.249/wp-login.php?redirect_to=%2F')
@@ -576,9 +577,24 @@ export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void
       >
         {srcBusy ? 'Building…' : 'Download Vite project (source).zip'}
       </button>
+      <button
+        className="wide"
+        disabled={srcProjectBusy}
+        onClick={() => {
+          setSrcProjectBusy(true)
+          void import('../viteExport')
+            .then((m) => m.exportViteProjectGroup())
+            .finally(() => setSrcProjectBusy(false))
+        }}
+      >
+        {srcProjectBusy ? 'Building…' : 'Download project Vite source.zip'}
+      </button>
       <div className="hint pad">
         A runnable Vite + TypeScript repo with the full runtime source, your project and assets. Devs run <b>npm install</b> then{' '}
         <b>npm run dev</b> and edit <b>src/runtime/games/</b> to customize gameplay mechanics. Optional; not needed for ad delivery.
+      </div>
+      <div className="hint pad">
+        The project zip gathers every playable in the current project into folders like <b>project/mip1</b>, <b>project/mip2</b>, and so on.
       </div>
 
       {canApplovin && (

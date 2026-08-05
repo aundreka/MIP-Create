@@ -66,6 +66,8 @@ export function App(): JSX.Element {
   const closeShare = (): void => { setShare(false); setShareTarget(null) }
   const [cmdK, setCmdK] = useState(false)
   const [quickExportBusy, setQuickExportBusy] = useState(false)
+  const [quickViteExportBusy, setQuickViteExportBusy] = useState(false)
+  const [quickProjectViteExportBusy, setQuickProjectViteExportBusy] = useState(false)
   const [uploadRequest, setUploadRequest] = useState<{ projectIds?: string[]; label?: string } | null>(null)
 
   // Deep-link from a QA finding to the offending project/scene/element.
@@ -118,6 +120,31 @@ export function App(): JSX.Element {
       alert('Quick export failed: ' + String(e))
     } finally {
       setQuickExportBusy(false)
+    }
+  }
+
+  const doQuickViteExport = async (): Promise<void> => {
+    setQuickViteExportBusy(true)
+    try {
+      const mod = await import('./viteExport')
+      const { project, assets } = getState()
+      await mod.exportViteProject(project, assets)
+    } catch (e) {
+      alert('Quick Vite export failed: ' + String(e))
+    } finally {
+      setQuickViteExportBusy(false)
+    }
+  }
+
+  const doQuickProjectViteExport = async (): Promise<void> => {
+    setQuickProjectViteExportBusy(true)
+    try {
+      const mod = await import('./viteExport')
+      await mod.exportViteProjectGroup()
+    } catch (e) {
+      alert('Quick project Vite export failed: ' + String(e))
+    } finally {
+      setQuickProjectViteExportBusy(false)
     }
   }
 
@@ -193,6 +220,10 @@ export function App(): JSX.Element {
             onProjectSettings={() => setSettings(true)}
             onQuickExport={() => void doQuickExport()}
             quickExportBusy={quickExportBusy}
+            onQuickViteExport={() => void doQuickViteExport()}
+            quickViteExportBusy={quickViteExportBusy}
+            onQuickProjectViteExport={() => void doQuickProjectViteExport()}
+            quickProjectViteExportBusy={quickProjectViteExportBusy}
             onExport={() => setExportOpen(true)}
             onUpload={() => setUploadRequest({})}
             onQa={() => setQa(true)}
