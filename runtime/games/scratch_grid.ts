@@ -836,6 +836,15 @@ export function createScratchGrid(): GameModule {
     }
   }
 
+  // A scene handoff can leave the shared iOS audio element/loop registry in a
+  // stale state (especially when the previous touch is cancelled by an overlay).
+  // Reset the loop on the new user gesture so loopStart is always permitted to
+  // claim and play it again.
+  const startScratchSfx = (): void => {
+    ctx.sfx.loopStop?.('drag')
+    ctx.sfx.loopStart?.('drag')
+  }
+
   const revealCell = (cell: CellState): void => {
     if (cell.won) return
     cell.won = true
@@ -994,7 +1003,7 @@ export function createScratchGrid(): GameModule {
         lastPt = null
         if (!beginStroke(t.clientX, t.clientY)) return // press missed the brush — ignore
         touchActive = true
-        ctx.sfx.loopStart?.('drag')
+        startScratchSfx()
         const onTouchMove = (ev: TouchEvent): void => {
           ev.preventDefault()
           onMove(ev.changedTouches[0].clientX, ev.changedTouches[0].clientY)
@@ -1023,7 +1032,7 @@ export function createScratchGrid(): GameModule {
       } catch {
         /* ignore */
       }
-      ctx.sfx.loopStart?.('drag')
+      startScratchSfx()
       beginStroke(e.clientX, e.clientY)
       const onPointerMove = (ev: PointerEvent): void => onMove(ev.clientX, ev.clientY)
       const onPointerUp = (): void => {

@@ -176,7 +176,13 @@ export function createSfxManager(project: Project, assets: AssetMap, mount: HTML
 
   interface Handle { stop: () => void }
 
-  const makeHandle = (slot: Slot, vol: number, loop: boolean, label: string): Handle | null => {
+  const makeHandle = (
+    slot: Slot,
+    vol: number,
+    loop: boolean,
+    label: string,
+    onPlaybackFailure?: () => void,
+  ): Handle | null => {
     const ctx  = getCtx()
     const gain = sharedGain
     dbg('make ' + label + ' buf=' + !!slot.buf + ' el=' + !!slot.el + ' ctx=' + (ctx?.state ?? 'null'))
@@ -208,7 +214,14 @@ export function createSfxManager(project: Project, assets: AssetMap, mount: HTML
       const p = el.play()
       if (p) p
         .then(() => dbg('→ el OK ' + label))
-        .catch((e: Error) => dbg('→ el BLOCKED ' + label + ': ' + e.message))
+        .catch((e: Error) => {
+          // iOS can reject a play after an overlay/scene handoff even though the
+          // gesture that requested it was valid. Do not leave the loop registered
+          // as active in that case: the next real gesture must be allowed to retry.
+          claimedEls.delete(el)
+          onPlaybackFailure?.()
+          dbg('→ el BLOCKED ' + label + ': ' + e.message)
+        })
       else dbg('→ el (no promise) ' + label)
       return {
         stop: () => {
@@ -251,7 +264,11 @@ export function createSfxManager(project: Project, assets: AssetMap, mount: HTML
     const slot = projectSlots[event]
     if (!slot) { dbg('no slot loop:' + event); return }
     ensureRunning()
-    const h = makeHandle(slot, e.volume * master, true, 'loop:' + event)
+    let h: Handle | null = null
+    const onFailure = (): void => {
+      if (h && activeLoops[event] === h) delete activeLoops[event]
+    }
+    h = makeHandle(slot, e.volume * master, true, 'loop:' + event, onFailure)
     if (h) activeLoops[event] = h
   }
   const stopLoop = (event: string): void => {
@@ -264,7 +281,11 @@ export function createSfxManager(project: Project, assets: AssetMap, mount: HTML
     const slot = assetSlots[id]
     if (!slot) { dbg('no slot loop:a:' + id.slice(-6)); return }
     ensureRunning()
-    const h = makeHandle(slot, vol * master, true, 'loop:a:' + id.slice(-6))
+    let h: Handle | null = null
+    const onFailure = (): void => {
+      if (h && activeAssetLoops[id] === h) delete activeAssetLoops[id]
+    }
+    h = makeHandle(slot, vol * master, true, 'loop:a:' + id.slice(-6), onFailure)
     if (h) activeAssetLoops[id] = h
   }
   const stopAssetLoop = (id: string): void => {
