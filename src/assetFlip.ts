@@ -66,6 +66,7 @@ function elementAssetRefs(el: Partial<SceneElement>, path: string): Array<{ id: 
   add(el.background?.landscapeAssetId, `${path}.background.landscapeAssetId`)
   add(el.text?.fontFamily, `${path}.text.fontFamily`)
   add(el.container?.imageId, `${path}.container.imageId`)
+  add(el.button?.tapFadeAssetId, `${path}.button.tapFadeAssetId`)
   add(el.generate?.resultId, `${path}.generate.resultId`)
   add(el.scratch?.coverAssetId, `${path}.scratch.coverAssetId`)
 
@@ -172,6 +173,7 @@ function remapElementAssets(el: Partial<SceneElement>, renameById: Record<string
   if (el.background) el.background.landscapeAssetId = remap(el.background.landscapeAssetId)
   if (el.text) el.text.fontFamily = remap(el.text.fontFamily)
   if (el.container) el.container.imageId = remap(el.container.imageId)
+  if (el.button) el.button.tapFadeAssetId = remap(el.button.tapFadeAssetId)
   if (el.generate) el.generate.resultId = remap(el.generate.resultId)
   if (el.scratch) el.scratch.coverAssetId = remap(el.scratch.coverAssetId)
 

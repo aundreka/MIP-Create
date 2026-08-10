@@ -520,7 +520,7 @@ export function duplicateSelected(): void {
 // Asset ids one element references (so a cross-scene paste survives even if the
 // source asset is later deleted). Mirrors export's pruneAssets walk.
 function elementAssetIds(el: SceneElement): string[] {
-  const ids: (string | undefined)[] = [el.assetId, el.container?.imageId, el.generate?.resultId]
+  const ids: (string | undefined)[] = [el.assetId, el.container?.imageId, el.generate?.resultId, el.button?.tapFadeAssetId]
   if (el.sfx) for (const b of el.sfx) ids.push(b.assetId)
   if (el.game?.params) for (const v of Object.values(el.game.params)) (Array.isArray(v) ? ids.push(...(v as string[])) : ids.push(v as string))
   if (el.endscene) ids.push(el.endscene.portraitVideoId, el.endscene.landscapeVideoId, el.endscene.portraitImageId, el.endscene.landscapeImageId)

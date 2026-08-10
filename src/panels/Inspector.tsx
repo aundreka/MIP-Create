@@ -2,7 +2,8 @@
 // single-element editor with a visual Background-box section.
 
 import { useState, useEffect, useRef, useMemo, type PointerEvent as ReactPointerEvent } from 'react'
-import type { Anchor, AdvanceOn, AnimPresetId, AnimSpec, AnimTrigger, BackgroundConfig, BoxStyle, ConfettiConfig, CountdownConfig, CtaPulsePreset, EndsceneConfig, HandguideConfig, HandguideNode, KeyframeStep, LayoutMode, ObjectFit, SceneDef, SceneElement, SceneKind, SceneOverlay, SfxBinding, ShadowPreset, TextConfig, TimingConfig, TransitionType, UnboxingConfig } from '../../runtime/scene'
+import type { Anchor, AdvanceOn, AnimPresetId, AnimSpec, AnimTrigger, BackgroundConfig, BoxStyle, ButtonConfig, ButtonTapEffect, ConfettiConfig, CountdownConfig, CtaPulsePreset, EndsceneConfig, HandguideConfig, HandguideNode, KeyframeStep, LayoutMode, ObjectFit, SceneDef, SceneElement, SceneKind, SceneOverlay, SfxBinding, ShadowPreset, TextConfig, TimingConfig, TransitionType, UnboxingConfig } from '../../runtime/scene'
+import { TAP_FADE_DEFAULT_MS } from '../../runtime/elements/button'
 import { GAME_TEMPLATES } from '../../runtime/games/registry'
 import type { ParamField } from '../../runtime/games/types'
 import { importFont } from '../bridge'
@@ -68,7 +69,74 @@ const TAP_EFFECTS = [
   { value: 'press', label: 'Press (shrink)' },
   { value: 'glow', label: 'Glow' },
   { value: 'outline', label: 'Outline' },
+  { value: 'fade', label: 'Fade to another image' },
 ]
+
+// Where a tappable image/button goes on click. '__stay' is not a scene id — it maps
+// to button.stay, which plays the tap effect and goes nowhere (so a cross-fade is
+// watchable instead of being cut off by the scene change).
+const STAY = '__stay'
+
+// The "Go to screen" + "Tap effect" rows, shared by the image-as-button panel and
+// the Button element panel so the two can't drift apart. `fade` reveals its own
+// picture + duration controls.
+function ButtonTapFields(props: {
+  cfg: ButtonConfig
+  others: SceneDef[]
+  patch: (p: Partial<ButtonConfig>) => void
+}): JSX.Element {
+  const { cfg, others, patch } = props
+  return (
+    <>
+      <Row label="Go to screen">
+        <Select
+          value={cfg.stay ? STAY : (cfg.targetSceneId ?? '')}
+          onChange={(v) =>
+            v === STAY
+              ? patch({ stay: true, targetSceneId: undefined })
+              : patch({ stay: undefined, targetSceneId: v || undefined })
+          }
+          options={[
+            { value: '', label: '(next screen / advance)' },
+            { value: STAY, label: '(stay on this screen)' },
+            ...others.map((s) => ({ value: s.id, label: s.name || s.id })),
+          ]}
+        />
+      </Row>
+      <Row label="Tap effect">
+        <Select
+          value={cfg.tapEffect ?? 'none'}
+          onChange={(v) => patch({ tapEffect: v === 'none' ? undefined : (v as ButtonTapEffect) })}
+          options={TAP_EFFECTS}
+        />
+      </Row>
+      {cfg.tapEffect === 'fade' && (
+        <>
+          <AssetPicker
+            label="Fade to image"
+            value={cfg.tapFadeAssetId}
+            allowNone
+            onChange={(aid) => patch({ tapFadeAssetId: aid ?? undefined })}
+          />
+          <Slider
+            label="Fade duration"
+            value={cfg.tapFadeMs ?? TAP_FADE_DEFAULT_MS}
+            min={0}
+            max={3000}
+            step={50}
+            suffix="ms"
+            onChange={(n) => patch({ tapFadeMs: n })}
+          />
+          <div className="hint pad">
+            On tap the picture cross-fades into this one and <b>stays</b> on it (it resets when the screen is
+            re-entered). Set <b>Go to screen</b> to <b>(stay on this screen)</b> so the tap doesn’t change screen
+            before the fade finishes.
+          </div>
+        </>
+      )}
+    </>
+  )
+}
 import { SfxLibrary } from './SfxLibrary'
 import { startPathDraw } from '../drawMode'
 import { setEditLocale, useEditLocale } from '../locale'
@@ -2259,20 +2327,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 />
                 {cfg && (
                   <>
-                    <Row label="Go to screen">
-                      <Select
-                        value={cfg.targetSceneId ?? ''}
-                        onChange={(v) => patch({ targetSceneId: v || undefined })}
-                        options={[{ value: '', label: '(next screen / advance)' }, ...others.map((s) => ({ value: s.id, label: s.name || s.id }))]}
-                      />
-                    </Row>
-                    <Row label="Tap effect">
-                      <Select
-                        value={cfg.tapEffect ?? 'none'}
-                        onChange={(v) => patch({ tapEffect: v === 'none' ? undefined : (v as NonNullable<typeof cfg.tapEffect>) })}
-                        options={TAP_EFFECTS}
-                      />
-                    </Row>
+                    <ButtonTapFields cfg={cfg} others={others} patch={patch} />
                     <div className="hint pad">Keeps the image’s own crop, mask &amp; animation — it just becomes tappable.</div>
                   </>
                 )}
@@ -2740,20 +2795,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
         const patch = (p: Partial<typeof cfg>): void => patchElement(id, { button: { ...cfg, ...p } })
         return (
           <Accordion id="inspector.button" title="Button">
-            <Row label="Go to screen">
-              <Select
-                value={cfg.targetSceneId ?? ''}
-                onChange={(v) => patch({ targetSceneId: v || undefined })}
-                options={[{ value: '', label: '(next screen / advance)' }, ...others.map((s) => ({ value: s.id, label: s.name || s.id }))]}
-              />
-            </Row>
-            <Row label="Tap effect">
-              <Select
-                value={cfg.tapEffect ?? 'none'}
-                onChange={(v) => patch({ tapEffect: v === 'none' ? undefined : (v as NonNullable<typeof cfg.tapEffect>) })}
-                options={TAP_EFFECTS}
-              />
-            </Row>
+            <ButtonTapFields cfg={cfg} others={others} patch={patch} />
             <AssetPicker label="Image (optional)" allowNone value={el.assetId} onChange={(aid) => patchElement(id, { assetId: aid ?? undefined })} />
             <div className="hint pad">Uses the image if set, otherwise the text label below. Style the fill &amp; corners in Background box. Animation is optional (Animation section). Toggle “Above overlays” at the top to float it over game win/lose cards.</div>
             {el.assetId && (

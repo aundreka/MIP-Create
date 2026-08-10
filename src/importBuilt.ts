@@ -105,6 +105,7 @@ function collectMissingAssets(project: Project, assets: AssetMap): string[] {
     for (const el of s.elements || []) {
       need(el.assetId)
       need(el.container?.imageId)
+      need(el.button?.tapFadeAssetId)
       for (const b of el.sfx || []) need(b.assetId)
     }
   }

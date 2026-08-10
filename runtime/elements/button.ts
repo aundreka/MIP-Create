@@ -27,6 +27,62 @@ import { localize } from '../i18n'
  * .pa-el-anim — a running CSS animation there overrides transform, which would
  * swallow the press scale on any animated element. Callers pass the content node.
  */
+/** Default cross-fade duration for the 'fade' tap effect, in ms. */
+export const TAP_FADE_DEFAULT_MS = 400
+
+/**
+ * The 'fade' tap effect: cross-fade the element's picture into button.tapFadeAssetId
+ * and STAY on it (until the scene is rebuilt, e.g. on re-entry).
+ *
+ * Done by overlaying a CLONE of the live <img> rather than animating opacity on the
+ * original: the clone inherits the crop styles applyImageCrop wrote inline, so a
+ * cropped or masked image fades within the same window instead of jumping to the
+ * uncropped frame. Once the fade lands, the source is handed to the original <img>
+ * and the clone is dropped — so the swap survives the next relayout, which rewrites
+ * the original's geometry but never its src.
+ */
+function fadeToImage(effectNode: HTMLElement, el: SceneElement, ctx: RuntimeCtx): void {
+  const src = ctx.src(el.button?.tapFadeAssetId)
+  if (!src) return
+  // .pa-img for a plain image / image button; the inner <img> for a masked container.
+  const base = (effectNode.tagName === 'IMG' ? effectNode : effectNode.querySelector('img')) as HTMLImageElement | null
+  // Already swapped (or a fade to the same art is mid-flight) — a second tap is a no-op.
+  if (!base || base.dataset.tapFadeTo === src) return
+  base.dataset.tapFadeTo = src
+
+  const ms = Math.max(0, el.button?.tapFadeMs ?? TAP_FADE_DEFAULT_MS)
+  const parent = base.parentElement
+  if (!parent || ms === 0) {
+    base.src = src
+    return
+  }
+
+  const over = base.cloneNode(false) as HTMLImageElement
+  delete over.dataset.tapFadeTo
+  over.src = src
+  // A cropped image is already absolutely placed, so the clone lands exactly on top.
+  // Anything else sits in normal flow and has to be lifted onto the original.
+  if (base.style.position !== 'absolute') {
+    if (!parent.style.position) parent.style.position = 'relative'
+    over.style.position = 'absolute'
+    over.style.inset = '0'
+    over.style.width = '100%'
+    over.style.height = '100%'
+  }
+  over.style.opacity = '0'
+  over.style.transition = `opacity ${ms}ms ease`
+  parent.appendChild(over)
+  // Next frame, or applying the transition and the target value together means no
+  // transition at all — the same reason the pa-tap-on class lands a frame late.
+  requestAnimationFrame(() => {
+    over.style.opacity = '1'
+  })
+  setTimeout(() => {
+    base.src = src
+    over.remove()
+  }, ms + 40)
+}
+
 export function wireSceneNav(
   listen: HTMLElement,
   effectNode: HTMLElement,
@@ -36,8 +92,16 @@ export function wireSceneNav(
   let held = '' // the pa-tap-* class currently applied, '' when released
 
   const press = (): void => {
-    const fx = getEl().button?.tapEffect
-    if (!fx || fx === 'none' || held) return
+    const el = getEl()
+    const fx = el.button?.tapEffect
+    if (!fx || fx === 'none') return
+    // The cross-fade is a one-shot swap, not a held state — it neither uses a
+    // pa-tap-* class nor has anything for release() to undo.
+    if (fx === 'fade') {
+      fadeToImage(effectNode, el, ctx)
+      return
+    }
+    if (held) return
     held = `pa-tap-${fx}`
     effectNode.classList.add(held)
     // Add the "on" state a frame later: applying the transition and the target
@@ -73,7 +137,9 @@ export function wireSceneNav(
   listen.addEventListener('click', (ev) => {
     ev.stopPropagation()
     ctx.emit('sfx', 'tap')
-    const target = getEl().button?.targetSceneId
+    const cfg = getEl().button
+    if (cfg?.stay) return // tap effect only — deliberately goes nowhere
+    const target = cfg?.targetSceneId
     if (target) ctx.emit('scene-goto', target)
     else ctx.emit('pa-advance') // no target chosen → behave like a tap-to-advance
   })

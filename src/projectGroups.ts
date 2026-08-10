@@ -100,7 +100,7 @@ export function ensureGroupByName(name: string): ProjectGroup {
 // Asset ids one element references (mirrors store.elementAssetIds / export's walk),
 // kept here so this module has no store dependency.
 function referencedAssetIds(el: Partial<SceneElement>): string[] {
-  const ids: (string | undefined)[] = [el.assetId, el.container?.imageId, el.generate?.resultId]
+  const ids: (string | undefined)[] = [el.assetId, el.container?.imageId, el.generate?.resultId, el.button?.tapFadeAssetId]
   const nestedStrings = (value: unknown, seen = new Set<unknown>()): void => {
     if (typeof value === 'string') { ids.push(value); return }
     if (!value || typeof value !== 'object' || seen.has(value)) return

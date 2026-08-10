@@ -227,14 +227,24 @@ export interface ButtonConfig {
   // Target scene id to navigate to on click. Empty/unset = advance to the scene's
   // configured next scene (same as a tap), via the generic 'pa-advance' signal.
   targetSceneId?: string
+  // Stay put on click: play the tap effect but do NOT navigate or advance. Exists
+  // so a 'fade' tap effect is actually watchable — a navigating tap would swap the
+  // scene out before the cross-fade finishes. Wins over targetSceneId when set.
+  stay?: boolean
   // Visual tap feedback, applied while the element is held down (:active).
   // Unset/'none' = no feedback. Also used by plain IMAGE elements marked as buttons.
   tapEffect?: ButtonTapEffect
+  // 'fade' only: the image this one cross-fades INTO on tap. Unset = the effect
+  // no-ops (nothing to fade to).
+  tapFadeAssetId?: string
+  // 'fade' only: cross-fade duration in ms; unset = TAP_FADE_DEFAULT_MS. 0 = instant swap.
+  tapFadeMs?: number
 }
 
 // 'press' = brief scale-down (the most readable "tap registered" signal on touch);
-// 'glow' = box-shadow bloom; 'outline' = a ring around the element.
-export type ButtonTapEffect = 'none' | 'press' | 'glow' | 'outline'
+// 'glow' = box-shadow bloom; 'outline' = a ring around the element;
+// 'fade' = cross-fade into tapFadeAssetId over tapFadeMs and stay on it.
+export type ButtonTapEffect = 'none' | 'press' | 'glow' | 'outline' | 'fade'
 
 export interface EndsceneConfig {
   /** 'video' (default) shows a video/image card; 'html' embeds an HTML asset in an iframe. */
