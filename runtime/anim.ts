@@ -179,7 +179,7 @@ export function ctaPulseAnimation(cta: import('./scene').CtaConfig | undefined):
 
 // A phase can hold MULTIPLE stacked specs: the primary (`entrance`/`loop`/`exit`/`gameWin`) plus any
 // `…Extra[]` played together with it (e.g. entrance = pop + shine). Collect them in order.
-type Phase = 'entrance' | 'loop' | 'exit' | 'gameWin'
+type Phase = 'entrance' | 'loop' | 'exit' | 'gameWin' | 'tap'
 export function phaseSpecs(el: SceneElement, phase: Phase): AnimSpec[] {
   const a = el.animations
   if (!a) return []
@@ -195,15 +195,15 @@ export function phaseSpecs(el: SceneElement, phase: Phase): AnimSpec[] {
   const extra =
     phase === 'entrance'
       ? (a.entrance?.trigger === 'onGameWin' ? undefined : a.entranceExtra)
-      : (a[(phase + 'Extra') as 'entranceExtra' | 'loopExtra' | 'exitExtra' | 'gameWinExtra'] ?? legacyExtra)
+      : (a[(phase + 'Extra') as 'entranceExtra' | 'loopExtra' | 'exitExtra' | 'gameWinExtra' | 'tapExtra'] ?? legacyExtra)
   if (Array.isArray(extra)) for (const s of extra) if (s) out.push(s)
   return out
 }
 
-/** The lightray spec from ANY phase (entrance/loop/exit/gameWin) — drives the .pa-lightray pseudo sweep.
+/** The lightray spec from ANY phase (entrance/loop/exit/gameWin/tap) — drives the .pa-lightray pseudo sweep.
  * The reflection is an ambient class-driven effect, so it can be added in any phase, not just loop. */
 export function lightraySpec(el: SceneElement): AnimSpec | undefined {
-  return (['entrance', 'loop', 'exit', 'gameWin'] as const).flatMap((p) => phaseSpecs(el, p)).find((s) => s.preset === 'lightray')
+  return (['entrance', 'loop', 'exit', 'gameWin', 'tap'] as const).flatMap((p) => phaseSpecs(el, p)).find((s) => s.preset === 'lightray')
 }
 
 /** Total wall time a phase occupies (the latest `delay + duration` across its stacked
@@ -316,9 +316,24 @@ export function entranceTriggers(el: SceneElement, trigger: 'onMount' | 'onGameW
 
 /** Win animation shorthand: game-win phase, then the ordinary loop delayed until the win phase ends. */
 export function composeGameWinAnim(el: SceneElement): string {
+  return composeOneShotAnim(el, 'gameWin')
+}
+
+/** Tap animation shorthand — same shape as the win phase, replayed on every tap. */
+export function composeTapAnim(el: SceneElement): string {
+  return composeOneShotAnim(el, 'tap')
+}
+
+/**
+ * A one-shot phase (game win / tap) followed by the element's ordinary loop, held
+ * back until the phase has finished so the two never fight over transform. Falls
+ * back to the CTA pulse when the element has no authored loop, exactly as the loop
+ * path does, so a CTA keeps pulsing after the phase instead of going still.
+ */
+function composeOneShotAnim(el: SceneElement, phase: 'gameWin' | 'tap'): string {
   const parts: string[] = []
   let loopDelay = 0
-  for (const e of phaseSpecs(el, 'gameWin')) {
+  for (const e of phaseSpecs(el, phase)) {
     if (e.preset === 'lightray') continue
     if (e.preset === 'typewriter') continue
     const css = animationCss(e, false)

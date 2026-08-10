@@ -1406,7 +1406,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
     // first selected element's spec; any change writes that same spec to every
     // selected element, so identical timing makes them animate in sync as a group.
     const first = state.scene.elements.find((e) => e.id === state.selectedIds[0]) ?? state.scene.elements.find((e) => state.selectedIds.includes(e.id))
-    const patchAllPhase = (phase: 'entrance' | 'loop' | 'exit' | 'gameWin', primary: AnimSpec | undefined, extra: AnimSpec[]): void => {
+    const patchAllPhase = (phase: 'entrance' | 'loop' | 'exit' | 'gameWin' | 'tap', primary: AnimSpec | undefined, extra: AnimSpec[]): void => {
       beginTransaction()
       for (const id of state.selectedIds) {
         const e = state.scene.elements.find((x) => x.id === id)
@@ -1458,6 +1458,16 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
             defaultSpec={{ preset: 'pop', durationMs: 420, delayMs: 0, easing: 'ease-out' }}
             defaultExtraSpec={{ preset: 'shine', durationMs: 900, delayMs: 0, easing: 'ease-in-out' }}
             onChange={(primary, ex) => patchAllPhase('gameWin', primary, ex)}
+          />
+          <AnimPhase
+            title="On tap"
+            primary={first?.animations?.tap}
+            extra={first?.animations?.tapExtra}
+            presets={NODE_PRESETS}
+            extraPresets={NODE_PRESETS}
+            defaultSpec={{ preset: 'pop', durationMs: 320, delayMs: 0, easing: 'ease-out' }}
+            defaultExtraSpec={{ preset: 'shine', durationMs: 900, delayMs: 0, easing: 'ease-in-out' }}
+            onChange={(primary, ex) => patchAllPhase('tap', primary, ex)}
           />
           <AnimPhase
             title="Loop"
@@ -3347,6 +3357,22 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
           defaultExtraSpec={{ preset: 'shine', durationMs: 900, delayMs: 0, easing: 'ease-in-out' }}
           onChange={patchGameWinAnimations}
         />
+        <AnimPhase
+          title="On tap"
+          primary={el.animations?.tap}
+          extra={el.animations?.tapExtra}
+          presets={NODE_PRESETS}
+          extraPresets={NODE_PRESETS}
+          defaultSpec={{ preset: 'pop', durationMs: 320, delayMs: 0, easing: 'ease-out' }}
+          defaultExtraSpec={{ preset: 'shine', durationMs: 900, delayMs: 0, easing: 'ease-in-out' }}
+          onChange={(primary, ex) => patchElement(id, { animations: { ...(el.animations ?? {}), tap: primary, tapExtra: ex.length ? ex : undefined } })}
+        />
+        {(el.animations?.tap || el.animations?.tapExtra?.length) && (
+          <div className="hint pad">
+            Replays every time this element is tapped, in <b>Preview</b> and the exported ad — on the canvas a click
+            selects instead. It doesn’t swallow the tap, so a screen change on this element still happens.
+          </div>
+        )}
         <AnimPhase
           title="Loop"
           primary={el.animations?.loop}

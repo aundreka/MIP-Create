@@ -101,6 +101,11 @@ export interface ElementAnimations {
   loop?: AnimSpec
   exit?: AnimSpec
   gameWin?: AnimSpec
+  // Replayed every time the player taps THIS element (interactive playback only —
+  // the editor canvas uses clicks to select). Having one makes the element accept
+  // pointer events; it never swallows the tap, so a scene tap-advance or a button
+  // navigation on the same element still fires.
+  tap?: AnimSpec
   // Additional specs stacked ON TOP of the primary one in each phase, played together with it
   // (e.g. entrance = pop + shine). Empty/absent = just the primary. The primary must exist for
   // extras to apply; extras share the primary entrance's trigger.
@@ -108,6 +113,7 @@ export interface ElementAnimations {
   loopExtra?: AnimSpec[]
   exitExtra?: AnimSpec[]
   gameWinExtra?: AnimSpec[]
+  tapExtra?: AnimSpec[]
 }
 
 /**

@@ -13,7 +13,7 @@
 import type { Anchor, AnimSpec, Scene, SceneElement, SceneOverlay } from './scene'
 import type { AssetEntry, AssetMap, RuntimeCtx } from './types'
 import { designH, designW as baseDesignW, isLandscape, scale, sx, sy, viewH } from './responsive'
-import { composeElementAnim, composeGameWinAnim, entranceLeadDelayMs, entranceTriggers, exitCss, injectAnimStyles, lightraySpec, phaseFrameCss, phaseLeadDelayMs, phaseTotalMs } from './anim'
+import { composeElementAnim, composeGameWinAnim, composeTapAnim, entranceLeadDelayMs, entranceTriggers, exitCss, injectAnimStyles, lightraySpec, phaseFrameCss, phaseLeadDelayMs, phaseTotalMs } from './anim'
 import { applyImageCrop, createContainerContent, createImageContent, styleContainer } from './elements/image'
 import { applyBarFill, createBarContent } from './elements/bar'
 import { createTextContent } from './elements/text'
@@ -639,6 +639,16 @@ function runGameWin(rec: Rec): void {
   const cfg = phaseTypingConfig(rec.el, 'gameWin')
   if (cfg) startTyping(rec, 0, cfg)
 }
+/** Does this element have an authored on-tap animation? */
+function hasTapAnim(el: SceneElement): boolean {
+  return !!(el.animations?.tap || el.animations?.tapExtra?.length)
+}
+// Replayed on every tap of the element (restartAnim rewinds a still-running one, so
+// impatient repeat taps re-trigger rather than being swallowed).
+function runTap(rec: Rec): void {
+  const css = composeTapAnim(rec.el)
+  if (css !== 'none') restartAnim(rec.anim, css)
+}
 
 // ---------------------------------------------------------------------------
 // Typewriter reveal (see TypingConfig in scene.ts).
@@ -932,6 +942,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
   const byId = new Map<string, Rec>()
   let sfxWired = false // element tap/scene-enter sounds attached once
   let choicesWired = false // quiz/survey choice taps attached once
+  let tapAnimWired = false // on-tap animation listeners attached once
   let dragWired = false // drag-and-drop slots attached once
   let picksWired = false // tap-pick / fill / generate attached once
   let scratchWired = false // scratch-cover coatings attached once
@@ -985,12 +996,13 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     // Non-interactive decorative elements must not absorb touches meant for the
     // game canvas or CTAs layered behind them in z-order. Scratch/reveal covers
     // keep their overlay canvas interactive; dim and the interactive widgets do too.
-    // An image marked as a button (el.button) is interactive by definition.
+    // An image marked as a button (el.button) is interactive by definition, and so
+    // is one with an on-tap animation — it can't react to a tap it never receives.
     const nonInteractive =
       el.type !== 'cta' && el.type !== 'choice' && el.type !== 'button' &&
       el.type !== 'game-mount' && el.type !== 'endscene' &&
       el.type !== 'unboxing' && el.type !== 'bar' &&
-      el.type !== 'dim' && !el.scratch && !el.reveal && !el.button
+      el.type !== 'dim' && !el.scratch && !el.reveal && !el.button && !hasTapAnim(el)
     if (nonInteractive) {
       outer.style.pointerEvents = 'none'
       anim.style.pointerEvents = 'none'
@@ -1451,6 +1463,23 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       // quiz/survey choices: options select (mutually exclusive within a group);
       // in feedback mode the correct option turns green and a wrong pick red. An
       // advance choice (Continue/next) requests the scene's next step.
+      // On-tap animations. Interactive playback only — on the editor canvas a click
+      // means "select this element", not "play its tap animation".
+      //
+      // Deliberately does NOT stopPropagation: the animation is decoration layered on
+      // whatever the tap already did, so a scene tap-advance, or a button navigation on
+      // this same element, still fires. Bound on `anim` because the content node inside
+      // it (.pa-img and friends) sets pointer-events:none, so taps land on the wrapper.
+      // Read through byId so an element re-authored in the inspector is picked up live.
+      if (interactive && !tapAnimWired) {
+        tapAnimWired = true
+        for (const rec of recs) {
+          rec.anim.addEventListener('pointerdown', () => {
+            const live = byId.get(rec.el.id) ?? rec
+            if (hasTapAnim(live.el)) runTap(live)
+          })
+        }
+      }
       if (interactive && !choicesWired) {
         choicesWired = true
         const choices = recs.filter((r) => r.el.type === 'choice')
@@ -1835,6 +1864,9 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
         // The target scene + tap effect themselves are read live, so only the toggle
         // needs the rebuild.
         if (!nel.button !== !prev.button) return false
+        // Same reason: gaining/losing an on-tap animation flips the pointer-events gate,
+        // and an element that cannot receive a tap cannot animate on one.
+        if (hasTapAnim(nel) !== hasTapAnim(prev)) return false
         rec.el = nel
         byId.set(nel.id, rec)
         if (nel.type === 'cta' || nel.type === 'choice') {
