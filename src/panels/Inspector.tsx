@@ -129,8 +129,25 @@ function ButtonTapFields(props: {
           />
           <div className="hint pad">
             On tap the picture cross-fades into this one and <b>stays</b> on it (it resets when the screen is
-            re-entered). Set <b>Go to screen</b> to <b>(stay on this screen)</b> so the tap doesn’t change screen
-            before the fade finishes.
+            re-entered).
+          </div>
+        </>
+      )}
+      {!cfg.stay && (
+        <>
+          <Slider
+            label="Wait before switching"
+            value={cfg.navDelayMs ?? 0}
+            min={0}
+            max={3000}
+            step={50}
+            suffix="ms"
+            onChange={(n) => patch({ navDelayMs: n || undefined })}
+          />
+          <div className="hint pad">
+            {cfg.tapEffect === 'fade'
+              ? 'Holds the screen this long after the tap so the cross-fade can play out. Match it to the fade duration above (or set Go to screen to “stay on this screen” to never leave).'
+              : 'Holds the screen this long after the tap before changing screen — useful to let the tap effect or a sound finish. 0 = switch immediately.'}
           </div>
         </>
       )}

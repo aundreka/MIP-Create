@@ -176,4 +176,110 @@ describe('wireSceneNav', () => {
       expect(emit).not.toHaveBeenCalledWith('scene-goto', 's2')
     })
   })
+
+  // navDelayMs holds the scene change so a tap effect (or a sound) can finish.
+  describe('delayed scene change', () => {
+    const click = (n: HTMLElement): void => void n.dispatchEvent(new Event('click', { bubbles: true }))
+
+    it('waits navDelayMs before navigating', async () => {
+      vi.useFakeTimers()
+      try {
+        const { emit, listen } = setup(img({ targetSceneId: 's2', navDelayMs: 500 }))
+        document.body.appendChild(listen)
+        click(listen)
+        expect(emit).not.toHaveBeenCalledWith('scene-goto', 's2')
+        await vi.advanceTimersByTimeAsync(499)
+        expect(emit).not.toHaveBeenCalledWith('scene-goto', 's2')
+        await vi.advanceTimersByTimeAsync(2)
+        expect(emit).toHaveBeenCalledWith('scene-goto', 's2')
+        listen.remove()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('delays the plain advance too, when no target is chosen', async () => {
+      vi.useFakeTimers()
+      try {
+        const { emit, listen } = setup(img({ navDelayMs: 300 }))
+        document.body.appendChild(listen)
+        click(listen)
+        expect(emit).not.toHaveBeenCalledWith('pa-advance')
+        await vi.advanceTimersByTimeAsync(350)
+        expect(emit).toHaveBeenCalledWith('pa-advance')
+        listen.remove()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('navigates immediately when no delay is set', () => {
+      const { emit, listen } = setup(img({ targetSceneId: 's2' }))
+      click(listen)
+      expect(emit).toHaveBeenCalledWith('scene-goto', 's2')
+    })
+
+    it('an impatient double-tap still only jumps once', async () => {
+      vi.useFakeTimers()
+      try {
+        const { emit, listen } = setup(img({ targetSceneId: 's2', navDelayMs: 400 }))
+        document.body.appendChild(listen)
+        click(listen)
+        click(listen)
+        click(listen)
+        await vi.advanceTimersByTimeAsync(500)
+        expect(emit.mock.calls.filter((c) => c[0] === 'scene-goto')).toHaveLength(1)
+        listen.remove()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    // Otherwise a late timer would yank the player back out of wherever the scene
+    // moved on to while the delay was counting down.
+    it('cancels the jump if the element was torn down while waiting', async () => {
+      vi.useFakeTimers()
+      try {
+        const { emit, listen } = setup(img({ targetSceneId: 's2', navDelayMs: 400 }))
+        document.body.appendChild(listen)
+        click(listen)
+        listen.remove() // scene rebuilt / advanced by something else
+        await vi.advanceTimersByTimeAsync(500)
+        expect(emit).not.toHaveBeenCalledWith('scene-goto', 's2')
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('reads the target live, so an edit during the wait still lands', async () => {
+      vi.useFakeTimers()
+      try {
+        const { emit, listen, live } = setup(img({ targetSceneId: 's2', navDelayMs: 400 }))
+        document.body.appendChild(listen)
+        click(listen)
+        live.el = img({ targetSceneId: 's9', navDelayMs: 400 })
+        await vi.advanceTimersByTimeAsync(500)
+        expect(emit).toHaveBeenCalledWith('scene-goto', 's9')
+        expect(emit).not.toHaveBeenCalledWith('scene-goto', 's2')
+        listen.remove()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('never delays when stay is set — it goes nowhere at all', async () => {
+      vi.useFakeTimers()
+      try {
+        const { emit, listen } = setup(img({ stay: true, targetSceneId: 's2', navDelayMs: 400 }))
+        document.body.appendChild(listen)
+        click(listen)
+        await vi.advanceTimersByTimeAsync(1000)
+        expect(emit).not.toHaveBeenCalledWith('scene-goto', expect.anything())
+        expect(emit).not.toHaveBeenCalledWith('pa-advance')
+        listen.remove()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+  })
 })

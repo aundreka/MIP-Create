@@ -231,6 +231,10 @@ export interface ButtonConfig {
   // so a 'fade' tap effect is actually watchable — a navigating tap would swap the
   // scene out before the cross-fade finishes. Wins over targetSceneId when set.
   stay?: boolean
+  // Hold the scene change for this many ms after the tap, so the tap effect (notably
+  // the 'fade' cross-fade) plays out before the screen swaps. Unset/0 = go at once.
+  // Ignored when `stay` is set — that never navigates in the first place.
+  navDelayMs?: number
   // Visual tap feedback, applied while the element is held down (:active).
   // Unset/'none' = no feedback. Also used by plain IMAGE elements marked as buttons.
   tapEffect?: ButtonTapEffect

@@ -134,14 +134,36 @@ export function wireSceneNav(
   listen.addEventListener('pointercancel', release)
   listen.addEventListener('pointerleave', release)
 
+  let navPending = false // a delayed scene change is already counting down
+
   listen.addEventListener('click', (ev) => {
     ev.stopPropagation()
     ctx.emit('sfx', 'tap')
     const cfg = getEl().button
     if (cfg?.stay) return // tap effect only — deliberately goes nowhere
-    const target = cfg?.targetSceneId
-    if (target) ctx.emit('scene-goto', target)
-    else ctx.emit('pa-advance') // no target chosen → behave like a tap-to-advance
+
+    const go = (): void => {
+      // Re-read at fire time: a delay gives the inspector a window to change the
+      // target between the tap and the jump.
+      const target = getEl().button?.targetSceneId
+      if (target) ctx.emit('scene-goto', target)
+      else ctx.emit('pa-advance') // no target chosen → behave like a tap-to-advance
+    }
+
+    const delay = Math.max(0, cfg?.navDelayMs ?? 0)
+    if (!delay) {
+      go()
+      return
+    }
+    if (navPending) return // impatient double-tap must not queue two jumps
+    navPending = true
+    setTimeout(() => {
+      navPending = false
+      // The scene can move on while we wait (auto-advance, a countdown, another
+      // button). Firing from a torn-down element would yank the player back out of
+      // wherever they landed, so a disconnected node cancels the jump.
+      if (listen.isConnected) go()
+    }, delay)
   })
 }
 
