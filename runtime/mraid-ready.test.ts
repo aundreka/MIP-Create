@@ -1,0 +1,165 @@
+// MRAID v2.0 compliance for the network layer. Two rules networks reject creatives over:
+//   1. Nothing may call an MRAID API while the container is still loading — only
+//      getState() and addEventListener('ready') are legal before the ready event.
+//   2. Click-throughs go through mraid.open().
+// Plus the lifecycle consequence of (1): if listener registration is skipped, the ad never
+// pauses/mutes when it goes off screen or is closed.
+
+import { describe, it, expect, afterEach, vi } from 'vitest'
+
+type Listener = (...args: unknown[]) => void
+
+/** A container stub that records every API touch, so a pre-ready call is visible. */
+function makeMraid(opts: { state?: string; throwOn?: string[] } = {}) {
+  const calls: string[] = []
+  const listeners = new Map<string, Listener[]>()
+  const mraid = {
+    calls,
+    listeners,
+    state: opts.state ?? 'loading',
+    getState() {
+      calls.push('getState')
+      return this.state
+    },
+    isViewable() {
+      calls.push('isViewable')
+      return true
+    },
+    open(url: string) {
+      calls.push('open:' + url)
+    },
+    getVersion() {
+      calls.push('getVersion')
+      return '2.0'
+    },
+    supports() {
+      calls.push('supports')
+      return false
+    },
+    addEventListener(event: string, fn: Listener) {
+      calls.push('addEventListener:' + event)
+      if (opts.throwOn?.includes(event)) throw new Error('unsupported event ' + event)
+      const arr = listeners.get(event) ?? []
+      arr.push(fn)
+      listeners.set(event, arr)
+    },
+    removeEventListener() {},
+    fire(event: string, ...args: unknown[]) {
+      for (const fn of listeners.get(event) ?? []) fn(...args)
+    },
+  }
+  return mraid
+}
+
+/** Everything the container is allowed to be asked before 'ready'. */
+const PRE_READY_OK = new Set(['getState', 'addEventListener:ready'])
+
+async function load() {
+  vi.resetModules()
+  return {
+    net: await import('./networks'),
+    emitter: await import('./emitter'),
+  }
+}
+
+afterEach(() => {
+  vi.useRealTimers()
+  delete (window as unknown as Record<string, unknown>).mraid
+  vi.restoreAllMocks()
+})
+
+describe('MRAID readiness', () => {
+  it('touches no MRAID API besides getState/ready while the container is loading', async () => {
+    vi.useFakeTimers()
+    const mraid = makeMraid({ state: 'loading' })
+    ;(window as unknown as Record<string, unknown>).mraid = mraid
+    const { net } = await load()
+
+    const booted = net.initMraid(2000, 500)
+    // Never fire 'ready': the timeout must release boot WITHOUT calling into MRAID.
+    await vi.advanceTimersByTimeAsync(4000)
+    await booted
+
+    expect(mraid.calls.filter((c) => !PRE_READY_OK.has(c))).toEqual([])
+  })
+
+  it('registers the lifecycle listeners once the ready event arrives', async () => {
+    vi.useFakeTimers()
+    const mraid = makeMraid({ state: 'loading' })
+    ;(window as unknown as Record<string, unknown>).mraid = mraid
+    const { net, emitter } = await load()
+
+    const booted = net.initMraid(2000, 500)
+    mraid.state = 'default'
+    mraid.fire('ready')
+    await booted
+
+    expect(mraid.calls).toContain('addEventListener:viewableChange')
+    expect(mraid.calls).toContain('isViewable')
+
+    const seen: string[] = []
+    const offs = [
+      emitter.on('ad-pause', () => seen.push('pause')),
+      emitter.on('ad-resume', () => seen.push('resume')),
+    ]
+    mraid.fire('viewableChange', false)
+    expect(seen).toContain('pause')
+    for (const off of offs) off()
+  })
+
+  it('boots straight through when the container is already past loading', async () => {
+    const mraid = makeMraid({ state: 'default' })
+    ;(window as unknown as Record<string, unknown>).mraid = mraid
+    const { net } = await load()
+
+    await net.initMraid(2000, 500)
+    expect(mraid.calls).toContain('addEventListener:viewableChange')
+    expect(mraid.calls).not.toContain('addEventListener:ready')
+  })
+
+  it('still registers 2.0 listeners when a 3.0-only event is rejected', async () => {
+    // A strict 2.0 container throws on exposureChange. Registration must continue —
+    // viewableChange is what stops audio when the ad leaves the screen.
+    const mraid = makeMraid({ state: 'default', throwOn: ['exposureChange', 'audioVolumeChange'] })
+    ;(window as unknown as Record<string, unknown>).mraid = mraid
+    const { net } = await load()
+
+    await net.initMraid(2000, 500)
+    expect(mraid.listeners.has('viewableChange')).toBe(true)
+    expect(mraid.listeners.has('stateChange')).toBe(true)
+  })
+
+  it('pauses when the container reports the ad hidden (closed)', async () => {
+    const mraid = makeMraid({ state: 'default' })
+    ;(window as unknown as Record<string, unknown>).mraid = mraid
+    const { net, emitter } = await load()
+    await net.initMraid(2000, 500)
+
+    const seen: string[] = []
+    const off = emitter.on('ad-pause', () => seen.push('pause'))
+    mraid.fire('stateChange', 'hidden')
+    expect(seen).toEqual(['pause'])
+    off()
+  })
+
+  it('routes the click-through through mraid.open()', async () => {
+    const mraid = makeMraid({ state: 'default' })
+    ;(window as unknown as Record<string, unknown>).mraid = mraid
+    const { net } = await load()
+    net.setStoreUrl({ ios: 'https://play.google.com/x', android: 'https://play.google.com/x' })
+
+    net.triggerCTA()
+    expect(mraid.calls.some((c) => c.startsWith('open:'))).toBe(true)
+  })
+
+  it('does not open through a still-loading container', async () => {
+    const mraid = makeMraid({ state: 'loading' })
+    ;(window as unknown as Record<string, unknown>).mraid = mraid
+    const { net } = await load()
+    net.setStoreUrl({ ios: 'https://play.google.com/x', android: 'https://play.google.com/x' })
+    vi.spyOn(window, 'open').mockReturnValue(window)
+
+    net.triggerCTA()
+    expect(mraid.calls.some((c) => c.startsWith('open:'))).toBe(false)
+  })
+})

@@ -58,7 +58,16 @@ export function preflightNetwork(net: Network, html: string, bytes: number, proj
   const interactive = project.scenes.some((s) => s.advance?.on === 'tap' || s.elements.some((e) => e.type === 'game-mount' || e.type === 'cta' || e.type === 'choice'))
   if (!interactive) findings.push({ level: 'warn', message: 'No interaction (game, CTA, choice or tap-to-advance); many networks reject static playables.' })
 
-  if (net.injectMraid && !/mraid\.js/.test(html)) findings.push({ level: 'error', message: 'MRAID network but mraid.js is not present in the output.' })
+  if (net.injectMraid) {
+    if (!/mraid\.js/.test(html)) findings.push({ level: 'error', message: 'MRAID network but mraid.js is not present in the output.' })
+    // Networks reject creatives that call MRAID APIs while the container is still
+    // loading. The runtime guards this in initMraid() (getState() + the 'ready'
+    // listener), so these strings surviving minification is the regression check.
+    if (!/getState/.test(html) || !/["']ready["']/.test(html))
+      findings.push({ level: 'error', message: 'No MRAID ready guard in the output: APIs must wait for the ready event or a non-loading getState().' })
+    if (!/\.open\(/.test(html))
+      findings.push({ level: 'warn', message: 'No mraid.open() call found; MRAID click-throughs must go through mraid.open().' })
+  }
 
   return {
     net: net.name,

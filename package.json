@@ -17,6 +17,7 @@
     "format:check": "prettier --check \"{src,runtime,electron,scripts}/**/*.{ts,tsx,js,cjs,mjs,css,md}\"",
     "test": "vitest run",
     "smoke": "node scripts/smoke.mjs",
+    "mraid": "node scripts/mraid-check.mjs",
     "app": "electron .",
     "app:dev": "cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .",
     "dist": "npm run build && electron-builder",

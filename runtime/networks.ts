@@ -42,7 +42,9 @@ export const notifyGameClose = (): void => callStub('gameClose')
 // ---------------------------------------------------------------------------
 // CTA fallback chain (AGENTS.md priority order).
 // ---------------------------------------------------------------------------
-let _lastCta = 0
+// -Infinity, not 0: with 0 the "was there a CTA in the last 800ms" test reads a tap in the
+// first 800ms after LOAD as a repeat of a CTA that never happened, and swallows it.
+let _lastCta = -Infinity
 // Clear the CTA cooldown. Called whenever the page is re-shown/refocused — i.e. the
 // user has RETURNED from wherever the last CTA sent them (store, new tab, MRAID
 // expand). The 800ms guard below only exists to collapse a SINGLE gesture's double-fire
@@ -50,7 +52,7 @@ let _lastCta = 0
 // their next tap is a fresh, deliberate interaction that must redirect on the FIRST
 // click. Without this reset that return tap lands inside the lingering 800ms window and
 // gets swallowed, so the endcard "needs two clicks" to redirect the second time around.
-export function resetCtaCooldown(): void { _lastCta = 0 }
+export function resetCtaCooldown(): void { _lastCta = -Infinity }
 export function triggerCTA(): void {
   // Cooldown so a whole-scene endcard tap + the CTA button tap (or rapid double-taps)
   // can't fire the store open twice. CRITICAL: arm it only AFTER a redirect ACTUALLY
@@ -146,14 +148,17 @@ export function triggerCTA(): void {
 }
 
 // ---------------------------------------------------------------------------
-// MRAID 3.0 init + cached viewability/volume.
+// MRAID init (v2.0 baseline, v3.0 events when the container has them) + cached
+// viewability/volume.
 // ---------------------------------------------------------------------------
 let _mraidViewable = true
 let _mraidExposed = true
+let _mraidHidden = false
 let _mraidVolume = 1
+let _mraidRegistered = false
 
 function emitVisibility(): void {
-  const visible = _mraidViewable && _mraidExposed
+  const visible = _mraidViewable && _mraidExposed && !_mraidHidden
   emit(visible ? 'ad-resume' : 'ad-pause')
 }
 function setVolume(vol: number): void {
@@ -161,29 +166,62 @@ function setVolume(vol: number): void {
   emit('ad-volume', vol)
 }
 
+/** True while the container has not finished loading — no MRAID API but getState()
+ *  and addEventListener('ready') may be touched before that point. */
+function mraidLoading(mraid: any): boolean {
+  try {
+    return typeof mraid.getState === 'function' && mraid.getState() === 'loading'
+  } catch {
+    return true
+  }
+}
+
+// One try/catch PER listener. A container that only implements MRAID 2.0 can throw (or
+// fire its 'error' handler) on a 3.0-only event name, and a single shared try block would
+// then skip every listener registered after it — including viewableChange, which is what
+// pauses/mutes the ad when it leaves the screen.
+function addMraidListener(mraid: any, event: string, fn: (...args: any[]) => void): void {
+  try {
+    mraid.addEventListener(event, fn)
+  } catch { /* event unsupported by this container version */ }
+}
+
 function registerMraid(): void {
+  if (_mraidRegistered) return
   const mraid = W.mraid
   if (!mraid || typeof mraid.addEventListener !== 'function') return
+  // Guard every call below: registerMraid() runs from the 'ready' event, from a
+  // not-loading getState(), and from the startup timeout — the last of which can land
+  // while the container is STILL loading, when calling into MRAID is not allowed.
+  if (mraidLoading(mraid)) return
+  _mraidRegistered = true
   try {
     if (typeof mraid.isViewable === 'function') _mraidViewable = !!mraid.isViewable()
   } catch { /* */ }
-  try {
-    mraid.addEventListener('error', (message: string, action: string) =>
-      console.warn('[MRAID error]', { message, action }),
-    )
-    mraid.addEventListener('stateChange', (state: string) => console.log('[MRAID stateChange]', state))
-    mraid.addEventListener('exposureChange', (exposed: number) => {
-      _mraidExposed = typeof exposed === 'number' ? exposed > 0 : true
-      emitVisibility()
-    })
-    mraid.addEventListener('viewableChange', (v: boolean) => {
-      _mraidViewable = !!v
-      emitVisibility()
-    })
-    mraid.addEventListener('audioVolumeChange', (pct: number | null) => {
-      if (typeof pct === 'number') setVolume(pct / 100)
-    })
-  } catch { /* */ }
+  // MRAID 2.0 core events.
+  addMraidListener(mraid, 'error', (message: string, action: string) =>
+    console.warn('[MRAID error]', { message, action }),
+  )
+  addMraidListener(mraid, 'stateChange', (state: string) => {
+    console.log('[MRAID stateChange]', state)
+    // 'hidden' = the container closed the ad. Fold it into visibility so playback and
+    // audio stop on close, not just when the ad scrolls out of view.
+    _mraidHidden = state === 'hidden' || state === 'loading'
+    emitVisibility()
+  })
+  addMraidListener(mraid, 'viewableChange', (v: boolean) => {
+    _mraidViewable = !!v
+    emitVisibility()
+  })
+  // MRAID 3.0 events — attempted on every container (some 2.0-reporting SDKs ship
+  // them); a rejection is contained to its own listener.
+  addMraidListener(mraid, 'exposureChange', (exposed: number) => {
+    _mraidExposed = typeof exposed === 'number' ? exposed > 0 : true
+    emitVisibility()
+  })
+  addMraidListener(mraid, 'audioVolumeChange', (pct: number | null) => {
+    if (typeof pct === 'number') setVolume(pct / 100)
+  })
 }
 
 /**
@@ -204,14 +242,21 @@ export function initMraid(timeoutMs = 2000, detectTimeoutMs = 500): Promise<void
       finish()
     }
 
+    // Startup must not hang on a container that never fires 'ready' — but it also must
+    // not start calling MRAID APIs just because the clock ran out. Boot proceeds; the
+    // 'ready' listener stays armed, so registerMraid() still runs if ready arrives late.
+    const onReadyTimeout = (): void => {
+      if (!mraidLoading(W.mraid ?? {})) registerMraid()
+      finish()
+    }
+
     const waitForReady = (): void => {
       const mraid = W.mraid
       if (!mraid) return finish()
       try {
-        const state = typeof mraid.getState === 'function' ? mraid.getState() : 'ready'
-        if (state === 'loading' && typeof mraid.addEventListener === 'function') {
+        if (mraidLoading(mraid) && typeof mraid.addEventListener === 'function') {
           mraid.addEventListener('ready', onReady)
-          window.setTimeout(onReady, timeoutMs)
+          window.setTimeout(onReadyTimeout, timeoutMs)
         } else {
           onReady()
         }
@@ -273,6 +318,10 @@ export function bindLifecycle(): void {
   })
   // Generic page visibility (GoogleAds / Facebook / Moloco + all)
   document.addEventListener('visibilitychange', () => (document.hidden ? pause() : resume()))
+  // Ad closing / being torn down: 'pagehide' is the one signal every container gives us
+  // (visibilitychange doesn't always fire on a webview teardown), and audio must be
+  // silenced by then — see the ad-pause handling in sfx.ts.
+  window.addEventListener('pagehide', pause)
   // Recovery backstops: always resume when the tab/window regains focus.
   window.addEventListener('focus', resume)
   window.addEventListener('pageshow', resume)

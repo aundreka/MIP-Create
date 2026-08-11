@@ -5,11 +5,15 @@
 import type { Project } from './scene'
 import type { AssetMap } from './types'
 import { computeMetrics, setDesign, setVAlign } from './responsive'
-import { bindLifecycle, initMraid, setStoreUrl } from './networks'
+import { bindLifecycle, initMraid, notifyGameStart, setStoreUrl } from './networks'
 import { resolveLocale, setActiveLocale } from './i18n'
 import { playProject, type SceneManager } from './scenes'
 
 const W = window as unknown as Record<string, any>
+
+// Gesture types that can be "the first user interaction". pointer/touch are the real
+// paths; mouse/click are backstops for containers that synthesize only mouse events.
+const FIRST_TOUCH_EVENTS = ['pointerdown', 'touchstart', 'mousedown', 'click'] as const
 
 function installLifecycleStubs(): void {
   for (const name of ['gameReady', 'gameStart', 'gameEnd', 'gameClose']) {
@@ -87,6 +91,16 @@ export async function boot(project: Project, assets: AssetMap, opts: { mount?: H
   }
 
   bindLifecycle()
+
+  // Networks require the ad's timer to start on the FIRST user interaction, not on load.
+  // gameStart() is the signal the SDKs listen for, so fire it from the first gesture and
+  // never again (installLifecycleStubs guarantees the call is safe when no SDK is present).
+  const onFirstInteraction = (): void => {
+    for (const type of FIRST_TOUCH_EVENTS) window.removeEventListener(type, onFirstInteraction, true)
+    notifyGameStart()
+  }
+  for (const type of FIRST_TOUCH_EVENTS)
+    window.addEventListener(type, onFirstInteraction, { capture: true, passive: true })
 
   let lastW = first.w
   let lastH = first.h

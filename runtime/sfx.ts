@@ -237,11 +237,16 @@ export function createSfxManager(project: Project, assets: AssetMap, mount: HTML
   }
 
   // ---- One-shot plays --------------------------------------------------------
+  // Nothing may make a sound before the first user interaction (network policy: no
+  // audio autoplay). A sceneEnter binding on the FIRST scene fires at load, so the
+  // gate lives here rather than at the call sites. iOS blocks those plays anyway;
+  // this makes the containers that DO allow autoplay behave the same way.
   const play = (event: string): void => {
     if (muted) return
     const e = map[event]; if (!e) return
     const slot = projectSlots[event]
     if (!slot) { dbg('no slot evt:' + event); return }
+    if (!unlocked) { dbg('pre-gesture drop evt:' + event); return }
     ensureRunning()
     makeHandle(slot, e.volume * master, false, 'evt:' + event)
   }
@@ -250,6 +255,7 @@ export function createSfxManager(project: Project, assets: AssetMap, mount: HTML
     if (muted) return
     const slot = assetSlots[id]
     if (!slot) { dbg('no slot a:' + id.slice(-6)); return }
+    if (!unlocked) { dbg('pre-gesture drop a:' + id.slice(-6)); return }
     ensureRunning()
     makeHandle(slot, vol * master, false, 'a:' + id.slice(-6))
   }
@@ -257,12 +263,17 @@ export function createSfxManager(project: Project, assets: AssetMap, mount: HTML
   // ---- Loops -----------------------------------------------------------------
   const activeLoops:      Record<string, Handle> = {}
   const activeAssetLoops: Record<string, Handle> = {}
+  // Loops armed before the first gesture (e.g. an ambient sceneEnter loop on scene 1)
+  // are held, not dropped, and start together with the BGM inside unlock().
+  const pendingLoops      = new Set<string>()
+  const pendingAssetLoops = new Map<string, number>()
 
   const startLoop = (event: string): void => {
     if (muted || activeLoops[event]) return
     const e = map[event]; if (!e) return
     const slot = projectSlots[event]
     if (!slot) { dbg('no slot loop:' + event); return }
+    if (!unlocked) { pendingLoops.add(event); dbg('defer loop:' + event); return }
     ensureRunning()
     let h: Handle | null = null
     const onFailure = (): void => {
@@ -272,6 +283,7 @@ export function createSfxManager(project: Project, assets: AssetMap, mount: HTML
     if (h) activeLoops[event] = h
   }
   const stopLoop = (event: string): void => {
+    pendingLoops.delete(event)
     const h = activeLoops[event]; if (!h) return
     h.stop(); delete activeLoops[event]
   }
@@ -280,6 +292,7 @@ export function createSfxManager(project: Project, assets: AssetMap, mount: HTML
     if (muted || activeAssetLoops[id]) return
     const slot = assetSlots[id]
     if (!slot) { dbg('no slot loop:a:' + id.slice(-6)); return }
+    if (!unlocked) { pendingAssetLoops.set(id, vol); dbg('defer loop:a:' + id.slice(-6)); return }
     ensureRunning()
     let h: Handle | null = null
     const onFailure = (): void => {
@@ -289,6 +302,7 @@ export function createSfxManager(project: Project, assets: AssetMap, mount: HTML
     if (h) activeAssetLoops[id] = h
   }
   const stopAssetLoop = (id: string): void => {
+    pendingAssetLoops.delete(id)
     const h = activeAssetLoops[id]; if (!h) return
     h.stop(); delete activeAssetLoops[id]
   }
@@ -301,9 +315,42 @@ export function createSfxManager(project: Project, assets: AssetMap, mount: HTML
     bgmHandle = makeHandle(bgmSlot, bgmVol * master, true, 'bgm')
   }
 
+  // ---- Ad pause / hide / close ----------------------------------------------
+  // Networks require audio to STOP or MUTE when the ad is hidden or closed. Suspending
+  // the shared AudioContext only silences the Web Audio path — on iOS every sound
+  // actually plays through an HTMLAudioElement (see the priming note at the top), and
+  // those keep going through a suspend. So pause the elements too, and mute any video.
+  const forEachAudioEl = (fn: (el: HTMLAudioElement) => void): void => {
+    for (const slot of [...Object.values(projectSlots), ...Object.values(assetSlots)])
+      if (slot.el) fn(slot.el)
+    if (bgmSlot?.el) fn(bgmSlot.el)
+  }
+
   let adPaused = false
-  const pauseBgm  = (): void => { if (adPaused)  return; adPaused = true;  void sharedCtx?.suspend() }
-  const resumeBgm = (): void => { if (!adPaused) return; adPaused = false; void sharedCtx?.resume()  }
+  // Only the elements WE paused are resumed, so a one-shot that had already finished
+  // doesn't restart when the player comes back.
+  const pausedEls: HTMLAudioElement[] = []
+  const pauseBgm = (): void => {
+    if (adPaused) return
+    adPaused = true
+    void sharedCtx?.suspend()
+    pausedEls.length = 0
+    forEachAudioEl((el) => {
+      if (el.paused) return
+      pausedEls.push(el)
+      el.pause()
+    })
+    forEachVideo((v) => (v.muted = true))
+  }
+  const resumeBgm = (): void => {
+    if (!adPaused) return
+    adPaused = false
+    void sharedCtx?.resume()
+    for (const el of pausedEls) { el.muted = muted; void el.play()?.catch(() => {}) }
+    pausedEls.length = 0
+    // Videos stay muted until the first gesture has happened (no audio autoplay).
+    if (unlocked) forEachVideo((v) => (v.muted = muted))
+  }
 
   // ---- Mute / volume ---------------------------------------------------------
   const setMuted = (m: boolean): void => {
@@ -353,10 +400,24 @@ export function createSfxManager(project: Project, assets: AssetMap, mount: HTML
     bgmUnlocked = true
     if (bgmSlot) startBgm()
     forEachVideo((v) => (v.muted = muted))
+
+    // Loops armed before this gesture were held back by the no-autoplay gate — start
+    // them now, inside the gesture, so iOS grants them playback permission too.
+    const heldLoops = [...pendingLoops]
+    const heldAssetLoops = [...pendingAssetLoops]
+    pendingLoops.clear()
+    pendingAssetLoops.clear()
+    for (const event of heldLoops) startLoop(event)
+    for (const [id, vol] of heldAssetLoops) startAssetLoop(id, vol)
   }
 
-  window.addEventListener('pointerdown', unlock, { capture: true, once: true })
-  window.addEventListener('touchstart',  unlock, { capture: true, once: true })
+  // Every gesture type that can be "the first user interaction". pointerdown/touchstart
+  // are the real paths; mousedown/click are backstops for containers that synthesize
+  // only mouse events — without an unlock, the no-autoplay gate above would leave the
+  // ad permanently silent there.
+  const UNLOCK_EVENTS = ['pointerdown', 'touchstart', 'mousedown', 'click'] as const
+  for (const type of UNLOCK_EVENTS)
+    window.addEventListener(type, unlock, { capture: true, once: true })
 
   // ---- Event bindings --------------------------------------------------------
   const offs = [
@@ -375,8 +436,10 @@ export function createSfxManager(project: Project, assets: AssetMap, mount: HTML
   return {
     destroy() {
       for (const off of offs) off()
-      window.removeEventListener('pointerdown', unlock, { capture: true } as EventListenerOptions)
-      window.removeEventListener('touchstart',  unlock, { capture: true } as EventListenerOptions)
+      for (const type of UNLOCK_EVENTS)
+        window.removeEventListener(type, unlock, { capture: true } as EventListenerOptions)
+      pendingLoops.clear()
+      pendingAssetLoops.clear()
       for (const h of [...Object.values(activeLoops), ...Object.values(activeAssetLoops)]) h.stop()
       bgmHandle?.stop()
     },
