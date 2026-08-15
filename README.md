@@ -70,6 +70,14 @@ npm run app:dev         # editor in Electron (point at the dev server)
 
 CI (`.github/workflows/ci.yml`) runs **typecheck → lint → build:runtime → test → build → smoke** on every push/PR. Locally, run `npm run typecheck && npm test` before committing.
 
+## Static site deployment
+
+`deploy-pages.yml` builds the editor and deploys the `dist/` output to GitHub Pages on every push to `main`. It can also be run manually from the Actions tab.
+
+Before the first deployment, set the repository's **Settings → Pages → Build and deployment → Source** to **GitHub Actions**. The deployed URL is shown in the workflow's `deploy` job and in the repository's Pages settings.
+
+Cloud features remain optional. To enable them in the deployed site, add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` as repository Actions secrets before running the workflow.
+
 ## Conventions
 
 - **TypeScript strict**; avoid `any` (only the untyped Figma REST surface in `src/figma.ts` is exempt).
