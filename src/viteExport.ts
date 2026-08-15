@@ -6,7 +6,7 @@
 import JSZip from 'jszip'
 import type { Project } from '../runtime/scene'
 import type { AssetMap } from '../runtime/types'
-import { downloadBlob, pruneAssets } from './export'
+import { downloadBlob, MRAID_HEAD, pruneAssets } from './export'
 import { currentProjectId, loadProjectPreview, projectsInGroup } from './projects'
 import { getState } from './store'
 
@@ -65,9 +65,45 @@ import assets from './assets.json'
 import type { Project } from './runtime/scene'
 import type { AssetMap } from './runtime/types'
 
-void boot(project as unknown as Project, assets as unknown as AssetMap, {
-  mount: document.getElementById('app') ?? document.body,
-})
+const W = window as unknown as Record<string, any>
+const mraid = W.mraid
+
+let started = false
+function startCreative(): void {
+  if (started) return
+  started = true
+  // Tells the runtime the ready wait already happened here, so it registers the MRAID
+  // lifecycle listeners instead of waiting a second time.
+  W.PA_MRAID_WAITED = true
+  void boot(project as unknown as Project, assets as unknown as AssetMap, {
+    mount: document.getElementById('app') ?? document.body,
+  })
+}
+
+// MRAID v2.0: nothing may initialize while the container is still loading — the ready
+// event is the only legal signal to start on (see index.html for the matching guard).
+// Written out longhand, subscription inside the branch: network validators static-scan
+// for this exact shape, and a shared wait helper reads to them as no guard at all.
+if (!mraid || typeof mraid.getState !== 'function') {
+  startCreative() // no container (plain browser, npm run dev)
+} else {
+  try {
+    if (mraid.getState() === 'loading') {
+      if (typeof mraid.addEventListener === 'function') mraid.addEventListener('ready', startCreative)
+      window.setTimeout(startCreative, 2500) // backstop: never leave a blank ad
+    } else {
+      startCreative()
+    }
+  } catch {
+    // State unreadable — treat it as loading: same wait, same backstop.
+    try {
+      if (typeof mraid.addEventListener === 'function') mraid.addEventListener('ready', startCreative)
+    } catch {
+      // Container refused the listener; the backstop below still starts the creative.
+    }
+    window.setTimeout(startCreative, 2500)
+  }
+}
 `
 
 function readme(name: string): string {
@@ -98,6 +134,11 @@ npm run build    # production build into dist/
 ## Notes
 
 - The runtime has zero runtime dependencies, so the build stays light.
+- \`index.html\` declares the MRAID bridge (\`<script src="mraid.js">\`), the
+  \`isMraidUsable()\` readiness guard and the guarded \`PA_CLICKOUT\` handler, and
+  \`src/main.ts\` holds initialization until \`mraid.getState()\` is past \`"loading"\`,
+  so a \`npm run build\` is ad-container ready.
+  The 404 for \`mraid.js\` in local dev is expected — the ad container supplies it.
 - This is a standard Vite app: \`npm run build\` produces a multi-file \`dist/\`. For
   the single-file, ad-network-ready HTML (with the 5MB gate and MRAID/ExitAPI
   variants), use the editor's Export playable instead.
@@ -111,6 +152,7 @@ const INDEX_HTML = (title: string): string =>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
     <title>${title.replace(/</g, '&lt;')}</title>
+    ${MRAID_HEAD}
     <style>html,body{margin:0;height:100%;background:#000;overflow:hidden}</style>
   </head>
   <body>

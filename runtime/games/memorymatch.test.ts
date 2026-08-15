@@ -3,7 +3,7 @@
 // (data-mm-hint) always points at one card of a pair, then its partner.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createMemoryMatch } from './memorymatch'
+import { createMemoryMatch, MEMORYMATCH_TEMPLATE } from './memorymatch'
 import { mulberry32, type GameContext } from './types'
 
 const flip = (el: HTMLElement): void => {
@@ -230,6 +230,38 @@ describe('memory match', () => {
     expect(back.style.background).toBe('')
     expect(back.textContent).toBe('') // no "?" placeholder on a transparent cover
     expect(back.style.boxShadow).toBe('none')
+  })
+
+  it('tracker off: no symbol row, no reserved band, still completes', () => {
+    const withRow = makeBoard({ tracker: 'top' })
+    const noRow = makeBoard({ tracker: 'off' })
+    expect(Array.from(noRow.root.children).filter((e) => !(e as HTMLElement).dataset.mmCard)).toHaveLength(0)
+    // The band the tracker reserved is given back to the grid — cards start higher.
+    expect(parseFloat(noRow.cards[0].style.top)).toBeLessThan(parseFloat(withRow.cards[0].style.top))
+    for (const pid of ['1', '2']) {
+      const pair = noRow.cards.filter((c) => noRow.pairOf(c) === pid)
+      flip(pair[0])
+      flip(pair[1])
+      vi.runAllTimers()
+    }
+    expect(noRow.completed()).toBe(true)
+  })
+
+  it('hides the tracker-only controls when the tracker is off', () => {
+    const shown = (params: Record<string, unknown>): string[] => [
+      ...MEMORYMATCH_TEMPLATE.paramFields.filter((f) => f.showIf?.(params) ?? true).map((f) => f.key),
+      ...(MEMORYMATCH_TEMPLATE.assetSlots ?? []).filter((s) => s.showIf?.(params) ?? true).map((s) => s.key),
+    ]
+    const on = shown({ tracker: 'top' })
+    const off = shown({ tracker: 'off' })
+    expect(on).toContain('trackerSize')
+    expect(on).toContain('symbolsLit')
+    expect(off).not.toContain('trackerSize')
+    expect(off).not.toContain('symbolsLit')
+    expect(off).not.toContain('symbolsUnlit')
+    expect(off).toContain('images') // the cards' own art is unaffected
+    // Kept visible even with the tracker off: it also sizes the pair art on cards.
+    expect(off).toContain('trackerScales')
   })
 
   it('completes when every pair is matched', () => {

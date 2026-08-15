@@ -1082,7 +1082,7 @@ export function addGameScene(templateId: string): void {
     anchor: 'center',
     zIndex: 10,
     mode: fullBleed ? 'extend' : 'fit',
-    game: { templateId, params: {} },
+    game: { templateId, params: {}, hintEnabled: true, hintIdleMs: tpl?.defaultHintIdleMs ?? 4000 },
     sfx: isScratch ? [{ event: 'whileScratching', assetId: 'sfx_f_scratch' }, { event: 'onReveal', assetId: 'sfx_f_correctBright' }] : undefined,
   }
   const sd: SceneDef = {

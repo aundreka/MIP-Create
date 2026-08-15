@@ -3,7 +3,7 @@
 // braceBareTokens before rendering.
 
 import { describe, it, expect } from 'vitest'
-import { formatCountdown } from './countdown'
+import { formatCountdown, formatTickerIntervalMs } from './countdown'
 import type { SceneElement } from '../scene'
 
 const el = (format: string): SceneElement => ({
@@ -25,6 +25,12 @@ describe('countdown element bare date tokens', () => {
 
   it('leaves braced timer tokens working as before', () => {
     expect(formatCountdown(el('{mm}:{ss}'), T + 65000, T)).toBe('01:05')
+  })
+
+  it('renders two-digit hundredths with {ms}', () => {
+    expect(formatCountdown(el('{ss}:{ms}'), T + 6990, T)).toBe('06:99')
+    expect(formatTickerIntervalMs('{ss}:{ms}')).toBe(10)
+    expect(formatTickerIntervalMs('{mm}:{ss}')).toBe(1000)
   })
 
   it('does not eat literal words', () => {

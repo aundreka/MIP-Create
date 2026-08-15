@@ -134,10 +134,10 @@ function loadSlot(src: string, label: string, done: (slot: Slot) => void): void 
 
 // ---------------------------------------------------------------------------
 export function createSfxManager(project: Project, assets: AssetMap, mount: HTMLElement): SfxManager {
-  const map: Record<string, { src: string; volume: number }> = {}
+  const map: Record<string, { src: string; volume: number; delayMs: number }> = {}
   for (const b of project.sfx ?? []) {
     const a = assets[b.assetId]
-    if (a) map[b.event] = { src: a.src, volume: b.volume ?? 1 }
+    if (a) map[b.event] = { src: a.src, volume: b.volume ?? 1, delayMs: Math.max(0, b.delayMs ?? 0) }
   }
 
   const elementAssetIds = new Set<string>()
@@ -154,6 +154,7 @@ export function createSfxManager(project: Project, assets: AssetMap, mount: HTML
   const assetSlots:   Record<string, Slot> = {}
   let   bgmSlot: Slot | null = null
   let   bgmUnlocked = false
+  let   adPaused = false
 
   dbg('init events=' + Object.keys(map).join(',') + ' assets=' + [...elementAssetIds].length)
 
@@ -241,23 +242,41 @@ export function createSfxManager(project: Project, assets: AssetMap, mount: HTML
   // audio autoplay). A sceneEnter binding on the FIRST scene fires at load, so the
   // gate lives here rather than at the call sites. iOS blocks those plays anyway;
   // this makes the containers that DO allow autoplay behave the same way.
+  const delayedOneShots = new Set<number>()
+  const scheduleOneShot = (delayMs: number, run: () => void): void => {
+    if (delayMs <= 0) { run(); return }
+    const timer = window.setTimeout(() => {
+      delayedOneShots.delete(timer)
+      if (!muted && !adPaused) run()
+    }, delayMs)
+    delayedOneShots.add(timer)
+  }
+  const clearDelayedOneShots = (): void => {
+    for (const timer of delayedOneShots) window.clearTimeout(timer)
+    delayedOneShots.clear()
+  }
+
   const play = (event: string): void => {
-    if (muted) return
+    if (muted || adPaused) return
     const e = map[event]; if (!e) return
     const slot = projectSlots[event]
     if (!slot) { dbg('no slot evt:' + event); return }
     if (!unlocked) { dbg('pre-gesture drop evt:' + event); return }
-    ensureRunning()
-    makeHandle(slot, e.volume * master, false, 'evt:' + event)
+    scheduleOneShot(e.delayMs, () => {
+      ensureRunning()
+      makeHandle(slot, e.volume * master, false, 'evt:' + event)
+    })
   }
 
-  const playAsset = (id: string, vol: number): void => {
-    if (muted) return
+  const playAsset = (id: string, vol: number, delayMs = 0): void => {
+    if (muted || adPaused) return
     const slot = assetSlots[id]
     if (!slot) { dbg('no slot a:' + id.slice(-6)); return }
     if (!unlocked) { dbg('pre-gesture drop a:' + id.slice(-6)); return }
-    ensureRunning()
-    makeHandle(slot, vol * master, false, 'a:' + id.slice(-6))
+    scheduleOneShot(Math.max(0, delayMs), () => {
+      ensureRunning()
+      makeHandle(slot, vol * master, false, 'a:' + id.slice(-6))
+    })
   }
 
   // ---- Loops -----------------------------------------------------------------
@@ -266,14 +285,34 @@ export function createSfxManager(project: Project, assets: AssetMap, mount: HTML
   // Loops armed before the first gesture (e.g. an ambient sceneEnter loop on scene 1)
   // are held, not dropped, and start together with the BGM inside unlock().
   const pendingLoops      = new Set<string>()
-  const pendingAssetLoops = new Map<string, number>()
+  const pendingAssetLoops = new Map<string, { volume: number; delayMs: number }>()
+  const loopTimers = new Map<string, number>()
+  const assetLoopTimers = new Map<string, number>()
+
+  const clearLoopTimer = (timers: Map<string, number>, key: string): void => {
+    const timer = timers.get(key)
+    if (timer == null) return
+    window.clearTimeout(timer)
+    timers.delete(key)
+  }
 
   const startLoop = (event: string): void => {
-    if (muted || activeLoops[event]) return
+    if (muted || adPaused || activeLoops[event] || loopTimers.has(event)) return
     const e = map[event]; if (!e) return
     const slot = projectSlots[event]
     if (!slot) { dbg('no slot loop:' + event); return }
     if (!unlocked) { pendingLoops.add(event); dbg('defer loop:' + event); return }
+    if (e.delayMs > 0) {
+      const timer = window.setTimeout(() => {
+        loopTimers.delete(event)
+        if (!muted && !adPaused) startLoopNow(event, e, slot)
+      }, e.delayMs)
+      loopTimers.set(event, timer)
+      return
+    }
+    startLoopNow(event, e, slot)
+  }
+  const startLoopNow = (event: string, e: { volume: number }, slot: Slot): void => {
     ensureRunning()
     let h: Handle | null = null
     const onFailure = (): void => {
@@ -284,15 +323,28 @@ export function createSfxManager(project: Project, assets: AssetMap, mount: HTML
   }
   const stopLoop = (event: string): void => {
     pendingLoops.delete(event)
+    clearLoopTimer(loopTimers, event)
     const h = activeLoops[event]; if (!h) return
     h.stop(); delete activeLoops[event]
   }
 
-  const startAssetLoop = (id: string, vol: number): void => {
-    if (muted || activeAssetLoops[id]) return
+  const startAssetLoop = (id: string, vol: number, delayMs = 0): void => {
+    if (muted || adPaused || activeAssetLoops[id] || assetLoopTimers.has(id)) return
     const slot = assetSlots[id]
     if (!slot) { dbg('no slot loop:a:' + id.slice(-6)); return }
-    if (!unlocked) { pendingAssetLoops.set(id, vol); dbg('defer loop:a:' + id.slice(-6)); return }
+    const delay = Math.max(0, delayMs)
+    if (!unlocked) { pendingAssetLoops.set(id, { volume: vol, delayMs: delay }); dbg('defer loop:a:' + id.slice(-6)); return }
+    if (delay > 0) {
+      const timer = window.setTimeout(() => {
+        assetLoopTimers.delete(id)
+        if (!muted && !adPaused) startAssetLoopNow(id, vol, slot)
+      }, delay)
+      assetLoopTimers.set(id, timer)
+      return
+    }
+    startAssetLoopNow(id, vol, slot)
+  }
+  const startAssetLoopNow = (id: string, vol: number, slot: Slot): void => {
     ensureRunning()
     let h: Handle | null = null
     const onFailure = (): void => {
@@ -303,6 +355,7 @@ export function createSfxManager(project: Project, assets: AssetMap, mount: HTML
   }
   const stopAssetLoop = (id: string): void => {
     pendingAssetLoops.delete(id)
+    clearLoopTimer(assetLoopTimers, id)
     const h = activeAssetLoops[id]; if (!h) return
     h.stop(); delete activeAssetLoops[id]
   }
@@ -326,13 +379,17 @@ export function createSfxManager(project: Project, assets: AssetMap, mount: HTML
     if (bgmSlot?.el) fn(bgmSlot.el)
   }
 
-  let adPaused = false
   // Only the elements WE paused are resumed, so a one-shot that had already finished
   // doesn't restart when the player comes back.
   const pausedEls: HTMLAudioElement[] = []
   const pauseBgm = (): void => {
     if (adPaused) return
     adPaused = true
+    clearDelayedOneShots()
+    for (const timer of loopTimers.values()) window.clearTimeout(timer)
+    for (const timer of assetLoopTimers.values()) window.clearTimeout(timer)
+    loopTimers.clear()
+    assetLoopTimers.clear()
     void sharedCtx?.suspend()
     pausedEls.length = 0
     forEachAudioEl((el) => {
@@ -408,7 +465,7 @@ export function createSfxManager(project: Project, assets: AssetMap, mount: HTML
     pendingLoops.clear()
     pendingAssetLoops.clear()
     for (const event of heldLoops) startLoop(event)
-    for (const [id, vol] of heldAssetLoops) startAssetLoop(id, vol)
+    for (const [id, pending] of heldAssetLoops) startAssetLoop(id, pending.volume, pending.delayMs)
   }
 
   // Every gesture type that can be "the first user interaction". pointerdown/touchstart
@@ -422,10 +479,10 @@ export function createSfxManager(project: Project, assets: AssetMap, mount: HTML
   // ---- Event bindings --------------------------------------------------------
   const offs = [
     on('sfx',                  (e: string) => play(e)),
-    on('sfx-asset',            (id: string, v?: number) => playAsset(id, typeof v === 'number' ? v : 1)),
+    on('sfx-asset',            (id: string, v?: number, delayMs?: number) => playAsset(id, typeof v === 'number' ? v : 1, typeof delayMs === 'number' ? delayMs : 0)),
     on('sfx-loop-start',       (e: string) => startLoop(e)),
     on('sfx-loop-stop',        (e: string) => stopLoop(e)),
-    on('sfx-asset-loop-start', (id: string, v?: number) => startAssetLoop(id, typeof v === 'number' ? v : 1)),
+    on('sfx-asset-loop-start', (id: string, v?: number, delayMs?: number) => startAssetLoop(id, typeof v === 'number' ? v : 1, typeof delayMs === 'number' ? delayMs : 0)),
     on('sfx-asset-loop-stop',  (id: string) => stopAssetLoop(id)),
     on('ad-mute',              (m: boolean) => setMuted(!!m)),
     on('ad-volume',            (v: number) => setVolume(typeof v === 'number' ? v : 1)),
@@ -440,6 +497,11 @@ export function createSfxManager(project: Project, assets: AssetMap, mount: HTML
         window.removeEventListener(type, unlock, { capture: true } as EventListenerOptions)
       pendingLoops.clear()
       pendingAssetLoops.clear()
+      clearDelayedOneShots()
+      for (const timer of loopTimers.values()) window.clearTimeout(timer)
+      for (const timer of assetLoopTimers.values()) window.clearTimeout(timer)
+      loopTimers.clear()
+      assetLoopTimers.clear()
       for (const h of [...Object.values(activeLoops), ...Object.values(activeAssetLoops)]) h.stop()
       bgmHandle?.stop()
     },

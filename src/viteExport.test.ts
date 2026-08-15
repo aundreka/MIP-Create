@@ -46,6 +46,23 @@ describe('viteExport', () => {
     expect(saved.meta.name).toBe('Playable One')
   })
 
+  it('ships the MRAID guard in index.html and the ready gate in main.ts', async () => {
+    const blob = await buildViteProjectZip(project('Playable One', 'MIP1'), assets('AAA'))
+    const zip = await JSZip.loadAsync(await blob.arrayBuffer())
+
+    const html = await zip.file('index.html')!.async('string')
+    expect(html).toContain('<script src="mraid.js"></script>')
+    expect(html).toMatch(/window\.isMraidUsable\(mraid\)/)
+    expect(html).toMatch(/mraid\.open\(clickTarget\)/)
+
+    // This export builds its own bundle, so it carries the gate in source: boot() must not
+    // run while the container reports loading.
+    const main = await zip.file('src/main.ts')!.async('string')
+    expect(main).toMatch(/if \(mraid\.getState\(\) === 'loading'\)/)
+    expect(main).toMatch(/mraid\.addEventListener\('ready', startCreative\)/)
+    expect(main.indexOf('startCreative')).toBeLessThan(main.indexOf('boot(project'))
+  })
+
   it('builds a grouped zip with one Vite repo per MIP folder', async () => {
     const blob = await buildViteProjectCollectionZip('project', [
       { folderName: 'mip1', project: project('Playable One', 'MIP1'), assets: assets('AAA') },

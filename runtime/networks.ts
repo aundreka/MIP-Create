@@ -40,6 +40,42 @@ export const notifyGameEnd = (): void => callStub('gameEnd')
 export const notifyGameClose = (): void => callStub('gameClose')
 
 // ---------------------------------------------------------------------------
+// MRAID v2.0 clickout guard (docs/mraid-v2-guide.md).
+// ---------------------------------------------------------------------------
+/** Click destination as the networks publish it — no single global is universal:
+ *  Moloco/DSPs use clickTag, some tags number it clickTag1, others spell it
+ *  clickthrough / clickThrough. Anything non-string is ignored. */
+function clickTagUrl(): string {
+  for (const key of ['clickTag', 'clickTag1', 'clickthrough', 'clickThrough']) {
+    try {
+      const v = W[key]
+      if (typeof v === 'string' && v) return v
+    } catch { /* */ }
+  }
+  return ''
+}
+
+/** True when mraid.open() is legal to call. The export shell installs this check as
+ *  window.isMraidUsable (see MRAID_HEAD in src/export.ts) and it wins when present — it
+ *  is armed in <head>, so it catches a 'ready' that fires before the runtime boots. This
+ *  copy is the fallback for shells without it (editor preview, Vite source export).
+ *  Rule: only 'default' and 'expanded' may be called into; a container still 'loading'
+ *  must be left alone, and a mock/minimal mraid with no getState() is treated as usable. */
+function mraidUsable(mraid: any): boolean {
+  if (!mraid) return false
+  try {
+    if (typeof W.isMraidUsable === 'function') return !!W.isMraidUsable(mraid)
+  } catch { /* fall through to the local check */ }
+  try {
+    if (typeof mraid.getState !== 'function') return true
+    const state = mraid.getState()
+    return state === 'default' || state === 'expanded'
+  } catch {
+    return false
+  }
+}
+
+// ---------------------------------------------------------------------------
 // CTA fallback chain (AGENTS.md priority order).
 // ---------------------------------------------------------------------------
 // -Infinity, not 0: with 0 the "was there a CTA in the last 800ms" test reads a tap in the
@@ -99,9 +135,10 @@ export function triggerCTA(): void {
   try {
     if (typeof W.openAppStore === 'function') return done(() => W.openAppStore())
   } catch { /* */ }
-  // 7. Moloco clickTag fallback
+  // 7. Moloco / DSP click macro (clickTag, clickTag1, clickthrough, clickThrough)
   try {
-    if (typeof W.clickTag === 'string' && W.clickTag) return done(() => window.open(W.clickTag, '_blank'))
+    const tag = clickTagUrl()
+    if (tag) return done(() => window.open(tag, '_blank', 'noopener'))
   } catch { /* */ }
   // 8. Vungle
   try {
@@ -119,10 +156,23 @@ export function triggerCTA(): void {
   // Always fires when MRAID is present — even with no URL (dest=''). The SDK uses
   // its own configured store URL when given an empty string, so the redirect still
   // happens for mode:'none' / about:blank ads inside a MRAID container.
+  // Guarded by mraidUsable(): calling open() on a container that is still 'loading'
+  // violates the MRAID spec and is what creative audits flag. If open() itself throws,
+  // the catch drops through to the browser fallback below rather than swallowing the tap.
+  //
+  // The export shell publishes the same guarded open as window.PA_CLICKOUT (MRAID_HEAD in
+  // src/export.ts) written longhand, so the guard + try/catch + click-macro chain survive
+  // in scannable source instead of only as mangled bundle identifiers. Prefer it when it
+  // is there; this branch is the fallback for shells without it (preview, Vite source
+  // export). It returns true only when something actually opened — false drops through to
+  // the browser fallback below, so a blocked popup still gets the same-tab retry.
   try {
     if (typeof W.mraid?.open === 'function') {
-      const state = typeof W.mraid.getState === 'function' ? W.mraid.getState() : 'ready'
-      if (state !== 'loading') return done(() => W.mraid.open(dest))
+      if (typeof W.PA_CLICKOUT === 'function') {
+        if (W.PA_CLICKOUT(dest) === true) { _lastCta = t; return }
+      } else if (mraidUsable(W.mraid)) {
+        return done(() => W.mraid.open(dest))
+      }
     }
   } catch { /* */ }
   // 11. Fallback — standalone HTML (no network SDK present). Try a new tab first; if the
@@ -229,6 +279,20 @@ function registerMraid(): void {
  * Polls briefly for late `window.mraid` injection before giving up.
  */
 export function initMraid(timeoutMs = 2000, detectTimeoutMs = 500): Promise<void> {
+  // The export shell holds the creative's start until the container is ready (MRAID_BOOT
+  // in src/export.ts) and sets this flag when it releases it. Repeating the wait here
+  // would put a SECOND timeout in the boot path — on a container that never fires
+  // 'ready' the ad would sit blank for both. All that is left to do is register the
+  // lifecycle listeners; registerMraid() no-ops while the container is still loading, so
+  // a late 'ready' is kept armed for it.
+  if (W.PA_MRAID_WAITED) {
+    registerMraid()
+    const mraid = W.mraid
+    if (!_mraidRegistered && mraid && typeof mraid.addEventListener === 'function') {
+      addMraidListener(mraid, 'ready', () => registerMraid())
+    }
+    return Promise.resolve()
+  }
   return new Promise((resolve) => {
     let done = false
     const finish = (): void => {

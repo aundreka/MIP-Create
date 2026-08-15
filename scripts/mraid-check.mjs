@@ -106,12 +106,30 @@ addEventListener('pointerdown', function () { window.__tapped = true }, true);
 })();
 `
 
+// The export shell's MRAID head, read straight out of src/export.ts so this harness
+// exercises the guard that actually ships instead of a copy that can drift. The literals
+// are plain (no interpolation), so evaluating the expression is just string concatenation.
+function exportConst(name) {
+  const src = readFileSync(join(ROOT, 'src', 'export.ts'), 'utf8')
+  // One backtick-delimited literal, no interpolation — so the match is the whole value.
+  const m = src.match(new RegExp('export const ' + name + ' = (`[^`]*`)'))
+  if (!m) throw new Error(`${name} not found in src/export.ts — the export shell no longer carries it.`)
+  return Function('return (' + m[1] + ')')()
+}
+const HEAD = exportConst('MRAID_HEAD')
+const BOOT = exportConst('MRAID_BOOT')
+// Drop the bridge tag: the stub below IS the container's mraid.js, and a relative
+// <script src> would only 404 in this harness. Its presence is asserted separately.
+const GUARD = HEAD.replace('<script src="mraid.js"></script>', '')
+
 const buildHtml = (project, assets, runtimeSrc) =>
   `<!doctype html><html lang="en"><head><meta charset="utf-8">` +
   `<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">` +
-  `<script>${STUB}</script></head><body>` +
+  // Container bridge first, then the guard — the real load order in an ad container.
+  `<script>${STUB}</script>${GUARD}</head><body>` +
   `<script>window.PA_PROJECT=${esc(JSON.stringify(project))};window.PA_ASSETS=${esc(JSON.stringify(assets))};</script>` +
-  `<script>${runtimeSrc}</script></body></html>`
+  // Runtime, then the readiness gate that starts it — exactly as buildBaseHtml emits them.
+  `<script>${runtimeSrc}</script>${BOOT}</body></html>`
 
 /** The only two things a creative may ask of a container that is still loading. */
 const PRE_READY_OK = new Set(['getState', 'addEventListener:ready'])
@@ -146,9 +164,29 @@ async function run() {
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message))
   page.on('console', (m) => m.type() === 'error' && errors.push('console: ' + m.text()))
 
+  // 0. the bridge declaration every export must carry
+  if (!/src="mraid\.js"/.test(HEAD)) problems.push('export shell is missing the <script src="mraid.js"> bridge declaration')
+  else console.log('✓ export shell declares the mraid.js bridge')
+
   try {
     await page.setContent(buildHtml(target.project, target.assets, runtimeSrc), { waitUntil: 'load' })
-    // Past initMraid's ready timeout — 'ready' deliberately never fires in this window.
+
+    // 0b. the head guard must refuse a container that is still loading
+    const guard = await page.evaluate(() => ({
+      installed: typeof window.isMraidUsable === 'function',
+      whileLoading: typeof window.isMraidUsable === 'function' ? window.isMraidUsable(window.mraid) : null,
+    }))
+    if (!guard.installed) problems.push('window.isMraidUsable is not installed by the export shell')
+    else if (guard.whileLoading !== false) problems.push('isMraidUsable() returned true while the container reported loading')
+    else console.log('✓ isMraidUsable() refuses a still-loading container')
+
+    // 0c. initialization itself must be held while the container is loading
+    await wait(300)
+    if (await page.evaluate(() => !!document.querySelector('.pa-root')))
+      problems.push('creative initialized while the container reported loading')
+    else console.log('✓ initialization held while the container reported loading')
+
+    // Past the gate's ready backstop — 'ready' deliberately never fires in this window.
     await wait(3000)
 
     // 1. no MRAID API while loading
@@ -171,6 +209,10 @@ async function run() {
     const missing = ['stateChange', 'viewableChange'].filter((e) => !listeners.includes(e))
     if (missing.length) problems.push(`MRAID 2.0 listeners missing after ready: ${missing.join(', ')}`)
     else console.log('✓ 2.0 lifecycle listeners registered (3.0 rejections did not block them)')
+
+    const usableAfterReady = await page.evaluate(() => window.isMraidUsable(window.mraid))
+    if (usableAfterReady !== true) problems.push('isMraidUsable() still false after ready / state default — clickouts would never reach mraid.open()')
+    else console.log('✓ isMraidUsable() opens up once the container is ready')
 
     // 5. audio: nothing may play before the first gesture (checked before the CTA tap,
     //    which is itself the first gesture).

@@ -29,10 +29,17 @@ const DATE_OPTS: Record<string, Intl.DateTimeFormatOptions> = {
   monthDay: { month: 'long', day: 'numeric' }, // June 24
 }
 
-/** A live ticker is only needed when the display changes by the second/minute/hour
- * (a pure {date} or {d} label doesn't tick). */
+/** A live ticker is only needed when the display changes by the hundredth/second/
+ * minute/hour (a pure {date} or {d} label doesn't tick). */
 export function formatTicks(fmt: string): boolean {
-  return /\{s\}|\{ss\}|\{m\}|\{mm\}|\{h\}|\{hh\}/.test(fmt)
+  return /\{ms\}|\{s\}|\{ss\}|\{m\}|\{mm\}|\{h\}|\{hh\}/.test(fmt)
+}
+
+/** How often a formatted timer needs repainting. `{ms}` intentionally represents
+ * two-digit hundredths (00–99), matching a display such as `06:99`. */
+export function formatTickerIntervalMs(fmt: string): number {
+  if (/\{ms\}/.test(fmt)) return 10
+  return formatTicks(fmt) ? 1000 : 0
 }
 
 export function needsTicker(el: SceneElement): boolean {
@@ -124,6 +131,9 @@ export function renderCountdownFormat(fmt: string, deadline: number, now: number
   const h = clock && opts.hour12 ? h24 % 12 || 12 : h24
   const m = clock ? nowDate.getMinutes() : Math.floor(total / 60000) % 60
   const s = clock ? nowDate.getSeconds() : Math.floor(total / 1000) % 60
+  // The editor-facing token is called {ms}, but the requested two-digit display is
+  // hundredths rather than three-digit milliseconds: 6.99 seconds -> "06:99".
+  const ms = Math.floor((clock ? nowDate.getMilliseconds() : total % 1000) / 10)
   const locale = opts.dateLocale || 'en-US'
   const target = clock ? nowDate : new Date(deadline)
   let dateStr = ''
@@ -165,6 +175,7 @@ export function renderCountdownFormat(fmt: string, deadline: number, now: number
     .replace(/\{hh\}/g, pad(h))
     .replace(/\{mm\}/g, pad(m))
     .replace(/\{ss\}/g, pad(s))
+    .replace(/\{ms\}/g, pad(ms))
     .replace(/\{d\}/g, String(d))
     .replace(/\{h\}/g, String(h))
     .replace(/\{m\}/g, String(m))

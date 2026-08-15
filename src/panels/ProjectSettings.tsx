@@ -26,6 +26,7 @@ const EVENTS: { key: string; label: string; wired?: boolean }[] = [
   { key: 'lastPage', label: 'Flipbook reaches its last page', wired: true },
   { key: 'tap', label: 'Tap' },
   { key: 'drag', label: 'Drag / scratch (loops while held)', wired: true },
+  { key: 'release', label: 'Release / slide back (hold gauge)', wired: true },
   { key: 'pop', label: 'Pop' },
   { key: 'collect', label: 'Collect' },
   { key: 'merge', label: 'Merge' },

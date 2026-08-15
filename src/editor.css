@@ -3940,6 +3940,9 @@ svg {
 }
 
 /* ---- per-element sound rows (inspector) ---- */
+.sfx-el-binding {
+  padding-bottom: 4px;
+}
 .sfx-el-row {
   display: flex;
   align-items: center;
@@ -3970,6 +3973,12 @@ svg {
 }
 .sfx-el-row .field {
   flex: 0 0 124px;
+  padding: 0;
+}
+.sfx-el-delay {
+  padding: 0 42px 0 10px;
+}
+.sfx-el-delay .field {
   padding: 0;
 }
 

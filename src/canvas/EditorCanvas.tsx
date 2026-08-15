@@ -72,24 +72,38 @@ const EDGES: Handle[] = [
 ]
 
 // How many elements in a scene carry their own landscape geometry (any override field).
-const landscapeCount = (sd: SceneDef): number =>
-  sd.elements.filter((e) => e.landscape && Object.keys(e.landscape).length > 0).length
+const landscapeCount = (sd: SceneDef): number => sd.elements.filter((e) => e.landscape && Object.keys(e.landscape).length > 0).length
 
 function effGeom(el: SceneElement, landscape: boolean, locale?: string | null) {
   const localized = localizeElement(el, locale)
   const ov = landscape ? localized.landscape : undefined
-  return { x: ov?.x ?? localized.x, y: ov?.y ?? localized.y, scale: ov?.scale ?? localized.scale ?? 1, w: ov?.w ?? localized.w, h: ov?.h ?? localized.h, anchor: ov?.anchor ?? localized.anchor }
+  return {
+    x: ov?.x ?? localized.x,
+    y: ov?.y ?? localized.y,
+    scale: ov?.scale ?? localized.scale ?? 1,
+    w: ov?.w ?? localized.w,
+    h: ov?.h ?? localized.h,
+    anchor: ov?.anchor ?? localized.anchor,
+  }
 }
 // Anchor point as a fraction of the box (x, y); mirrors the runtime ANCHOR map.
 const ANCHOR_FRAC: Record<Anchor, [number, number]> = {
-  center: [0.5, 0.5], top: [0.5, 0], bottom: [0.5, 1], left: [0, 0.5], right: [1, 0.5],
-  'top-left': [0, 0], 'top-right': [1, 0], 'bottom-left': [0, 1], 'bottom-right': [1, 1],
+  center: [0.5, 0.5],
+  top: [0.5, 0],
+  bottom: [0.5, 1],
+  left: [0, 0.5],
+  right: [1, 0.5],
+  'top-left': [0, 0],
+  'top-right': [1, 0],
+  'bottom-left': [0, 1],
+  'bottom-right': [1, 1],
 }
 
 // Live crop-editor state: the image window (box, DESIGN px, top-left origin) plus the
 // source image's placement behind it (scale = imgWidth/boxWidth; cx/cy = image top-left
 // as a fraction of the box). natR = image natural height ÷ width.
 type CropView = { left: number; top: number; w: number; h: number; scale: number; cx: number; cy: number; natR: number }
+type ThoughtZone = { x: number; y: number; w: number; h: number }
 
 // Keep the source image fully covering the window (no gaps) after any edit: the image
 // must be at least as big as the box, and its offset kept within bounds. Canva-style.
@@ -103,12 +117,7 @@ function clampCrop(w: number, h: number, scale: number, cx: number, cy: number, 
 }
 
 function boxSizable(el: SceneElement): boolean {
-  return (
-    el.type === 'cta' ||
-    el.type === 'bar' ||
-    (el.w != null && el.h != null) ||
-    (el.type === 'text' && (!!el.box?.bgColor || !!el.box?.borderPx || el.w != null))
-  )
+  return el.type === 'cta' || el.type === 'bar' || (el.w != null && el.h != null) || (el.type === 'text' && (!!el.box?.bgColor || !!el.box?.borderPx || el.w != null))
 }
 
 // ---- one scene's iframe; reports its own layout (rects + metrics) -----------
@@ -142,7 +151,12 @@ function CanvasFrame(props: {
     return out
   }, [assetKey, assets])
   const post = useCallback(() => {
-    const scene: Scene = { meta: { ...meta, bgMatchColor: displayDef.bgColor !== undefined ? displayDef.bgColor : meta.bgMatchColor }, elements: displayDef.elements, kind: displayDef.kind, overlay: displayDef.overlay }
+    const scene: Scene = {
+      meta: { ...meta, bgMatchColor: displayDef.bgColor !== undefined ? displayDef.bgColor : meta.bgMatchColor },
+      elements: displayDef.elements,
+      kind: displayDef.kind,
+      overlay: displayDef.overlay,
+    }
     const changed = lastSentAssets.current !== frameAssets
     lastSentAssets.current = frameAssets
     ref.current?.contentWindow?.postMessage({ type: 'pa:render', scene, assets: changed ? frameAssets : undefined, interactive: false, locale }, '*')
@@ -168,7 +182,7 @@ function CanvasFrame(props: {
   return (
     <iframe
       ref={(el) => {
-        (ref as React.MutableRefObject<HTMLIFrameElement | null>).current = el
+        ;(ref as React.MutableRefObject<HTMLIFrameElement | null>).current = el
         iframeRef?.(el)
       }}
       className="canvas-frame"
@@ -189,8 +203,32 @@ interface Props {
 
 type Drag =
   | { mode: 'move'; start: { px: number; py: number }; base: Record<string, { x: number; y: number }>; bbox: { x: number; y: number; w: number; h: number } }
-  | { mode: 'resize'; id: string; h: Handle; start: { px: number; py: number }; kind: 'wh' | 'scale' | 'font'; sw: number; sh: number; sScale: number; sFont: number; nativeW: number; sx: number; sy: number; anchor: SceneElement['anchor']; cx: number; cy: number; sDist: number }
-  | { mode: 'group-scale'; start: { px: number; py: number }; cx: number; cy: number; sDist: number; members: { id: string; x: number; y: number; w?: number; h?: number; scale?: number; font?: number; isText?: boolean }[] }
+  | {
+      mode: 'resize'
+      id: string
+      h: Handle
+      start: { px: number; py: number }
+      kind: 'wh' | 'scale' | 'font'
+      sw: number
+      sh: number
+      sScale: number
+      sFont: number
+      nativeW: number
+      sx: number
+      sy: number
+      anchor: SceneElement['anchor']
+      cx: number
+      cy: number
+      sDist: number
+    }
+  | {
+      mode: 'group-scale'
+      start: { px: number; py: number }
+      cx: number
+      cy: number
+      sDist: number
+      members: { id: string; x: number; y: number; w?: number; h?: number; scale?: number; font?: number; isText?: boolean }[]
+    }
   | { mode: 'marquee'; start: { px: number; py: number } }
   | { mode: 'pan'; start: { x: number; y: number }; pan0: { x: number; y: number } }
   | null
@@ -235,25 +273,67 @@ export function EditorCanvas(props: Props): JSX.Element {
   // live transform during a drag, and the in-flight gesture.
   const [revealEdit, setRevealEdit] = useState<string | null>(null)
   const [revealLive, setRevealLive] = useState<{ scale: number; x: number; y: number } | null>(null)
-  const revealDrag = useRef<{ mode: 'move' | 'scale'; sx: number; sy: number; startX: number; startY: number; startScale: number; rectW: number; rectH: number; ccx: number; ccy: number; startDist: number; last: { scale: number; x: number; y: number } | null } | null>(null)
+  const revealDrag = useRef<{
+    mode: 'move' | 'scale'
+    sx: number
+    sy: number
+    startX: number
+    startY: number
+    startScale: number
+    rectW: number
+    rectH: number
+    ccx: number
+    ccy: number
+    startDist: number
+    last: { scale: number; x: number; y: number } | null
+  } | null>(null)
   const curRevealRef = useRef<{ scale: number; x: number; y: number }>({ scale: 1, x: 0, y: 0 })
   // Reveal-zone editor (scratch / scratch grid): which game-mount's zone is being drawn,
   // the live rect during a drag (percent of the card / cell), and the in-flight gesture.
   const [zoneEdit, setZoneEdit] = useState<string | null>(null)
   const [zoneLive, setZoneLive] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
-  const zoneDrag = useRef<
-    | { mode: 'move' | 'resize'; hx: number; hy: number; ox: number; oy: number; base: { x: number; y: number; w: number; h: number }; start: { x: number; y: number; w: number; h: number }; last: { x: number; y: number; w: number; h: number } | null }
-    | null
-  >(null)
+  const zoneDrag = useRef<{
+    mode: 'move' | 'resize'
+    hx: number
+    hy: number
+    ox: number
+    oy: number
+    base: { x: number; y: number; w: number; h: number }
+    start: { x: number; y: number; w: number; h: number }
+    last: { x: number; y: number; w: number; h: number } | null
+  } | null>(null)
   const curZoneRef = useRef<{ x: number; y: number; w: number; h: number }>({ x: 0, y: 0, w: 100, h: 100 })
+  // Thought-whacker spawn-zone editor: drag on empty game space to draw any
+  // number of spawn rectangles; existing rectangles stay movable/resizable.
+  const [thoughtZoneEdit, setThoughtZoneEdit] = useState<string | null>(null)
+  const [thoughtZonesLive, setThoughtZonesLive] = useState<ThoughtZone[] | null>(null)
+  const [thoughtSubjectLive, setThoughtSubjectLive] = useState<{ x: number; y: number } | null>(null)
+  const thoughtSubjectDrag = useRef<{ last: { x: number; y: number } | null } | null>(null)
+  const thoughtZoneDrag = useRef<{
+    mode: 'draw' | 'move' | 'resize'
+    idx: number
+    hx: number
+    hy: number
+    sx: number
+    sy: number
+    base: ThoughtZone[]
+    last: ThoughtZone[] | null
+  } | null>(null)
   // Memory-match tracker symbol editor: double-click the game → per-symbol boxes to
   // drag (X nudge) / resize (uniform scale, bottoms stay on the shared baseline).
   const [trackerEdit, setTrackerEdit] = useState<string | null>(null)
   const [trackerLive, setTrackerLive] = useState<{ scales: number[]; dxs: number[] } | null>(null)
-  const trackerDrag = useRef<
-    | { mode: 'move' | 'resize'; idx: number; ox: number; oy: number; s: number; symSz: number; bottomY: number; start: { scales: number[]; dxs: number[] }; last: { scales: number[]; dxs: number[] } | null }
-    | null
-  >(null)
+  const trackerDrag = useRef<{
+    mode: 'move' | 'resize'
+    idx: number
+    ox: number
+    oy: number
+    s: number
+    symSz: number
+    bottomY: number
+    start: { scales: number[]; dxs: number[] }
+    last: { scales: number[]; dxs: number[] } | null
+  } | null>(null)
   const curTrackerRef = useRef<{ scales: number[]; dxs: number[] }>({ scales: [], dxs: [] })
   // Scratch-grid dynamic-date position editor: which game-mount's date marker is being
   // dragged, and the live position (percent of the cell — shared by every cell).
@@ -265,10 +345,7 @@ export function EditorCanvas(props: Props): JSX.Element {
   // drawn in the artwork, and drag the shut cover's corners to size it.
   const [spineEdit, setSpineEdit] = useState<string | null>(null)
   const [spineLive, setSpineLive] = useState<{ coverScale: number; bookScale: number } | null>(null)
-  const spineDrag = useRef<
-    | { mode: 'cover' | 'book'; base: { x: number; w: number; cx: number; cy: number; dist: number }; start: number; last: number | null }
-    | null
-  >(null)
+  const spineDrag = useRef<{ mode: 'cover' | 'book'; base: { x: number; w: number; cx: number; cy: number; dist: number }; start: number; last: number | null } | null>(null)
   // Canva-style image crop: which image is being cropped, its live geometry, and the
   // in-flight gesture (resize a window edge, pan the picture, or none).
   const [cropEdit, setCropEdit] = useState<string | null>(null)
@@ -404,6 +481,47 @@ export function EditorCanvas(props: Props): JSX.Element {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [zoneEdit])
+  useEffect(() => {
+    const onEnter = (e: Event): void => {
+      const id = (e as CustomEvent<{ elementId: string }>).detail?.elementId
+      if (!id) return
+      setRevealEdit(null)
+      setRevealLive(null)
+      setZoneEdit(null)
+      setZoneLive(null)
+      setDateEdit(null)
+      setDateLive(null)
+      setTrackerEdit(null)
+      setTrackerLive(null)
+      setSpineEdit(null)
+      setSpineLive(null)
+      setThoughtZonesLive(null)
+      setThoughtSubjectLive(null)
+      setThoughtZoneEdit(id)
+    }
+    window.addEventListener('pa:thought-zone-edit', onEnter)
+    return () => window.removeEventListener('pa:thought-zone-edit', onEnter)
+  }, [])
+  useEffect(() => {
+    if (thoughtZoneEdit && !scene.elements.some((e) => e.id === thoughtZoneEdit)) {
+      setThoughtZoneEdit(null)
+      setThoughtZonesLive(null)
+      setThoughtSubjectLive(null)
+    }
+  }, [thoughtZoneEdit, scene])
+  useEffect(() => {
+    if (!thoughtZoneEdit) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape' || e.key === 'Enter') {
+        thoughtZoneDrag.current = null
+        setThoughtZoneEdit(null)
+        setThoughtZonesLive(null)
+        setThoughtSubjectLive(null)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [thoughtZoneEdit])
   useEffect(() => {
     if (trackerEdit && !scene.elements.some((e) => e.id === trackerEdit)) {
       setTrackerEdit(null)
@@ -673,10 +791,24 @@ export function EditorCanvas(props: Props): JSX.Element {
     const lY = [bbox.y + dy, bbox.y + bbox.h / 2 + dy, bbox.y + bbox.h + dy]
     let aX = SNAP + 1
     let gX: number | null = null
-    for (const l of lX) for (const t of tX) { const d = t - l; if (Math.abs(d) < Math.abs(aX)) { aX = d; gX = t } }
+    for (const l of lX)
+      for (const t of tX) {
+        const d = t - l
+        if (Math.abs(d) < Math.abs(aX)) {
+          aX = d
+          gX = t
+        }
+      }
     let aY = SNAP + 1
     let gY: number | null = null
-    for (const l of lY) for (const t of tY) { const d = t - l; if (Math.abs(d) < Math.abs(aY)) { aY = d; gY = t } }
+    for (const l of lY)
+      for (const t of tY) {
+        const d = t - l
+        if (Math.abs(d) < Math.abs(aY)) {
+          aY = d
+          gY = t
+        }
+      }
     const okX = Math.abs(aX) <= SNAP
     const okY = Math.abs(aY) <= SNAP
     setGuides({ x: okX && gX != null ? [gX] : [], y: okY && gY != null ? [gY] : [] })
@@ -731,6 +863,10 @@ export function EditorCanvas(props: Props): JSX.Element {
 
   const onOverlayPointerDown = (e: React.PointerEvent): void => {
     if (editing) return
+    if (thoughtZoneEdit) {
+      beginThoughtZoneDraw(e)
+      return
+    }
     if (cropEdit) {
       // Clicking outside the crop window (which stops its own events) commits & exits.
       exitCrop()
@@ -821,7 +957,16 @@ export function EditorCanvas(props: Props): JSX.Element {
           // scale: the EFFECTIVE value (landscape override included) so scaling in
           // landscape multiplies the landscape size, not the portrait one.
           const baseScale = ge.scale
-          return { id: (el as SceneElement).id, x: ge.x, y: ge.y, w: ge.w, h: ge.h, scale: baseScale, font: (el as SceneElement).text?.fontSizePx, isText: (el as SceneElement).type === 'text' }
+          return {
+            id: (el as SceneElement).id,
+            x: ge.x,
+            y: ge.y,
+            w: ge.w,
+            h: ge.h,
+            scale: baseScale,
+            font: (el as SceneElement).text?.fontSizePx,
+            isText: (el as SceneElement).type === 'text',
+          }
         })
       beginTransaction()
       drag.current = { mode: 'group-scale', start: { px, py }, cx, cy, sDist: Math.hypot(px - cxI, py - cyI) || 1, members }
@@ -855,10 +1000,31 @@ export function EditorCanvas(props: Props): JSX.Element {
     const cx = rect.x + rect.w / 2 // intrinsic center → distance-based scale/font
     const cy = rect.y + rect.h / 2
     beginTransaction()
-    drag.current = { mode: 'resize', id, h, start: { px, py }, kind, sw, sh, sScale, sFont, nativeW, sx: g.x, sy: g.y, anchor: g.anchor, cx, cy, sDist: Math.hypot(px - cx, py - cy) || 1 }
+    drag.current = {
+      mode: 'resize',
+      id,
+      h,
+      start: { px, py },
+      kind,
+      sw,
+      sh,
+      sScale,
+      sFont,
+      nativeW,
+      sx: g.x,
+      sy: g.y,
+      anchor: g.anchor,
+      cx,
+      cy,
+      sDist: Math.hypot(px - cx, py - cy) || 1,
+    }
   }
 
   const onPointerMove = (e: React.PointerEvent): void => {
+    if (thoughtZoneDrag.current) {
+      moveThoughtZone(e)
+      return
+    }
     if (pathDrawTarget()) {
       const c = toIntrinsic(e.clientX, e.clientY)
       setPathCursor({ x: c.px, y: c.py })
@@ -970,6 +1136,10 @@ export function EditorCanvas(props: Props): JSX.Element {
   commitPathRef.current = commitPath
 
   const endInteraction = (e?: React.PointerEvent): void => {
+    if (thoughtZoneDrag.current) {
+      if (e) endThoughtZone(e)
+      return
+    }
     // Release the pointer capture taken on pointerdown so an interrupted/cancelled
     // gesture can't leak capture and swallow later events.
     if (e && overlayRef.current?.hasPointerCapture?.(e.pointerId)) overlayRef.current.releasePointerCapture(e.pointerId)
@@ -990,7 +1160,10 @@ export function EditorCanvas(props: Props): JSX.Element {
         const place: Record<string, { x: number; y: number }> = {}
         for (const id of Object.keys(d.base)) {
           const el = liveRef.current.scene.elements.find((x) => x.id === id)
-          if (el) { const g = effGeom(el, liveRef.current.landscape, liveRef.current.editLocale); place[id] = { x: g.x + ddx, y: g.y + ddy } }
+          if (el) {
+            const g = effGeom(el, liveRef.current.landscape, liveRef.current.editLocale)
+            place[id] = { x: g.x + ddx, y: g.y + ddy }
+          }
         }
         moveSelectedToScene(dropId, place)
       }
@@ -1036,7 +1209,9 @@ export function EditorCanvas(props: Props): JSX.Element {
       return
     }
     // Double-click a memory match → edit its tracker symbols on the canvas.
-    if (el && el.type === 'game-mount' && el.game?.templateId === 'memorymatch') {
+    // Skipped when the tracker is off: there are no symbols to edit, and the
+    // mode would trap the user in an overlay with nothing in it.
+    if (el && el.type === 'game-mount' && el.game?.templateId === 'memorymatch' && el.game.params?.tracker !== 'off') {
       setTrackerLive(null)
       setTrackerEdit(hit.id)
       return
@@ -1259,8 +1434,8 @@ export function EditorCanvas(props: Props): JSX.Element {
   }, [])
 
   // ---- render helpers (active frame) ----------------------------------------
-  const single = selectedIds.length === 1 ? scene.elements.find((e) => e.id === selectedIds[0]) ?? null : null
-  const singleRect = single ? rects.find((r) => r.id === single.id) ?? null : null
+  const single = selectedIds.length === 1 ? (scene.elements.find((e) => e.id === selectedIds[0]) ?? null) : null
+  const singleRect = single ? (rects.find((r) => r.id === single.id) ?? null) : null
   const singleHandles: Handle[] = single ? (boxSizable(localizeElement(single, editLocale)) ? [...CORNERS, ...EDGES] : CORNERS) : []
   // Handguide slide path (design coords -> intrinsic) for the selected handguide:
   // a polyline from the hand's center through each waypoint.
@@ -1270,17 +1445,14 @@ export function EditorCanvas(props: Props): JSX.Element {
     const m = metricsRef.current
     const wp = hg.nodes && hg.nodes.length ? hg.nodes : hg.toX != null && hg.toY != null ? [{ x: hg.toX, y: hg.toY }] : []
     if (!wp.length) return null
-    return [
-      { x: singleRect.x + singleRect.w / 2, y: singleRect.y + singleRect.h / 2 },
-      ...wp.map((n) => ({ x: n.x * m.s + m.offX, y: n.y * m.s + m.offY })),
-    ]
+    return [{ x: singleRect.x + singleRect.w / 2, y: singleRect.y + singleRect.h / 2 }, ...wp.map((n) => ({ x: n.x * m.s + m.offX, y: n.y * m.s + m.offY }))]
   })()
   const groupBbox = selectedIds.length > 1 ? bboxOf(selectedIds) : null
-  const editEl = editing ? scene.elements.find((e) => e.id === editing) ?? null : null
-  const editRect = editing ? rects.find((r) => r.id === editing) ?? null : null
+  const editEl = editing ? (scene.elements.find((e) => e.id === editing) ?? null) : null
+  const editRect = editing ? (rects.find((r) => r.id === editing) ?? null) : null
 
-  const revealEl = revealEdit ? scene.elements.find((e) => e.id === revealEdit) ?? null : null
-  const revealRect = revealEdit ? rects.find((r) => r.id === revealEdit) ?? null : null
+  const revealEl = revealEdit ? (scene.elements.find((e) => e.id === revealEdit) ?? null) : null
+  const revealRect = revealEdit ? (rects.find((r) => r.id === revealEdit) ?? null) : null
   const revealParams: Record<string, unknown> = revealEl?.game?.params ?? {}
   const revealSrc = revealParams.prize ? assets[String(revealParams.prize)]?.src : undefined
   const curReveal = revealLive ?? {
@@ -1294,7 +1466,20 @@ export function EditorCanvas(props: Props): JSX.Element {
     if (!revealRect) return
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
     const cur = curRevealRef.current
-    revealDrag.current = { mode: 'move', sx: e.clientX, sy: e.clientY, startX: cur.x, startY: cur.y, startScale: cur.scale, rectW: revealRect.w, rectH: revealRect.h, ccx: 0, ccy: 0, startDist: 1, last: null }
+    revealDrag.current = {
+      mode: 'move',
+      sx: e.clientX,
+      sy: e.clientY,
+      startX: cur.x,
+      startY: cur.y,
+      startScale: cur.scale,
+      rectW: revealRect.w,
+      rectH: revealRect.h,
+      ccx: 0,
+      ccy: 0,
+      startDist: 1,
+      last: null,
+    }
   }
   const onRevealHandleDown = (e: React.PointerEvent): void => {
     e.stopPropagation()
@@ -1305,7 +1490,20 @@ export function EditorCanvas(props: Props): JSX.Element {
     const ccx = o.left + (revealRect.x + revealRect.w / 2) * z
     const ccy = o.top + (revealRect.y + revealRect.h / 2) * z
     const cur = curRevealRef.current
-    revealDrag.current = { mode: 'scale', sx: e.clientX, sy: e.clientY, startX: cur.x, startY: cur.y, startScale: cur.scale, rectW: revealRect.w, rectH: revealRect.h, ccx, ccy, startDist: Math.hypot(e.clientX - ccx, e.clientY - ccy) || 1, last: null }
+    revealDrag.current = {
+      mode: 'scale',
+      sx: e.clientX,
+      sy: e.clientY,
+      startX: cur.x,
+      startY: cur.y,
+      startScale: cur.scale,
+      rectW: revealRect.w,
+      rectH: revealRect.h,
+      ccx,
+      ccy,
+      startDist: Math.hypot(e.clientX - ccx, e.clientY - ccy) || 1,
+      last: null,
+    }
   }
   const onRevealMove = (e: React.PointerEvent): void => {
     const d = revealDrag.current
@@ -1330,7 +1528,7 @@ export function EditorCanvas(props: Props): JSX.Element {
   }
 
   // ---- Canva-style image crop editor ----------------------------------------
-  const cropEl = cropEdit ? scene.elements.find((e) => e.id === cropEdit) ?? null : null
+  const cropEl = cropEdit ? (scene.elements.find((e) => e.id === cropEdit) ?? null) : null
   const localizedCropEl = cropEl ? localizeElement(cropEl, editLocale) : null
   const cropSrc = localizedCropEl?.assetId ? assets[localizedCropEl.assetId]?.src : undefined
   const writeCrop = (v: CropView, box: boolean): void => {
@@ -1377,11 +1575,27 @@ export function EditorCanvas(props: Props): JSX.Element {
     let top = b.top
     let w = b.w
     let h = b.h
-    if (d.hx === -1) { left = b.left + dd.dx; w = b.w - dd.dx } else if (d.hx === 1) { w = b.w + dd.dx }
-    if (d.hy === -1) { top = b.top + dd.dy; h = b.h - dd.dy } else if (d.hy === 1) { h = b.h + dd.dy }
+    if (d.hx === -1) {
+      left = b.left + dd.dx
+      w = b.w - dd.dx
+    } else if (d.hx === 1) {
+      w = b.w + dd.dx
+    }
+    if (d.hy === -1) {
+      top = b.top + dd.dy
+      h = b.h - dd.dy
+    } else if (d.hy === 1) {
+      h = b.h + dd.dy
+    }
     const MIN = 20
-    if (w < MIN) { if (d.hx === -1) left = b.left + b.w - MIN; w = MIN }
-    if (h < MIN) { if (d.hy === -1) top = b.top + b.h - MIN; h = MIN }
+    if (w < MIN) {
+      if (d.hx === -1) left = b.left + b.w - MIN
+      w = MIN
+    }
+    if (h < MIN) {
+      if (d.hy === -1) top = b.top + b.h - MIN
+      h = MIN
+    }
     const scale = d.imgW / w
     const cl = clampCrop(w, h, scale, (d.imgL - left) / w, (d.imgT - top) / h, b.natR)
     writeCrop({ left, top, w, h, scale: cl.scale, cx: cl.cx, cy: cl.cy, natR: b.natR }, true)
@@ -1392,8 +1606,8 @@ export function EditorCanvas(props: Props): JSX.Element {
   }
 
   // ---- reveal-zone editor ---------------------------------------------------
-  const zoneEl = zoneEdit ? scene.elements.find((e) => e.id === zoneEdit) ?? null : null
-  const zoneRect = zoneEdit ? rects.find((r) => r.id === zoneEdit) ?? null : null
+  const zoneEl = zoneEdit ? (scene.elements.find((e) => e.id === zoneEdit) ?? null) : null
+  const zoneRect = zoneEdit ? (rects.find((r) => r.id === zoneEdit) ?? null) : null
   const zoneParams: Record<string, unknown> = zoneEl?.game?.params ?? {}
   const curZone = zoneLive ?? {
     x: typeof zoneParams.zoneX === 'number' ? zoneParams.zoneX : 0,
@@ -1494,10 +1708,18 @@ export function EditorCanvas(props: Props): JSX.Element {
       let nw = right - left
       let ny = top
       let nh = bottom - top
-      if (d.hx < 0) { nx = Math.min(fx, right - MIN); nw = right - nx }
-      else if (d.hx > 0) { nw = Math.max(MIN, fx - left) }
-      if (d.hy < 0) { ny = Math.min(fy, bottom - MIN); nh = bottom - ny }
-      else if (d.hy > 0) { nh = Math.max(MIN, fy - top) }
+      if (d.hx < 0) {
+        nx = Math.min(fx, right - MIN)
+        nw = right - nx
+      } else if (d.hx > 0) {
+        nw = Math.max(MIN, fx - left)
+      }
+      if (d.hy < 0) {
+        ny = Math.min(fy, bottom - MIN)
+        nh = bottom - ny
+      } else if (d.hy > 0) {
+        nh = Math.max(MIN, fy - top)
+      }
       next = { x: nx * 100, y: ny * 100, w: nw * 100, h: nh * 100 }
     }
     d.last = next
@@ -1514,10 +1736,154 @@ export function EditorCanvas(props: Props): JSX.Element {
     }
   }
 
+  // ---- thought-whacker multi-zone editor ----------------------------------
+  const thoughtZoneEl = thoughtZoneEdit ? (scene.elements.find((e) => e.id === thoughtZoneEdit) ?? null) : null
+  const thoughtZoneRect = thoughtZoneEdit ? (rects.find((r) => r.id === thoughtZoneEdit) ?? null) : null
+  const readThoughtZones = (value: unknown): ThoughtZone[] => {
+    if (!Array.isArray(value)) return [{ x: 8, y: 8, w: 84, h: 62 }]
+    const out: ThoughtZone[] = []
+    for (const raw of value) {
+      if (!raw || typeof raw !== 'object') continue
+      const z = raw as Partial<ThoughtZone>
+      const x = Math.max(0, Math.min(100, Number(z.x) || 0))
+      const y = Math.max(0, Math.min(100, Number(z.y) || 0))
+      const w = Math.max(1, Math.min(100 - x, Number(z.w) || 1))
+      const h = Math.max(1, Math.min(100 - y, Number(z.h) || 1))
+      out.push({ x, y, w, h })
+    }
+    return out.length ? out : [{ x: 8, y: 8, w: 84, h: 62 }]
+  }
+  const currentThoughtZones = thoughtZonesLive ?? readThoughtZones(thoughtZoneEl?.game?.params?.spawnZones)
+  const currentThoughtSubject = thoughtSubjectLive ?? {
+    x: Math.max(0, Math.min(100, Number(thoughtZoneEl?.game?.params?.subjectX ?? 50))),
+    y: Math.max(0, Math.min(100, Number(thoughtZoneEl?.game?.params?.subjectY ?? 88))),
+  }
+  const roundZone = (z: ThoughtZone): ThoughtZone => ({
+    x: Math.round(z.x * 10) / 10,
+    y: Math.round(z.y * 10) / 10,
+    w: Math.round(z.w * 10) / 10,
+    h: Math.round(z.h * 10) / 10,
+  })
+  const saveThoughtZones = (next: ThoughtZone[]): void => {
+    if (!thoughtZoneEl?.game) return
+    const zones = (next.length ? next : [{ x: 8, y: 8, w: 84, h: 62 }]).map(roundZone)
+    setThoughtZonesLive(zones)
+    patchElement(thoughtZoneEl.id, {
+      game: { ...thoughtZoneEl.game, params: { ...(thoughtZoneEl.game.params ?? {}), spawnZones: zones } },
+    })
+  }
+  const thoughtZonePoint = (e: React.PointerEvent): { x: number; y: number } | null => {
+    if (!thoughtZoneRect) return null
+    const { px, py } = toIntrinsic(e.clientX, e.clientY)
+    return {
+      x: Math.max(0, Math.min(100, ((px - thoughtZoneRect.x) / thoughtZoneRect.w) * 100)),
+      y: Math.max(0, Math.min(100, ((py - thoughtZoneRect.y) / thoughtZoneRect.h) * 100)),
+    }
+  }
+  const beginThoughtZoneDraw = (e: React.PointerEvent): void => {
+    if (!thoughtZoneRect) return
+    const { px, py } = toIntrinsic(e.clientX, e.clientY)
+    if (px < thoughtZoneRect.x || px > thoughtZoneRect.x + thoughtZoneRect.w || py < thoughtZoneRect.y || py > thoughtZoneRect.y + thoughtZoneRect.h) return
+    const p = thoughtZonePoint(e)
+    if (!p) return
+    overlayRef.current?.setPointerCapture(e.pointerId)
+    const base = currentThoughtZones.slice()
+    thoughtZoneDrag.current = { mode: 'draw', idx: base.length, hx: 1, hy: 1, sx: p.x, sy: p.y, base, last: null }
+  }
+  const beginThoughtZoneMove = (e: React.PointerEvent, idx: number): void => {
+    e.stopPropagation()
+    const p = thoughtZonePoint(e)
+    if (!p) return
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    thoughtZoneDrag.current = { mode: 'move', idx, hx: 0, hy: 0, sx: p.x, sy: p.y, base: currentThoughtZones.map((z) => ({ ...z })), last: null }
+  }
+  const beginThoughtZoneResize = (e: React.PointerEvent, idx: number, hx: number, hy: number): void => {
+    e.stopPropagation()
+    const p = thoughtZonePoint(e)
+    if (!p) return
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    thoughtZoneDrag.current = { mode: 'resize', idx, hx, hy, sx: p.x, sy: p.y, base: currentThoughtZones.map((z) => ({ ...z })), last: null }
+  }
+  const moveThoughtZone = (e: React.PointerEvent): void => {
+    const d = thoughtZoneDrag.current
+    const p = thoughtZonePoint(e)
+    if (!d || !p) return
+    e.stopPropagation()
+    const next = d.base.map((z) => ({ ...z }))
+    if (d.mode === 'draw') {
+      const x = Math.min(d.sx, p.x)
+      const y = Math.min(d.sy, p.y)
+      next.push({ x, y, w: Math.max(0.1, Math.abs(p.x - d.sx)), h: Math.max(0.1, Math.abs(p.y - d.sy)) })
+    } else if (d.mode === 'move') {
+      const z = next[d.idx]
+      if (!z) return
+      z.x = Math.max(0, Math.min(100 - z.w, d.base[d.idx].x + p.x - d.sx))
+      z.y = Math.max(0, Math.min(100 - z.h, d.base[d.idx].y + p.y - d.sy))
+    } else {
+      const z = next[d.idx]
+      const original = d.base[d.idx]
+      if (!z || !original) return
+      const right = original.x + original.w
+      const bottom = original.y + original.h
+      if (d.hx < 0) {
+        z.x = Math.min(p.x, right - 1)
+        z.w = right - z.x
+      } else {
+        z.w = Math.max(1, p.x - original.x)
+      }
+      if (d.hy < 0) {
+        z.y = Math.min(p.y, bottom - 1)
+        z.h = bottom - z.y
+      } else {
+        z.h = Math.max(1, p.y - original.y)
+      }
+    }
+    d.last = next
+    setThoughtZonesLive(next)
+  }
+  const endThoughtZone = (e: React.PointerEvent): void => {
+    e.stopPropagation()
+    const d = thoughtZoneDrag.current
+    thoughtZoneDrag.current = null
+    if (!d?.last) return
+    const next = d.last.filter((z) => z.w >= 1 && z.h >= 1)
+    saveThoughtZones(next)
+  }
+  const removeThoughtZone = (e: React.PointerEvent, idx: number): void => {
+    e.stopPropagation()
+    saveThoughtZones(currentThoughtZones.filter((_, i) => i !== idx))
+  }
+  const beginThoughtSubjectMove = (e: React.PointerEvent): void => {
+    e.stopPropagation()
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    thoughtSubjectDrag.current = { last: null }
+  }
+  const moveThoughtSubject = (e: React.PointerEvent): void => {
+    if (!thoughtSubjectDrag.current) return
+    e.stopPropagation()
+    const point = thoughtZonePoint(e)
+    if (!point) return
+    thoughtSubjectDrag.current.last = point
+    setThoughtSubjectLive(point)
+  }
+  const endThoughtSubject = (e: React.PointerEvent): void => {
+    e.stopPropagation()
+    const drag = thoughtSubjectDrag.current
+    thoughtSubjectDrag.current = null
+    const point = drag?.last
+    if (!point || !thoughtZoneEl?.game) return
+    const x = Math.round(point.x * 10) / 10
+    const y = Math.round(point.y * 10) / 10
+    setThoughtSubjectLive({ x, y })
+    patchElement(thoughtZoneEl.id, {
+      game: { ...thoughtZoneEl.game, params: { ...(thoughtZoneEl.game.params ?? {}), subjectX: x, subjectY: y } },
+    })
+  }
+
   // ---- scratch-grid dynamic-date position editor -----------------------------
   // One shared (dateX, dateY) — dragging the marker in ANY cell moves it in all.
-  const dateEl = dateEdit ? scene.elements.find((e) => e.id === dateEdit) ?? null : null
-  const dateRect = dateEdit ? rects.find((r) => r.id === dateEdit) ?? null : null
+  const dateEl = dateEdit ? (scene.elements.find((e) => e.id === dateEdit) ?? null) : null
+  const dateRect = dateEdit ? (rects.find((r) => r.id === dateEdit) ?? null) : null
   const dateParams: Record<string, unknown> = dateEl?.game?.params ?? {}
   const curDate = dateLive ?? {
     x: typeof dateParams.dateX === 'number' ? dateParams.dateX : 50,
@@ -1570,14 +1936,12 @@ export function EditorCanvas(props: Props): JSX.Element {
   // aspect-locked box centered in the element) rather than the element itself:
   // the fold line, and the shut cover's box with corner handles. Mirrors
   // runtime/games/flipbook.ts layout()/sizeCover() so what you drag is what renders.
-  const spineEl = spineEdit ? scene.elements.find((e) => e.id === spineEdit) ?? null : null
-  const spineRect = spineEdit ? rects.find((r) => r.id === spineEdit) ?? null : null
+  const spineEl = spineEdit ? (scene.elements.find((e) => e.id === spineEdit) ?? null) : null
+  const spineRect = spineEdit ? (rects.find((r) => r.id === spineEdit) ?? null) : null
   const spineParams: Record<string, unknown> = spineEl?.game?.params ?? {}
   const curCoverScale = spineLive?.coverScale ?? (typeof spineParams.coverScale === 'number' ? spineParams.coverScale : 100)
   const curBookScale = spineLive?.bookScale ?? (typeof spineParams.bookScale === 'number' ? spineParams.bookScale : 100)
-  const spineBoxes = spineRect
-    ? flipbookBoxes(spineRect, { ...flipbookOpts(spineParams, assets), bookScale: curBookScale, coverScale: curCoverScale })
-    : null
+  const spineBoxes = spineRect ? flipbookBoxes(spineRect, { ...flipbookOpts(spineParams, assets), bookScale: curBookScale, coverScale: curCoverScale }) : null
   const spineBook = spineBoxes?.book ?? null
   const spineCover = spineBoxes?.cover ?? null
   // Passive indicator: a SELECTED flipbook shows where its fold falls — the seam
@@ -1591,24 +1955,26 @@ export function EditorCanvas(props: Props): JSX.Element {
   })()
   /** Grab a corner of the book or of the shut cover: uniform scale about that box's
    * centre, frozen at drag start so the anchor can't chase the pointer as it resizes. */
-  const onScaleDown = (mode: 'cover' | 'book') => (e: React.PointerEvent): void => {
-    e.stopPropagation()
-    const box = mode === 'book' ? spineBook : spineCover
-    if (!spineBook || !box) return
-    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-    const o = overlayRef.current!.getBoundingClientRect()
-    const z = liveRef.current.zoom
-    const cx = box.x + box.w / 2
-    const cy = box.y + box.h / 2
-    const dx = (e.clientX - o.left) / z - cx
-    const dy = (e.clientY - o.top) / z - cy
-    spineDrag.current = {
-      mode,
-      base: { x: spineBook.x, w: spineBook.w, cx, cy, dist: Math.max(1, Math.hypot(dx, dy)) },
-      start: mode === 'book' ? curBookScale : curCoverScale,
-      last: null,
+  const onScaleDown =
+    (mode: 'cover' | 'book') =>
+    (e: React.PointerEvent): void => {
+      e.stopPropagation()
+      const box = mode === 'book' ? spineBook : spineCover
+      if (!spineBook || !box) return
+      ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+      const o = overlayRef.current!.getBoundingClientRect()
+      const z = liveRef.current.zoom
+      const cx = box.x + box.w / 2
+      const cy = box.y + box.h / 2
+      const dx = (e.clientX - o.left) / z - cx
+      const dy = (e.clientY - o.top) / z - cy
+      spineDrag.current = {
+        mode,
+        base: { x: spineBook.x, w: spineBook.w, cx, cy, dist: Math.max(1, Math.hypot(dx, dy)) },
+        start: mode === 'book' ? curBookScale : curCoverScale,
+        last: null,
+      }
     }
-  }
   const onSpineMove = (e: React.PointerEvent): void => {
     const d = spineDrag.current
     if (!d) return
@@ -1636,11 +2002,14 @@ export function EditorCanvas(props: Props): JSX.Element {
   // ---- memory-match tracker symbol editor -----------------------------------
   // Mirrors runtime/games/memorymatch.ts tracker layout (baseline model): symbols
   // left-to-right, bottoms on a shared baseline; per-symbol scale + X nudge.
-  const trackerEl = trackerEdit ? scene.elements.find((e) => e.id === trackerEdit) ?? null : null
-  const trackerRect = trackerEdit ? rects.find((r) => r.id === trackerEdit) ?? null : null
+  const trackerEl = trackerEdit ? (scene.elements.find((e) => e.id === trackerEdit) ?? null) : null
+  const trackerRect = trackerEdit ? (rects.find((r) => r.id === trackerEdit) ?? null) : null
   const tP: Record<string, unknown> = trackerEl?.game?.params ?? {}
   const tPairs = Math.max(2, Math.min(10, Number(tP.pairs ?? 5)))
-  const parseNums = (v: unknown): number[] => String(v ?? '').split(',').map((x) => parseFloat(x.trim()))
+  const parseNums = (v: unknown): number[] =>
+    String(v ?? '')
+      .split(',')
+      .map((x) => parseFloat(x.trim()))
   const curTracker = trackerLive ?? {
     scales: Array.from({ length: tPairs }, (_, i) => {
       const n = parseNums(tP.trackerScales)[i]
@@ -1671,9 +2040,7 @@ export function EditorCanvas(props: Props): JSX.Element {
     const maxTs = Math.max(1, ...curTracker.scales.filter((v) => v > 0))
     const maxH = symSz * maxTs
     const pad = Math.max(8 * s, symSz * 0.35)
-    const baseline = trackerDrag.current
-      ? trackerDrag.current.bottomY
-      : trackerRect.y + (pos === 'bottom' ? trackerRect.h - pad / 2 : pad / 2 + maxH) + shiftY
+    const baseline = trackerDrag.current ? trackerDrag.current.bottomY : trackerRect.y + (pos === 'bottom' ? trackerRect.h - pad / 2 : pad / 2 + maxH) + shiftY
     const sizes = curTracker.scales.map((v) => symSz * (v > 0 ? v : 1))
     const totalW = sizes.reduce((a, b) => a + b, 0) + gap * (tPairs - 1)
     let x = trackerRect.x + (trackerRect.w - totalW) / 2 + shiftX
@@ -1813,7 +2180,11 @@ export function EditorCanvas(props: Props): JSX.Element {
           const active = sd.id === activeSceneId
           const lsN = landscapeCount(sd)
           return (
-            <div key={sd.id} className={'frame' + (active ? ' active' : '') + (dropTarget === sd.id ? ' drop-target' : '')} style={{ left: pos.x, top: pos.y, width: box.w, height: box.h }}>
+            <div
+              key={sd.id}
+              className={'frame' + (active ? ' active' : '') + (dropTarget === sd.id ? ' drop-target' : '')}
+              style={{ left: pos.x, top: pos.y, width: box.w, height: box.h }}
+            >
               <div
                 className="frame-label"
                 onPointerDown={(e) => onFrameLabelDown(e, sd.id)}
@@ -1833,10 +2204,7 @@ export function EditorCanvas(props: Props): JSX.Element {
                   </button>
                 )}
                 {lsN > 0 && (
-                  <span
-                    className="frame-chip frame-chip-ls"
-                    title={`${lsN}/${sd.elements.length} elements in this scene have their own landscape layout`}
-                  >
+                  <span className="frame-chip frame-chip-ls" title={`${lsN}/${sd.elements.length} elements in this scene have their own landscape layout`}>
                     ▭ {lsN}
                   </span>
                 )}
@@ -1845,22 +2213,44 @@ export function EditorCanvas(props: Props): JSX.Element {
                   shown only on the active frame, in landscape, while the scene still
                   mirrors portrait. Seeding snapshots portrait geometry per element and
                   the banner disappears (overrides now exist). */}
-              {active && landscape && lsN === 0 && sd.elements.length > 0 && !activeVariant && !editLocale && !lsBannerClosed[sd.id] &&
-                !revealEdit && !zoneEdit && !cropEdit && !trackerEdit && !spineEdit && (
-                <div className="ls-banner" onPointerDown={(e) => e.stopPropagation()}>
-                  <span>Landscape mirrors portrait</span>
-                  <button onClick={() => seedLandscapeLayout()}>Create separate landscape layout</button>
-                  <button
-                    className="ls-banner-close"
-                    title="Hide for this scene"
-                    onClick={() => setLsBannerClosed((m) => ({ ...m, [sd.id]: true }))}
-                  >
-                    ✕
-                  </button>
-                </div>
-              )}
+              {active &&
+                landscape &&
+                lsN === 0 &&
+                sd.elements.length > 0 &&
+                !activeVariant &&
+                !editLocale &&
+                !lsBannerClosed[sd.id] &&
+                !revealEdit &&
+                !zoneEdit &&
+                !thoughtZoneEdit &&
+                !cropEdit &&
+                !trackerEdit &&
+                !spineEdit && (
+                  <div className="ls-banner" onPointerDown={(e) => e.stopPropagation()}>
+                    <span>Landscape mirrors portrait</span>
+                    <button onClick={() => seedLandscapeLayout()}>Create separate landscape layout</button>
+                    <button className="ls-banner-close" title="Hide for this scene" onClick={() => setLsBannerClosed((m) => ({ ...m, [sd.id]: true }))}>
+                      ✕
+                    </button>
+                  </div>
+                )}
               <div className="stage-wrap">
-                <CanvasFrame sceneId={sd.id} def={sd} meta={project.meta} assets={assets} renderKey={renderKey} locale={editLocale} onLayout={handleLayout} iframeRef={active ? (el) => { activeIframeRef.current = el } : undefined} />
+                <CanvasFrame
+                  sceneId={sd.id}
+                  def={sd}
+                  meta={project.meta}
+                  assets={assets}
+                  renderKey={renderKey}
+                  locale={editLocale}
+                  onLayout={handleLayout}
+                  iframeRef={
+                    active
+                      ? (el) => {
+                          activeIframeRef.current = el
+                        }
+                      : undefined
+                  }
+                />
                 {active && traceSrc && <img className="trace-backdrop" src={traceSrc} alt="" style={{ opacity: trace.opacity }} />}
               </div>
               {active ? (
@@ -1875,7 +2265,12 @@ export function EditorCanvas(props: Props): JSX.Element {
                   onDoubleClick={onDoubleClick}
                   onContextMenu={onContextMenu}
                 >
-                  {!revealEdit && !zoneEdit && !cropEdit && !trackerEdit && !spineEdit &&
+                  {!revealEdit &&
+                    !zoneEdit &&
+                    !thoughtZoneEdit &&
+                    !cropEdit &&
+                    !trackerEdit &&
+                    !spineEdit &&
                     selectedIds.map((id) => {
                       const r = rects.find((x) => x.id === id)
                       if (!r) return null
@@ -1900,14 +2295,21 @@ export function EditorCanvas(props: Props): JSX.Element {
                       </div>
                     )
                   })}
-                  {!revealEdit && !zoneEdit && !cropEdit && !trackerEdit && !spineEdit && single && singleRect && singleHandles.map((h) => (
-                    <div
-                      key={h.k}
-                      className={'handle h-' + h.k}
-                      style={{ left: singleRect.x + ((h.hx + 1) / 2) * singleRect.w, top: singleRect.y + ((h.hy + 1) / 2) * singleRect.h }}
-                      onPointerDown={(e) => onHandlePointerDown(e, h, 'single')}
-                    />
-                  ))}
+                  {!revealEdit &&
+                    !zoneEdit &&
+                    !cropEdit &&
+                    !trackerEdit &&
+                    !spineEdit &&
+                    single &&
+                    singleRect &&
+                    singleHandles.map((h) => (
+                      <div
+                        key={h.k}
+                        className={'handle h-' + h.k}
+                        style={{ left: singleRect.x + ((h.hx + 1) / 2) * singleRect.w, top: singleRect.y + ((h.hy + 1) / 2) * singleRect.h }}
+                        onPointerDown={(e) => onHandlePointerDown(e, h, 'single')}
+                      />
+                    ))}
                   {!revealEdit && !zoneEdit && !cropEdit && !trackerEdit && !spineEdit && single && singleRect && (
                     <div
                       className="dim-badge"
@@ -1947,9 +2349,7 @@ export function EditorCanvas(props: Props): JSX.Element {
                       <div key={'ms' + i}>
                         <div
                           className={'measure-line ' + (mo.horiz ? 'mh' : 'mv')}
-                          style={mo.horiz
-                            ? { left: mo.x1, top: mo.y1, width: Math.max(0, len) }
-                            : { left: mo.x1, top: mo.y1, height: Math.max(0, len) }}
+                          style={mo.horiz ? { left: mo.x1, top: mo.y1, width: Math.max(0, len) } : { left: mo.x1, top: mo.y1, height: Math.max(0, len) }}
                         />
                         <div
                           className="measure-badge"
@@ -2003,11 +2403,11 @@ export function EditorCanvas(props: Props): JSX.Element {
                         color: editEl.text.color ?? '#fff',
                         textAlign: editEl.text.align ?? 'center',
                       }}
-                      onChange={(e) => patchElement(editEl.id, {
-                        text: editLocale
-                          ? { ...editEl.text!, i18n: { ...(editEl.text!.i18n ?? {}), [editLocale]: e.target.value } }
-                          : { ...editEl.text!, value: e.target.value },
-                      })}
+                      onChange={(e) =>
+                        patchElement(editEl.id, {
+                          text: editLocale ? { ...editEl.text!, i18n: { ...(editEl.text!.i18n ?? {}), [editLocale]: e.target.value } } : { ...editEl.text!, value: e.target.value },
+                        })
+                      }
                       onBlur={() => setEditing(null)}
                       onKeyDown={(e) => {
                         if (e.key === 'Escape' || (e.key === 'Enter' && !e.shiftKey)) {
@@ -2017,60 +2417,76 @@ export function EditorCanvas(props: Props): JSX.Element {
                       }}
                     />
                   )}
-                  {cropEdit && cropView && cropSrc && (() => {
-                    const m = metricsRef.current
-                    const rx = cropView.left * m.s + m.offX
-                    const ry = cropView.top * m.s + m.offY
-                    const rw = cropView.w * m.s
-                    const rh = cropView.h * m.s
-                    const iw = cropView.scale * rw
-                    const ih = iw * cropView.natR
-                    const ix = rx + cropView.cx * rw
-                    const iy = ry + cropView.cy * rh
-                    const dim = 'rgba(0,0,0,0.5)'
-                    return (
-                      <>
-                        {/* the full picture behind the window; bright inside, dimmed outside by the bands */}
-                        <img src={cropSrc} alt="" draggable={false} style={{ position: 'absolute', left: ix, top: iy, width: iw, height: ih, pointerEvents: 'none', userSelect: 'none' }} />
-                        <div style={{ position: 'absolute', left: 0, top: 0, width: box.w, height: Math.max(0, ry), background: dim, pointerEvents: 'none' }} />
-                        <div style={{ position: 'absolute', left: 0, top: ry + rh, width: box.w, height: Math.max(0, box.h - (ry + rh)), background: dim, pointerEvents: 'none' }} />
-                        <div style={{ position: 'absolute', left: 0, top: ry, width: Math.max(0, rx), height: rh, background: dim, pointerEvents: 'none' }} />
-                        <div style={{ position: 'absolute', left: rx + rw, top: ry, width: Math.max(0, box.w - (rx + rw)), height: rh, background: dim, pointerEvents: 'none' }} />
-                        {/* the crop window: drag the middle to pan, the handles to resize */}
-                        <div
-                          style={{ position: 'absolute', left: rx, top: ry, width: rw, height: rh, border: '2px solid var(--accent)', boxSizing: 'border-box', cursor: 'move', touchAction: 'none' }}
-                          onPointerDown={onCropBodyDown}
-                          onPointerMove={onCropMove}
-                          onPointerUp={onCropUp}
-                          onPointerCancel={onCropUp}
-                        >
-                          {[...CORNERS, ...EDGES].map((h) => (
-                            <div
-                              key={h.k}
-                              className={'handle h-' + h.k}
-                              style={{ left: ((h.hx + 1) / 2) * rw, top: ((h.hy + 1) / 2) * rh }}
-                              onPointerDown={(ev) => onCropHandleDown(ev, h)}
-                              onPointerMove={onCropMove}
-                              onPointerUp={onCropUp}
-                              onPointerCancel={onCropUp}
-                            />
-                          ))}
-                        </div>
-                        <div className="dim-badge" style={{ left: rx + rw / 2, top: ry + rh, transform: `translate(-50%, 6px) scale(${1 / zoom})`, whiteSpace: 'nowrap' }}>
-                          drag edges to crop · drag middle to move · scroll to zoom · Enter when done
-                        </div>
-                      </>
-                    )
-                  })()}
+                  {cropEdit &&
+                    cropView &&
+                    cropSrc &&
+                    (() => {
+                      const m = metricsRef.current
+                      const rx = cropView.left * m.s + m.offX
+                      const ry = cropView.top * m.s + m.offY
+                      const rw = cropView.w * m.s
+                      const rh = cropView.h * m.s
+                      const iw = cropView.scale * rw
+                      const ih = iw * cropView.natR
+                      const ix = rx + cropView.cx * rw
+                      const iy = ry + cropView.cy * rh
+                      const dim = 'rgba(0,0,0,0.5)'
+                      return (
+                        <>
+                          {/* the full picture behind the window; bright inside, dimmed outside by the bands */}
+                          <img
+                            src={cropSrc}
+                            alt=""
+                            draggable={false}
+                            style={{ position: 'absolute', left: ix, top: iy, width: iw, height: ih, pointerEvents: 'none', userSelect: 'none' }}
+                          />
+                          <div style={{ position: 'absolute', left: 0, top: 0, width: box.w, height: Math.max(0, ry), background: dim, pointerEvents: 'none' }} />
+                          <div
+                            style={{ position: 'absolute', left: 0, top: ry + rh, width: box.w, height: Math.max(0, box.h - (ry + rh)), background: dim, pointerEvents: 'none' }}
+                          />
+                          <div style={{ position: 'absolute', left: 0, top: ry, width: Math.max(0, rx), height: rh, background: dim, pointerEvents: 'none' }} />
+                          <div
+                            style={{ position: 'absolute', left: rx + rw, top: ry, width: Math.max(0, box.w - (rx + rw)), height: rh, background: dim, pointerEvents: 'none' }}
+                          />
+                          {/* the crop window: drag the middle to pan, the handles to resize */}
+                          <div
+                            style={{
+                              position: 'absolute',
+                              left: rx,
+                              top: ry,
+                              width: rw,
+                              height: rh,
+                              border: '2px solid var(--accent)',
+                              boxSizing: 'border-box',
+                              cursor: 'move',
+                              touchAction: 'none',
+                            }}
+                            onPointerDown={onCropBodyDown}
+                            onPointerMove={onCropMove}
+                            onPointerUp={onCropUp}
+                            onPointerCancel={onCropUp}
+                          >
+                            {[...CORNERS, ...EDGES].map((h) => (
+                              <div
+                                key={h.k}
+                                className={'handle h-' + h.k}
+                                style={{ left: ((h.hx + 1) / 2) * rw, top: ((h.hy + 1) / 2) * rh }}
+                                onPointerDown={(ev) => onCropHandleDown(ev, h)}
+                                onPointerMove={onCropMove}
+                                onPointerUp={onCropUp}
+                                onPointerCancel={onCropUp}
+                              />
+                            ))}
+                          </div>
+                          <div className="dim-badge" style={{ left: rx + rw / 2, top: ry + rh, transform: `translate(-50%, 6px) scale(${1 / zoom})`, whiteSpace: 'nowrap' }}>
+                            drag edges to crop · drag middle to move · scroll to zoom · Enter when done
+                          </div>
+                        </>
+                      )
+                    })()}
                   {revealEdit && revealRect && revealSrc && (
                     <div className="reveal-edit" style={{ left: revealRect.x, top: revealRect.y, width: revealRect.w, height: revealRect.h }}>
-                      <div
-                        className="reveal-edit-clip"
-                        onPointerDown={onRevealBodyDown}
-                        onPointerMove={onRevealMove}
-                        onPointerUp={onRevealUp}
-                        onPointerCancel={onRevealUp}
-                      >
+                      <div className="reveal-edit-clip" onPointerDown={onRevealBodyDown} onPointerMove={onRevealMove} onPointerUp={onRevealUp} onPointerCancel={onRevealUp}>
                         <img
                           src={revealSrc}
                           alt=""
@@ -2107,7 +2523,17 @@ export function EditorCanvas(props: Props): JSX.Element {
                         return (
                           <div
                             key={'zprev-' + i}
-                            style={{ position: 'absolute', left: bx.x, top: bx.y, width: bx.w, height: bx.h, border: '1.5px dashed var(--accent)', opacity: 0.45, pointerEvents: 'none', boxSizing: 'border-box' }}
+                            style={{
+                              position: 'absolute',
+                              left: bx.x,
+                              top: bx.y,
+                              width: bx.w,
+                              height: bx.h,
+                              border: '1.5px dashed var(--accent)',
+                              opacity: 0.45,
+                              pointerEvents: 'none',
+                              boxSizing: 'border-box',
+                            }}
                           />
                         )
                       })}
@@ -2116,7 +2542,18 @@ export function EditorCanvas(props: Props): JSX.Element {
                         const bx = zoneBoxFor(zoneBase, curZone)
                         return (
                           <div
-                            style={{ position: 'absolute', left: bx.x, top: bx.y, width: bx.w, height: bx.h, border: '2px solid var(--accent)', background: 'rgba(80,140,255,0.12)', boxSizing: 'border-box', cursor: 'move', touchAction: 'none' }}
+                            style={{
+                              position: 'absolute',
+                              left: bx.x,
+                              top: bx.y,
+                              width: bx.w,
+                              height: bx.h,
+                              border: '2px solid var(--accent)',
+                              background: 'rgba(80,140,255,0.12)',
+                              boxSizing: 'border-box',
+                              cursor: 'move',
+                              touchAction: 'none',
+                            }}
                             onPointerDown={onZoneBodyDown}
                             onPointerMove={onZoneMove}
                             onPointerUp={onZoneUp}
@@ -2138,6 +2575,137 @@ export function EditorCanvas(props: Props): JSX.Element {
                       })()}
                     </>
                   )}
+                  {thoughtZoneEdit && thoughtZoneRect && (
+                    <>
+                      <div
+                        style={{
+                          position: 'absolute',
+                          left: thoughtZoneRect.x,
+                          top: thoughtZoneRect.y,
+                          width: thoughtZoneRect.w,
+                          height: thoughtZoneRect.h,
+                          border: '1px dashed rgba(80,140,255,.7)',
+                          boxSizing: 'border-box',
+                          pointerEvents: 'none',
+                        }}
+                      >
+                        <div
+                          style={{
+                            position: 'absolute',
+                            left: 4,
+                            top: 4,
+                            padding: '2px 7px',
+                            borderRadius: 4,
+                            background: 'var(--accent)',
+                            color: '#fff',
+                            font: '600 11px/1.5 system-ui,sans-serif',
+                          }}
+                        >
+                          Draw spawn areas · drag the SUBJECT marker · Enter when done
+                        </div>
+                      </div>
+                      {currentThoughtZones.map((zone, i) => {
+                        const bx = {
+                          x: thoughtZoneRect.x + (zone.x / 100) * thoughtZoneRect.w,
+                          y: thoughtZoneRect.y + (zone.y / 100) * thoughtZoneRect.h,
+                          w: (zone.w / 100) * thoughtZoneRect.w,
+                          h: (zone.h / 100) * thoughtZoneRect.h,
+                        }
+                        return (
+                          <div
+                            key={`thought-zone-${i}`}
+                            style={{
+                              position: 'absolute',
+                              left: bx.x,
+                              top: bx.y,
+                              width: bx.w,
+                              height: bx.h,
+                              border: '2px solid var(--accent)',
+                              background: 'rgba(80,140,255,.15)',
+                              boxSizing: 'border-box',
+                              cursor: 'move',
+                              touchAction: 'none',
+                            }}
+                            onPointerDown={(e) => beginThoughtZoneMove(e, i)}
+                            onPointerMove={moveThoughtZone}
+                            onPointerUp={endThoughtZone}
+                            onPointerCancel={endThoughtZone}
+                          >
+                            <div
+                              title="Remove this spawn area"
+                              style={{
+                                position: 'absolute',
+                                right: -10,
+                                top: -10,
+                                width: 18,
+                                height: 18,
+                                borderRadius: '50%',
+                                background: 'var(--accent)',
+                                color: '#fff',
+                                font: '700 12px/18px system-ui,sans-serif',
+                                textAlign: 'center',
+                                cursor: 'pointer',
+                              }}
+                              onPointerDown={(e) => removeThoughtZone(e, i)}
+                            >
+                              ×
+                            </div>
+                            {CORNERS.map((h) => (
+                              <div
+                                key={h.k}
+                                className={'handle h-' + h.k}
+                                style={{ left: ((h.hx + 1) / 2) * bx.w, top: ((h.hy + 1) / 2) * bx.h }}
+                                onPointerDown={(e) => beginThoughtZoneResize(e, i, h.hx, h.hy)}
+                                onPointerMove={moveThoughtZone}
+                                onPointerUp={endThoughtZone}
+                                onPointerCancel={endThoughtZone}
+                              />
+                            ))}
+                          </div>
+                        )
+                      })}
+                      <div
+                        title="Drag this marker onto the subject; every thought tail points here"
+                        style={{
+                          position: 'absolute',
+                          left: thoughtZoneRect.x + (currentThoughtSubject.x / 100) * thoughtZoneRect.w - 14,
+                          top: thoughtZoneRect.y + (currentThoughtSubject.y / 100) * thoughtZoneRect.h - 14,
+                          width: 28,
+                          height: 28,
+                          borderRadius: '50%',
+                          border: '3px solid #ff4f87',
+                          background: 'rgba(255,79,135,.22)',
+                          boxShadow: '0 0 0 2px #fff,0 2px 8px rgba(0,0,0,.25)',
+                          boxSizing: 'border-box',
+                          cursor: 'move',
+                          touchAction: 'none',
+                          zIndex: 20,
+                        }}
+                        onPointerDown={beginThoughtSubjectMove}
+                        onPointerMove={moveThoughtSubject}
+                        onPointerUp={endThoughtSubject}
+                        onPointerCancel={endThoughtSubject}
+                      >
+                        <div
+                          style={{
+                            position: 'absolute',
+                            left: '50%',
+                            top: -23,
+                            transform: 'translateX(-50%)',
+                            padding: '1px 5px',
+                            borderRadius: 4,
+                            background: '#ff4f87',
+                            color: '#fff',
+                            font: '700 10px/1.5 system-ui,sans-serif',
+                            whiteSpace: 'nowrap',
+                            pointerEvents: 'none',
+                          }}
+                        >
+                          SUBJECT
+                        </div>
+                      </div>
+                    </>
+                  )}
                   {trackerEdit && trackerGeom && (
                     <>
                       {/* Shared baseline every symbol's bottom sits on. */}
@@ -2156,7 +2724,18 @@ export function EditorCanvas(props: Props): JSX.Element {
                       {trackerGeom.boxes.map((b, i) => (
                         <div
                           key={'trk' + i}
-                          style={{ position: 'absolute', left: b.x, top: b.y, width: b.w, height: b.h, border: '1.5px solid var(--accent)', background: 'rgba(80,140,255,0.10)', boxSizing: 'border-box', cursor: 'ew-resize', touchAction: 'none' }}
+                          style={{
+                            position: 'absolute',
+                            left: b.x,
+                            top: b.y,
+                            width: b.w,
+                            height: b.h,
+                            border: '1.5px solid var(--accent)',
+                            background: 'rgba(80,140,255,0.10)',
+                            boxSizing: 'border-box',
+                            cursor: 'ew-resize',
+                            touchAction: 'none',
+                          }}
                           onPointerDown={(e) => onTrackerBodyDown(e, i)}
                           onPointerMove={onTrackerMove}
                           onPointerUp={onTrackerUp}
@@ -2175,40 +2754,66 @@ export function EditorCanvas(props: Props): JSX.Element {
                       ))}
                     </>
                   )}
-                  {dateEdit && dateCellRects.length > 0 && dateCellRects.map((b, i) => {
-                    const on = dateCellOn(i)
-                    const mx = b.x + (curDate.x / 100) * b.w
-                    const my = b.y + (curDate.y / 100) * b.h
-                    return (
-                      <div
-                        key={'dmark-' + i}
-                        title={on ? 'Drag to position the date (shared by all cells). Esc to finish.' : 'No date in this cell — drag still moves the shared position'}
-                        style={{
-                          position: 'absolute', left: mx - 10, top: my - 10, width: 20, height: 20, borderRadius: '50%',
-                          border: '2px solid var(--accent)', background: 'rgba(80,140,255,0.28)', boxSizing: 'border-box',
-                          cursor: 'move', touchAction: 'none', opacity: on ? 1 : 0.35,
-                        }}
-                        onPointerDown={(e) => onDateDown(e, b)}
-                        onPointerMove={onDateMove}
-                        onPointerUp={onDateUp}
-                        onPointerCancel={onDateUp}
-                      />
-                    )
-                  })}
+                  {dateEdit &&
+                    dateCellRects.length > 0 &&
+                    dateCellRects.map((b, i) => {
+                      const on = dateCellOn(i)
+                      const mx = b.x + (curDate.x / 100) * b.w
+                      const my = b.y + (curDate.y / 100) * b.h
+                      return (
+                        <div
+                          key={'dmark-' + i}
+                          title={on ? 'Drag to position the date (shared by all cells). Esc to finish.' : 'No date in this cell — drag still moves the shared position'}
+                          style={{
+                            position: 'absolute',
+                            left: mx - 10,
+                            top: my - 10,
+                            width: 20,
+                            height: 20,
+                            borderRadius: '50%',
+                            border: '2px solid var(--accent)',
+                            background: 'rgba(80,140,255,0.28)',
+                            boxSizing: 'border-box',
+                            cursor: 'move',
+                            touchAction: 'none',
+                            opacity: on ? 1 : 0.35,
+                          }}
+                          onPointerDown={(e) => onDateDown(e, b)}
+                          onPointerMove={onDateMove}
+                          onPointerUp={onDateUp}
+                          onPointerCancel={onDateUp}
+                        />
+                      )
+                    })}
                   {spineHint && (
                     <>
                       {/* Where the fold sits — visible on selection, not only in the editor. */}
                       <div
                         style={{
-                          position: 'absolute', left: spineHint.x - 1, top: spineHint.book.y, width: 2, height: spineHint.book.h,
-                          background: 'var(--accent)', opacity: 0.55, pointerEvents: 'none',
+                          position: 'absolute',
+                          left: spineHint.x - 1,
+                          top: spineHint.book.y,
+                          width: 2,
+                          height: spineHint.book.h,
+                          background: 'var(--accent)',
+                          opacity: 0.55,
+                          pointerEvents: 'none',
                         }}
                       />
                       <div
                         style={{
-                          position: 'absolute', left: spineHint.x, top: spineHint.book.y - 20, transform: 'translateX(-50%)',
-                          padding: '0 5px', borderRadius: 4, background: 'var(--accent)', color: '#fff', opacity: 0.85,
-                          font: '600 10px/1.7 system-ui, sans-serif', whiteSpace: 'nowrap', pointerEvents: 'none',
+                          position: 'absolute',
+                          left: spineHint.x,
+                          top: spineHint.book.y - 20,
+                          transform: 'translateX(-50%)',
+                          padding: '0 5px',
+                          borderRadius: 4,
+                          background: 'var(--accent)',
+                          color: '#fff',
+                          opacity: 0.85,
+                          font: '600 10px/1.7 system-ui, sans-serif',
+                          whiteSpace: 'nowrap',
+                          pointerEvents: 'none',
                         }}
                       >
                         fold · double-click to size the book
@@ -2222,11 +2827,24 @@ export function EditorCanvas(props: Props): JSX.Element {
                       <div
                         title="Drag a corner to size the book. Esc to finish."
                         style={{
-                          position: 'absolute', left: spineBook.x, top: spineBook.y, width: spineBook.w, height: spineBook.h,
-                          border: '1px dashed var(--accent)', boxSizing: 'border-box', pointerEvents: 'none',
+                          position: 'absolute',
+                          left: spineBook.x,
+                          top: spineBook.y,
+                          width: spineBook.w,
+                          height: spineBook.h,
+                          border: '1px dashed var(--accent)',
+                          boxSizing: 'border-box',
+                          pointerEvents: 'none',
                         }}
                       >
-                        {([[0, 0, 'nwse-resize'], [1, 0, 'nesw-resize'], [0, 1, 'nesw-resize'], [1, 1, 'nwse-resize']] as const).map(([hx, hy, cursor]) => (
+                        {(
+                          [
+                            [0, 0, 'nwse-resize'],
+                            [1, 0, 'nesw-resize'],
+                            [0, 1, 'nesw-resize'],
+                            [1, 1, 'nwse-resize'],
+                          ] as const
+                        ).map(([hx, hy, cursor]) => (
                           <div
                             key={'bk' + hx + hy}
                             className="handle"
@@ -2239,9 +2857,15 @@ export function EditorCanvas(props: Props): JSX.Element {
                         ))}
                         <div
                           style={{
-                            position: 'absolute', top: -22, left: 0,
-                            padding: '1px 6px', borderRadius: 4, background: 'var(--accent)', color: '#fff',
-                            font: '600 11px/1.5 system-ui, sans-serif', whiteSpace: 'nowrap',
+                            position: 'absolute',
+                            top: -22,
+                            left: 0,
+                            padding: '1px 6px',
+                            borderRadius: 4,
+                            background: 'var(--accent)',
+                            color: '#fff',
+                            font: '600 11px/1.5 system-ui, sans-serif',
+                            whiteSpace: 'nowrap',
                           }}
                         >
                           book {Math.round(curBookScale)}%
@@ -2253,12 +2877,25 @@ export function EditorCanvas(props: Props): JSX.Element {
                         <div
                           title="Drag a corner to size the shut cover. Esc to finish."
                           style={{
-                            position: 'absolute', left: spineCover.x, top: spineCover.y, width: spineCover.w, height: spineCover.h,
-                            border: '1.5px solid var(--accent)', background: 'rgba(80,140,255,0.08)', boxSizing: 'border-box',
+                            position: 'absolute',
+                            left: spineCover.x,
+                            top: spineCover.y,
+                            width: spineCover.w,
+                            height: spineCover.h,
+                            border: '1.5px solid var(--accent)',
+                            background: 'rgba(80,140,255,0.08)',
+                            boxSizing: 'border-box',
                             pointerEvents: 'none',
                           }}
                         >
-                          {([[0, 0, 'nwse-resize'], [1, 0, 'nesw-resize'], [0, 1, 'nesw-resize'], [1, 1, 'nwse-resize']] as const).map(([hx, hy, cursor]) => (
+                          {(
+                            [
+                              [0, 0, 'nwse-resize'],
+                              [1, 0, 'nesw-resize'],
+                              [0, 1, 'nesw-resize'],
+                              [1, 1, 'nwse-resize'],
+                            ] as const
+                          ).map(([hx, hy, cursor]) => (
                             <div
                               key={'cov' + hx + hy}
                               className="handle"
@@ -2271,9 +2908,16 @@ export function EditorCanvas(props: Props): JSX.Element {
                           ))}
                           <div
                             style={{
-                              position: 'absolute', bottom: -22, left: '50%', transform: 'translateX(-50%)',
-                              padding: '1px 6px', borderRadius: 4, background: 'var(--accent)', color: '#fff',
-                              font: '600 11px/1.5 system-ui, sans-serif', whiteSpace: 'nowrap',
+                              position: 'absolute',
+                              bottom: -22,
+                              left: '50%',
+                              transform: 'translateX(-50%)',
+                              padding: '1px 6px',
+                              borderRadius: 4,
+                              background: 'var(--accent)',
+                              color: '#fff',
+                              font: '600 11px/1.5 system-ui, sans-serif',
+                              whiteSpace: 'nowrap',
                             }}
                           >
                             cover {Math.round(curCoverScale)}%
@@ -2287,8 +2931,14 @@ export function EditorCanvas(props: Props): JSX.Element {
                       {spineBoxes && (
                         <div
                           style={{
-                            position: 'absolute', left: spineBoxes.spineX - 1, top: spineBook.y, width: 2, height: spineBook.h,
-                            background: 'var(--accent)', opacity: 0.5, pointerEvents: 'none',
+                            position: 'absolute',
+                            left: spineBoxes.spineX - 1,
+                            top: spineBook.y,
+                            width: 2,
+                            height: spineBook.h,
+                            background: 'var(--accent)',
+                            opacity: 0.5,
+                            pointerEvents: 'none',
                           }}
                         />
                       )}

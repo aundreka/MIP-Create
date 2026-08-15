@@ -8,7 +8,7 @@
 //
 // Pure (testable) bits — formatMoney / resolveAmount — live at the bottom.
 
-import type { RevealConfig, SceneElement } from './scene'
+import type { RevealConfig, SceneElement, SfxBinding } from './scene'
 import type { RuntimeCtx } from './types'
 
 // Minimal view of stage.ts's internal Rec — only what the coating needs.
@@ -19,6 +19,12 @@ export interface CoverRec {
 }
 
 type Emit = (event: string, ...args: unknown[]) => void
+
+function emitBoundSfx(emit: Emit, binding: SfxBinding, loop = false): void {
+  const event = loop ? 'sfx-asset-loop-start' : 'sfx-asset'
+  if ((binding.delayMs ?? 0) > 0) emit(event, binding.assetId, binding.volume ?? 1, binding.delayMs)
+  else emit(event, binding.assetId, binding.volume ?? 1)
+}
 
 let stylesInjected = false
 function injectRevealStyles(): void {
@@ -233,7 +239,7 @@ export function attachScratchCover(
     }
     // sound: the target's bound onReveal sounds, else a gentle default event.
     const bound = (target.el.sfx ?? []).filter((b) => b.event === 'onReveal' && b.assetId)
-    if (bound.length) for (const b of bound) emit('sfx-asset', b.assetId, b.volume ?? 1)
+    if (bound.length) for (const b of bound) emitBoundSfx(emit, b)
     else emit('sfx', 'collect')
 
     if (revealed.size >= candidates().length && (cover.el.scratch?.advanceOnAllRevealed ?? true)) {
@@ -268,7 +274,7 @@ export function attachScratchCover(
   let scratching = false
   const loopAsset = (cover.el.sfx ?? []).find((b) => b.event === 'whileScratching' && b.assetId)
   const startLoop = (): void => {
-    if (loopAsset) emit('sfx-asset-loop-start', loopAsset.assetId, loopAsset.volume ?? 1)
+    if (loopAsset) emitBoundSfx(emit, loopAsset, true)
     else emit('sfx-loop-start', 'drag')
   }
   const stopLoop = (): void => {

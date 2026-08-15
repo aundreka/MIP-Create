@@ -58,16 +58,46 @@ export function preflightNetwork(net: Network, html: string, bytes: number, proj
   const interactive = project.scenes.some((s) => s.advance?.on === 'tap' || s.elements.some((e) => e.type === 'game-mount' || e.type === 'cta' || e.type === 'choice'))
   if (!interactive) findings.push({ level: 'warn', message: 'No interaction (game, CTA, choice or tap-to-advance); many networks reject static playables.' })
 
-  if (net.injectMraid) {
-    if (!/mraid\.js/.test(html)) findings.push({ level: 'error', message: 'MRAID network but mraid.js is not present in the output.' })
-    // Networks reject creatives that call MRAID APIs while the container is still
-    // loading. The runtime guards this in initMraid() (getState() + the 'ready'
-    // listener), so these strings surviving minification is the regression check.
-    if (!/getState/.test(html) || !/["']ready["']/.test(html))
-      findings.push({ level: 'error', message: 'No MRAID ready guard in the output: APIs must wait for the ready event or a non-loading getState().' })
-    if (!/\.open\(/.test(html))
-      findings.push({ level: 'warn', message: 'No mraid.open() call found; MRAID click-throughs must go through mraid.open().' })
-  }
+  // MRAID is checked on EVERY network: every export now ships the bridge tag and the
+  // readiness guard (see MRAID_HEAD in export.ts), so a missing one is a build
+  // regression regardless of which network the file is headed for.
+  if (!/mraid\.js/.test(html)) findings.push({ level: 'error', message: 'mraid.js bridge declaration is not present in the output.' })
+  // Networks reject creatives that call MRAID APIs while the container is still
+  // loading. The head guard (isMraidUsable) and the runtime's initMraid() both check
+  // getState() + the 'ready' listener, so these strings surviving minification is the
+  // regression check.
+  if (!/isMraidUsable/.test(html))
+    findings.push({ level: 'error', message: 'No MRAID ready guard in the output: isMraidUsable() must gate every call into the container.' })
+  // Validators STATIC-SCAN for these two literals — an equivalent check hidden behind
+  // minified identifiers reads as missing and gets the creative rejected. The export
+  // shell writes them out longhand (MRAID_HEAD / MRAID_BOOT), so their absence means the
+  // gate was dropped or mangled.
+  if (!/mraid\.addEventListener\(\s*["']ready["']/.test(html))
+    findings.push({ level: 'error', message: 'No literal mraid.addEventListener("ready", …) in the output: initialization must visibly wait for the ready event.' })
+  // The statement form, not just the comparison: scanners look for the guard itself —
+  // `if (mraid.getState() === "loading")` — so a check hidden behind a local variable or a
+  // helper reads as missing even when it behaves correctly.
+  const guard = /if\s*\(\s*mraid\.getState\(\)\s*===\s*["']loading["']\s*\)\s*\{/.exec(html)
+  if (!guard)
+    findings.push({ level: 'error', message: 'No literal if (mraid.getState() === "loading") guard in the output: initialization must confirm the container is past loading.' })
+  // ...and the ready subscription has to be INSIDE that branch. A branch body that calls a
+  // wait helper is the same failure one level down: the scanner reads the body and finds
+  // no mraid.addEventListener("ready", …) there.
+  else if (!/mraid\.addEventListener\(\s*["']ready["']/.test(html.slice(guard.index, guard.index + 600)))
+    findings.push({ level: 'error', message: 'The if (mraid.getState() === "loading") branch does not subscribe to the ready event inline: mraid.addEventListener("ready", …) must sit inside the guard, not behind a helper.' })
+  // The clickout half of the same rule: a scanner that finds mraid.open() with no
+  // isMraidUsable(mraid) guard beside it reports an unguarded call into the container,
+  // however well the minified bundle actually behaves.
+  if (!/mraid\.open\(/.test(html))
+    findings.push({ level: 'warn', message: 'No literal mraid.open() call found; MRAID click-throughs must go through mraid.open().' })
+  else if (!/isMraidUsable\(\s*mraid\s*\)/.test(html))
+    findings.push({ level: 'error', message: 'mraid.open() is not visibly guarded: window.isMraidUsable(mraid) must gate it in unminified source.' })
+  // Click macros: no single global is universal across DSPs, so the whole chain ships.
+  const macros = ['clickTag', 'clickTag1', 'clickthrough', 'clickThrough'].filter((k) => !html.includes(k))
+  if (macros.length)
+    findings.push({ level: 'error', message: `Click macro chain incomplete — missing ${macros.join(', ')}; clickouts must fall back through all four.` })
+  if (!/window\.open\(/.test(html))
+    findings.push({ level: 'error', message: 'No window.open() fallback in the output: a clickout must still reach the browser when mraid.open() is unavailable or throws.' })
 
   return {
     net: net.name,

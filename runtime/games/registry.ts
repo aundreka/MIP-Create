@@ -16,6 +16,7 @@ import { SORT_TEMPLATE } from './sort'
 import { SLIDER_TEMPLATE } from './slider'
 import { SPINCATCH_TEMPLATE } from './spincatch'
 import { WHACK_TEMPLATE } from './whack'
+import { THOUGHTWHACK_TEMPLATE } from './thoughtwhack'
 import { MERGE_TEMPLATE } from './merge'
 import { CATCH_TEMPLATE } from './catch'
 import { RECIPE_TEMPLATE } from './recipe'
@@ -27,6 +28,8 @@ import { VENDING_TEMPLATE } from './vending'
 import { WORD_TEMPLATE } from './word'
 import { SONGMIX_TEMPLATE } from './songmix'
 import { SCROLL_TEMPLATE } from './scroll'
+import { COUNTDOWN_TEMPLATE } from './countdown'
+import { HOLDGAUGE_TEMPLATE } from './holdgauge'
 import { EMBED_TEMPLATE } from './embed'
 
 export const GAME_TEMPLATES: GameTemplate[] = [
@@ -47,14 +50,17 @@ export const GAME_TEMPLATES: GameTemplate[] = [
   CATCH_TEMPLATE,
   BUBBLES_TEMPLATE,
   SLIDER_TEMPLATE,
+  HOLDGAUGE_TEMPLATE,
   SWIPE_TEMPLATE,
   WHACK_TEMPLATE,
+  THOUGHTWHACK_TEMPLATE,
   CONVEYOR_TEMPLATE,
   RECIPE_TEMPLATE,
   BINGO_TEMPLATE,
   WORD_TEMPLATE,
   SONGMIX_TEMPLATE,
   SCROLL_TEMPLATE,
+  COUNTDOWN_TEMPLATE,
   EMBED_TEMPLATE,
 ]
 

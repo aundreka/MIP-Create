@@ -198,7 +198,7 @@ export function gameTemplateStarters(): Starter[] {
                 ...headerBlock('hdr'),
                 { id: 'game_title', type: 'text', name: 'Prompt', x: C, y: 320, anchor: 'center', zIndex: 12, mode: 'fit', text: { value: isCatch ? 'Catch them all!' : 'Tap to play!', fontSizePx: 72, fontWeight: 800, color: '#ffffff', align: 'center' } },
                 ...catchElements,
-                { id: 'game_mount', type: 'game-mount', name: t.label, x: C, y: 1080, w: 980, h: 1100, anchor: 'center', zIndex: 5, mode: 'fit', game: { templateId: t.id, params: { ...t.defaultParams }, hintEnabled: true, hintIdleMs: 4000 }, sfx: isScratch ? [{ event: 'whileScratching', assetId: 'sfx_f_scratch' }, { event: 'onReveal', assetId: 'sfx_f_correctBright' }] : undefined },
+                { id: 'game_mount', type: 'game-mount', name: t.label, x: C, y: 1080, w: 980, h: 1100, anchor: 'center', zIndex: 5, mode: 'fit', game: { templateId: t.id, params: { ...t.defaultParams }, hintEnabled: true, hintIdleMs: t.defaultHintIdleMs ?? 4000 }, sfx: isScratch ? [{ event: 'whileScratching', assetId: 'sfx_f_scratch' }, { event: 'onReveal', assetId: 'sfx_f_correctBright' }] : undefined },
               ],
             },
             ...(isScratch ? [] : [winScene()]),

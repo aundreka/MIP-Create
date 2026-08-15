@@ -11,10 +11,12 @@ export interface Pt {
 export interface HintMove {
   from: Pt
   to: Pt
-  kind?: 'slide' | 'tap' | 'scratch'
+  kind?: 'slide' | 'tap' | 'scratch' | 'hold'
   /** Optional hand-size multiplier (1 = natural). Lets a game shrink the hint hand so
    * it fits inside small targets — e.g. a short cell in a 1-column scratch grid. */
   scale?: number
+  /** Vertical target point within a live hint element (0 = top, 1 = bottom). */
+  targetYRatio?: number
 }
 
 export interface GameContext {
@@ -46,6 +48,9 @@ export interface GameModule {
   relayout(): void
   /** Next correct move in screen px, or null if none (host points at the CTA). */
   getHint(): HintMove | null
+  /** Optional live target for the shared hand animation. The hint layer samples
+   * it every frame, allowing the hand to follow a newly selected valid target. */
+  getHintTarget?(): HTMLElement | null
   onComplete(cb: () => void): void
   /** Optional: fires immediately when the win condition is met, before any reveal
    * transition. Use this for SFX that should play at the moment of winning rather
@@ -62,6 +67,10 @@ export interface ParamField {
   max?: number
   step?: number
   options?: string[]
+  /** Editor-only: hide this field when it can't do anything (e.g. tracker
+   * styling once the tracker is off). Runtime ignores it — a hidden field's
+   * value is untouched, so turning the feature back on restores the setup. */
+  showIf?: (params: Record<string, unknown>) => boolean
 }
 
 // Image slots a template can use. `list` slots take one image per item, sized by
@@ -75,6 +84,8 @@ export interface AssetSlot {
   countParam?: string
   /** What kind of asset this slot picks (defaults to image). */
   accept?: 'image' | 'video' | 'audio' | 'html'
+  /** Editor-only: hide this slot when the feature it feeds is switched off. */
+  showIf?: (params: Record<string, unknown>) => boolean
 }
 
 export interface GameTemplate {
@@ -83,12 +94,14 @@ export interface GameTemplate {
   paramFields: ParamField[]
   assetSlots?: AssetSlot[]
   defaultParams: Record<string, unknown>
+  /** Default delay before the coded hint hand appears. */
+  defaultHintIdleMs?: number
   /** Optional default hint route (points normalized 0..1 of the game card) used to
    * seed an editable handguide when the game is added. The first point is the start;
    * the rest are slide waypoints. Omit for a simple centered tap hint. A `mode`
    * picks a game-aware logic template instead (e.g. 'match' follows the game's
    * data-mm-hint card); nodes then only place the hand's initial position. */
-  defaultHandguide?: { mode?: 'match'; nodes: { x: number; y: number; pauseMs?: number }[]; periodMs?: number }
+  defaultHandguide?: { mode?: 'match' | 'hold' | 'thoughtwhack'; nodes: { x: number; y: number; pauseMs?: number }[]; periodMs?: number }
   create(): GameModule
 }
 

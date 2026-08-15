@@ -150,22 +150,23 @@ export function sceneAssets(scene: SceneDef, assets: AssetMap): AssetMap {
 }
 
 // ---- networks (mirrors coinsort build-all.mjs) ----------------------------
+// MRAID is no longer a per-network flag — every export carries the bridge + guard
+// (MRAID_HEAD), so only the network-SPECIFIC extras stay here.
 export interface Network {
   name: string
   tag: string
-  injectMraid?: boolean
   injectExitApi?: boolean
   vungleFlag?: boolean
   onloadGameReady?: boolean
   zip?: boolean
 }
 export const NETWORKS: Network[] = [
-  { name: 'AppLovin', tag: 'al', injectMraid: true },
-  { name: 'ironSource', tag: 'is', injectMraid: true },
-  { name: 'Unity', tag: 'un', injectMraid: true },
+  { name: 'AppLovin', tag: 'al' },
+  { name: 'ironSource', tag: 'is' },
+  { name: 'Unity', tag: 'un' },
   { name: 'Google', tag: 'gg', injectExitApi: true, onloadGameReady: true, zip: true },
   { name: 'Facebook', tag: 'fb' },
-  { name: 'Mintegral', tag: 'mtg', injectMraid: true, zip: true },
+  { name: 'Mintegral', tag: 'mtg', zip: true },
   { name: 'Vungle', tag: 'vu', vungleFlag: true, zip: true },
   { name: 'Moloco', tag: 'mo' },
 ]
@@ -538,6 +539,173 @@ export function blurWarnings(project: Project, assets: AssetMap): string[] {
 }
 
 // ---- html assembly --------------------------------------------------------
+// MRAID v2.0 bridge + readiness guard — on EVERY export, not just the MRAID-tagged
+// networks (docs/mraid-v2-guide.md). The bridge tag is the declaration containers look
+// for and replace with their own implementation; outside one it 404s harmlessly (it is a
+// relative path, so it is not an external resource). The guard publishes
+// window.isMraidUsable(), the getState()/ready-event check a clickout must pass before it
+// may call into the container: networks reject creatives that touch an MRAID API while
+// getState() is still 'loading'. It lives in <head>, ahead of the runtime, because some
+// containers inject window.mraid asynchronously and the 'ready' listener has to be armed
+// before that lands. runtime/networks.ts falls back to its own copy of this check when the
+// global is absent (editor preview, Vite source export).
+//
+// Written out longhand, with `mraid` as the literal identifier and an explicit
+// getState() === "loading" comparison, because network creative validators STATIC-SCAN
+// the file for this pattern. The minified bundle's equivalent check reads
+// `f.addEventListener("ready",a)` after mangling, which those scanners do not recognise —
+// that mismatch is what produces "mraid present but no ready-event / getState() guard".
+export const MRAID_HEAD = `<script src="mraid.js"></script>
+<script>
+  // MRAID v2.0 readiness. Nothing in this creative may initialize, or call into the
+  // container, while mraid.getState() is still "loading" — only getState() and
+  // addEventListener("ready", ...) are legal before the ready event.
+  (function () {
+    var mraidIsReady = false;
+    var mraidReadyListenerAttached = false;
+
+    // Subscribe to the ready event once. Handles containers that attach window.mraid
+    // asynchronously, after this script has already run.
+    function trackMraidReadiness(mraid) {
+      if (mraidReadyListenerAttached || !mraid || typeof mraid.addEventListener !== "function") return;
+      try {
+        mraid.addEventListener("ready", function () { mraidIsReady = true; });
+        mraidReadyListenerAttached = true;
+      } catch (e) {
+        // Some non-standard containers throw on addEventListener; getState() stays the
+        // primary check.
+      }
+    }
+
+    // True when mraid.open() and the rest of the API are safe to call.
+    window.isMraidUsable = function (mraid) {
+      if (!mraid) return false;
+      trackMraidReadiness(mraid);
+      // Minimal/mock MRAID objects without getState() are treated as usable.
+      if (typeof mraid.getState !== "function") return true;
+      try {
+        // The AppLovin readiness guard, spelled the way validators scan for it.
+        if (mraid.getState() === "loading") return false;
+        var state = mraid.getState();
+        return state === "default" || state === "expanded";
+      } catch (e) {
+        return mraidIsReady; // state unreadable — fall back to whether "ready" fired
+      }
+    };
+
+    // The guarded clickout every CTA routes through (runtime/networks.ts calls this when
+    // it is present). Longhand here, with mraid as the literal identifier, for the same
+    // static-scan reason as the gate below: inside the minified bundle the same code reads
+    // Pa(tt.mraid), and a validator sees an unguarded open.
+    window.PA_CLICKOUT = function (url) {
+      var mraid = window.mraid || {};
+
+      // No single click macro is universal across DSPs / networks.
+      var clickTarget =
+        url || window.clickTag || window.clickTag1 || window.clickthrough || window.clickThrough || "";
+
+      // mraid.open() only after the readiness guard passes, and never outside try/catch —
+      // native containers throw on a bad URL or a half-built bridge.
+      if (typeof mraid.open === "function" && window.isMraidUsable(mraid)) {
+        try {
+          if (clickTarget) mraid.open(clickTarget);
+          // No destination (clickUrlMode 'none'): the container substitutes its own
+          // configured store URL, so the tap still registers as a click.
+          else mraid.open("");
+          return true;
+        } catch (e) {
+          // Container refused the open — fall through to the browser.
+        }
+      }
+
+      if (!clickTarget) return false;
+      try {
+        return !!window.open(clickTarget, "_blank", "noopener");
+      } catch (e) {
+        return false;
+      }
+    };
+
+    // The creative bundle below defers its own start to PA_START() because of this flag;
+    // the gate at the end of <body> calls it once the container is ready.
+    window.PA_MRAID_GATE = true;
+
+    // AppLovin readiness guard, armed HERE — in <head>, ahead of the creative bundle,
+    // because that is where "before initialization" has to be visible (and because a
+    // container can fire ready before the bundle has finished parsing). The matching
+    // release lives at the end of <body>, after the bundle publishes PA_START.
+    // The subscription is written out INSIDE the guard, not delegated to the helper
+    // above: a scanner reads the branch body, and a call to trackMraidReadiness(mraid)
+    // there is not the mraid.addEventListener("ready", ...) it is looking for.
+    var mraid = window.mraid;
+    if (mraid && typeof mraid.getState === "function") {
+      try {
+        if (mraid.getState() === "loading") {
+          // Still loading: subscribe to "ready" and initialize nothing until it fires.
+          if (typeof mraid.addEventListener === "function") {
+            mraid.addEventListener("ready", function () { mraidIsReady = true; });
+            mraidReadyListenerAttached = true;
+          }
+        }
+      } catch (e) {
+        // Some non-standard containers throw; getState() stays the primary check.
+      }
+    }
+  })();
+</script>`
+
+// The initialization gate, emitted AFTER the runtime bundle (which publishes PA_START).
+// This is the "wait for mraid ready before initialization" contract in the exact shape
+// validators look for — and it is the real thing: with PA_MRAID_GATE set, the bundle does
+// not start the creative on its own.
+export const MRAID_BOOT = `<script>
+  // MRAID v2.0: do not initialize the creative until the container is ready.
+  (function () {
+    var started = false;
+    function startCreative() {
+      if (started) return;
+      started = true;
+      // PA_MRAID_WAITED tells the runtime the ready wait already happened out here, so it
+      // registers the MRAID lifecycle listeners instead of waiting a second time.
+      window.PA_MRAID_WAITED = true;
+      if (typeof window.PA_START === "function") window.PA_START();
+    }
+
+    var mraid = window.mraid;
+    // No container (plain browser, QA preview): nothing to wait for.
+    if (!mraid || typeof mraid.getState !== "function") { startCreative(); return; }
+
+    // The AppLovin readiness guard. Written as this exact statement — the literal
+    // identifier, the literal call, the literal state, and the ready subscription inside
+    // the branch — because network validators static-scan for it; the same check behind a
+    // helper, a local variable or a shared wait function reads as missing and gets the
+    // creative rejected. The repetition in the catch is deliberate for that reason.
+    try {
+      if (mraid.getState() === "loading") {
+        // Still loading: the ready event is the only legal signal to start on.
+        if (typeof mraid.addEventListener === "function") {
+          mraid.addEventListener("ready", startCreative);
+        }
+        // Backstop so a container that never fires ready cannot leave a blank ad.
+        window.setTimeout(startCreative, 2500);
+      } else {
+        // Past loading (default / expanded): safe to initialize now.
+        startCreative();
+      }
+    } catch (e) {
+      // State unreadable — treat it as loading: same wait, same backstop.
+      try {
+        if (typeof mraid.addEventListener === "function") {
+          mraid.addEventListener("ready", startCreative);
+        }
+      } catch (e2) {
+        // Container refused the listener; the backstop below still starts the creative.
+      }
+      window.setTimeout(startCreative, 2500);
+    }
+  })();
+</script>`
+
 export function buildBaseHtml(project: Project, assets: AssetMap, runtimeSrc = staticRuntimeSrc): string {
   // Set background color statically so the html canvas background is correct
   // before JS runs — prevents white flash / edge bleed in Chromium/AppLovin WebViews.
@@ -545,6 +713,7 @@ export function buildBaseHtml(project: Project, assets: AssetMap, runtimeSrc = s
   return (
     `<!doctype html><html lang="en"><head><meta charset="utf-8">` +
     `<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">` +
+    MRAID_HEAD +
     // Title is always the brand (Client) name; fall back to the MIP name, then a generic label.
     `<title>${esc(project.meta.client || project.meta.name || 'playable')}</title>` +
     // user-select guards mirror the runtime base styles: without them, a drag that
@@ -554,7 +723,9 @@ export function buildBaseHtml(project: Project, assets: AssetMap, runtimeSrc = s
     `user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;}</style>` +
     `</head><body>` +
     `<script>window.PA_PROJECT=${esc(JSON.stringify(project))};window.PA_ASSETS=${esc(JSON.stringify(assets))};</script>` +
-    `<script>${stripSourceMap(runtimeSrc)}</script></body></html>`
+    `<script>${stripSourceMap(runtimeSrc)}</script>` +
+    MRAID_BOOT +
+    `</body></html>`
   )
 }
 
@@ -563,7 +734,8 @@ function injectHead(html: string, tag: string): string {
 }
 export function transformForNetwork(base: string, net: Network): string {
   let html = base
-  if (net.injectMraid) html = injectHead(html, '<script src="mraid.js"></script>')
+  // No mraid.js here: the bridge + readiness guard are in the base shell for every
+  // network now (MRAID_HEAD), so injecting per-network would duplicate the tag.
   if (net.injectExitApi) html = injectHead(html, '<script src="exitapi.js"></script>')
   if (net.vungleFlag) html = injectHead(html, '<script>window.__VUNGLE__=true;</script>')
   if (net.onloadGameReady) html = html.replace('<body>', '<body onload="gameReady()">')

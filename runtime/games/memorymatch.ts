@@ -16,6 +16,10 @@
 // The tracker row shows one symbol per pair: a custom "unlit" image (or the pair
 // image, dimmed) swapped for a custom "lit" image (or the pair image, full) when
 // matched. Its edge (top/bottom), size, spacing and x/y offset are all params.
+// It is entirely OPTIONAL — tracker:'off' builds no row, reserves no band (the
+// grid takes the full height) and hides every symbol control in the editor, for
+// a plain memory match with no symbols outside the cards. The win condition is
+// unchanged: all pairs matched, leftovers then sweep off the board.
 //
 // SFX: 'flip' plays on every player flip; 'correct'/'wrong' on resolve.
 //
@@ -810,6 +814,10 @@ export function createMemoryMatch(): GameModule {
   }
 }
 
+/** The tracker row is fully optional ('off' = a plain memory match, no symbols
+ * anywhere but the cards). Its styling controls only make sense while it's on. */
+const trackerOn = (p: Record<string, unknown>): boolean => p.tracker !== 'off'
+
 export const MEMORYMATCH_TEMPLATE: GameTemplate = {
   id: 'memorymatch',
   label: 'Memory match (pairs vanish + symbol tracker)',
@@ -840,22 +848,26 @@ export const MEMORYMATCH_TEMPLATE: GameTemplate = {
     { key: 'flipGlow', label: 'Flipped card glow', type: 'select', options: ['on', 'off'] },
     { key: 'flipGlowColor', label: 'Glow colour', type: 'color' },
     { key: 'tracker', label: 'Symbol tracker', type: 'select', options: ['top', 'bottom', 'off'] },
-    { key: 'trackerSize', label: 'Symbol size (px)', type: 'number', min: 10, max: 120, step: 1 },
+    // Everything below is tracker-only: with the tracker off it has no effect, so
+    // the editor hides it (values are kept — switching the tracker back on
+    // restores the whole symbol setup untouched). `trackerScales` is the one
+    // exception: it also drives per-pair CARD art size via 'match-tracker'.
+    { key: 'trackerSize', label: 'Symbol size (px)', type: 'number', min: 10, max: 120, step: 1, showIf: trackerOn },
     { key: 'trackerScales', label: 'Per-symbol scales (e.g. 1, 0.8, 1.2)', type: 'text' },
-    { key: 'trackerDx', label: 'Per-symbol X offsets (px)', type: 'text' },
-    { key: 'trackerUnlit', label: 'Unlit style', type: 'select', options: ['image', 'dimmed-lit'] },
-    { key: 'trackerUnlitOpacity', label: 'Unlit opacity (dimmed-lit)', type: 'number', min: 0.05, max: 1, step: 0.05 },
-    { key: 'trackerGap', label: 'Symbol spacing (px)', type: 'number', min: 0, max: 80, step: 1 },
-    { key: 'trackerShiftX', label: 'Symbols shift X (px)', type: 'number', min: -400, max: 400, step: 1 },
-    { key: 'trackerShiftY', label: 'Symbols shift Y (px)', type: 'number', min: -400, max: 400, step: 1 },
+    { key: 'trackerDx', label: 'Per-symbol X offsets (px)', type: 'text', showIf: trackerOn },
+    { key: 'trackerUnlit', label: 'Unlit style', type: 'select', options: ['image', 'dimmed-lit'], showIf: trackerOn },
+    { key: 'trackerUnlitOpacity', label: 'Unlit opacity (dimmed-lit)', type: 'number', min: 0.05, max: 1, step: 0.05, showIf: trackerOn },
+    { key: 'trackerGap', label: 'Symbol spacing (px)', type: 'number', min: 0, max: 80, step: 1, showIf: trackerOn },
+    { key: 'trackerShiftX', label: 'Symbols shift X (px)', type: 'number', min: -400, max: 400, step: 1, showIf: trackerOn },
+    { key: 'trackerShiftY', label: 'Symbols shift Y (px)', type: 'number', min: -400, max: 400, step: 1, showIf: trackerOn },
   ],
   assetSlots: [
     { key: 'images', label: 'Pair image', list: true, countParam: 'pairs' },
     { key: 'cover', label: 'Card cover A (shared)' },
     { key: 'cover2', label: 'Card cover B (pattern, optional)' },
     { key: 'face', label: 'Flipped card background (shared)' },
-    { key: 'symbolsUnlit', label: 'Tracker symbol — unlit', list: true, countParam: 'pairs' },
-    { key: 'symbolsLit', label: 'Tracker symbol — lit', list: true, countParam: 'pairs' },
+    { key: 'symbolsUnlit', label: 'Tracker symbol — unlit', list: true, countParam: 'pairs', showIf: trackerOn },
+    { key: 'symbolsLit', label: 'Tracker symbol — lit', list: true, countParam: 'pairs', showIf: trackerOn },
     { key: 'handImage', label: 'Hint hand image (optional)' },
   ],
   defaultParams: {

@@ -10,22 +10,37 @@
 //                 the positional layout.
 //   content       the <img> / text / button.
 
-import type { Anchor, AnimSpec, Scene, SceneElement, SceneOverlay } from './scene'
+import type { Anchor, AnimSpec, Scene, SceneElement, SceneOverlay, SfxBinding } from './scene'
 import type { AssetEntry, AssetMap, RuntimeCtx } from './types'
+import { cssFontFamily } from './font'
 import { designH, designW as baseDesignW, isLandscape, scale, sx, sy, viewH } from './responsive'
-import { composeElementAnim, composeGameWinAnim, composeTapAnim, entranceLeadDelayMs, entranceTriggers, exitCss, injectAnimStyles, lightraySpec, phaseFrameCss, phaseLeadDelayMs, phaseTotalMs } from './anim'
+import {
+  composeElementAnim,
+  composeGameWinAnim,
+  composeTapAnim,
+  composeThoughtEventAnim,
+  entranceLeadDelayMs,
+  entranceTriggers,
+  exitCss,
+  injectAnimStyles,
+  lightraySpec,
+  phaseFrameCss,
+  phaseLeadDelayMs,
+  phaseTotalMs,
+} from './anim'
 import { applyImageCrop, createContainerContent, createImageContent, styleContainer } from './elements/image'
 import { applyBarFill, createBarContent } from './elements/bar'
 import { createTextContent } from './elements/text'
 import { createCtaContent } from './elements/cta'
 import { createButtonContent, wireSceneNav } from './elements/button'
 import { createChoiceContent } from './elements/choice'
+import { elementHintPoint, holdPress, tapPress } from './hint'
 import { localize, localizeElement } from './i18n'
 import { getPicks, isPicked, togglePick } from './selection'
-import { createEndsceneContent, updateEndsceneMedia } from './elements/endscene'
+import { createEndsceneContent, updateEndsceneMedia, htmlEndsceneMediaEl, mediaNaturalSize } from './elements/endscene'
 import { applyUnboxingImages, createUnboxingContent } from './elements/unboxing'
 import { createConfetti, createConfettiContent, type ConfettiController } from './elements/confetti'
-import { computeDeadline, formatCountdown, needsTicker } from './elements/countdown'
+import { computeDeadline, formatCountdown, formatTickerIntervalMs, needsTicker } from './elements/countdown'
 import { createGameHost, type GameHost } from './gameHost'
 import { mulberry32 } from './games/types'
 import { attachScratchCover } from './reveal'
@@ -75,7 +90,9 @@ function startIdleBehavior(rec: Rec, root: HTMLElement): { stop(): void } {
   const scheduleShow = (): void => {
     window.clearTimeout(idleTimer)
     if (reappearOnIdle) {
-      idleTimer = window.setTimeout(() => { if (!interacting) show() }, idleMs)
+      idleTimer = window.setTimeout(() => {
+        if (!interacting) show()
+      }, idleMs)
     }
   }
 
@@ -117,7 +134,7 @@ function startIdleBehavior(rec: Rec, root: HTMLElement): { stop(): void } {
         rec.anim.style.transition = ''
         rec.anim.style.opacity = ''
       }
-    }
+    },
   }
 }
 
@@ -133,9 +150,11 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
   // Waypoints (design px). 'slide' uses the configured nodes (or legacy toX/toY);
   // 'smart' targets the CTA/game; 'tap' stays in place (no waypoints).
   let pts: { x: number; y: number; pauseMs?: number }[] = []
-  let kind: 'tap' | 'slide' | 'scratch' | 'match' | 'brush' | 'still' = 'tap'
+  let kind: 'tap' | 'slide' | 'scratch' | 'match' | 'thoughtwhack' | 'brush' | 'still' | 'hold' = 'tap'
   if (cfg.mode === 'still') {
     kind = 'still'
+  } else if (cfg.mode === 'hold') {
+    kind = 'hold'
   } else if (cfg.mode === 'slide') {
     if (cfg.nodes && cfg.nodes.length) pts = cfg.nodes.filter((p) => p && p.x != null && p.y != null)
     else if (cfg.toX != null && cfg.toY != null) pts = [{ x: cfg.toX, y: cfg.toY }]
@@ -150,10 +169,13 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     kind = 'scratch'
   } else if (cfg.mode === 'match') {
     kind = 'match'
+  } else if (cfg.mode === 'thoughtwhack') {
+    kind = 'thoughtwhack'
   } else if (cfg.mode === 'brush') {
     kind = 'brush'
   }
-  const travel = cfg.periodMs && cfg.periodMs > 0 ? cfg.periodMs : kind === 'scratch' ? 600 : kind === 'slide' ? 1500 : 900
+  // A hold has to read as a HOLD, so its default cycle is longer than a tap's.
+  const travel = cfg.periodMs && cfg.periodMs > 0 ? cfg.periodMs : kind === 'scratch' ? 600 : kind === 'slide' ? 1500 : kind === 'hold' ? 2000 : 900
   const cubic = (t: number): number => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
   const EASE: Record<string, (t: number) => number> = {
     linear: (t) => t,
@@ -285,7 +307,10 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
       let bestCov = -1
       for (const el of root.querySelectorAll<HTMLElement>('[data-scratch-cell]:not([data-won])')) {
         const cov = parseFloat(el.dataset.scratchCov ?? '0') || 0
-        if (cov > bestCov) { bestCov = cov; cellEl = el }
+        if (cov > bestCov) {
+          bestCov = cov
+          cellEl = el
+        }
       }
       if (cellEl) {
         const cellRect = cellEl.getBoundingClientRect()
@@ -320,11 +345,28 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
         // and tap with a hover-and-dip — the hand floats slightly above the spot
         // and dips down to touch it (a scale-only pulse read as "pushing").
         const phase = ((now - t0) % travel) / travel
-        const dip = phase < 0.55 ? Math.sin((phase / 0.55) * Math.PI) : 0
+        const dip = tapPress(phase)
         ox = cardRect.left + cardRect.width / 2 - (guideRect.left + guideRect.width * 0.22)
         oy = cardRect.top + cardRect.height * 0.85 - guideRect.height * 0.28 * (1 - dip) - (guideRect.top + guideRect.height * 0.12)
         press = dip
       }
+    } else if (kind === 'thoughtwhack') {
+      // Follow the first visible, unwhacked thought. Query every frame so the
+      // editable handguide retargets immediately after a whack or respawn.
+      const thoughtEl = root.querySelector<HTMLElement>('[data-tw-state="active"] [data-tw-thought]')
+      if (!thoughtEl) {
+        content.style.opacity = '0'
+        raf = requestAnimationFrame(frame)
+        return
+      }
+      content.style.opacity = '1'
+      const point = elementHintPoint(thoughtEl, 0.65)
+      const guideRect = rec.outer.getBoundingClientRect()
+      const phase = ((now - t0) % travel) / travel
+      const dip = tapPress(phase)
+      ox = point.x - (guideRect.left + guideRect.width * 0.22)
+      oy = point.y - guideRect.height * 0.28 * (1 - dip) - (guideRect.top + guideRect.height * 0.12)
+      press = dip
     } else if (kind === 'slide') {
       const c = (now - t0) % total
       let rem = c
@@ -352,6 +394,12 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
       // Slide MOVES only — no press dip. The scale-down read as the hand zooming in
       // at the start of every loop, which fought the sense of it travelling a path.
       // (The other modes keep their dip: it is the whole point of a tap.)
+    } else if (kind === 'hold') {
+      // Press and STAY pressed: down over the first 10% of the cycle, held for the
+      // next 65%, lifted over the following 15%, then a beat off the surface before
+      // it goes again. A tap's in-and-out dip reads as "tap here"; this reads as
+      // "and keep holding".
+      press = holdPress(((now - t0) % travel) / travel)
     } else {
       const phase = ((now - t0) % travel) / travel
       press = phase < 0.5 ? Math.sin(phase * Math.PI) : 0
@@ -388,7 +436,9 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
   const scheduleShow = (): void => {
     window.clearTimeout(idleTimer)
     if (reappearOnIdle) {
-      idleTimer = window.setTimeout(() => { if (!interacting) show() }, idleMs)
+      idleTimer = window.setTimeout(() => {
+        if (!interacting) show()
+      }, idleMs)
     }
   }
   const onInteractStart = (): void => {
@@ -442,7 +492,8 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
 }
 
 // ---------------------------------------------------------------------------
-// Countdown ticker: rewrites the inner text once a second from the deadline.
+// Countdown ticker: rewrites the inner text at the precision requested by its
+// format (10ms for two-digit {ms}; otherwise once a second).
 // ---------------------------------------------------------------------------
 function tickCountdown(rec: Rec): void {
   const inner = rec.content?.firstElementChild as HTMLElement | null
@@ -460,7 +511,10 @@ function startTicker(rec: Rec): void {
   rec.deadline = computeDeadline(rec.el, Date.now())
   tickCountdown(rec)
   // a pure date label ({date}/{d}) doesn't change second-to-second — render once.
-  if (needsTicker(rec.el)) rec.ticker = window.setInterval(() => tickCountdown(rec), 1000)
+  if (needsTicker(rec.el)) {
+    const intervalMs = formatTickerIntervalMs(rec.el.countdown?.format || '') || 1000
+    rec.ticker = window.setInterval(() => tickCountdown(rec), intervalMs)
+  }
 }
 
 interface Effective {
@@ -558,6 +612,14 @@ html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;overscroll-b
   document.head.appendChild(style)
 }
 
+function setPageBackground(background: string): void {
+  // Export shell sets html/body background with !important before runtime boot.
+  // Runtime scene/endcard fills must carry the same priority or AppLovin's
+  // physical edge gap keeps showing the shell canvas during compositor settles.
+  document.body.style.setProperty('background', background, 'important')
+  document.documentElement.style.setProperty('background', background, 'important')
+}
+
 // ---------------------------------------------------------------------------
 // Anchor -> translate(%) so (x,y) maps to the chosen point of the box.
 // ---------------------------------------------------------------------------
@@ -650,6 +712,11 @@ function runTap(rec: Rec): void {
   if (css !== 'none') restartAnim(rec.anim, css)
 }
 
+function runThoughtEvent(rec: Rec, event: 'thoughtSpawn' | 'thoughtWhack'): void {
+  const css = composeThoughtEventAnim(rec.el, event)
+  if (css !== 'none') restartAnim(rec.anim, css)
+}
+
 // ---------------------------------------------------------------------------
 // Typewriter reveal (see TypingConfig in scene.ts).
 // ---------------------------------------------------------------------------
@@ -665,9 +732,10 @@ const phaseTypingSpec = (el: SceneElement, phase: 'entrance' | 'exit' | 'gameWin
   (phase === 'gameWin'
     ? [
         el.animations?.gameWin ?? (el.animations?.entrance?.trigger === 'onGameWin' ? el.animations.entrance : undefined),
-        ...(((el.animations?.gameWinExtra ?? (el.animations?.entrance?.trigger === 'onGameWin' ? el.animations?.entranceExtra : undefined)) ?? []) as AnimSpec[]),
+        ...((el.animations?.gameWinExtra ?? (el.animations?.entrance?.trigger === 'onGameWin' ? el.animations?.entranceExtra : undefined) ?? []) as AnimSpec[]),
       ]
-    : [el.animations?.[phase], ...((el.animations?.[(phase + 'Extra') as 'entranceExtra' | 'exitExtra'] ?? []) as AnimSpec[])])
+    : [el.animations?.[phase], ...((el.animations?.[(phase + 'Extra') as 'entranceExtra' | 'exitExtra'] ?? []) as AnimSpec[])]
+  )
     .filter((s): s is AnimSpec => !!s)
     .find((s) => s.preset === 'typewriter')
 const phaseTypingConfig = (el: SceneElement, phase: 'entrance' | 'exit' | 'gameWin'): NonNullable<SceneElement['typing']> | null => {
@@ -728,18 +796,24 @@ function startTyping(rec: Rec, fromMs = 0, cfg = rec.el.typing): void {
         paintTyped(rec)
         return
       }
-      rec.typeTimer = window.setTimeout(() => {
-        t = 0
-        tick()
-      }, Math.max(0, cfg.holdMs ?? 1500))
+      rec.typeTimer = window.setTimeout(
+        () => {
+          t = 0
+          tick()
+        },
+        Math.max(0, cfg.holdMs ?? 1500),
+      )
       return
     }
     // Advance to exactly the next character boundary so slow speeds don't burn frames.
     const nextAt = delay + (shown + 1) * step
-    rec.typeTimer = window.setTimeout(() => {
-      t = nextAt
-      tick()
-    }, Math.max(16, nextAt - t))
+    rec.typeTimer = window.setTimeout(
+      () => {
+        t = nextAt
+        tick()
+      },
+      Math.max(16, nextAt - t),
+    )
   }
   tick()
 }
@@ -777,10 +851,13 @@ function startTypingOut(rec: Rec, fromMs = 0): void {
       return
     }
     const nextAt = delay + (removed + 1) * step
-    rec.typeTimer = window.setTimeout(() => {
-      t = nextAt
-      tick()
-    }, Math.max(16, nextAt - t))
+    rec.typeTimer = window.setTimeout(
+      () => {
+        t = nextAt
+        tick()
+      },
+      Math.max(16, nextAt - t),
+    )
   }
   tick()
 }
@@ -896,16 +973,13 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     if (!bleedEl) {
       bleedEl = document.createElement('div')
       bleedEl.className = 'pa-bleed'
-      bleedEl.style.cssText =
-        'position:fixed;left:50%;top:50%;width:300vmax;height:300vmax;' +
-        'transform:translate(-50%,-50%);pointer-events:none;z-index:0;'
+      bleedEl.style.cssText = 'position:fixed;left:50%;top:50%;width:300vmax;height:300vmax;' + 'transform:translate(-50%,-50%);pointer-events:none;z-index:0;'
       mount.insertBefore(bleedEl, mount.firstChild)
     }
     bleedEl.style.background = sceneBgCss(scene.meta.bgMatchColor, scene.meta.bgMatchColor2)
     // Belt-and-suspenders: also set body/html so even if bleedEl somehow gets
     // removed, the gap shows the scene colour instead of black.
-    document.body.style.background = scene.meta.bgMatchColor || '#000'
-    document.documentElement.style.background = scene.meta.bgMatchColor || '#000'
+    setPageBackground(scene.meta.bgMatchColor || '#000')
   }
 
   const root = document.createElement('div')
@@ -961,9 +1035,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       const ovDiv = document.createElement('div')
       ovDiv.className = 'pa-scene-overlay'
       ovDiv.style.cssText =
-        `position:absolute;left:50%;top:50%;width:300vmax;height:300vmax;` +
-        `transform:translate(-50%,-50%);pointer-events:none;z-index:0;` +
-        `background:${overlayFillCss(ov)};`
+        `position:absolute;left:50%;top:50%;width:300vmax;height:300vmax;` + `transform:translate(-50%,-50%);pointer-events:none;z-index:0;` + `background:${overlayFillCss(ov)};`
       if (blur > 0) {
         const s = ovDiv.style as MaskableStyle
         s.backdropFilter = `blur(${blur}px)`
@@ -999,10 +1071,18 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     // An image marked as a button (el.button) is interactive by definition, and so
     // is one with an on-tap animation — it can't react to a tap it never receives.
     const nonInteractive =
-      el.type !== 'cta' && el.type !== 'choice' && el.type !== 'button' &&
-      el.type !== 'game-mount' && el.type !== 'endscene' &&
-      el.type !== 'unboxing' && el.type !== 'bar' &&
-      el.type !== 'dim' && !el.scratch && !el.reveal && !el.button && !hasTapAnim(el)
+      el.type !== 'cta' &&
+      el.type !== 'choice' &&
+      el.type !== 'button' &&
+      el.type !== 'game-mount' &&
+      el.type !== 'endscene' &&
+      el.type !== 'unboxing' &&
+      el.type !== 'bar' &&
+      el.type !== 'dim' &&
+      !el.scratch &&
+      !el.reveal &&
+      !el.button &&
+      !hasTapAnim(el)
     if (nonInteractive) {
       outer.style.pointerEvents = 'none'
       anim.style.pointerEvents = 'none'
@@ -1077,6 +1157,14 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
   // entrance's own delay so staggered elements each pop with their sound in sync with the
   // visual (delay 0 = element has no entrance → fires immediately). Used for staggered pop-ins.
   const enterSfxTimers: number[] = []
+  const emitBoundSfx = (binding: SfxBinding): void => {
+    if ((binding.delayMs ?? 0) > 0) emit('sfx-asset', binding.assetId, binding.volume ?? 1, binding.delayMs)
+    else emit('sfx-asset', binding.assetId, binding.volume ?? 1)
+  }
+  const emitBoundSfxLoopStart = (binding: SfxBinding): void => {
+    if ((binding.delayMs ?? 0) > 0) emit('sfx-asset-loop-start', binding.assetId, binding.volume ?? 1, binding.delayMs)
+    else emit('sfx-asset-loop-start', binding.assetId, binding.volume ?? 1)
+  }
   const GAME_WIN_SFX_BIAS_MS = 500
   const gameWinSoundDelayMs = (rec?: Rec): number => {
     const phaseDelay = rec ? phaseLeadDelayMs(rec.el, 'gameWin') : 0
@@ -1086,8 +1174,24 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     const binds = (rec.el.sfx ?? []).filter((b) => b.event === 'elementEnter' && b.assetId)
     if (!binds.length) return
     const delay = phase === 'gameWin' ? phaseLeadDelayMs(rec.el, 'gameWin') : entranceLeadDelayMs(rec.el)
-    for (const b of binds)
-      enterSfxTimers.push(window.setTimeout(() => emit('sfx-asset', b.assetId, b.volume ?? 1), delay))
+    for (const b of binds) enterSfxTimers.push(window.setTimeout(() => emitBoundSfx(b), delay))
+  }
+
+  // Thought Whacker broadcasts these events through the game SFX channel. Replay
+  // the matching authored animation and sound on EVERY visible scene element, so
+  // supporting copy/art/CTAs can react without being children of the game mount.
+  const fireThoughtEvent = (event: 'thoughtSpawn' | 'thoughtWhack'): void => {
+    for (const target of recs) {
+      if (target.el.hidden) continue
+      const phase = event
+      if (target.el.animations?.[phase] || target.el.animations?.[`${phase}Extra`]?.length) runThoughtEvent(target, event)
+      const delay = phaseLeadDelayMs(target.el, phase)
+      for (const binding of target.el.sfx ?? []) {
+        if (binding.event !== event || !binding.assetId) continue
+        if (delay > 0) enterSfxTimers.push(window.setTimeout(() => emitBoundSfx(binding), delay))
+        else emitBoundSfx(binding)
+      }
+    }
   }
 
   // ---- scene timeline: element in/out windows -------------------------------
@@ -1301,8 +1405,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
         continue
       }
       setTimedVisible(rec, true)
-      const phase: 'entrance' | 'exit' | null =
-        ms < w.inMs + entMs ? 'entrance' : w.outMs !== Infinity && ms >= w.outMs ? 'exit' : null
+      const phase: 'entrance' | 'exit' | null = ms < w.inMs + entMs ? 'entrance' : w.outMs !== Infinity && ms >= w.outMs ? 'exit' : null
       if (phase === 'exit' && exitTyping) freezeTypingOut(rec, ms - w.outMs)
       else if (entranceTyping) freezeTyping(rec, ms - w.inMs) // scrub through the type-out
       if (!phase) {
@@ -1323,12 +1426,15 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       rec.outer.classList.remove('pa-el--t-off')
       rec.anim.style.animationPlayState = ''
       applyMountAnim(rec)
-      if ((rec.el.typing || phaseTypingConfig(rec.el, 'entrance') || phaseTypingConfig(rec.el, 'exit')) && rec.typeShown != null)
-        stopTyping(rec, true) // back to the full string for editing
+      if ((rec.el.typing || phaseTypingConfig(rec.el, 'entrance') || phaseTypingConfig(rec.el, 'exit')) && rec.typeShown != null) stopTyping(rec, true) // back to the full string for editing
     }
   }
   const onEndsceneMediaReset = (): void => {
     if (timelinePreview?.playing) armTimeline(0)
+    // Elements riding the endscene's media crop (endsceneMediaPos) were positioned
+    // against whatever was measurable at the time — a clip that has only just
+    // reported its size, or resized itself, moves them.
+    for (const rec of recs) if (rec.el.type === 'image') layoutRec(rec)
   }
   root.addEventListener('pa-endscene-media-reset', onEndsceneMediaReset)
 
@@ -1349,9 +1455,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
         winSfxDelay = Math.min(winSfxDelay, phaseLeadDelayMs(rec.el, 'gameWin'))
       }
     }
-    for (const rec of recs)
-      if (rec.el.type === 'confetti' && rec.confetti && (rec.el.confetti?.trigger ?? 'sceneEnter') === 'onGameWin')
-        rec.confetti.start()
+    for (const rec of recs) if (rec.el.type === 'confetti' && rec.confetti && (rec.el.confetti?.trigger ?? 'sceneEnter') === 'onGameWin') rec.confetti.start()
     const playWinSfx = (): void => emit('sfx', 'gameWin') // central win sound (every game template)
     const delayedBy = (Number.isFinite(winSfxDelay) ? Math.max(0, winSfxDelay) : 0) + GAME_WIN_SFX_BIAS_MS
     if (delayedBy > 0) enterSfxTimers.push(window.setTimeout(playWinSfx, delayedBy))
@@ -1400,7 +1504,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
             params: rec.el.game?.params ?? {},
             assets: ctx.assets,
             interactive,
-            hintIdleMs: rec.el.game?.hintIdleMs ?? 4000,
+            hintIdleMs: rec.el.game?.hintIdleMs,
             elementId: rec.el.id,
             navigate: (id) => emit('scene-goto', id),
             // An editable handguide element in the scene replaces the coded hint hand.
@@ -1411,13 +1515,17 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
               // Win SFX is timed centrally in revealOnWin so it can line up with the
               // dedicated "On game won" animation phase instead of firing early here.
               if (event === 'gameWin') return
+              if (event === 'thoughtSpawn' || event === 'thoughtWhack') {
+                fireThoughtEvent(event)
+                return
+              }
               const bind = (rec.el.sfx ?? []).find((b) => b.event === event && b.assetId)
-              if (bind) emit('sfx-asset', bind.assetId, bind.volume ?? 1)
+              if (bind) emitBoundSfx(bind)
               else emit('sfx', event)
             },
             sfxLoopStart: (event) => {
               const bind = (rec.el.sfx ?? []).find((b) => b.event === 'whileScratching' && b.assetId)
-              if (bind) emit('sfx-asset-loop-start', bind.assetId, bind.volume ?? 1)
+              if (bind) emitBoundSfxLoopStart(bind)
               else emit('sfx-loop-start', event)
             },
             sfxLoopStop: (event) => {
@@ -1426,9 +1534,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
               else emit('sfx-loop-stop', event)
             },
             onWin: () => {
-              for (const b of rec.el.sfx ?? [])
-                if (b.event === 'onReveal' && b.assetId)
-                  enterSfxTimers.push(window.setTimeout(() => emit('sfx-asset', b.assetId, b.volume ?? 1), gameWinSoundDelayMs(rec)))
+              for (const b of rec.el.sfx ?? []) if (b.event === 'onReveal' && b.assetId) enterSfxTimers.push(window.setTimeout(() => emitBoundSfx(b), gameWinSoundDelayMs(rec)))
             },
             onComplete: () => {
               stageEmit('game-win')
@@ -1449,7 +1555,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
             rec.confetti.renderStatic()
           }
         }
-        
+
         if (interactive && rec.el.idle && !rec.idle && rec.el.type !== 'handguide') {
           rec.idle = startIdleBehavior(rec, root)
         }
@@ -1566,8 +1672,10 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
               const h = ctr(it)
               home.set(it, h)
               const s = itemSlot.get(it)
-              if (s) { const c = ctr(s); setOff(it, c.x - h.x, c.y - h.y, false) }
-              else setOff(it, 0, 0, false)
+              if (s) {
+                const c = ctr(s)
+                setOff(it, c.x - h.x, c.y - h.y, false)
+              } else setOff(it, 0, 0, false)
             }
           })
           for (const it of items) {
@@ -1591,9 +1699,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
                 it.outer.removeEventListener('pointerup', up)
                 it.outer.style.zIndex = String(it.el.zIndex)
                 const g = groupOf(it)
-                const target = slots.find(
-                  (s) => groupOf(s) === g && !slotItem.get(s) && (!s.el.slot?.key || s.el.slot.key === it.el.drag?.key) && inside(u.clientX, u.clientY, s),
-                )
+                const target = slots.find((s) => groupOf(s) === g && !slotItem.get(s) && (!s.el.slot?.key || s.el.slot.key === it.el.drag?.key) && inside(u.clientX, u.clientY, s))
                 if (target) {
                   const c = ctr(target)
                   const h = home.get(it) ?? c
@@ -1763,8 +1869,9 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       if (interactive && !sfxWired) {
         sfxWired = true
         for (const rec of recs)
-          if (!rec.el.hidden) // skip showOnWin elements — their sceneEnter would fire before they're visible
-            for (const b of rec.el.sfx ?? []) if (b.event === 'sceneEnter' && b.assetId) emit('sfx-asset', b.assetId, b.volume ?? 1)
+          if (!rec.el.hidden)
+            // skip showOnWin elements — their sceneEnter would fire before they're visible
+            for (const b of rec.el.sfx ?? []) if (b.event === 'sceneEnter' && b.assetId) emitBoundSfx(b)
         const tapRecs = recs.filter((r) => r.el.sfx?.some((b) => b.event === 'tap' && b.assetId))
         if (tapRecs.length) {
           root.addEventListener(
@@ -1775,8 +1882,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
               for (const r of tapRecs) {
                 if (r.el.hidden) continue
                 const rect = r.outer.getBoundingClientRect()
-                if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom)
-                  for (const b of r.el.sfx ?? []) if (b.event === 'tap' && b.assetId) emit('sfx-asset', b.assetId, b.volume ?? 1)
+                if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) for (const b of r.el.sfx ?? []) if (b.event === 'tap' && b.assetId) emitBoundSfx(b)
               }
             },
             { capture: true },
@@ -1835,8 +1941,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       root.style.background = sceneBgCss(nextScene.meta.bgMatchColor, nextScene.meta.bgMatchColor2)
       root.style.setProperty('--pa-bg', nextScene.meta.bgMatchColor || '#000000')
       if (bleedEl) bleedEl.style.background = sceneBgCss(nextScene.meta.bgMatchColor, nextScene.meta.bgMatchColor2)
-      document.body.style.background = nextScene.meta.bgMatchColor || '#000'
-      document.documentElement.style.background = nextScene.meta.bgMatchColor || '#000'
+      setPageBackground(nextScene.meta.bgMatchColor || '#000')
       // re-apply built-in overlay so opacity/color/blur edits are live in the editor
       const existingOv = root.querySelector<HTMLDivElement>('.pa-scene-overlay')
       const nextOv = nextScene.overlay
@@ -2042,7 +2147,7 @@ function effective(el: SceneElement): Effective {
     anchor: o?.anchor ?? el.anchor,
     zIndex: o?.zIndex ?? el.zIndex,
     mode: o?.mode ?? el.mode,
-    hidden: (o?.hidden ?? el.hidden) ?? false,
+    hidden: o?.hidden ?? el.hidden ?? false,
     rotation: el.rotation ?? 0,
     opacity: el.opacity,
   }
@@ -2063,7 +2168,7 @@ function layoutRec(rec: Rec): void {
   const floatedImmune = !outer.closest('.pa-root') && !!outer.closest('.pa-stage')
   // overlayTop is a higher immune tier (z:10050) that floats above ordinary
   // "above overlays" elements (z:10000); keep it in sync with scenes.ts.
-  outer.style.zIndex = floatedImmune ? (rec.el.overlayTop ? '10050' : '10000') : (rec.el.type === 'handguide' && rec.hg ? '99999' : String(e.zIndex))
+  outer.style.zIndex = floatedImmune ? (rec.el.overlayTop ? '10050' : '10000') : rec.el.type === 'handguide' && rec.hg ? '99999' : String(e.zIndex)
   // CTA is always immune; other elements opt in via overlayImmune / overlayTop (top tier).
   outer.classList.toggle('pa-el--immune', rec.el.type === 'cta' || !!rec.el.overlayImmune || !!rec.el.overlayTop)
   outer.classList.toggle('pa-el--immune-top', !!rec.el.overlayTop)
@@ -2224,16 +2329,7 @@ function applyBackdropBlur(rec: Rec): void {
   style.webkitMaskImage = mask
 }
 
-function applyBox(
-  outer: HTMLDivElement,
-  px: number,
-  py: number,
-  w: number,
-  h: number,
-  tx: number,
-  ty: number,
-  rotation: number,
-): void {
+function applyBox(outer: HTMLDivElement, px: number, py: number, w: number, h: number, tx: number, ty: number, rotation: number): void {
   outer.style.left = round(px) + 'px'
   outer.style.top = round(py) + 'px'
   outer.style.width = w + 'px'
@@ -2260,7 +2356,7 @@ function layoutAsset(rec: Rec, e: Effective, mode: 'fit' | 'extend'): void {
     // translateZ(0) forces a GPU compositing layer for blurred elements — without it,
     // AppLovin's Chromium WebView shows white bleeding edges around filter:blur().
     const gpu = rec.el.blur ? ' translateZ(0)' : ''
-    outer.style.transform = e.rotation ? `rotate(${e.rotation}deg)${gpu}` : (gpu.trim() || 'none')
+    outer.style.transform = e.rotation ? `rotate(${e.rotation}deg)${gpu}` : gpu.trim() || 'none'
     // Clip blur so it never bleeds outside the element's rect in Chromium WebViews.
     outer.style.overflow = rec.el.blur ? 'hidden' : ''
 
@@ -2286,8 +2382,7 @@ function layoutAsset(rec: Rec, e: Effective, mode: 'fit' | 'extend'): void {
     // the edge — otherwise a relayout (AppLovin fires one as its WebView settles to the true
     // size) recomputes the extension with bar.color and the header detaches from the top again.
     const barBgColor = (rec.el.assetId ? edgeColor : undefined) ?? rec.el.bar?.color ?? paBg
-    const isBarDiv = (rec.el.type === 'bar' || rec.el.type === 'image') && !rec.el.blur
-      && rec.content instanceof HTMLDivElement
+    const isBarDiv = (rec.el.type === 'bar' || rec.el.type === 'image') && !rec.el.blur && rec.content instanceof HTMLDivElement
     // BLEED: for top-pinned/letterbox bars, switch to position:fixed so the bar can
     // extend BEYOND the CSS viewport into the physical screen gap that AppLovin's WebView
     // leaves at the edges. position:fixed bypasses pa-root's overflow:hidden so BLEED px
@@ -2334,11 +2429,9 @@ function layoutAsset(rec: Rec, e: Effective, mode: 'fit' | 'extend'): void {
       // composites the GPU layer against the body bg) shows bar color — invisible against
       // the bar itself. Only apply in the game scene (pa-root directly in pa-stage), not
       // in float/overlay mode where body bg is owned by the game scene below.
-      const isGameScene = (outer.closest<HTMLElement>('.pa-root')?.parentElement
-        ?.classList.contains('pa-stage')) ?? false
+      const isGameScene = outer.closest<HTMLElement>('.pa-root')?.parentElement?.classList.contains('pa-stage') ?? false
       if (isGameScene) {
-        document.body.style.background = barBgColor
-        document.documentElement.style.background = barBgColor
+        setPageBackground(barBgColor)
       }
     } else if (pin === 'bottom') {
       outer.style.position = 'fixed'
@@ -2347,7 +2440,7 @@ function layoutAsset(rec: Rec, e: Effective, mode: 'fit' | 'extend'): void {
       outer.style.height = h + 'px'
       outer.style.left = '0'
       outer.style.width = '100%'
-      
+
       // translateZ(0) forces a GPU compositing layer to avoid clip issues
       const inImmune = !outer.closest('.pa-root') && !!outer.closest('.pa-stage')
       if (!inImmune) {
@@ -2369,14 +2462,17 @@ function layoutAsset(rec: Rec, e: Effective, mode: 'fit' | 'extend'): void {
     }
     // Clear backgroundColor override when not extending (e.g. landscape flip with no letterbox).
     if (!pin && !autoTop && isBarDiv) {
-      (rec.content as HTMLDivElement).style.backgroundColor = ''
+      ;(rec.content as HTMLDivElement).style.backgroundColor = ''
     }
     return
   }
 
   // FIT
-  let px = sx(e.x)
-  let py = sy(e.y)
+  // An image over an endscene follows the card's media crop instead (see
+  // endsceneMediaPos); everything else is plain design-space FIT.
+  const onEndscene = rec.el.type === 'image' ? endsceneMediaPos(rec, e) : null
+  let px = onEndscene ? onEndscene.left : sx(e.x)
+  let py = onEndscene ? onEndscene.top : sy(e.y)
 
   if (rec.el.relativeToBasketBar) {
     // The design is anchored to the top (offY=0), so any extra vertical screen space
@@ -2386,14 +2482,15 @@ function layoutAsset(rec: Rec, e: Effective, mode: 'fit' | 'extend'): void {
     const bottomGap = viewH() - designH() * s
     if (bottomGap > 0) py += bottomGap
   }
+  const k = onEndscene ? onEndscene.k : s
   let w: number
   let h: number
   if (e.w != null && e.h != null) {
-    w = e.w * s
-    h = e.h * s
+    w = e.w * k
+    h = e.h * k
   } else {
-    w = a.w * e.scale * s
-    h = a.h * e.scale * s
+    w = a.w * e.scale * k
+    h = a.h * e.scale * k
   }
   const [tx, ty] = ANCHOR[e.anchor]
   applyBox(outer, px, py, w, h, tx, ty, e.rotation)
@@ -2521,42 +2618,59 @@ function attachedTextPos(rec: Rec, e: Effective): { left: number; top: number; k
   }
 }
 
+// `html` opts the caller into HTML-mode endscenes, whose media is the card's own
+// clip inside the iframe (see htmlEndsceneMediaEl). 'live' additionally measures
+// that clip's rendered box instead of trusting `rect`: cards size the clip
+// themselves, so only the reference (design-frame) pass may assume it fills the
+// frame. 'off' keeps the historical behaviour — HTML cards have no media rect.
 function attachedTargetMediaRect(
   target: Rec,
   rect: Pick<DOMRect, 'left' | 'top' | 'width' | 'height'>,
+  html: 'off' | 'reference' | 'live' = 'off',
 ): { left: number; top: number; width: number; height: number } | null {
   if (target.el.type !== 'endscene' || !(target.content instanceof HTMLElement)) return null
   const d = target.content.dataset
   const landscape = isLandscape()
-  const mediaEl = target.content.querySelector<HTMLVideoElement | HTMLImageElement>(
-    landscape ? '.pa-endscene-video,.pa-endscene-img' : '.pa-endscene-video,.pa-endscene-img',
-  )
+  const isHtml = d.mode === 'html'
+  if (isHtml && html === 'off') return null
+  const htmlEl = isHtml ? htmlEndsceneMediaEl(target.content) : null
+  if (isHtml && !htmlEl) return null
+  const mediaEl =
+    htmlEl ?? target.content.querySelector<HTMLVideoElement | HTMLImageElement>(landscape ? '.pa-endscene-video,.pa-endscene-img' : '.pa-endscene-video,.pa-endscene-img')
   const dataW = parseFloat((landscape ? d.mediaWL : d.mediaWP) || '')
   const dataH = parseFloat((landscape ? d.mediaHL : d.mediaHP) || '')
-  const naturalW =
-    mediaEl instanceof HTMLVideoElement && mediaEl.videoWidth > 0 ? mediaEl.videoWidth :
-    mediaEl instanceof HTMLImageElement && mediaEl.naturalWidth > 0 ? mediaEl.naturalWidth :
-    dataW
-  const naturalH =
-    mediaEl instanceof HTMLVideoElement && mediaEl.videoHeight > 0 ? mediaEl.videoHeight :
-    mediaEl instanceof HTMLImageElement && mediaEl.naturalHeight > 0 ? mediaEl.naturalHeight :
-    dataH
+  const nat = mediaNaturalSize(mediaEl)
+  const naturalW = nat.w > 0 ? nat.w : dataW
+  const naturalH = nat.h > 0 ? nat.h : dataH
   if (!(naturalW > 0) || !(naturalH > 0)) return null
+  // An HTML card owns its clip's box, so measure it rather than assuming it fills
+  // the endscene element. (The design-frame pass has nothing to measure and keeps
+  // `rect`, which is what the card does at the unclipped design aspect.)
+  const box = (isHtml && html === 'live' ? htmlMediaBox(target, htmlEl!) : null) ?? rect
   const fullH = landscape ? d.fhL === '1' : d.fhP === '1'
   const zoom = parseFloat((landscape ? d.zoomL : d.zoomP) || '1') || 1
   if (fullH) {
-    const h = rect.height * zoom
+    const h = box.height * zoom
     const w = h * (naturalW / naturalH)
-    return { left: rect.left + (rect.width - w) / 2, top: rect.top + (rect.height - h) / 2, width: w, height: h }
+    return { left: box.left + (box.width - w) / 2, top: box.top + (box.height - h) / 2, width: w, height: h }
   }
   const fit = (landscape ? d.fitL : d.fitP) || 'cover'
-  const base = fit === 'contain'
-    ? Math.min(rect.width / naturalW, rect.height / naturalH)
-    : Math.max(rect.width / naturalW, rect.height / naturalH)
+  const base = fit === 'contain' ? Math.min(box.width / naturalW, box.height / naturalH) : Math.max(box.width / naturalW, box.height / naturalH)
   const k = base * zoom
   const w = naturalW * k
   const h = naturalH * k
-  return { left: rect.left + (rect.width - w) / 2, top: rect.top + (rect.height - h) / 2, width: w, height: h }
+  return { left: box.left + (box.width - w) / 2, top: box.top + (box.height - h) / 2, width: w, height: h }
+}
+
+// The rendered box of an HTML card's clip, in page coordinates. The clip's own rect
+// is iframe-local; the iframe is never scaled, so offsetting by its rect is enough.
+function htmlMediaBox(target: Rec, mediaEl: HTMLElement): { left: number; top: number; width: number; height: number } | null {
+  const iframe = target.content instanceof HTMLElement ? target.content.querySelector<HTMLIFrameElement>('.pa-endscene-iframe') : null
+  if (!iframe) return null
+  const f = iframe.getBoundingClientRect()
+  const m = mediaEl.getBoundingClientRect()
+  if (!(m.width > 0) || !(m.height > 0)) return null
+  return { left: f.left + m.left, top: f.top + m.top, width: m.width, height: m.height }
 }
 
 function autoEndsceneTarget(rec: Rec, root: Element): Rec | undefined {
@@ -2577,6 +2691,7 @@ function autoEndsceneTarget(rec: Rec, root: Element): Rec | undefined {
 function autoEndsceneReferenceRect(
   target: Rec,
   e: Effective,
+  html: 'off' | 'reference' = 'off',
 ): { normalLeft: number; normalTop: number; fitScale: number; width: number; height: number; media: { left: number; top: number; width: number; height: number } } | null {
   const designW = baseDesignW()
   const designHpx = designH()
@@ -2584,7 +2699,7 @@ function autoEndsceneReferenceRect(
   const refH = isLandscape() ? designW : designHpx
   const fitScale = Math.min(refW / designW, refH / designHpx)
   const offX = (refW - designW * fitScale) / 2
-  const media = attachedTargetMediaRect(target, { left: 0, top: 0, width: refW, height: refH })
+  const media = attachedTargetMediaRect(target, { left: 0, top: 0, width: refW, height: refH }, html)
   if (!media || !(media.width > 0) || !(media.height > 0)) return null
   return {
     normalLeft: offX + e.x * fitScale,
@@ -2593,6 +2708,45 @@ function autoEndsceneReferenceRect(
     width: refW,
     height: refH,
     media,
+  }
+}
+
+// An image drawn ON TOP of a full-screen endscene has to ride the endscene's MEDIA
+// box, not the global FIT box. The media is cover-cropped to the viewport and the
+// card positions its own overlays against that crop, so plain sx/sy layout drifts
+// away from the text the image was designed to sit beside the moment the viewport
+// aspect stops matching the design — on a landscape tablet a badge authored next to
+// the card's last line ended up alone near the bottom of the screen, at the wrong
+// size, because the FIT box is a narrow letterboxed column there while the card
+// fills the width.
+//
+// The image's design x/y is mapped to a fraction of the media box AS IT WOULD
+// RENDER AT THE DESIGN FRAME (autoEndsceneReferenceRect — the frame the position
+// was authored in), then re-applied to the live media box; `k` carries the same
+// ratio into the draw size, so the image tracks the card's own overlay scale.
+// Returns null when there is no endscene underneath or its media is not measurable
+// yet (→ plain FIT).
+function endsceneMediaPos(rec: Rec, e: Effective): { left: number; top: number; k: number } | null {
+  const root = rec.outer.parentElement
+  if (!root) return null
+  const target = autoEndsceneTarget(rec, root)
+  if (!target) return null
+  // Element order in a scene is arbitrary — make sure the endscene's geometry is
+  // current for this pass before measuring it.
+  layoutRec(target)
+  if (effective(target.el).hidden) return null
+  const tRect = target.outer.getBoundingClientRect()
+  if (tRect.width < 1 || tRect.height < 1) return null
+  const media = attachedTargetMediaRect(target, tRect, 'live')
+  const ref = autoEndsceneReferenceRect(target, e, 'reference')
+  if (!media || !ref || !(media.width > 0) || !(media.height > 0)) return null
+  const rootRect = root.getBoundingClientRect()
+  const nx = (ref.normalLeft - ref.media.left) / ref.media.width
+  const ny = (ref.normalTop - ref.media.top) / ref.media.height
+  return {
+    left: media.left - rootRect.left + nx * media.width,
+    top: media.top - rootRect.top + ny * media.height,
+    k: ref.fitScale * (media.height / ref.media.height),
   }
 }
 
@@ -2616,7 +2770,7 @@ function layoutText(rec: Rec, e: Effective): void {
   // otherwise a resize (or a countdown tick) during the type-out would finish it early.
   const fullText = rec.el.type === 'countdown' ? formatCountdown(rec.el, rec.deadline ?? Date.now(), Date.now()) : localize(t)
   inner.textContent = rec.typeShown != null ? fullText.slice(0, rec.typeShown) : fullText
-  inner.style.fontFamily = t.fontFamily ?? ''
+  inner.style.fontFamily = cssFontFamily(t.fontFamily)
   inner.style.fontWeight = String(t.fontWeight ?? 400)
   inner.style.color = t.color ?? '#fff'
   inner.style.textAlign = t.align ?? 'center'
@@ -2736,7 +2890,8 @@ function layoutBackground(rec: Rec): void {
 // source here so a rotation swaps the clip without a rebuild.
 function layoutEndscene(rec: Rec, e: Effective): void {
   const outer = rec.outer
-  if (e.mode === 'extend') {
+  const fullScreen = e.mode === 'extend'
+  if (fullScreen) {
     // Edge gaps on AppLovin are covered by the pa-bleed element (outside pa-root).
     outer.style.position = ''
     outer.style.left = '0'
@@ -2756,7 +2911,18 @@ function layoutEndscene(rec: Rec, e: Effective): void {
     const [tx, ty] = ANCHOR[e.anchor]
     applyBox(outer, px, py, w, h, tx, ty, e.rotation)
   }
-  if (rec.content) updateEndsceneMedia(rec.content, isLandscape())
+  if (rec.content) {
+    updateEndsceneMedia(rec.content, isLandscape())
+    const fill = rec.content.style.background
+    const root = outer.closest<HTMLElement>('.pa-root')
+    const mount = root?.parentElement
+    const ownsStageBg = !!root && root.style.background !== 'transparent'
+    if (fullScreen && ownsStageBg && fill && fill !== 'transparent') {
+      const bleed = mount?.querySelector<HTMLElement>('.pa-bleed')
+      if (bleed) bleed.style.background = fill
+      setPageBackground(fill)
+    }
+  }
 }
 
 // AppLovin-safe dim — ported from coinsort EndCard.show(): an oversized,

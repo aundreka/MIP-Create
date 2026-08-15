@@ -6,8 +6,13 @@
 // All pixel calculations use offsetWidth/offsetHeight/offsetLeft/offsetTop (design-space)
 // instead of getBoundingClientRect (screen-space) so the mechanic is zoom/scale invariant.
 
-import type { SceneElement, UnboxPiece, UnboxingConfig } from '../scene'
+import type { SceneElement, SfxBinding, UnboxPiece, UnboxingConfig } from '../scene'
 import type { RuntimeCtx } from '../types'
+
+function emitBoundSfx(ctx: RuntimeCtx, binding: SfxBinding): void {
+  if ((binding.delayMs ?? 0) > 0) ctx.emit('sfx-asset', binding.assetId, binding.volume ?? 1, binding.delayMs)
+  else ctx.emit('sfx-asset', binding.assetId, binding.volume ?? 1)
+}
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
@@ -207,7 +212,7 @@ export function createUnboxingContent(el: SceneElement, ctx: RuntimeCtx): HTMLDi
     // SFX fires immediately so lose feedback isn't confused with the next click
     for (const b of el.sfx ?? []) {
       if (!b.assetId) continue
-      if (b.event === 'onReveal' || b.event === 'onLose') ctx.emit('sfx-asset', b.assetId, b.volume ?? 1)
+      if (b.event === 'onReveal' || b.event === 'onLose') emitBoundSfx(ctx, b)
     }
     ctx.emit('sfx', 'gameLose')
 
@@ -246,7 +251,7 @@ export function createUnboxingContent(el: SceneElement, ctx: RuntimeCtx): HTMLDi
 
     for (const b of el.sfx ?? []) {
       if (!b.assetId) continue
-      if (b.event === 'onReveal' || b.event === 'onWin') ctx.emit('sfx-asset', b.assetId, b.volume ?? 1)
+      if (b.event === 'onReveal' || b.event === 'onWin') emitBoundSfx(ctx, b)
     }
 
     const parentW = flyEl.offsetWidth

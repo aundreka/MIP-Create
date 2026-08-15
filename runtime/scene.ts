@@ -8,16 +8,7 @@
 
 export type LayoutMode = 'fit' | 'extend'
 
-export type Anchor =
-  | 'center'
-  | 'top'
-  | 'bottom'
-  | 'left'
-  | 'right'
-  | 'top-left'
-  | 'top-right'
-  | 'bottom-left'
-  | 'bottom-right'
+export type Anchor = 'center' | 'top' | 'bottom' | 'left' | 'right' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
 
 export type ElementType =
   | 'background'
@@ -106,6 +97,11 @@ export interface ElementAnimations {
   // pointer events; it never swallows the tap, so a scene tap-advance or a button
   // navigation on the same element still fires.
   tap?: AnimSpec
+  // Replayed when a Thought Whacker game in the same scene emits its two
+  // gameplay events. These can be authored on ANY scene element, not only the
+  // game mount, so copy/images/CTAs can react to each spawn and successful hit.
+  thoughtSpawn?: AnimSpec
+  thoughtWhack?: AnimSpec
   // Additional specs stacked ON TOP of the primary one in each phase, played together with it
   // (e.g. entrance = pop + shine). Empty/absent = just the primary. The primary must exist for
   // extras to apply; extras share the primary entrance's trigger.
@@ -114,6 +110,8 @@ export interface ElementAnimations {
   exitExtra?: AnimSpec[]
   gameWinExtra?: AnimSpec[]
   tapExtra?: AnimSpec[]
+  thoughtSpawnExtra?: AnimSpec[]
+  thoughtWhackExtra?: AnimSpec[]
 }
 
 /**
@@ -167,6 +165,8 @@ export interface SfxBinding {
   event: string
   assetId: string
   volume?: number
+  /** Wait after the trigger before playback. Absent/0 plays immediately. */
+  delayMs?: number
 }
 
 // ---- scratch-to-reveal -----------------------------------------------------
@@ -218,8 +218,8 @@ export interface TextConfig {
 export type CtaPulsePreset = 'calm' | 'medium' | 'strong' | 'custom'
 export interface CtaConfig {
   pulse: CtaPulsePreset
-  pulseScale?: number      // peak scale factor (e.g. 1.06 = 6% bigger); default from preset
-  pulseMinScale?: number   // base/min scale factor (e.g. 0.96 = squish); default 1.0
+  pulseScale?: number // peak scale factor (e.g. 1.06 = 6% bigger); default from preset
+  pulseMinScale?: number // base/min scale factor (e.g. 0.96 = squish); default 1.0
   pulseDurationMs?: number // full cycle duration ms; default from preset
   customPulse?: KeyframeStep[]
   clickUrlOverride?: string
@@ -297,7 +297,7 @@ export interface EndsceneConfig {
   muteUntilInteraction?: boolean
   ctaElementId?: string
   // --- html mode ---
-  htmlId?: string          // portrait HTML asset
+  htmlId?: string // portrait HTML asset
   htmlLandscapeId?: string // landscape HTML asset (falls back to portrait)
   // Background color override injected as CSS into the iframe so custom gradients
   // can be applied without modifying the HTML asset itself.
@@ -328,7 +328,8 @@ export interface BoxStyle {
 // A live countdown / dynamic date. 'timer' counts down `seconds` from load;
 // 'date' counts to a fixed `targetIso`; 'dynamic' targets (now + dynamicDays) so
 // the date auto-updates whenever the ad runs. `format` is a token string:
-// {d}{h}{m}{s} (raw) / {dd}{hh}{mm}{ss} (2-digit) / {date} (localized date) /
+// {d}{h}{m}{s} (raw) / {dd}{hh}{mm}{ss} (2-digit) / {ms} (hundredths, 00–99) /
+// {date} (localized date) /
 // date parts of the target date: {MMMM} July, {MMM} Jul, {M}/{MM} 7/07,
 // {D}/{DD} 12/12, {Do} 21st (ordinal day), {o} the bare suffix, {YYYY}/{YY} —
 // month names follow dateLocale; the ordinal suffix is English-only.
@@ -393,7 +394,9 @@ export interface HandguideConfig {
   // 'brush' points the hand at the scratch card's brush (appears only after the brush's intro).
   // 'still' places the hand and leaves it there — no motion of any kind (idle
   // show/hide still applies; it just never moves).
-  mode: 'smart' | 'tap' | 'slide' | 'scratch' | 'match' | 'brush' | 'still'
+  // 'hold' presses in place and STAYS pressed for most of the cycle before
+  // lifting — the press-and-hold gesture, as opposed to 'tap''s quick dip.
+  mode: 'smart' | 'tap' | 'slide' | 'scratch' | 'match' | 'thoughtwhack' | 'brush' | 'still' | 'hold'
   toX?: number
   toY?: number
   nodes?: HandguideNode[]
@@ -439,8 +442,8 @@ export interface ChoiceConfig {
 // Absent = legacy behaviour (image simply fills the box, no clipping).
 export interface ImageCropConfig {
   scale?: number // image width ÷ box width; default 1
-  x?: number     // image left as a fraction of box width; default 0
-  y?: number     // image top as a fraction of box height; default 0
+  x?: number // image left as a fraction of box width; default 0
+  y?: number // image top as a fraction of box height; default 0
 }
 
 // Turn an asset into a container: its shape (alpha) masks an inner image, which
@@ -488,49 +491,65 @@ export interface GenerateConfig {
 // x/y = center of piece as % of element dimensions. w = width as % of element width.
 export interface UnboxPiece {
   assetId?: string
-  x?: number          // center X % (default 50)
-  y?: number          // center Y % (default 50)
-  w?: number          // width % of element width (default 100)
-  rotation?: number   // initial rotation degrees (default 0)
+  x?: number // center X % (default 50)
+  y?: number // center Y % (default 50)
+  w?: number // width % of element width (default 100)
+  rotation?: number // initial rotation degrees (default 0)
   // Animation end state (used for the lid)
-  endX?: number; endY?: number
-  endRotation?: number; endScale?: number; endOpacity?: number
-  durationMs?: number; delayMs?: number
+  endX?: number
+  endY?: number
+  endRotation?: number
+  endScale?: number
+  endOpacity?: number
+  durationMs?: number
+  delayMs?: number
 }
 
 // Mystery-box grid: shows N identical closed boxes composed of back+front+lid.
 // Tap 1 → selected box flies to center (closed). Tap 2 → lid flies off, product rises.
 // Layer order: back (z1) < product (z2) < front (z3) < lid (z4).
 export interface UnboxingConfig {
-  cols?: number; rows?: number; colGap?: number; rowGap?: number
+  cols?: number
+  rows?: number
+  colGap?: number
+  rowGap?: number
   // Static container background
-  bgAssetId?: string; bgScale?: number; bgX?: number; bgY?: number
+  bgAssetId?: string
+  bgScale?: number
+  bgX?: number
+  bgY?: number
   // Box pieces — define the closed state shown in each grid cell
-  back?: UnboxPiece    // back face (static)
-  front?: UnboxPiece   // front face (static, always in front of product)
-  top?: UnboxPiece     // lid (flies off on reveal tap)
+  back?: UnboxPiece // back face (static)
+  front?: UnboxPiece // front face (static, always in front of product)
+  top?: UnboxPiece // lid (flies off on reveal tap)
   // Product revealed inside (rises from below on reveal tap)
-  winAssetId?: string; loseAssetId?: string
+  winAssetId?: string
+  loseAssetId?: string
   productStartX?: number // product start center X % (default same as productX)
   productStartY?: number // product start center Y % (default 120 = below element)
-  productX?: number      // product end center X % (default 50)
-  productY?: number      // product end center Y % (default 28)
-  productW?: number      // product width % (default 65)
+  productX?: number // product end center X % (default 50)
+  productY?: number // product end center Y % (default 28)
+  productW?: number // product width % (default 65)
   // Lose product overrides (fall back to win product values when unset)
-  loseProductX?: number; loseProductY?: number; loseProductW?: number
-  loseProductStartX?: number; loseProductStartY?: number
-  productDurationMs?: number; productDelayMs?: number
-  randomize?: boolean; winChance?: number
-  cells?: Array<'win' | 'lose'>  // explicit per-cell outcome; overrides randomize when set
+  loseProductX?: number
+  loseProductY?: number
+  loseProductW?: number
+  loseProductStartX?: number
+  loseProductStartY?: number
+  productDurationMs?: number
+  productDelayMs?: number
+  randomize?: boolean
+  winChance?: number
+  cells?: Array<'win' | 'lose'> // explicit per-cell outcome; overrides randomize when set
   // On reveal: swap another scene image element to a new asset
-  revealSyncElementId?: string  // ID of a scene image element to update on reveal
-  revealSyncAssetId?: string    // asset to swap it to
+  revealSyncElementId?: string // ID of a scene image element to update on reveal
+  revealSyncAssetId?: string // asset to swap it to
   // Timing
-  selectMs?: number    // fly-to-center ms (default 450)
-  centerSize?: number  // centered box width as % of element width (default 65)
-  centerX?: number     // centered box position X offset in design-px (default 0 = centered)
-  centerY?: number     // centered box position Y offset in design-px (default 0 = centered)
-  tapHintMs?: number   // brief lock after centering to prevent accidental double-tap (default 300)
+  selectMs?: number // fly-to-center ms (default 450)
+  centerSize?: number // centered box width as % of element width (default 65)
+  centerX?: number // centered box position X offset in design-px (default 0 = centered)
+  centerY?: number // centered box position Y offset in design-px (default 0 = centered)
+  tapHintMs?: number // brief lock after centering to prevent accidental double-tap (default 300)
 }
 
 // "Sync to project": marks an element as shared across every MIP in the project
@@ -655,6 +674,15 @@ export interface SceneElement {
   overlayImmune?: boolean // always rendered above in-game overlays (e.g. scratch-grid lose/win)
   overlayTop?: boolean // a HIGHER immune tier — floats above other "above overlays" elements
   hideOnOverlay?: boolean // hidden while a floating overlay (win/lose card) is up over this scene
+  // Carry this element ACROSS scene changes. It is built ONCE into a layer that sits
+  // above every scene root (and above floating overlays and cross-fades), so a scene
+  // transition never rebuilds it: a CTA keeps pulsing straight through the cut instead
+  // of restarting — and slides/fades don't take it off screen with the old scene.
+  // `persistScenes` limits where it shows (scene ids; unset/empty = every scene); it
+  // cross-fades in/out when the flow enters a scene that isn't on the list. The editor
+  // canvas ignores both flags and keeps drawing the element on its own scene.
+  persist?: boolean
+  persistScenes?: string[]
   groupId?: string // elements sharing a groupId select/move/scale together
   showOnWin?: boolean // revealed when the mounted game completes (endcard seed)
   showAfterInteraction?: boolean // revealed only after the user's first interaction (e.g. dragging the basket)
@@ -742,10 +770,15 @@ export interface HeaderConfig {
   suffix?: string
   // What the band displays. 'date' (default) renders today's date; 'countdown'
   // renders a live timer counting down from countdownSeconds after load, using
-  // the same {hh}/{mm}/{ss} tokens as the countdown element.
+  // the same {hh}/{mm}/{ss}/{ms} tokens as the countdown element. The timer freezes
+  // when the first scene where this header is visible reaches game-won state.
   mode?: 'date' | 'countdown'
-  countdownSeconds?: number // timer length in seconds (default 300)
-  countdownFormat?: string // token string, e.g. '{mm} {ss}' (default '{mm}:{ss}')
+  // What the countdown runs to. 'duration' (default) counts countdownSeconds down
+  // from load; 'midnight' counts to the start of the viewer's next local day, so a
+  // 5pm impression shows ~7 hours left and the timer reads as a real daily deadline.
+  countdownTarget?: 'duration' | 'midnight'
+  countdownSeconds?: number // timer length in seconds (default 300), starts on first interaction; 'duration' target only
+  countdownFormat?: string // e.g. '{ss}:{ms}' -> 06:99; defaults to '{mm}:{ss}' (or '{hh}:{mm}:{ss}' to midnight)
   // Custom layout for date mode, e.g. 'MMMM D, YYYY' → "July 15, 2026". Tokens
   // (bare or {braced}): MMMM full month, MMM short month, MM/M numeric month,
   // DD/D day, Do ordinal day (21st), YYYY/YY year. Empty → localized full date,
@@ -756,6 +789,9 @@ export interface HeaderConfig {
   // Case applied to the rendered date/timer. 'upper' is what turns "Jul" into "JUL" —
   // Intl hands back month names already title-cased, so 'title' is a no-op on them.
   textCase?: 'none' | 'title' | 'upper' | 'lower'
+  // Optional one-shot entrance for the whole header surface. It uses the same
+  // preset/duration/delay/easing shape as scene-element entrances.
+  entrance?: AnimSpec
 }
 
 export interface ProjectMeta {
@@ -853,9 +889,9 @@ export interface Transition {
 export type SceneKind = 'game' | 'overlay' | 'endscene'
 
 export interface SceneOverlay {
-  opacity?: number  // 0-1 dim strength
-  color?: string    // hex, default '#000000'
-  blurPx?: number   // backdrop-filter blur radius in px (blurs content behind the dim)
+  opacity?: number // 0-1 dim strength
+  color?: string // hex, default '#000000'
+  blurPx?: number // backdrop-filter blur radius in px (blurs content behind the dim)
   // Falloff for the backdrop blur (mirrors an element's Background-blur effect):
   //   'uniform' (default) — even blur across the whole screen;
   //   'progressive' — blur ramps along `blurDir` (linear-gradient mask);
@@ -878,7 +914,7 @@ export interface SceneDef {
   id: string
   name: string
   kind?: SceneKind
-  bgColor?: string  // per-scene gradient start: top (portrait) / left (landscape)
+  bgColor?: string // per-scene gradient start: top (portrait) / left (landscape)
   bgColor2?: string // per-scene gradient end: bottom (portrait) / right (landscape)
   overlay?: SceneOverlay // built-in full-screen dim/blur overlay (win/lose scenes)
   // Overlay scenes only: ALSO treat this scene as the MRAID end card. It still floats over

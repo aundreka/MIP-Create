@@ -11,6 +11,21 @@ import { importFont } from '../bridge'
 import { DATE_LOCALE_OPTIONS } from '../dateLocales'
 import { useEditLocale } from '../locale'
 import { localeEntry } from '../../runtime/i18n'
+import type { AnimPresetId, AnimSpec } from '../../runtime/scene'
+
+const HEADER_ENTRANCE_PRESETS: { value: AnimPresetId; label: string }[] = [
+  { value: 'fade', label: 'Fade' },
+  { value: 'pop', label: 'Pop' },
+  { value: 'slide-down', label: 'Slide down' },
+  { value: 'slide-up', label: 'Slide up' },
+  { value: 'slide-left', label: 'Slide left' },
+  { value: 'slide-right', label: 'Slide right' },
+  { value: 'wipe-right', label: 'Wipe right' },
+  { value: 'wipe-left', label: 'Wipe left' },
+  { value: 'wipe-up', label: 'Wipe up' },
+]
+
+const DEFAULT_HEADER_ENTRANCE: AnimSpec = { preset: 'fade', durationMs: 520, delayMs: 0, easing: 'ease-out' }
 
 export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): JSX.Element {
   const { project, assets } = useEditorState()
@@ -59,6 +74,7 @@ export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): 
     else delete headers[editLocale]
     patchMeta({ headerI18n: Object.keys(headers).length ? headers : undefined })
   }
+  const setEntrance = (patch: Partial<AnimSpec>): void => set({ entrance: { ...(h?.entrance ?? DEFAULT_HEADER_ENTRANCE), ...patch } })
 
   return createPortal(
     <div ref={ref} className="header-pop" style={{ top: pos.top, right: pos.right }} role="dialog" aria-label="Header">
@@ -90,22 +106,38 @@ export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): 
               />
             </Row>
             {h.mode === 'countdown' ? (
-              <div className="grid2">
-                <NumField
-                  label="Duration"
-                  value={h.countdownSeconds ?? 300}
-                  min={1}
-                  suffix="s"
-                  onChange={(n) => set({ countdownSeconds: n })}
-                />
-                <Row label="Format">
-                  <input
-                    value={h.countdownFormat ?? ''}
-                    placeholder="{mm}:{ss}"
-                    onChange={(e) => set({ countdownFormat: e.target.value || undefined })}
+              <>
+                <Row label="Counts to">
+                  <Select
+                    value={h.countdownTarget ?? 'duration'}
+                    options={[
+                      { value: 'duration', label: 'A fixed duration' },
+                      { value: 'midnight', label: 'Tonight at 12am' },
+                    ]}
+                    onChange={(v) => set({ countdownTarget: v === 'duration' ? undefined : v })}
                   />
                 </Row>
-              </div>
+                <div className="grid2">
+                  {/* Duration is meaningless when the deadline is midnight — the time
+                      left comes from the viewer's own clock. */}
+                  {h.countdownTarget !== 'midnight' && (
+                    <NumField
+                      label="Duration"
+                      value={h.countdownSeconds ?? 300}
+                      min={1}
+                      suffix="s"
+                      onChange={(n) => set({ countdownSeconds: n })}
+                    />
+                  )}
+                  <Row label="Format">
+                    <input
+                      value={h.countdownFormat ?? ''}
+                      placeholder={h.countdownTarget === 'midnight' ? '{hh}:{mm}:{ss}' : '{mm}:{ss}'}
+                      onChange={(e) => set({ countdownFormat: e.target.value || undefined })}
+                    />
+                  </Row>
+                </div>
+              </>
             ) : (
               <>
                 <Row label="Format">
@@ -207,9 +239,23 @@ export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): 
               <ColorField label="Background" value={h.bgColor || ''} onChange={(c) => set({ bgColor: c ?? undefined })} allowNone />
               <ColorField label="Text colour" value={h.color || '#ffffff'} onChange={(c) => set({ color: c ?? '#ffffff' })} />
             </div>
+            <Toggle label="Entrance animation" checked={!!h.entrance} onChange={(v) => set({ entrance: v ? DEFAULT_HEADER_ENTRANCE : undefined })} />
+            {h.entrance && (
+              <>
+                <Row label="Entrance preset">
+                  <Select value={h.entrance.preset} options={HEADER_ENTRANCE_PRESETS} onChange={(v) => setEntrance({ preset: v as AnimPresetId })} />
+                </Row>
+                <div className="grid2">
+                  <NumField label="Duration" value={h.entrance.durationMs} min={0} step={50} suffix="ms" onChange={(n) => setEntrance({ durationMs: n })} />
+                  <NumField label="Delay" value={h.entrance.delayMs} min={0} step={50} suffix="ms" onChange={(n) => setEntrance({ delayMs: n })} />
+                </div>
+              </>
+            )}
             <div className="hint pad">
               {h.mode === 'countdown'
-                ? 'Counts down from the duration when the ad loads. Format tokens: {hh} {mm} {ss} (padded) or {h} {m} {s}.'
+                ? h.countdownTarget === 'midnight'
+                  ? 'Counts down to the viewer’s next midnight — at 5pm it shows about 7 hours left. It freezes when the first scene carrying this header is won. Format tokens: {hh} {mm} {ss} (padded), {ms} (hundredths, 00–99), or {h} {m} {s}.'
+                  : 'Starts on the viewer’s first interaction and freezes when the first scene carrying this header is won. Use {ss}:{ms} for 06:99 (6.99 seconds). Other tokens: {hh} {mm} {ss} (padded) or {h} {m} {s}.'
                 : 'Shows the current date. Format tokens: {date}, MMMM (July), MMM (Jul), MM (07), M (7), DD (05), D (5), Do (5th), YYYY (2026), YY (26). Empty = localized full date, uppercased.'}{' '}
               Leave background as “none” for no band.
             </div>

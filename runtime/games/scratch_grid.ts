@@ -6,6 +6,7 @@
 import type { GameContext, GameModule, GameTemplate, HintMove } from './types'
 import { num, str } from './types'
 import { emit } from '../emitter'
+import { cssFontFamily } from '../font'
 import { scale } from '../responsive'
 import { braceBareTokens, renderCountdownFormat } from '../elements/countdown'
 
@@ -1309,7 +1310,7 @@ export function createScratchGrid(): GameModule {
             'pointer-events:none;white-space:pre-line;text-align:center;line-height:1.15;user-select:none;-webkit-user-select:none;'
           dateEl.style.color = dateColor
           dateEl.style.fontWeight = String(dateWeight)
-          if (dateFont) dateEl.style.fontFamily = dateFont
+          if (dateFont) dateEl.style.fontFamily = cssFontFamily(dateFont)
           revealDiv.appendChild(dateEl)
         }
         cellEl.appendChild(revealDiv)

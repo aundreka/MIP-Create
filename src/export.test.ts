@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { blurWarnings, buildBaseHtml, pruneAssets, stripSourceMap } from './export'
+import { blurWarnings, buildBaseHtml, NETWORKS, pruneAssets, stripSourceMap, transformForNetwork } from './export'
 import type { Project } from '../runtime/scene'
 import type { AssetMap } from '../runtime/types'
 
@@ -68,12 +68,77 @@ describe('source map stripping', () => {
     const html = buildBaseHtml(proj, {}, rt)
     expect(html).toContain('console.log(1);')
     expect(html).not.toContain('sourceMappingURL')
-    expect(html.length).toBeLessThan(3000)
+    // Measured against the same shell with a map-free runtime, so the bound tracks the
+    // stripped payload rather than the (MRAID head + gate) size of the shell itself.
+    expect(html.length).toBeLessThan(buildBaseHtml(proj, {}, 'console.log(1);').length + 50)
   })
 
   it('stripSourceMap leaves ordinary code untouched', () => {
     const js = 'const a = 1; // normal comment\nconst b = "sourceMappingURL in a string is fine"'
     expect(stripSourceMap(js)).toBe(js)
+  })
+
+  it('every export carries the MRAID bridge and the readiness guard', () => {
+    const html = buildBaseHtml(proj, {}, 'x')
+    expect(html).toContain('<script src="mraid.js"></script>')
+    expect(html).toContain('window.isMraidUsable')
+    // Guard must be in <head>, ahead of the runtime: containers can inject window.mraid
+    // asynchronously, so the 'ready' listener has to be armed before that lands.
+    expect(html.indexOf('isMraidUsable')).toBeLessThan(html.indexOf('</head>'))
+  })
+
+  it('holds initialization behind a literal ready gate that validators can see', () => {
+    const html = buildBaseHtml(proj, {}, '/*runtime*/')
+    // Written longhand on purpose: a minified equivalent reads as missing to the static
+    // scanners networks run ("mraid present but no ready-event / getState() guard").
+    expect(html).toMatch(/mraid\.addEventListener\("ready", startCreative\)/)
+    // The AppLovin readiness guard, spelled the way a scanner reads it: the literal
+    // identifier, the literal call, the literal state — and as the if statement itself,
+    // not a comparison stashed in a variable.
+    expect(html).toMatch(/if \(mraid\.getState\(\) === "loading"\)/)
+    // Armed in <head> too: "before initialization" has to be visible ahead of the bundle.
+    const head = html.slice(0, html.indexOf('</head>'))
+    expect(head).toMatch(/if \(mraid\.getState\(\) === "loading"\)/)
+    expect(head).toMatch(/mraid\.addEventListener\("ready"/)
+    // Every guard subscribes to ready inside its own branch — a scanner reads the branch
+    // body, and a call to a shared wait helper there is not the subscription it wants.
+    for (const m of html.matchAll(/if \(mraid\.getState\(\) === "loading"\) \{/g)) {
+      const branch = html.slice(m.index, m.index + 400)
+      expect(branch, branch.slice(0, 160)).toMatch(/mraid\.addEventListener\("ready"/)
+    }
+    // The gate is real: the bundle defers to PA_START because of PA_MRAID_GATE, and the
+    // gate runs AFTER the runtime that publishes PA_START.
+    expect(html).toContain('window.PA_MRAID_GATE = true')
+    expect(html).toContain('window.PA_START()')
+    expect(html.indexOf('/*runtime*/')).toBeLessThan(html.indexOf('window.PA_START()'))
+    expect(html.indexOf('PA_MRAID_GATE')).toBeLessThan(html.indexOf('/*runtime*/'))
+  })
+
+  it('ships a guarded clickout with the full click-macro chain in scannable source', () => {
+    const html = buildBaseHtml(proj, {}, 'x')
+    // mraid.open() only behind the readiness guard, and only inside try/catch.
+    expect(html).toMatch(/window\.isMraidUsable\(mraid\)/)
+    expect(html).toMatch(/mraid\.open\(clickTarget\)/)
+    const guard = html.indexOf('window.isMraidUsable(mraid)')
+    const open = html.indexOf('mraid.open(clickTarget)')
+    expect(guard).toBeGreaterThan(-1)
+    expect(guard).toBeLessThan(open)
+    expect(html.slice(guard, open)).toContain('try {')
+    // No network's click macro is universal, so all four ship, with a browser fallback.
+    for (const macro of ['clickTag', 'clickTag1', 'clickthrough', 'clickThrough']) {
+      expect(html).toContain('window.' + macro)
+    }
+    expect(html).toContain('window.open(clickTarget, "_blank", "noopener")')
+    // The guard is defined in <head>, ahead of the runtime that calls it.
+    expect(html.indexOf('window.PA_CLICKOUT')).toBeLessThan(html.indexOf('</head>'))
+  })
+
+  it('does not double-inject mraid.js on the MRAID networks', () => {
+    const base = buildBaseHtml(proj, {}, 'x')
+    for (const net of NETWORKS) {
+      const html = transformForNetwork(base, net)
+      expect(html.match(/src="mraid\.js"/g)?.length).toBe(1)
+    }
   })
 
   it('export shell carries the user-select guards (whole-screen selection bug)', () => {

@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createSfxManager } from './sfx'
 import { emit } from './emitter'
-import type { Project } from './scene'
+import type { Project, SceneElement } from './scene'
 import type { AssetMap } from './types'
 
 // Distinct payloads so a played element can be traced back to its binding.
@@ -102,6 +102,80 @@ describe('no audio before the first interaction', () => {
     // any play of its element is either the muted prime or already stopped.
     const sfxPlays = plays.filter((el) => el.src === SRC && !el.muted)
     expect(sfxPlays).toEqual([])
+    mgr.destroy()
+  })
+})
+
+describe('authored SFX delay', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  it('waits the configured time before playing a one-shot', () => {
+    const p = project()
+    p.sfx![0].delayMs = 350
+    const mgr = createSfxManager(p, assets(), document.body)
+    tap()
+    plays.length = 0
+
+    emit('sfx', 'tap')
+    vi.advanceTimersByTime(349)
+    expect(plays).toEqual([])
+    vi.advanceTimersByTime(1)
+    expect(plays.length).toBe(1)
+    mgr.destroy()
+  })
+
+  it('cancels delayed playback when the manager is destroyed', () => {
+    const p = project()
+    p.sfx![0].delayMs = 350
+    const mgr = createSfxManager(p, assets(), document.body)
+    tap()
+    plays.length = 0
+
+    emit('sfx', 'tap')
+    mgr.destroy()
+    vi.advanceTimersByTime(350)
+    expect(plays).toEqual([])
+  })
+
+  it('delays an element sound by the value sent with its binding', () => {
+    const p = project()
+    p.scenes[0].elements = [
+      {
+        id: 'game', type: 'game-mount', name: 'Game', x: 0, y: 0,
+        anchor: 'center', zIndex: 0, mode: 'fit',
+        sfx: [{ event: 'correct', assetId: 'a1', delayMs: 200 }],
+      } as SceneElement,
+    ]
+    const mgr = createSfxManager(p, assets(), document.body)
+    tap()
+    plays.length = 0
+
+    emit('sfx-asset', 'a1', 1, 200)
+    vi.advanceTimersByTime(199)
+    expect(plays).toEqual([])
+    vi.advanceTimersByTime(1)
+    expect(plays.length).toBe(1)
+    mgr.destroy()
+  })
+
+  it('does not start a delayed loop after its trigger has stopped', () => {
+    const p = project()
+    p.scenes[0].elements = [
+      {
+        id: 'game', type: 'game-mount', name: 'Game', x: 0, y: 0,
+        anchor: 'center', zIndex: 0, mode: 'fit',
+        sfx: [{ event: 'whileScratching', assetId: 'a1', delayMs: 200 }],
+      } as SceneElement,
+    ]
+    const mgr = createSfxManager(p, assets(), document.body)
+    tap()
+    plays.length = 0
+
+    emit('sfx-asset-loop-start', 'a1', 1, 200)
+    emit('sfx-asset-loop-stop', 'a1')
+    vi.advanceTimersByTime(200)
+    expect(plays).toEqual([])
     mgr.destroy()
   })
 })

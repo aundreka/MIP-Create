@@ -20,7 +20,7 @@ export interface GameHostOptions {
   params: Record<string, unknown>
   assets: AssetMap
   interactive: boolean
-  hintIdleMs: number
+  hintIdleMs?: number
   /** Show the built-in coded hint hand. False when an editable handguide element
    * provides the hint instead, so the two don't both appear. Defaults to true. */
   hint?: boolean
@@ -76,13 +76,21 @@ export function createGameHost(opts: GameHostOptions): GameHost | null {
       let inputActive = false
       const schedule = (): void => {
         window.clearTimeout(idle)
-        idle = window.setTimeout(() => {
-          if (destroyed || inputActive) return
-          const move = mod.getHint()
-          // The hand is drawn in screen px: multiply the game's own size hint by
-          // the stage scale so it shrinks/grows with the rest of the layout.
-          if (move) hand!.show(move.from, move.to, move.kind ?? 'slide', (move.scale ?? 1) * scale())
-        }, opts.hintIdleMs)
+        idle = window.setTimeout(
+          () => {
+            if (destroyed || inputActive) return
+            const move = mod.getHint()
+            // The hand is drawn in screen px: multiply the game's own size hint by
+            // the stage scale so it shrinks/grows with the rest of the layout.
+            if (move) {
+              const kind = move.kind ?? 'slide'
+              const fit = (move.scale ?? 1) * scale()
+              if (mod.getHintTarget) hand!.showTarget(() => mod.getHintTarget?.() ?? null, kind, fit, move.targetYRatio ?? 0.5)
+              else hand!.show(move.from, move.to, kind, fit)
+            }
+          },
+          opts.hintIdleMs ?? tpl.defaultHintIdleMs ?? 4000,
+        )
       }
       const onStart = (): void => {
         inputActive = true

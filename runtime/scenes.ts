@@ -11,7 +11,7 @@ import { createSfxManager, type SfxManager } from './sfx'
 import { mountHeader } from './header'
 import { preloadScratchCover } from './games/scratch'
 import { localizeHeader, localizeSceneDef } from './i18n'
-import type { Project, Scene, SceneDef, Transition } from './scene'
+import type { Project, Scene, SceneDef, SceneElement, Transition } from './scene'
 import type { AssetMap } from './types'
 
 export interface SceneManager {
@@ -58,6 +58,15 @@ function applyTransition(oldRoot: HTMLElement, newRoot: HTMLElement, t: Transiti
     newRoot.style.opacity = ''
     done()
   }, dur + 40)
+}
+
+// A tap on the CTA is a click-OUT, never a scene interaction: the CTA's own handler
+// already fires triggerCTA(). So a scene whose advance rule is "on tap" — and a coded
+// end card's tap-to-install surface — must ignore pointer events that started on it,
+// or tapping the CTA would ALSO advance the flow underneath the store opening.
+function fromCta(ev: Event): boolean {
+  const t = ev.target as Element | null
+  return !!(t && typeof t.closest === 'function' && t.closest('.pa-cta'))
 }
 
 export function playProject(
@@ -111,7 +120,7 @@ export function playProject(
   let current: { def: SceneDef; stage: StageHandle } | null = null
   let transitioning = false
   let advanceTimer = 0
-  let tapHandler: (() => void) | null = null
+  let tapHandler: ((ev: Event) => void) | null = null
   let unsubGameDone: (() => void) | null = null
   let unsubAdvance: (() => void) | null = null
   let unsubGoto: (() => void) | null = null
@@ -122,6 +131,10 @@ export function playProject(
   // post-win (win overlay / next scene / end card) and a reload must RESTART the ad,
   // not resume — so the resume record stays cleared until another game scene mounts.
   let gameWon = false
+  // The header belongs to the first scene in this play-through where it is allowed
+  // to appear. Only that scene's game win freezes its countdown; later games cannot
+  // change the already-finalized urgency value.
+  let headerGameWinSceneId: string | null = null
   // Does this scene contain something winnable? (game mount, unboxing, or scratch/reveal
   // cells — everything that can emit 'game-complete'.) Mounting one re-arms resume.
   const hasGame = (def: SceneDef): boolean =>
@@ -260,9 +273,104 @@ export function playProject(
     }
   }
 
+  // ---- carry-over layer ----------------------------------------------------
+  // Elements flagged `persist` (typically the CTA) are built ONCE into their own
+  // stage above every scene root, instead of once per scene. A transition then
+  // never tears them down: the CTA's pulse keeps its phase across the cut and the
+  // fade/slide moves only the scene behind it. They are stripped from the scene
+  // defs (see toScene / the overlay path) so nothing renders twice.
+  //
+  // z 12000 puts the layer above both immune tiers (10000 / 10050) AND above the
+  // redirect cover (11000) that coverRedirect fades the destination scene in at —
+  // so even a win-overlay → end-card redirect plays out underneath a CTA that
+  // never blinks.
+  const persistDefs: SceneElement[] = []
+  {
+    const seen = new Set<string>()
+    for (const s of project.scenes)
+      for (const e of s.elements) {
+        if (!e.persist) continue
+        const key = e.sync?.key ?? e.id // copies of one synced element are ONE carry-over
+        if (seen.has(key)) continue
+        seen.add(key)
+        persistDefs.push(e)
+      }
+  }
+  const stripPersist = (els: SceneElement[]): SceneElement[] =>
+    persistDefs.length ? els.filter((e) => !e.persist) : els
+
+  let persistLayer: HTMLDivElement | null = null
+  let persistStage: StageHandle | null = null
+  // Which carry-over elements take taps. Only interactive ones (anything wrapping a
+  // <button> — the CTA) do; static art stays click-through so the scene beneath still
+  // receives the tap that advances it.
+  const persistTappable = new Map<string, boolean>()
+  const persistHidden = new Set<string>()
+  // The opacity layoutRec computed for each carry-over element (locale / orientation
+  // overrides included), captured right after a layout pass — the value a fade-in
+  // must return to. Ours is written over it, so it can only be read before we do.
+  const persistOpacity = new Map<string, string>()
+  const showsOn = (el: SceneElement, sceneId: string): boolean =>
+    !el.persistScenes?.length || el.persistScenes.includes(sceneId)
+  // Re-lay out the layer and re-impose the carry-over state: layoutRec rewrites outer
+  // opacity from the element, undoing an in-progress fade-out on every resize.
+  const layoutPersist = (): void => {
+    if (!persistStage) return
+    persistStage.layoutAll()
+    for (const el of persistDefs) {
+      const rec = persistStage.get(el.id)
+      if (rec) persistOpacity.set(el.id, rec.outer.style.opacity)
+    }
+    applyPersistVis()
+  }
+  const applyPersistVis = (): void => {
+    if (!persistStage) return
+    for (const el of persistDefs) {
+      const rec = persistStage.get(el.id)
+      if (!rec) continue
+      const off = persistHidden.has(el.id)
+      rec.outer.style.transition = 'opacity 220ms ease'
+      rec.outer.style.opacity = off ? '0' : persistOpacity.get(el.id) ?? ''
+      rec.outer.style.pointerEvents = off || !persistTappable.get(el.id) ? 'none' : 'auto'
+    }
+  }
+  const syncPersist = (sceneId: string): void => {
+    if (!persistStage) return
+    persistHidden.clear()
+    for (const el of persistDefs) if (!showsOn(el, sceneId)) persistHidden.add(el.id)
+    applyPersistVis()
+  }
+  const buildPersist = (): void => {
+    if (!persistDefs.length) return
+    persistLayer = document.createElement('div')
+    persistLayer.style.cssText = 'position:absolute;inset:0;z-index:12000;pointer-events:none;'
+    container.appendChild(persistLayer)
+    // float:true keeps the stage's pa-root transparent and skips the bleed div (the
+    // scene below owns the background). buildScene localizes the elements itself.
+    persistStage = buildScene({ meta: project.meta, elements: persistDefs }, assets, { mount: persistLayer, float: true })
+    for (const el of persistDefs) {
+      const rec = persistStage.get(el.id)
+      if (rec) persistTappable.set(el.id, !!rec.outer.querySelector('button'))
+    }
+    layoutPersist()
+    // Wires the same per-element behaviour a scene would give them: tap animations,
+    // element SFX, idle show/hide. (There are no games up here.)
+    persistStage.startGames(opts.interactive)
+    if (opts.interactive) persistStage.playEntrances()
+  }
+  const destroyPersist = (): void => {
+    persistStage?.destroy()
+    persistLayer?.remove()
+    persistStage = null
+    persistLayer = null
+    persistTappable.clear()
+    persistHidden.clear()
+    persistOpacity.clear()
+  }
+
   const toScene = (def: SceneDef): Scene => ({
     meta: { ...project.meta, bgMatchColor: def.bgColor ?? project.meta.bgMatchColor },
-    elements: def.elements,
+    elements: stripPersist(def.elements),
     kind: def.kind,
     overlay: def.overlay,
     timelineMs: def.timelineMs,
@@ -309,7 +417,8 @@ export function playProject(
     notifyGameEnd()
     if (def.elements.some((e) => e.type === 'endscene')) return
     surface.style.cursor = 'pointer'
-    surface.addEventListener('pointerdown', () => {
+    surface.addEventListener('pointerdown', (ev) => {
+      if (fromCta(ev)) return // the CTA button fires its own click-out — don't double-trigger
       emit('sfx', 'ctaClick')
       notifyGameClose()
       triggerCTA()
@@ -318,10 +427,13 @@ export function playProject(
 
   const mountScene = (def: SceneDef): StageHandle => {
     const displayDef = localizeSceneDef(def)
-    header?.setVisible(headerAllowed(displayDef))
+    const showsHeader = headerAllowed(displayDef)
+    if (header && showsHeader && headerGameWinSceneId == null) headerGameWinSceneId = def.id
+    header?.setVisible(showsHeader)
     const stage = buildScene(toScene(displayDef), assets, { mount: container })
     stage.layoutAll()
     parkImmune(stage)
+    syncPersist(def.id) // carry-over elements follow the destination scene's allow-list
     stage.startGames(opts.interactive)
     if (opts.interactive) {
       // Remember where the player is: some containers (AppLovin) RELOAD the page
@@ -409,7 +521,8 @@ export function playProject(
     } else if (rule.on === 'timer') {
       advanceTimer = window.setTimeout(go, rule.delayMs ?? 2000)
     } else if (rule.on === 'tap') {
-      tapHandler = () => {
+      tapHandler = (ev) => {
+        if (fromCta(ev)) return // the CTA clicks out; it never counts as the scene's tap
         advanceTimer = window.setTimeout(go, rule.delayMs ?? 0)
       }
       container.addEventListener('pointerdown', tapHandler)
@@ -452,6 +565,7 @@ export function playProject(
     // armAdvance's one-shot subscription — so it fires no matter how the win happens.
     unsubWinPersist = on('game-complete', () => {
       gameWon = true
+      if (current?.def.id === headerGameWinSceneId) header?.freezeCountdown()
       try { window.sessionStorage.removeItem('pa:resume-scene') } catch { /* ignore */ }
     })
     unsubWinRoute = on('scene-goto-after-win', (id: string) => {
@@ -514,11 +628,13 @@ export function playProject(
       // too, or "hide on overlay" would silently do nothing for exactly the elements
       // that stay on top of the overlay. Only THIS scene's parked nodes, never the
       // overlay's own.
+      // Carry-over elements (persist layer) are a third home the class can live in.
       const parkedEls = parkedByStage.get(current.stage)?.els ?? []
       const hideEls = [
         ...new Set([
           ...gameRoot.querySelectorAll<HTMLElement>('.pa-el--hide-on-overlay'),
           ...parkedEls.filter((el) => el.classList.contains('pa-el--hide-on-overlay')),
+          ...(persistStage?.root.querySelectorAll<HTMLElement>('.pa-el--hide-on-overlay') ?? []),
         ]),
       ]
       const savedDisplay = hideEls.map((el) => el.style.display)
@@ -528,7 +644,11 @@ export function playProject(
       overlayDiv.style.cssText = 'position:absolute;inset:0;z-index:9000;pointer-events:all;'
       stageContainer.appendChild(overlayDiv)
 
-      const overScene: Scene = { meta: { ...project.meta, bgMatchColor: def.bgColor !== undefined ? def.bgColor : project.meta.bgMatchColor }, elements: def.elements, kind: def.kind, overlay: def.overlay }
+      // A floated overlay scene gets the same carry-over treatment as a mounted one:
+      // its own copies are stripped, and the persistent layer follows ITS allow-list
+      // for as long as it is up (restored to the underlying scene on dismiss).
+      syncPersist(def.id)
+      const overScene: Scene = { meta: { ...project.meta, bgMatchColor: def.bgColor !== undefined ? def.bgColor : project.meta.bgMatchColor }, elements: stripPersist(def.elements), kind: def.kind, overlay: def.overlay }
       const overStage = buildScene(overScene, assets, { mount: overlayDiv, float: true })
       overStage.layoutAll()
       overStage.startGames(true)
@@ -552,6 +672,7 @@ export function playProject(
         // Header follows whichever scene is current after the overlay closes: the game scene
         // on a plain dismiss, or the redirect destination (mountScene already set it; same value).
         if (current) header?.setVisible(headerAllowed(current.def))
+        if (current) syncPersist(current.def.id)
       }
       const removeOverlayDom = (): void => {
         overlayStages.delete(overStage)
@@ -631,6 +752,9 @@ export function playProject(
 
   const startDef = project.scenes.find((s) => s.id === (opts.startSceneId ?? project.startSceneId)) ?? project.scenes[0]
   if (startDef) {
+    // Built before the first scene mounts so mountScene's syncPersist has a stage to
+    // talk to — the layer then outlives every scene until destroy().
+    buildPersist()
     current = { def: startDef, stage: mountScene(startDef) }
     armAdvance(startDef)
   }
@@ -639,6 +763,7 @@ export function playProject(
     relayout() {
       header?.relayout()
       current?.stage.layoutAll() // re-lays out the floated immune bars (they live in current.stage)
+      layoutPersist() // the carry-over layer is responsive too (and keeps its fade state)
       for (const ov of overlayStages) ov.layoutAll() // keep floating win/lose overlays responsive
       // Re-sync each immune-bar cover to its (now re-laid-out) bar so the header backing tracks
       // the viewport on resize instead of keeping its mount-time size.
@@ -653,6 +778,8 @@ export function playProject(
       unparkInto(current.stage)
       current.stage.destroy()
       refreshHeader()
+      destroyPersist() // carry-over elements carry text/assets too — rebuild in the new locale
+      buildPersist()
       current = { def, stage: mountScene(def) }
       armAdvance(def)
     },
@@ -665,6 +792,7 @@ export function playProject(
       for (const ov of overlayStages) ov.destroy()
       overlayStages.clear()
       overlayCovers.clear() // cover divs are torn down with the container below
+      destroyPersist()
       sfx?.destroy()
       header?.destroy()
       current?.stage.destroy()

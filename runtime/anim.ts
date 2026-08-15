@@ -103,7 +103,9 @@ export function injectAnimStyles(): void {
 
 // ---- preset peak scales (the max scale at the 50% keyframe for each preset) -
 export const CTA_PULSE_PEAK: Record<'calm' | 'medium' | 'strong', number> = {
-  calm: 1.025, medium: 1.04, strong: 1.06,
+  calm: 1.025,
+  medium: 1.04,
+  strong: 1.06,
 }
 
 // ---- custom CTA pulse keyframe injection ------------------------------------
@@ -158,10 +160,16 @@ function keyframeName(spec: AnimSpec): string {
 function animationCss(spec: AnimSpec, loop: boolean, delayOverrideMs?: number): string {
   const name = keyframeName(spec)
   if (!name) return ''
-  const iter = loop ? (spec.iterations === 'infinite' || spec.iterations == null ? 'infinite' : spec.iterations) : spec.iterations ?? 1
+  const iter = loop ? (spec.iterations === 'infinite' || spec.iterations == null ? 'infinite' : spec.iterations) : (spec.iterations ?? 1)
   const delay = delayOverrideMs != null ? delayOverrideMs : spec.delayMs || 0
   const fill = loop ? 'none' : 'both'
   return `${name} ${spec.durationMs}ms ${spec.easing || 'ease'} ${delay}ms ${iter} normal ${fill}`
+}
+
+/** Public one-shot shorthand for non-stage surfaces (such as the pinned header)
+ * that use the same entrance preset library as ordinary scene elements. */
+export function oneShotAnimationCss(spec: AnimSpec): string {
+  return animationCss(spec, false)
 }
 
 /** The CSS `animation` shorthand for a CTA's pulse (used in static export contexts). */
@@ -179,23 +187,22 @@ export function ctaPulseAnimation(cta: import('./scene').CtaConfig | undefined):
 
 // A phase can hold MULTIPLE stacked specs: the primary (`entrance`/`loop`/`exit`/`gameWin`) plus any
 // `…Extra[]` played together with it (e.g. entrance = pop + shine). Collect them in order.
-type Phase = 'entrance' | 'loop' | 'exit' | 'gameWin' | 'tap'
+type Phase = 'entrance' | 'loop' | 'exit' | 'gameWin' | 'tap' | 'thoughtSpawn' | 'thoughtWhack'
 export function phaseSpecs(el: SceneElement, phase: Phase): AnimSpec[] {
   const a = el.animations
   if (!a) return []
   const out: AnimSpec[] = []
   const legacyGameWin = phase === 'gameWin' && a.entrance?.trigger === 'onGameWin'
   const legacyPrimary = legacyGameWin ? a.entrance : undefined
-  const primary =
-    phase === 'entrance'
-      ? (a.entrance?.trigger === 'onGameWin' ? undefined : a.entrance)
-      : (a[phase] ?? legacyPrimary)
+  const primary = phase === 'entrance' ? (a.entrance?.trigger === 'onGameWin' ? undefined : a.entrance) : (a[phase] ?? legacyPrimary)
   if (primary) out.push(primary)
   const legacyExtra = legacyGameWin ? a.entranceExtra : undefined
   const extra =
     phase === 'entrance'
-      ? (a.entrance?.trigger === 'onGameWin' ? undefined : a.entranceExtra)
-      : (a[(phase + 'Extra') as 'entranceExtra' | 'loopExtra' | 'exitExtra' | 'gameWinExtra' | 'tapExtra'] ?? legacyExtra)
+      ? a.entrance?.trigger === 'onGameWin'
+        ? undefined
+        : a.entranceExtra
+      : (a[(phase + 'Extra') as 'entranceExtra' | 'loopExtra' | 'exitExtra' | 'gameWinExtra' | 'tapExtra' | 'thoughtSpawnExtra' | 'thoughtWhackExtra'] ?? legacyExtra)
   if (Array.isArray(extra)) for (const s of extra) if (s) out.push(s)
   return out
 }
@@ -203,7 +210,7 @@ export function phaseSpecs(el: SceneElement, phase: Phase): AnimSpec[] {
 /** The lightray spec from ANY phase (entrance/loop/exit/gameWin/tap) — drives the .pa-lightray pseudo sweep.
  * The reflection is an ambient class-driven effect, so it can be added in any phase, not just loop. */
 export function lightraySpec(el: SceneElement): AnimSpec | undefined {
-  return (['entrance', 'loop', 'exit', 'gameWin', 'tap'] as const).flatMap((p) => phaseSpecs(el, p)).find((s) => s.preset === 'lightray')
+  return (['entrance', 'loop', 'exit', 'gameWin', 'tap', 'thoughtSpawn', 'thoughtWhack'] as const).flatMap((p) => phaseSpecs(el, p)).find((s) => s.preset === 'lightray')
 }
 
 /** Total wall time a phase occupies (the latest `delay + duration` across its stacked
@@ -324,13 +331,18 @@ export function composeTapAnim(el: SceneElement): string {
   return composeOneShotAnim(el, 'tap')
 }
 
+/** Thought-game event animation — reusable by any other element in the scene. */
+export function composeThoughtEventAnim(el: SceneElement, event: 'thoughtSpawn' | 'thoughtWhack'): string {
+  return composeOneShotAnim(el, event)
+}
+
 /**
  * A one-shot phase (game win / tap) followed by the element's ordinary loop, held
  * back until the phase has finished so the two never fight over transform. Falls
  * back to the CTA pulse when the element has no authored loop, exactly as the loop
  * path does, so a CTA keeps pulsing after the phase instead of going still.
  */
-function composeOneShotAnim(el: SceneElement, phase: 'gameWin' | 'tap'): string {
+function composeOneShotAnim(el: SceneElement, phase: 'gameWin' | 'tap' | 'thoughtSpawn' | 'thoughtWhack'): string {
   const parts: string[] = []
   let loopDelay = 0
   for (const e of phaseSpecs(el, phase)) {

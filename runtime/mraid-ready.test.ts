@@ -64,7 +64,8 @@ async function load() {
 
 afterEach(() => {
   vi.useRealTimers()
-  delete (window as unknown as Record<string, unknown>).mraid
+  const W = window as unknown as Record<string, unknown>
+  for (const key of ['mraid', 'isMraidUsable', 'PA_CLICKOUT', 'clickTag', 'clickTag1', 'clickthrough', 'clickThrough']) delete W[key]
   vi.restoreAllMocks()
 })
 
@@ -162,4 +163,88 @@ describe('MRAID readiness', () => {
     net.triggerCTA()
     expect(mraid.calls.some((c) => c.startsWith('open:'))).toBe(false)
   })
+
+  it('opens through an expanded container', async () => {
+    const mraid = makeMraid({ state: 'expanded' })
+    ;(window as unknown as Record<string, unknown>).mraid = mraid
+    const { net } = await load()
+    net.setStoreUrl({ ios: 'https://play.google.com/x', android: 'https://play.google.com/x' })
+
+    net.triggerCTA()
+    expect(mraid.calls.some((c) => c.startsWith('open:'))).toBe(true)
+  })
+
+  it('defers to the shell guard (window.isMraidUsable) when the export installs one', async () => {
+    // The head guard is armed before the runtime boots, so it can know about a 'ready'
+    // that fired early. Its verdict wins over the runtime's own getState() read.
+    const mraid = makeMraid({ state: 'default' })
+    const W = window as unknown as Record<string, unknown>
+    W.mraid = mraid
+    W.isMraidUsable = () => false
+    const { net } = await load()
+    net.setStoreUrl({ ios: 'https://play.google.com/x', android: 'https://play.google.com/x' })
+    vi.spyOn(window, 'open').mockReturnValue(window)
+
+    net.triggerCTA()
+    expect(mraid.calls.some((c) => c.startsWith('open:'))).toBe(false)
+  })
+
+  it('falls back to the browser when mraid.open() throws', async () => {
+    const mraid = makeMraid({ state: 'default' })
+    mraid.open = () => { throw new Error('bridge failure') }
+    ;(window as unknown as Record<string, unknown>).mraid = mraid
+    const { net } = await load()
+    net.setStoreUrl({ ios: 'https://apps.apple.com/x', android: 'https://apps.apple.com/x' })
+    const open = vi.spyOn(window, 'open').mockReturnValue(window)
+
+    net.triggerCTA()
+    expect(open).toHaveBeenCalled()
+  })
+
+  it('routes the clickout through the shell handler (window.PA_CLICKOUT) when present', async () => {
+    // The export shell publishes the guarded open longhand so validators can see it; the
+    // runtime must actually use it rather than duplicating the call.
+    const mraid = makeMraid({ state: 'default' })
+    const W = window as unknown as Record<string, unknown>
+    W.mraid = mraid
+    const seen: unknown[] = []
+    W.PA_CLICKOUT = (url: string) => { seen.push(url); return true }
+    const { net } = await load()
+    net.setStoreUrl({ ios: 'https://apps.apple.com/x', android: 'https://apps.apple.com/x' })
+    const open = vi.spyOn(window, 'open').mockReturnValue(window)
+
+    net.triggerCTA()
+    expect(seen).toEqual(['https://apps.apple.com/x'])
+    // The shell handler owns the open — no duplicate call into the container or the browser.
+    expect(mraid.calls.some((c) => c.startsWith('open:'))).toBe(false)
+    expect(open).not.toHaveBeenCalled()
+  })
+
+  it('falls back to the browser when the shell handler reports nothing opened', async () => {
+    const mraid = makeMraid({ state: 'loading' })
+    const W = window as unknown as Record<string, unknown>
+    W.mraid = mraid
+    W.PA_CLICKOUT = () => false
+    const { net } = await load()
+    net.setStoreUrl({ ios: 'https://apps.apple.com/x', android: 'https://apps.apple.com/x' })
+    const open = vi.spyOn(window, 'open').mockReturnValue(window)
+
+    net.triggerCTA()
+    expect(open).toHaveBeenCalled()
+  })
+})
+
+describe('click macro chain', () => {
+  // Networks publish the destination under four different global names; hardcoding only
+  // window.clickTag drops the click on the ones that use the others.
+  for (const key of ['clickTag', 'clickTag1', 'clickthrough', 'clickThrough']) {
+    it(`redirects through window.${key}`, async () => {
+      ;(window as unknown as Record<string, unknown>)[key] = 'https://dsp.example/click'
+      const { net } = await load()
+      const open = vi.spyOn(window, 'open').mockReturnValue(window)
+
+      net.triggerCTA()
+      expect(open).toHaveBeenCalledWith('https://dsp.example/click', '_blank', 'noopener')
+    })
+  }
 })

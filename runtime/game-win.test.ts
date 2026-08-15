@@ -71,6 +71,54 @@ describe('game win flow', () => {
     mgr.destroy()
   })
 
+  it('freezes the header countdown on its first scene game win and keeps it frozen afterward', () => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    const project: Project = {
+      meta: {
+        schemaVersion: 1,
+        name: 'frozen-header',
+        clickUrl: { ios: '', android: '' },
+        baseW: DESIGN_W,
+        baseH: DESIGN_H,
+        bgMatchColor: '#111111',
+        header: { mode: 'countdown', countdownSeconds: 10, countdownFormat: '{ss}:{ms}' },
+      },
+      startSceneId: 'game1',
+      scenes: [
+        {
+          id: 'game1',
+          name: 'Game',
+          kind: 'game',
+          elements: [textEl('game')],
+          advance: { on: 'gameWin', to: 'after1', delayMs: 0 },
+          transition: { type: 'none', durationMs: 0 },
+        },
+        {
+          id: 'after1',
+          name: 'After',
+          kind: 'game',
+          elements: [textEl('after')],
+          advance: { on: 'manual' },
+          transition: { type: 'none', durationMs: 0 },
+        },
+      ],
+    }
+
+    const mgr = playProject(project, {}, { mount, interactive: true })
+    mount.querySelector('.pa-stage')!.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+    vi.advanceTimersByTime(1230)
+    expect(mount.querySelector('.pa-header-text')?.textContent).toBe('08:77')
+
+    emit('game-complete')
+    vi.advanceTimersByTime(0)
+    expect(mount.querySelector('.pa-el[data-id="after"]')).toBeTruthy()
+    vi.advanceTimersByTime(5000)
+    expect(mount.querySelector('.pa-header-text')?.textContent).toBe('08:77')
+
+    mgr.destroy()
+  })
+
   it('uses the authored game-won delay even when the game picks the destination scene', () => {
     const mount = document.createElement('div')
     document.body.appendChild(mount)
