@@ -95,10 +95,7 @@ describe('overlay scene doubling as the MRAID end card', () => {
     vi.runOnlyPendingTimers()
   }
 
-  // The date band: a classless fixed-position div directly under .pa-stage (the .pa-bleed
-  // backdrop precedes it, so it is not the first child).
-  const headerBand = (): HTMLElement | null =>
-    mount.querySelector<HTMLElement>('.pa-stage > div:not([class])')
+  const headerBand = (): HTMLElement | null => mount.querySelector<HTMLElement>('.pa-header')
 
   it('floats over the still-mounted game and signals the ad ended', () => {
     playToCard(true)

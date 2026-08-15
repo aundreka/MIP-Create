@@ -128,7 +128,9 @@ ipcMain.handle('project:save', async (_e, json, currentPath) => {
 ipcMain.handle('export:write', async (_e, payload = {}) => {
   try {
     const raw = String(payload.filename || '').trim()
-    const filename = path.basename(raw).replace(/[<>:"/\\|?*\x00-\x1f]+/g, '_')
+    const invalidFilenameChars = '<>:"/\\|?*'
+    const isInvalidFilenameChar = (char) => invalidFilenameChars.includes(char) || char.charCodeAt(0) <= 31
+    const filename = Array.from(path.basename(raw), (char) => (isInvalidFilenameChar(char) ? '_' : char)).join('')
     if (!filename) return { ok: false, error: 'invalid filename' }
     const bytes = payload.bytes
     if (!(bytes instanceof ArrayBuffer)) return { ok: false, error: 'invalid bytes' }
