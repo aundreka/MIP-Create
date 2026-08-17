@@ -108,6 +108,7 @@ describe('basket drop', () => {
     // Eight pixels left of the basket is still within the 16px authored snap border.
     drag(game.items[0], { x: targetBox.left - 8, y: targetBox.top + targetBox.height / 2 })
     expect(game.items[0].dataset.basketPlaced).toBe('1')
+    expect(box(game.items[0]).left).toBeCloseTo(targetBox.left, 3)
     expect(game.completed()).toBe(false)
     expect(game.root.querySelector('[data-basket-hint]')).toBe(game.items[1])
 

@@ -65,7 +65,7 @@ describe('basket game-won sound binding', () => {
     item.dispatchEvent(new MouseEvent('pointerup', { clientX: to.x, clientY: to.y, bubbles: true }))
 
     expect(item.dataset.basketPlaced).toBe('1')
-    expect(played).toEqual([])
+    expect(played).toEqual(['basket-win'])
     vi.advanceTimersByTime(600)
     expect(played).toEqual(['basket-win'])
     stage.destroy()

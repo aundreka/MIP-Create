@@ -1567,7 +1567,14 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
               else emit('sfx-loop-stop', event)
             },
             onWin: () => {
-              for (const b of rec.el.sfx ?? []) if (b.event === 'onReveal' && b.assetId) enterSfxTimers.push(window.setTimeout(() => emitBoundSfx(b), gameWinSoundDelayMs(rec)))
+              for (const b of rec.el.sfx ?? []) {
+                if (b.event !== 'onReveal' || !b.assetId) continue
+                // Basket completion is already a strong visual beat: play its
+                // authored win sound as the final item lands. Other templates keep
+                // the existing animation-aligned delay.
+                if (rec.el.game?.templateId === 'basket') emitBoundSfx(b)
+                else enterSfxTimers.push(window.setTimeout(() => emitBoundSfx(b), gameWinSoundDelayMs(rec)))
+              }
             },
             onComplete: () => {
               stageEmit('game-win')
