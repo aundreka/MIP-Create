@@ -281,6 +281,7 @@ function ElementSound(props: { el: SceneElement }): JSX.Element {
       ? [
           { value: 'itemPickUp', label: 'When an item is picked up' },
           { value: 'itemPlace', label: 'When an item is placed down' },
+          { value: 'onReveal', label: 'When the game is won' },
         ]
       : []),
     ...(hasThoughtWhacker
@@ -2677,8 +2678,8 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                         Set basket area on canvas
                       </button>
                       <div className="hint pad">
-                        Draw the actual drop area over the basket artwork. A release inside the box or its snap border settles the item into the basket; every uploaded item must be
-                        placed to win.
+                        Draw the invisible drop area over the basket artwork. Items keep the position where they are released inside it; a release within the snap border is pulled
+                        just inside the area. Every item must be placed to win.
                       </div>
                       <div className="hint pad">
                         Prefer freeform items? Select any normal image and enable <b>Drag &amp; drop → Basket game item</b>. Marked scene images automatically replace the item slots

@@ -1,8 +1,9 @@
 // Basket drop: drag either uploaded slot assets or marked scene images into one
 // author-defined basket area.
 // The basket rectangle is editable on the canvas through the shared zone editor;
-// drops inside it (or its configurable snap border) settle into tidy slots. The
-// first unplaced item is always marked for both coded and editable handguides.
+// drops inside it keep their release position, while its configurable snap border
+// pulls near misses just inside. The first unplaced item is always marked for both
+// coded and editable handguides.
 
 import type { GameContext, GameModule, GameTemplate, HintMove, Pt } from './types'
 import { num } from './types'
@@ -12,7 +13,8 @@ interface BasketItem {
   index: number
   aspect: number
   placed: boolean
-  slot: number
+  dropX: number
+  dropY: number
   cx: number
   cy: number
   startX: number
@@ -26,7 +28,8 @@ interface SceneBasketItem {
   el: HTMLDivElement
   index: number
   placed: boolean
-  slot: number
+  dropX: number
+  dropY: number
   dx: number
   dy: number
   dragging: boolean
@@ -73,7 +76,6 @@ export function createBasket(): GameModule {
   let snapBorderPct = 5
   let zonePct: Zone = { x: 12, y: 34, w: 76, h: 43 }
   let zone: Zone = { x: 0, y: 0, w: 0, h: 0 }
-  let basketSrc = ''
   const items: BasketItem[] = []
   const sceneItems: SceneBasketItem[] = []
   let started = false
@@ -108,40 +110,12 @@ export function createBasket(): GameModule {
     return outside.length ? outside : candidates
   }
 
-  const slotPoint = (slot: number): Pt => {
-    const count = sceneItems.length || itemCount
-    const ratio = zone.h > 0 ? zone.w / zone.h : 1
-    const cols = Math.max(1, Math.min(count, Math.ceil(Math.sqrt(count * ratio))))
-    const rows = Math.max(1, Math.ceil(count / cols))
-    const row = Math.floor(slot / cols)
-    const rowStart = row * cols
-    const rowCount = Math.min(cols, count - rowStart)
-    const col = slot - rowStart
-    const padX = Math.min(zone.w * 0.12, 24)
-    const padY = Math.min(zone.h * 0.14, 24)
-    const innerW = Math.max(0, zone.w - padX * 2)
-    const innerH = Math.max(0, zone.h - padY * 2)
+  const containedCenter = (area: Zone, point: Pt, itemW: number, itemH: number): Pt => {
+    const halfW = Math.min(itemW / 2, area.w / 2)
+    const halfH = Math.min(itemH / 2, area.h / 2)
     return {
-      x: zone.x + padX + (innerW * (col + 0.5)) / rowCount,
-      y: zone.y + padY + (innerH * (row + 0.5)) / rows,
-    }
-  }
-
-  const screenSlotPoint = (slot: number): Pt => {
-    const r = target.getBoundingClientRect()
-    const count = Math.max(1, sceneItems.length)
-    const ratio = r.height > 0 ? r.width / r.height : 1
-    const cols = Math.max(1, Math.min(count, Math.ceil(Math.sqrt(count * ratio))))
-    const rows = Math.max(1, Math.ceil(count / cols))
-    const row = Math.floor(slot / cols)
-    const rowStart = row * cols
-    const rowCount = Math.min(cols, count - rowStart)
-    const col = slot - rowStart
-    const padX = Math.min(r.width * 0.12, 24)
-    const padY = Math.min(r.height * 0.14, 24)
-    return {
-      x: r.left + padX + ((r.width - padX * 2) * (col + 0.5)) / rowCount,
-      y: r.top + padY + ((r.height - padY * 2) * (row + 0.5)) / rows,
+      x: Math.max(area.x + halfW, Math.min(area.x + area.w - halfW, point.x)),
+      y: Math.max(area.y + halfH, Math.min(area.y + area.h - halfH, point.y)),
     }
   }
 
@@ -163,11 +137,18 @@ export function createBasket(): GameModule {
     item.el.style.translate = `${dx}px ${dy}px`
   }
 
-  const snapSceneItem = (item: SceneBasketItem, ease: boolean): void => {
+  const placeSceneItem = (item: SceneBasketItem, ease: boolean): void => {
     const current = center(item.el)
     const home = { x: current.x - item.dx, y: current.y - item.dy }
-    const slot = screenSlotPoint(item.slot)
-    setSceneOffset(item, slot.x - home.x, slot.y - home.y, ease)
+    const targetRect = target.getBoundingClientRect()
+    const itemRect = item.el.getBoundingClientRect()
+    const desired = containedCenter(
+      { x: targetRect.left, y: targetRect.top, w: targetRect.width, h: targetRect.height },
+      { x: targetRect.left + item.dropX * targetRect.width, y: targetRect.top + item.dropY * targetRect.height },
+      itemRect.width,
+      itemRect.height,
+    )
+    setSceneOffset(item, desired.x - home.x, desired.y - home.y, ease)
   }
 
   const layout = (): void => {
@@ -195,7 +176,7 @@ export function createBasket(): GameModule {
         item.h = maxSize
       }
       if (item.placed) {
-        const p = slotPoint(item.slot)
+        const p = containedCenter(zone, { x: zone.x + item.dropX * zone.w, y: zone.y + item.dropY * zone.h }, item.w, item.h)
         place(item, p.x, p.y)
       } else {
         const p = starts[index % starts.length]
@@ -205,7 +186,7 @@ export function createBasket(): GameModule {
       }
     })
     sceneItems.forEach((item) => {
-      if (item.placed) snapSceneItem(item, false)
+      if (item.placed) placeSceneItem(item, false)
       else if (!item.dragging) setSceneOffset(item, 0, 0, false)
     })
   }
@@ -221,7 +202,6 @@ export function createBasket(): GameModule {
     if (done || placedCount < activeItems().length) return
     done = true
     target.dataset.basketComplete = '1'
-    target.style.filter = 'drop-shadow(0 0 10px rgba(255,255,255,.7))'
     markHint()
     ctx.sfx.play('gameWin')
     winCb?.()
@@ -237,7 +217,6 @@ export function createBasket(): GameModule {
 
   const paintTargetNear = (near: boolean): void => {
     target.dataset.basketNear = near ? '1' : '0'
-    target.style.outline = near ? '3px solid rgba(255,255,255,.9)' : basketSrc ? 'none' : '3px dashed rgba(255,255,255,.65)'
   }
 
   const attachDrag = (item: BasketItem): void => {
@@ -264,7 +243,6 @@ export function createBasket(): GameModule {
         place(item, p.x - offsetX, p.y - offsetY)
         const border = (Math.min(ctx.root.clientWidth || 300, ctx.root.clientHeight || 400) * snapBorderPct) / 100
         target.dataset.basketNear = insideZone(item.cx, item.cy, border) ? '1' : '0'
-        target.style.outline = target.dataset.basketNear === '1' ? '3px solid rgba(255,255,255,.9)' : basketSrc ? 'none' : '3px dashed rgba(255,255,255,.65)'
       }
 
       const release = (upEvent: PointerEvent): void => {
@@ -276,11 +254,13 @@ export function createBasket(): GameModule {
         item.el.style.transition = 'left 180ms ease,top 180ms ease,transform 140ms ease'
         setTransform(item, 1)
         target.dataset.basketNear = '0'
-        target.style.outline = basketSrc ? 'none' : '3px dashed rgba(255,255,255,.65)'
         const border = (Math.min(ctx.root.clientWidth || 300, ctx.root.clientHeight || 400) * snapBorderPct) / 100
         if (insideZone(item.cx, item.cy, border)) {
           item.placed = true
-          item.slot = placedCount++
+          placedCount++
+          const dropped = containedCenter(zone, { x: item.cx, y: item.cy }, item.w, item.h)
+          item.dropX = zone.w > 0 ? (dropped.x - zone.x) / zone.w : 0.5
+          item.dropY = zone.h > 0 ? (dropped.y - zone.y) / zone.h : 0.5
           item.el.dataset.basketPlaced = '1'
           item.el.style.cursor = 'default'
           item.el.style.pointerEvents = 'none'
@@ -307,7 +287,6 @@ export function createBasket(): GameModule {
         item.el.style.transition = 'left 180ms ease,top 180ms ease,transform 140ms ease'
         setTransform(item, 1)
         target.dataset.basketNear = '0'
-        target.style.outline = basketSrc ? 'none' : '3px dashed rgba(255,255,255,.65)'
         layout()
         if (typeof item.el.releasePointerCapture === 'function' && item.el.hasPointerCapture?.(cancelEvent.pointerId)) {
           try {
@@ -363,11 +342,21 @@ export function createBasket(): GameModule {
         const p = center(item.el)
         if (!cancelled && insideTargetScreen(p.x, p.y)) {
           item.placed = true
-          item.slot = placedCount++
+          placedCount++
+          const targetRect = target.getBoundingClientRect()
+          const itemRect = item.el.getBoundingClientRect()
+          const dropped = containedCenter(
+            { x: targetRect.left, y: targetRect.top, w: targetRect.width, h: targetRect.height },
+            p,
+            itemRect.width,
+            itemRect.height,
+          )
+          item.dropX = targetRect.width > 0 ? (dropped.x - targetRect.left) / targetRect.width : 0.5
+          item.dropY = targetRect.height > 0 ? (dropped.y - targetRect.top) / targetRect.height : 0.5
           item.el.dataset.basketPlaced = '1'
           item.el.style.cursor = 'default'
           item.el.style.pointerEvents = 'none'
-          snapSceneItem(item, true)
+          placeSceneItem(item, true)
           ctx.sfx.play('itemPlace')
           markHint()
           finishIfWon()
@@ -407,17 +396,13 @@ export function createBasket(): GameModule {
         w: Math.max(2, Math.min(100 - x, clampPct(params.zoneW, 76))),
         h: Math.max(2, Math.min(100 - y, clampPct(params.zoneH, 43))),
       }
-      basketSrc = ctx.assets.src(params.basketImage as string)
       const itemIds = Array.isArray(params.itemImages) ? (params.itemImages as string[]) : []
       ctx.root.style.touchAction = 'none'
 
       target = document.createElement('div')
       target.dataset.basketTarget = '1'
       target.setAttribute('aria-label', 'Basket drop area')
-      target.style.cssText =
-        'position:absolute;box-sizing:border-box;pointer-events:none;background-position:center;background-repeat:no-repeat;background-size:contain;transition:outline-color 120ms ease,filter 180ms ease;'
-      target.style.backgroundImage = basketSrc ? `url("${basketSrc}")` : 'linear-gradient(135deg,rgba(255,255,255,.08),rgba(255,255,255,.02))'
-      target.style.outline = basketSrc ? 'none' : '3px dashed rgba(255,255,255,.65)'
+      target.style.cssText = 'position:absolute;box-sizing:border-box;pointer-events:none;opacity:0;background-color:transparent;outline:none;'
       ctx.root.appendChild(target)
 
       const stageRoot = ctx.root.closest('.pa-root')
@@ -429,7 +414,7 @@ export function createBasket(): GameModule {
         if (el.style.display === 'none') continue
         el.dataset.basketClaimedBy = ctx.elementId ?? 'basket'
         el.dataset.basketItem = 'scene:' + (el.dataset.id ?? sceneItems.length)
-        sceneItems.push({ el, index: sceneItems.length, placed: false, slot: -1, dx: 0, dy: 0, dragging: false, originalZ: el.style.zIndex })
+        sceneItems.push({ el, index: sceneItems.length, placed: false, dropX: 0.5, dropY: 0.5, dx: 0, dy: 0, dragging: false, originalZ: el.style.zIndex })
       }
 
       for (let index = 0; sceneItems.length === 0 && index < itemCount; index++) {
@@ -446,7 +431,7 @@ export function createBasket(): GameModule {
         el.style.backgroundImage = src ? `url("${src}")` : `radial-gradient(circle at 35% 30%,hsl(${(index * 67) % 360} 90% 72%),hsl(${(index * 67) % 360} 72% 46%))`
         el.style.zIndex = String(5 + index)
         ctx.root.appendChild(el)
-        items.push({ el, index, aspect, placed: false, slot: -1, cx: 0, cy: 0, startX: 0, startY: 0, w: 0, h: 0, angle: ((index * 17) % 21) - 10 })
+        items.push({ el, index, aspect, placed: false, dropX: 0.5, dropY: 0.5, cx: 0, cy: 0, startX: 0, startY: 0, w: 0, h: 0, angle: ((index * 17) % 21) - 10 })
       }
       layout()
       markHint()
@@ -497,10 +482,7 @@ export const BASKET_TEMPLATE: GameTemplate = {
     { key: 'pickupScale', label: 'Pick-up scale', type: 'number', min: 1, max: 1.5, step: 0.05 },
     { key: 'snapBorderPct', label: 'Snap border (%)', type: 'number', min: 0, max: 20, step: 1 },
   ],
-  assetSlots: [
-    { key: 'basketImage', label: 'Basket image' },
-    { key: 'itemImages', label: 'Item image', list: true, countParam: 'itemCount' },
-  ],
+  assetSlots: [{ key: 'itemImages', label: 'Item image', list: true, countParam: 'itemCount' }],
   defaultParams: {
     itemCount: 6,
     itemSizePct: 24,
@@ -510,7 +492,6 @@ export const BASKET_TEMPLATE: GameTemplate = {
     zoneY: 34,
     zoneW: 76,
     zoneH: 43,
-    basketImage: '',
     itemImages: [],
   },
   defaultHintIdleMs: 3000,

@@ -40,7 +40,7 @@ function mount(params: Record<string, unknown> = {}): MountedBasket {
     scale: () => 1,
   }
   const mod = createBasket()
-  mod.mount(ctx, { itemCount: 2, basketImage: 'basket-art', itemImages: ['wide-one', 'two'], pickupScale: 1.2, ...params })
+  mod.mount(ctx, { itemCount: 2, itemImages: ['wide-one', 'two'], pickupScale: 1.2, ...params })
   let complete = false
   let win = false
   mod.onComplete(() => (complete = true))
@@ -70,10 +70,18 @@ describe('basket drop', () => {
     document.body.innerHTML = ''
   })
 
-  it('exposes uploaded basket/item slots and a game-aware handguide', () => {
+  it('exposes uploaded item slots and a game-aware handguide', () => {
     expect(BASKET_TEMPLATE.defaultParams.itemCount).toBe(6)
-    expect(BASKET_TEMPLATE.assetSlots?.map((slot) => slot.key)).toEqual(['basketImage', 'itemImages'])
+    expect(BASKET_TEMPLATE.assetSlots?.map((slot) => slot.key)).toEqual(['itemImages'])
     expect(BASKET_TEMPLATE.defaultHandguide?.mode).toBe('basket')
+  })
+
+  it('keeps the basket hit area fully invisible', () => {
+    const game = mount()
+    expect(game.target.style.opacity).toBe('0')
+    expect(game.target.style.backgroundImage).toBe('')
+    expect(game.target.style.outline).toBe('none')
+    expect(game.target.style.filter).toBe('')
   })
 
   it('scales up on pick-up, plays both item triggers, and returns after an invalid drop', () => {
@@ -111,6 +119,21 @@ describe('basket drop', () => {
     expect(game.played.filter((event) => event === 'itemPlace')).toHaveLength(2)
     expect(game.played).toContain('gameWin')
     expect(game.mod.getHint()).toBeNull()
+  })
+
+  it('keeps each successful drop at its own release position instead of assigning slots', () => {
+    const game = mount({ zoneX: 20, zoneY: 35, zoneW: 60, zoneH: 40 })
+    const targetBox = box(game.target)
+    const firstDrop = { x: targetBox.left + targetBox.width * 0.68, y: targetBox.top + targetBox.height * 0.4 }
+    const secondDrop = { x: targetBox.left + targetBox.width * 0.34, y: targetBox.top + targetBox.height * 0.68 }
+
+    drag(game.items[0], firstDrop)
+    drag(game.items[1], secondDrop)
+
+    expect(center(game.items[0]).x).toBeCloseTo(firstDrop.x, 3)
+    expect(center(game.items[0]).y).toBeCloseTo(firstDrop.y, 3)
+    expect(center(game.items[1]).x).toBeCloseTo(secondDrop.x, 3)
+    expect(center(game.items[1]).y).toBeCloseTo(secondDrop.y, 3)
   })
 
   it('preserves wide uploaded item artwork and aims its hint at the basket', () => {
@@ -188,14 +211,20 @@ describe('basket drop', () => {
     expect(root.querySelector('[data-basket-item]')).toBeNull()
     expect(sceneItems[0].dataset.basketHint).toBe('1')
     expect(sceneItems[0].style.width).toBe('')
-    const targetCenter = center(target)
-    drag(sceneItems[0], targetCenter)
+    const targetBox = target.getBoundingClientRect()
+    const firstDrop = { x: targetBox.left + targetBox.width * 0.3, y: targetBox.top + targetBox.height * 0.4 }
+    const secondDrop = { x: targetBox.left + targetBox.width * 0.7, y: targetBox.top + targetBox.height * 0.6 }
+    drag(sceneItems[0], firstDrop)
     expect(sceneItems[0].dataset.basketPlaced).toBe('1')
     expect(sceneItems[0].style.scale).toBe('1')
+    expect(center(sceneItems[0]).x).toBeCloseTo(firstDrop.x, 3)
+    expect(center(sceneItems[0]).y).toBeCloseTo(firstDrop.y, 3)
     expect(sceneItems[1].dataset.basketHint).toBe('1')
     expect(complete).toBe(false)
 
-    drag(sceneItems[1], targetCenter)
+    drag(sceneItems[1], secondDrop)
+    expect(center(sceneItems[1]).x).toBeCloseTo(secondDrop.x, 3)
+    expect(center(sceneItems[1]).y).toBeCloseTo(secondDrop.y, 3)
     expect(complete).toBe(true)
     expect(played.filter((event) => event === 'itemPickUp')).toHaveLength(2)
     expect(played.filter((event) => event === 'itemPlace')).toHaveLength(2)
