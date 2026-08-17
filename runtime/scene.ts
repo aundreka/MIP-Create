@@ -464,6 +464,12 @@ export interface DragConfig {
   group?: string
   key?: string
 }
+// Marks a normal scene image as an item for a Basket drop game. `gameId` is
+// optional because the common case has one basket; it disambiguates scenes that
+// contain more than one Basket game mount.
+export interface BasketItemConfig {
+  gameId?: string
+}
 export interface SlotConfig {
   group?: string
   key?: string
@@ -743,6 +749,7 @@ export interface SceneElement {
   container?: ContainerConfig
   crop?: ImageCropConfig // crop/pan/zoom an ordinary image within its box
   drag?: DragConfig
+  basketItem?: BasketItemConfig
   slot?: SlotConfig
   pick?: PickConfig
   fill?: FillConfig

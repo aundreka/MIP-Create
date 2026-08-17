@@ -54,7 +54,7 @@ function mount(params: Record<string, unknown> = {}): MountedBasket {
 }
 
 function center(el: HTMLElement): { x: number; y: number } {
-  const r = box(el)
+  const r = el.getBoundingClientRect()
   return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
 }
 
@@ -120,5 +120,85 @@ describe('basket drop', () => {
     expect(hint?.kind).toBe('slide')
     expect(hint?.from).toEqual(center(game.items[0]))
     expect(hint?.to).toEqual(center(game.target))
+  })
+
+  it('uses freely positioned scene image elements instead of internal item slots', () => {
+    const stage = document.createElement('div')
+    stage.className = 'pa-root'
+    document.body.appendChild(stage)
+    const baseRects = [
+      { left: 10, top: 30, width: 90, height: 40 },
+      { left: 210, top: 410, width: 70, height: 55 },
+    ]
+    const sceneItems = baseRects.map((base, index) => {
+      const el = document.createElement('div')
+      el.dataset.id = 'scene-item-' + index
+      el.dataset.basketSceneItem = '1'
+      el.dataset.basketGameId = 'basket-game'
+      el.style.zIndex = String(20 + index)
+      el.getBoundingClientRect = () => {
+        const [dx = 0, dy = 0] = el.style.translate.split(' ').map((value) => parseFloat(value) || 0)
+        return {
+          x: base.left + dx,
+          y: base.top + dy,
+          left: base.left + dx,
+          top: base.top + dy,
+          right: base.left + dx + base.width,
+          bottom: base.top + dy + base.height,
+          width: base.width,
+          height: base.height,
+          toJSON: () => ({}),
+        } as DOMRect
+      }
+      stage.appendChild(el)
+      return el
+    })
+    const root = document.createElement('div')
+    Object.defineProperties(root, {
+      clientWidth: { value: 320, configurable: true },
+      clientHeight: { value: 480, configurable: true },
+    })
+    root.getBoundingClientRect = () => ({ x: 100, y: 20, left: 100, top: 20, right: 420, bottom: 500, width: 320, height: 480, toJSON: () => ({}) })
+    stage.appendChild(root)
+    const played: string[] = []
+    const mod = createBasket()
+    mod.mount(
+      {
+        root,
+        assets: { src: () => '', size: () => null },
+        sfx: { play: (event) => played.push(event) },
+        rng: mulberry32(7),
+        scale: () => 1,
+        elementId: 'basket-game',
+      },
+      { itemCount: 6 },
+    )
+    let complete = false
+    mod.onComplete(() => (complete = true))
+    mod.start()
+    const target = root.querySelector<HTMLElement>('[data-basket-target]')!
+    target.getBoundingClientRect = () => {
+      const left = 100 + parseFloat(target.style.left)
+      const top = 20 + parseFloat(target.style.top)
+      const width = parseFloat(target.style.width)
+      const height = parseFloat(target.style.height)
+      return { x: left, y: top, left, top, right: left + width, bottom: top + height, width, height, toJSON: () => ({}) } as DOMRect
+    }
+
+    expect(root.querySelector('[data-basket-item]')).toBeNull()
+    expect(sceneItems[0].dataset.basketHint).toBe('1')
+    expect(sceneItems[0].style.width).toBe('')
+    const targetCenter = center(target)
+    drag(sceneItems[0], targetCenter)
+    expect(sceneItems[0].dataset.basketPlaced).toBe('1')
+    expect(sceneItems[0].style.scale).toBe('1')
+    expect(sceneItems[1].dataset.basketHint).toBe('1')
+    expect(complete).toBe(false)
+
+    drag(sceneItems[1], targetCenter)
+    expect(complete).toBe(true)
+    expect(played.filter((event) => event === 'itemPickUp')).toHaveLength(2)
+    expect(played.filter((event) => event === 'itemPlace')).toHaveLength(2)
+    expect(played).toContain('gameWin')
   })
 })

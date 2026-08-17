@@ -2680,6 +2680,10 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                         Draw the actual drop area over the basket artwork. A release inside the box or its snap border settles the item into the basket; every uploaded item must be
                         placed to win.
                       </div>
+                      <div className="hint pad">
+                        Prefer freeform items? Select any normal image and enable <b>Drag &amp; drop → Basket game item</b>. Marked scene images automatically replace the item slots
+                        below.
+                      </div>
                     </>
                   )}
                   {tpl.id !== 'catch' &&
@@ -2862,7 +2866,44 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
             )
           })()}
           <Accordion id="inspector.dragdrop" title="Drag & drop" defaultOpen={false}>
-            <Toggle label="Draggable item" checked={!!el.drag} onChange={(v) => patchElement(id, { drag: v ? { group: el.slot?.group ?? 'a' } : undefined })} />
+            {(() => {
+              const basketGames = activeSceneDef(state)?.elements.filter((candidate) => candidate.type === 'game-mount' && candidate.game?.templateId === 'basket') ?? []
+              return (
+                <>
+                  <Toggle
+                    label="Basket game item"
+                    checked={!!el.basketItem}
+                    onChange={(v) =>
+                      patchElement(id, {
+                        basketItem: v ? { gameId: basketGames[0]?.id } : undefined,
+                        drag: v ? undefined : el.drag,
+                      })
+                    }
+                  />
+                  {el.basketItem && basketGames.length > 1 && (
+                    <Row label="Basket">
+                      <Select
+                        value={el.basketItem.gameId ?? ''}
+                        onChange={(gameId) => patchElement(id, { basketItem: { gameId: gameId || undefined } })}
+                        options={basketGames.map((game) => ({ value: game.id, label: game.name || game.id }))}
+                      />
+                    </Row>
+                  )}
+                  {el.basketItem && (
+                    <div className="hint pad">
+                      This image keeps its canvas position and size, but becomes draggable in Preview/export. Basket-item images replace the Basket game&apos;s internal item image
+                      slots and all of them must be placed to win.
+                    </div>
+                  )}
+                  {el.basketItem && basketGames.length === 0 && <div className="hint pad">Add a Basket drop game to this scene so the item has a destination.</div>}
+                </>
+              )
+            })()}
+            <Toggle
+              label="Draggable item"
+              checked={!!el.drag}
+              onChange={(v) => patchElement(id, { drag: v ? { group: el.slot?.group ?? 'a' } : undefined, basketItem: v ? undefined : el.basketItem })}
+            />
             {el.drag && (
               <div className="grid2">
                 <Row label="Group">

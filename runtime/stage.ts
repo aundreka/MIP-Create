@@ -1081,6 +1081,10 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     const outer = document.createElement('div')
     outer.className = 'pa-el'
     outer.dataset.id = el.id
+    if (el.basketItem) {
+      outer.dataset.basketSceneItem = '1'
+      if (el.basketItem.gameId) outer.dataset.basketGameId = el.basketItem.gameId
+    }
 
     const anim = document.createElement('div')
     anim.className = 'pa-el-anim'
@@ -1110,6 +1114,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       !el.scratch &&
       !el.reveal &&
       !el.button &&
+      !el.basketItem &&
       !hasTapAnim(el)
     if (nonInteractive) {
       outer.style.pointerEvents = 'none'
@@ -1997,6 +2002,9 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
         // The target scene + tap effect themselves are read live, so only the toggle
         // needs the rebuild.
         if (!nel.button !== !prev.button) return false
+        // Basket-item status changes pointer routing and the discovery markers used
+        // by the game module, so rebuild the element instead of updating in place.
+        if (JSON.stringify(nel.basketItem) !== JSON.stringify(prev.basketItem)) return false
         // Same reason: gaining/losing an on-tap animation flips the pointer-events gate,
         // and an element that cannot receive a tap cannot animate on one.
         if (hasTapAnim(nel) !== hasTapAnim(prev)) return false

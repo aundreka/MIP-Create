@@ -1,4 +1,5 @@
-// Basket drop: drag every uploaded item into one author-defined basket area.
+// Basket drop: drag either uploaded slot assets or marked scene images into one
+// author-defined basket area.
 // The basket rectangle is editable on the canvas through the shared zone editor;
 // drops inside it (or its configurable snap border) settle into tidy slots. The
 // first unplaced item is always marked for both coded and editable handguides.
@@ -19,6 +20,17 @@ interface BasketItem {
   w: number
   h: number
   angle: number
+}
+
+interface SceneBasketItem {
+  el: HTMLDivElement
+  index: number
+  placed: boolean
+  slot: number
+  dx: number
+  dy: number
+  dragging: boolean
+  originalZ: string
 }
 
 interface Zone {
@@ -63,6 +75,7 @@ export function createBasket(): GameModule {
   let zone: Zone = { x: 0, y: 0, w: 0, h: 0 }
   let basketSrc = ''
   const items: BasketItem[] = []
+  const sceneItems: SceneBasketItem[] = []
   let started = false
   let done = false
   let placedCount = 0
@@ -96,12 +109,13 @@ export function createBasket(): GameModule {
   }
 
   const slotPoint = (slot: number): Pt => {
+    const count = sceneItems.length || itemCount
     const ratio = zone.h > 0 ? zone.w / zone.h : 1
-    const cols = Math.max(1, Math.min(itemCount, Math.ceil(Math.sqrt(itemCount * ratio))))
-    const rows = Math.max(1, Math.ceil(itemCount / cols))
+    const cols = Math.max(1, Math.min(count, Math.ceil(Math.sqrt(count * ratio))))
+    const rows = Math.max(1, Math.ceil(count / cols))
     const row = Math.floor(slot / cols)
     const rowStart = row * cols
-    const rowCount = Math.min(cols, itemCount - rowStart)
+    const rowCount = Math.min(cols, count - rowStart)
     const col = slot - rowStart
     const padX = Math.min(zone.w * 0.12, 24)
     const padY = Math.min(zone.h * 0.14, 24)
@@ -113,12 +127,47 @@ export function createBasket(): GameModule {
     }
   }
 
+  const screenSlotPoint = (slot: number): Pt => {
+    const r = target.getBoundingClientRect()
+    const count = Math.max(1, sceneItems.length)
+    const ratio = r.height > 0 ? r.width / r.height : 1
+    const cols = Math.max(1, Math.min(count, Math.ceil(Math.sqrt(count * ratio))))
+    const rows = Math.max(1, Math.ceil(count / cols))
+    const row = Math.floor(slot / cols)
+    const rowStart = row * cols
+    const rowCount = Math.min(cols, count - rowStart)
+    const col = slot - rowStart
+    const padX = Math.min(r.width * 0.12, 24)
+    const padY = Math.min(r.height * 0.14, 24)
+    return {
+      x: r.left + padX + ((r.width - padX * 2) * (col + 0.5)) / rowCount,
+      y: r.top + padY + ((r.height - padY * 2) * (row + 0.5)) / rows,
+    }
+  }
+
+  const activeItems = (): Array<{ el: HTMLDivElement; placed: boolean }> => (sceneItems.length ? sceneItems : items)
+
   const markHint = (): void => {
-    const next = items.find((item) => !item.placed)
-    for (const item of items) {
+    const all = activeItems()
+    const next = all.find((item) => !item.placed)
+    for (const item of all) {
       if (item === next) item.el.dataset.basketHint = '1'
       else delete item.el.dataset.basketHint
     }
+  }
+
+  const setSceneOffset = (item: SceneBasketItem, dx: number, dy: number, ease: boolean): void => {
+    item.dx = dx
+    item.dy = dy
+    item.el.style.transition = ease ? 'translate 180ms ease,scale 140ms ease' : 'scale 140ms ease'
+    item.el.style.translate = `${dx}px ${dy}px`
+  }
+
+  const snapSceneItem = (item: SceneBasketItem, ease: boolean): void => {
+    const current = center(item.el)
+    const home = { x: current.x - item.dx, y: current.y - item.dy }
+    const slot = screenSlotPoint(item.slot)
+    setSceneOffset(item, slot.x - home.x, slot.y - home.y, ease)
   }
 
   const layout = (): void => {
@@ -155,6 +204,10 @@ export function createBasket(): GameModule {
         place(item, p.x, p.y)
       }
     })
+    sceneItems.forEach((item) => {
+      if (item.placed) snapSceneItem(item, false)
+      else if (!item.dragging) setSceneOffset(item, 0, 0, false)
+    })
   }
 
   const rootPoint = (event: PointerEvent): Pt => {
@@ -165,7 +218,7 @@ export function createBasket(): GameModule {
   }
 
   const finishIfWon = (): void => {
-    if (done || placedCount < items.length) return
+    if (done || placedCount < activeItems().length) return
     done = true
     target.dataset.basketComplete = '1'
     target.style.filter = 'drop-shadow(0 0 10px rgba(255,255,255,.7))'
@@ -173,6 +226,18 @@ export function createBasket(): GameModule {
     ctx.sfx.play('gameWin')
     winCb?.()
     completeCb?.()
+  }
+
+  const insideTargetScreen = (x: number, y: number): boolean => {
+    const r = target.getBoundingClientRect()
+    const rootRect = ctx.root.getBoundingClientRect()
+    const border = (Math.min(rootRect.width || 300, rootRect.height || 400) * snapBorderPct) / 100
+    return x >= r.left - border && x <= r.right + border && y >= r.top - border && y <= r.bottom + border
+  }
+
+  const paintTargetNear = (near: boolean): void => {
+    target.dataset.basketNear = near ? '1' : '0'
+    target.style.outline = near ? '3px solid rgba(255,255,255,.9)' : basketSrc ? 'none' : '3px dashed rgba(255,255,255,.65)'
   }
 
   const attachDrag = (item: BasketItem): void => {
@@ -259,6 +324,74 @@ export function createBasket(): GameModule {
     })
   }
 
+  const attachSceneDrag = (item: SceneBasketItem): void => {
+    item.el.style.cursor = 'grab'
+    item.el.style.touchAction = 'none'
+    item.el.style.pointerEvents = 'auto'
+    item.el.style.transformOrigin = 'center'
+    item.el.addEventListener('pointerdown', (event) => {
+      if (done || item.placed) return
+      event.preventDefault()
+      try {
+        item.el.setPointerCapture?.(event.pointerId)
+      } catch {
+        /* synthesized pointer stream — direct listeners still work */
+      }
+      item.dragging = true
+      const start = { x: event.clientX, y: event.clientY }
+      const base = { x: item.dx, y: item.dy }
+      item.el.style.zIndex = '99999'
+      item.el.style.cursor = 'grabbing'
+      item.el.style.scale = String(pickupScale)
+      ctx.sfx.play('itemPickUp')
+
+      const move = (moveEvent: PointerEvent): void => {
+        setSceneOffset(item, base.x + moveEvent.clientX - start.x, base.y + moveEvent.clientY - start.y, false)
+        const p = center(item.el)
+        paintTargetNear(insideTargetScreen(p.x, p.y))
+      }
+
+      const stop = (eventToRelease: PointerEvent, cancelled: boolean): void => {
+        item.el.removeEventListener('pointermove', move)
+        item.el.removeEventListener('pointerup', release)
+        item.el.removeEventListener('pointercancel', cancel)
+        item.dragging = false
+        item.el.style.zIndex = item.originalZ
+        item.el.style.cursor = 'grab'
+        item.el.style.scale = '1'
+        paintTargetNear(false)
+        const p = center(item.el)
+        if (!cancelled && insideTargetScreen(p.x, p.y)) {
+          item.placed = true
+          item.slot = placedCount++
+          item.el.dataset.basketPlaced = '1'
+          item.el.style.cursor = 'default'
+          item.el.style.pointerEvents = 'none'
+          snapSceneItem(item, true)
+          ctx.sfx.play('itemPlace')
+          markHint()
+          finishIfWon()
+        } else {
+          setSceneOffset(item, 0, 0, true)
+          if (!cancelled) ctx.sfx.play('itemPlace')
+        }
+        if (typeof item.el.releasePointerCapture === 'function' && item.el.hasPointerCapture?.(eventToRelease.pointerId)) {
+          try {
+            item.el.releasePointerCapture(eventToRelease.pointerId)
+          } catch {
+            /* capture was already released by the host */
+          }
+        }
+      }
+      const release = (upEvent: PointerEvent): void => stop(upEvent, false)
+      const cancel = (cancelEvent: PointerEvent): void => stop(cancelEvent, true)
+
+      item.el.addEventListener('pointermove', move)
+      item.el.addEventListener('pointerup', release)
+      item.el.addEventListener('pointercancel', cancel)
+    })
+  }
+
   return {
     mount(c, params) {
       ctx = c
@@ -287,7 +420,19 @@ export function createBasket(): GameModule {
       target.style.outline = basketSrc ? 'none' : '3px dashed rgba(255,255,255,.65)'
       ctx.root.appendChild(target)
 
-      for (let index = 0; index < itemCount; index++) {
+      const stageRoot = ctx.root.closest('.pa-root')
+      const candidates = stageRoot ? Array.from(stageRoot.querySelectorAll<HTMLDivElement>('[data-basket-scene-item="1"]')) : []
+      for (const el of candidates) {
+        const requestedGame = el.dataset.basketGameId
+        const claimedBy = el.dataset.basketClaimedBy
+        if ((requestedGame && requestedGame !== ctx.elementId) || (!requestedGame && claimedBy)) continue
+        if (el.style.display === 'none') continue
+        el.dataset.basketClaimedBy = ctx.elementId ?? 'basket'
+        el.dataset.basketItem = 'scene:' + (el.dataset.id ?? sceneItems.length)
+        sceneItems.push({ el, index: sceneItems.length, placed: false, slot: -1, dx: 0, dy: 0, dragging: false, originalZ: el.style.zIndex })
+      }
+
+      for (let index = 0; sceneItems.length === 0 && index < itemCount; index++) {
         const id = itemIds[index] || ''
         const src = ctx.assets.src(id)
         const natural = ctx.assets.size?.(id)
@@ -309,12 +454,13 @@ export function createBasket(): GameModule {
     start() {
       if (started) return
       started = true
-      items.forEach(attachDrag)
+      if (sceneItems.length) sceneItems.forEach(attachSceneDrag)
+      else items.forEach(attachDrag)
     },
     relayout: layout,
     getHint(): HintMove | null {
       if (done) return null
-      const item = items.find((candidate) => !candidate.placed)
+      const item = activeItems().find((candidate) => !candidate.placed)
       if (!item) return null
       return { from: center(item.el), to: center(target), kind: 'slide' }
     },
@@ -326,7 +472,18 @@ export function createBasket(): GameModule {
     },
     destroy() {
       ctx.root.innerHTML = ''
+      for (const item of sceneItems) {
+        delete item.el.dataset.basketClaimedBy
+        delete item.el.dataset.basketItem
+        delete item.el.dataset.basketHint
+        delete item.el.dataset.basketPlaced
+        item.el.style.translate = ''
+        item.el.style.scale = ''
+        item.el.style.transition = ''
+        item.el.style.pointerEvents = ''
+      }
       items.length = 0
+      sceneItems.length = 0
     },
   }
 }
