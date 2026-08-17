@@ -238,6 +238,7 @@ function ElementSound(props: { el: SceneElement }): JSX.Element {
   const isFlipping = el.game?.templateId === 'memorymatch' || el.game?.templateId === 'flipmatch'
   const isFlipbook = el.game?.templateId === 'flipbook'
   const isCatchBasket = el.game?.templateId === 'catch'
+  const isBasketDrop = el.game?.templateId === 'basket'
   // Hold gauge: one trigger per stage the dial can CLIMB into (the first stage is
   // where it rests, so it is never climbed into). Named with the author's own stage
   // labels — "When the dial reaches NEUTRAL" beats "stage 2".
@@ -276,6 +277,12 @@ function ElementSound(props: { el: SceneElement }): JSX.Element {
           { value: 'catch', label: 'When basket catches a falling item' },
         ]
       : []),
+    ...(isBasketDrop
+      ? [
+          { value: 'itemPickUp', label: 'When an item is picked up' },
+          { value: 'itemPlace', label: 'When an item is placed down' },
+        ]
+      : []),
     ...(hasThoughtWhacker
       ? [
           { value: 'thoughtSpawn', label: 'When a thought spawns' },
@@ -296,7 +303,7 @@ function ElementSound(props: { el: SceneElement }): JSX.Element {
         ]
       : []),
   ]
-  const defaultEvent = el.reveal ? 'onReveal' : isScratching ? 'whileScratching' : isFlipping ? 'flip' : isCatchBasket ? 'catch' : 'tap'
+  const defaultEvent = el.reveal ? 'onReveal' : isScratching ? 'whileScratching' : isFlipping ? 'flip' : isCatchBasket ? 'catch' : isBasketDrop ? 'itemPickUp' : 'tap'
   const pick = (assetId: string): void => {
     if (chooser == null) return
     if (chooser >= binds.length) setBinds([...binds, { event: defaultEvent, assetId }])
@@ -2660,6 +2667,21 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                       <div className="hint pad">The animated hint hand follows a currently visible, unwhacked thought and retargets after every whack.</div>
                     </>
                   )}
+                  {tpl.id === 'basket' && (
+                    <>
+                      <button
+                        className="btn"
+                        style={{ width: '100%', marginTop: 6 }}
+                        onClick={() => window.dispatchEvent(new CustomEvent('pa:zone-edit', { detail: { elementId: id } }))}
+                      >
+                        Set basket area on canvas
+                      </button>
+                      <div className="hint pad">
+                        Draw the actual drop area over the basket artwork. A release inside the box or its snap border settles the item into the basket; every uploaded item must be
+                        placed to win.
+                      </div>
+                    </>
+                  )}
                   {tpl.id !== 'catch' &&
                     (tpl.assetSlots ?? [])
                       .filter((slot) => slot.key !== 'brushImage' && slot.key !== 'popupImages' && (slot.showIf?.(params) ?? true))
@@ -3020,6 +3042,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                     { value: 'scratch', label: 'Scratch (back-and-forth rub)' },
                     { value: 'match', label: 'Match pairs (follow the game’s next card)' },
                     { value: 'thoughtwhack', label: 'Whack-a-mole (follow an unwhacked thought)' },
+                    { value: 'basket', label: 'Basket (drag next unplaced item)' },
                     { value: 'brush', label: 'Point at the scratch brush (after its intro)' },
                     { value: 'still', label: 'Still (no movement at all)' },
                   ]}

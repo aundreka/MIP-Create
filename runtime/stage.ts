@@ -150,7 +150,7 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
   // Waypoints (design px). 'slide' uses the configured nodes (or legacy toX/toY);
   // 'smart' targets the CTA/game; 'tap' stays in place (no waypoints).
   let pts: { x: number; y: number; pauseMs?: number }[] = []
-  let kind: 'tap' | 'slide' | 'scratch' | 'match' | 'thoughtwhack' | 'brush' | 'still' | 'hold' = 'tap'
+  let kind: 'tap' | 'slide' | 'scratch' | 'match' | 'thoughtwhack' | 'basket' | 'brush' | 'still' | 'hold' = 'tap'
   if (cfg.mode === 'still') {
     kind = 'still'
   } else if (cfg.mode === 'hold') {
@@ -171,6 +171,8 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     kind = 'match'
   } else if (cfg.mode === 'thoughtwhack') {
     kind = 'thoughtwhack'
+  } else if (cfg.mode === 'basket') {
+    kind = 'basket'
   } else if (cfg.mode === 'brush') {
     kind = 'brush'
   }
@@ -367,6 +369,32 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
       ox = point.x - (guideRect.left + guideRect.width * 0.22)
       oy = point.y - guideRect.height * 0.28 * (1 - dip) - (guideRect.top + guideRect.height * 0.12)
       press = dip
+    } else if (kind === 'basket') {
+      // Follow the next unplaced basket item and mime dragging it into the authored
+      // basket area. The game updates data-basket-hint after every successful drop,
+      // so this same hand automatically advances without moving any real item.
+      const itemEl = root.querySelector<HTMLElement>('[data-basket-hint]')
+      const basketEl = root.querySelector<HTMLElement>('[data-basket-target]')
+      if (!itemEl || !basketEl) {
+        content.style.opacity = '0'
+        raf = requestAnimationFrame(frame)
+        return
+      }
+      content.style.opacity = '1'
+      const itemRect = itemEl.getBoundingClientRect()
+      const basketRect = basketEl.getBoundingClientRect()
+      const guideRect = rec.outer.getBoundingClientRect()
+      const phase = ((now - t0) % travel) / travel
+      const p = phase < 0.15 ? 0 : phase > 0.85 ? 1 : cubic((phase - 0.15) / 0.7)
+      const fromX = itemRect.left + itemRect.width / 2
+      const fromY = itemRect.top + itemRect.height / 2
+      const toX = basketRect.left + basketRect.width / 2
+      const toY = basketRect.top + basketRect.height / 2
+      const fingerX = fromX + (toX - fromX) * p
+      const fingerY = fromY + (toY - fromY) * p
+      ox = fingerX - (guideRect.left + guideRect.width * 0.22)
+      oy = fingerY - (guideRect.top + guideRect.height * 0.12)
+      press = phase < 0.15 ? cubic(phase / 0.15) : phase > 0.85 ? cubic((1 - phase) / 0.15) : 1
     } else if (kind === 'slide') {
       const c = (now - t0) % total
       let rem = c

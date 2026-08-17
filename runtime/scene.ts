@@ -381,7 +381,8 @@ export interface HandguideNode {
 // with its own dwell time) in design px; 'smart' auto-targets the scene's CTA (or
 // game) and slides/taps toward it; 'match' tap-bounces over the memory-match
 // game's suggested card (the element marked data-mm-hint — one card of a pair,
-// then its partner once the first is flipped). `toX/toY` is the legacy
+// then its partner once the first is flipped). 'basket' mimes dragging the next
+// unplaced item into the authored basket area. `toX/toY` is the legacy
 // single-waypoint form, still honored when `nodes` is empty.
 export interface IdleConfig {
   idleMs?: number
@@ -396,7 +397,7 @@ export interface HandguideConfig {
   // show/hide still applies; it just never moves).
   // 'hold' presses in place and STAYS pressed for most of the cycle before
   // lifting — the press-and-hold gesture, as opposed to 'tap''s quick dip.
-  mode: 'smart' | 'tap' | 'slide' | 'scratch' | 'match' | 'thoughtwhack' | 'brush' | 'still' | 'hold'
+  mode: 'smart' | 'tap' | 'slide' | 'scratch' | 'match' | 'thoughtwhack' | 'basket' | 'brush' | 'still' | 'hold'
   toX?: number
   toY?: number
   nodes?: HandguideNode[]
