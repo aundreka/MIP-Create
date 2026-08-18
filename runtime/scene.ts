@@ -253,6 +253,16 @@ export interface ButtonConfig {
   tapFadeAssetId?: string
   // 'fade' only: cross-fade duration in ms; unset = TAP_FADE_DEFAULT_MS. 0 = instant swap.
   tapFadeMs?: number
+  // Ids of OTHER tappable elements on the same scene (buttons, CTAs, images marked
+  // as buttons). Tapping any of them presses THIS element too: its tap effect
+  // (press/glow/outline/fade) and its on-tap animation replay as if the player had
+  // tapped it directly — so e.g. an image can highlight or cross-fade when a button
+  // beside it is hit.
+  //
+  // A relayed press NEVER navigates. Only one redirect can win, and it is always the
+  // button that was actually tapped: this element's own targetSceneId / stay applies
+  // to direct taps on it and is ignored for linked ones.
+  linkedButtonIds?: string[]
 }
 
 // 'press' = brief scale-down (the most readable "tap registered" signal on touch);

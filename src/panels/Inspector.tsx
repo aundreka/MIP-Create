@@ -112,10 +112,53 @@ const CARRY_OVER_TYPES = new Set<SceneElement['type']>(['cta', 'image', 'text', 
 // watchable instead of being cut off by the scene change).
 const STAY = '__stay'
 
+// Elements a tap can land on, so they can drive a linked press (see LinkedButtons).
+const isTappable = (e: SceneElement): boolean => e.type === 'button' || e.type === 'cta' || e.type === 'choice' || !!e.button
+
+// "Also pressed by": other buttons on this screen whose taps press THIS element too —
+// it replays its tap effect and on-tap animation as if it had been tapped directly.
+// Only the feedback is shared, never the redirect: the button the player actually hit
+// decides where the ad goes, so its "Go to screen" always wins over this element's.
+function LinkedButtons(props: { cfg: ButtonConfig; selfId: string; siblings: SceneElement[]; patch: (p: Partial<ButtonConfig>) => void }): JSX.Element {
+  const { cfg, selfId, siblings, patch } = props
+  const linked = cfg.linkedButtonIds ?? []
+  const candidates = siblings.filter((e) => e.id !== selfId && isTappable(e))
+  // A linked id whose element was deleted (or stopped being tappable) stays listed so
+  // it can be seen and cleared, instead of silently doing nothing.
+  const stale = linked.filter((lid) => !candidates.some((c) => c.id === lid))
+  const set = (ids: string[]): void => patch({ linkedButtonIds: ids.length ? ids : undefined })
+  return (
+    <>
+      <div className="group-title2" style={{ marginTop: 6 }}>
+        Also pressed by
+      </div>
+      {!candidates.length && !stale.length && (
+        <div className="hint pad">No other buttons on this screen yet — add a Button element (or make another image tappable) and it will appear here.</div>
+      )}
+      {candidates.map((c) => (
+        <Toggle
+          key={c.id}
+          label={`${c.name || c.id} (${c.type})`}
+          checked={linked.includes(c.id)}
+          onChange={(v) => set(v ? [...linked, c.id] : linked.filter((x) => x !== c.id))}
+        />
+      ))}
+      {stale.map((lid) => (
+        <Toggle key={lid} label={`${lid} (missing)`} checked onChange={() => set(linked.filter((x) => x !== lid))} />
+      ))}
+      <div className="hint pad">
+        Tapping any ticked button also presses this element — same tap effect and on-tap animation as a direct tap on it. A linked press never changes screen: the button that
+        was tapped keeps its own <b>Go to screen</b>, so it wins whenever the two point at different places. If this element should only react to those buttons and do nothing
+        when tapped itself, set its <b>Go to screen</b> to “stay on this screen”.
+      </div>
+    </>
+  )
+}
+
 // The "Go to screen" + "Tap effect" rows, shared by the image-as-button panel and
 // the Button element panel so the two can't drift apart. `fade` reveals its own
 // picture + duration controls.
-function ButtonTapFields(props: { cfg: ButtonConfig; others: SceneDef[]; patch: (p: Partial<ButtonConfig>) => void }): JSX.Element {
+function ButtonTapFields(props: { cfg: ButtonConfig; others: SceneDef[]; selfId: string; siblings: SceneElement[]; patch: (p: Partial<ButtonConfig>) => void }): JSX.Element {
   const { cfg, others, patch } = props
   return (
     <>
@@ -152,6 +195,7 @@ function ButtonTapFields(props: { cfg: ButtonConfig; others: SceneDef[]; patch: 
           </div>
         </>
       )}
+      <LinkedButtons cfg={cfg} selfId={props.selfId} siblings={props.siblings} patch={patch} />
     </>
   )
 }
@@ -2858,7 +2902,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 <Toggle label="Tap this image to go to a screen" checked={!!cfg} onChange={(v) => patchElement(id, { button: v ? {} : undefined })} />
                 {cfg && (
                   <>
-                    <ButtonTapFields cfg={cfg} others={others} patch={patch} />
+                    <ButtonTapFields cfg={cfg} others={others} selfId={id} siblings={state.scene.elements} patch={patch} />
                     <div className="hint pad">Keeps the image’s own crop, mask &amp; animation — it just becomes tappable.</div>
                   </>
                 )}
@@ -3454,7 +3498,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
           const patch = (p: Partial<typeof cfg>): void => patchElement(id, { button: { ...cfg, ...p } })
           return (
             <Accordion id="inspector.button" title="Button">
-              <ButtonTapFields cfg={cfg} others={others} patch={patch} />
+              <ButtonTapFields cfg={cfg} others={others} selfId={id} siblings={state.scene.elements} patch={patch} />
               <AssetPicker label="Image (optional)" allowNone value={el.assetId} onChange={(aid) => patchElement(id, { assetId: aid ?? undefined })} />
               <div className="hint pad">
                 Uses the image if set, otherwise the text label below. Style the fill &amp; corners in Background box. Animation is optional (Animation section). Toggle “Above

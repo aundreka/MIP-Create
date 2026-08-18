@@ -32,7 +32,7 @@ import { applyImageCrop, createContainerContent, createImageContent, styleContai
 import { applyBarFill, createBarContent } from './elements/bar'
 import { createTextContent } from './elements/text'
 import { createCtaContent } from './elements/cta'
-import { createButtonContent, wireSceneNav } from './elements/button'
+import { createButtonContent, tapFeedbackByNode, wireSceneNav, type TapFeedback } from './elements/button'
 import { createChoiceContent } from './elements/choice'
 import { elementHintPoint, holdPress, tapPress } from './hint'
 import { localize, localizeElement } from './i18n'
@@ -1045,6 +1045,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
   let sfxWired = false // element tap/scene-enter sounds attached once
   let choicesWired = false // quiz/survey choice taps attached once
   let tapAnimWired = false // on-tap animation listeners attached once
+  let linkedPressWired = false // linked-button press relay attached once
   let dragWired = false // drag-and-drop slots attached once
   let picksWired = false // tap-pick / fill / generate attached once
   let scratchWired = false // scratch-cover coatings attached once
@@ -1624,6 +1625,45 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
             const live = byId.get(rec.el.id) ?? rec
             if (hasTapAnim(live.el)) runTap(live)
           })
+        }
+      }
+      // Linked presses (el.button.linkedButtonIds): an element names OTHER tappable
+      // elements, and a tap on any of them presses THIS one too — its tap effect and
+      // its on-tap animation replay as if it had been tapped directly.
+      //
+      // The relay carries the FEEDBACK only, never the navigation: a tap can redirect
+      // once, and the button the player actually hit owns that redirect, so a linked
+      // element's own "go to screen" is deliberately ignored here. No 'sfx' either —
+      // the tapped button already fired the tap sound.
+      //
+      // Listeners are CAPTURE phase: a button element's own handler stopPropagation()s
+      // the gesture on its inner <button>, so a bubble-phase listener on the wrapper
+      // would never see the taps we're relaying. Targets are resolved at press time
+      // (through byId) so re-authoring the link list takes effect without a rebuild.
+      if (interactive && !linkedPressWired) {
+        linkedPressWired = true
+        // rec.el is swapped in place by the update path, so this reads the live config.
+        const linkedTo = (srcId: string): Rec[] => recs.filter((r) => r.el.id !== srcId && r.el.button?.linkedButtonIds?.includes(srcId))
+        // Where wireSceneNav published this element's press/release: the <button>
+        // content for a button element, the .pa-el-anim wrapper for an image-as-button.
+        const feedback = (rec: Rec): TapFeedback | undefined => (rec.content ? tapFeedbackByNode.get(rec.content) : undefined) ?? tapFeedbackByNode.get(rec.anim)
+        for (const src of recs) {
+          const relay =
+            (fn: (t: Rec) => void) =>
+            (): void => {
+              for (const t of linkedTo(src.el.id)) fn(t)
+            }
+          const press = relay((t) => {
+            if (hasTapAnim(t.el)) runTap(t)
+            feedback(t)?.press()
+          })
+          const release = relay((t) => feedback(t)?.release())
+          src.anim.addEventListener('pointerdown', press, true)
+          src.anim.addEventListener('pointerup', release, true)
+          src.anim.addEventListener('pointercancel', release, true)
+          // pointerleave doesn't bubble, but it is dispatched on each ancestor the
+          // pointer leaves — so the wrapper hears it without a capture listener.
+          src.anim.addEventListener('pointerleave', release)
         }
       }
       if (interactive && !choicesWired) {

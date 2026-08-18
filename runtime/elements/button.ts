@@ -83,6 +83,21 @@ function fadeToImage(effectNode: HTMLElement, el: SceneElement, ctx: RuntimeCtx)
   }, ms + 40)
 }
 
+/**
+ * The press/release half of a wired element's tap feedback, published so the stage
+ * can replay it on an element that was NOT touched — the linked-press relay
+ * (button.linkedButtonIds). Keyed by the node wireSceneNav listens on: the <button>
+ * itself for a button element, the .pa-el-anim wrapper for an image-as-button.
+ *
+ * Deliberately exposes only the feedback, never the navigation: a relayed press must
+ * not redirect, so the tapped button stays the only thing that decides where to go.
+ */
+export interface TapFeedback {
+  press: () => void
+  release: () => void
+}
+export const tapFeedbackByNode = new WeakMap<HTMLElement, TapFeedback>()
+
 export function wireSceneNav(
   listen: HTMLElement,
   effectNode: HTMLElement,
@@ -118,6 +133,8 @@ export function wireSceneNav(
     effectNode.classList.remove(held, 'pa-tap-on')
     held = ''
   }
+
+  tapFeedbackByNode.set(listen, { press, release })
 
   // Swallow the pointer gesture so the scene's own tap-advance (a pointerdown
   // listener on the scene container, armed when advance.on === 'tap') can't fire
