@@ -59,5 +59,18 @@ describe('animation scale factor', () => {
       expect(rule, `pa-${name} missing`).not.toBe('')
       expect(rule).toContain('vw')
     }
+    // The vertical traversals (swipe-up, and the drop's fall from above the screen) use
+    // the height axis, so they must clear the top/bottom edge instead — 110vh.
+    for (const name of ['swipe-up', 'drop']) {
+      const rule = keyframeRule(css, name)
+      expect(rule, `pa-${name} missing`).not.toBe('')
+      expect(rule).toContain('vh')
+    }
+    // Their settle/bounce offsets are still authored distances, so those stay scaled.
+    for (const name of ['swipe-up', 'drop']) {
+      const rule = keyframeRule(css, name)
+      const bare = rule.match(/-?\d+(\.\d+)?px/g)?.filter((px) => !rule.includes(`${px} * var(--pa-s`)) ?? []
+      expect(bare, `pa-${name} has unscaled px travel: ${bare.join(', ')}`).toEqual([])
+    }
   })
 })

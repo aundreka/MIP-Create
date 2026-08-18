@@ -37,12 +37,19 @@ const KEYFRAMES = `
 /* Swipes: a full-screen traversal, so the travel is VIEWPORT-relative (110vw always
    clears the physical screen from any on-screen position) rather than design-relative.
    "swipe-left" = the element flies in travelling leftwards (enters from the right edge);
+   "swipe-up" = it flies in travelling upwards (enters from the bottom edge, 110vh away);
    "swipe-out-left" = it flies off past the left edge. The small overshoot at 88% gives
    the arrival some weight instead of a dead stop. */
 @keyframes pa-swipe-left{0%{transform:translateX(110vw);opacity:0}60%{opacity:1}88%{transform:translateX(calc(-14px * var(--pa-s,1)))}100%{transform:translateX(0);opacity:1}}
 @keyframes pa-swipe-right{0%{transform:translateX(-110vw);opacity:0}60%{opacity:1}88%{transform:translateX(calc(14px * var(--pa-s,1)))}100%{transform:translateX(0);opacity:1}}
+@keyframes pa-swipe-up{0%{transform:translateY(110vh);opacity:0}60%{opacity:1}88%{transform:translateY(calc(-14px * var(--pa-s,1)))}100%{transform:translateY(0);opacity:1}}
 @keyframes pa-swipe-out-left{0%{transform:translateX(0);opacity:1}12%{transform:translateX(calc(14px * var(--pa-s,1)))}70%{opacity:1}100%{transform:translateX(-110vw);opacity:0}}
 @keyframes pa-swipe-out-right{0%{transform:translateX(0);opacity:1}12%{transform:translateX(calc(-14px * var(--pa-s,1)))}70%{opacity:1}100%{transform:translateX(110vw);opacity:0}}
+/* DROP — a gravity fall from above the screen (viewport-relative start, like the swipes),
+   landing at rest with two diminishing bounces. The per-keyframe timing functions make the
+   fall accelerate and each rebound decelerate no matter which easing the author picked, so
+   it always reads as weight rather than a linear glide. */
+@keyframes pa-drop{0%{transform:translateY(-110vh);opacity:0;animation-timing-function:cubic-bezier(.55,.06,.68,.19)}8%{opacity:1}62%{transform:translateY(0);animation-timing-function:cubic-bezier(.22,1,.36,1)}76%{transform:translateY(calc(-22px * var(--pa-s,1)));animation-timing-function:cubic-bezier(.55,.06,.68,.19)}88%{transform:translateY(0);animation-timing-function:cubic-bezier(.22,1,.36,1)}94%{transform:translateY(calc(-7px * var(--pa-s,1)))}100%{transform:translateY(0);opacity:1}}
 /* WIPES — the element stays put and a moving edge uncovers or erases it, like a
    squeegee crossing the box. clip-path:inset(top right bottom left): growing the
    RIGHT inset eats the box from the right edge inward, growing the LEFT inset eats

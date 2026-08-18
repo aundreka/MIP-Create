@@ -35,13 +35,17 @@ export type AnimPresetId =
   | 'slide-down'
   | 'slide-left'
   | 'slide-right'
-  // Swipes travel a VIEWPORT-relative distance (110vw), so the element always
-  // starts/ends fully off the physical screen at any size — unlike the slides,
-  // which move a short authored distance around their resting position.
+  // Swipes travel a VIEWPORT-relative distance (110vw horizontally, 110vh vertically),
+  // so the element always starts/ends fully off the physical screen at any size — unlike
+  // the slides, which move a short authored distance around their resting position.
   | 'swipe-left'
   | 'swipe-right'
+  | 'swipe-up'
   | 'swipe-out-left'
   | 'swipe-out-right'
+  // A gravity fall: the element drops in from above the screen, accelerating on the way
+  // down and settling with a couple of diminishing bounces.
+  | 'drop'
   // Wipes DON'T move the element: a clip edge sweeps across the box, uncovering it
   // (wipe-*) or erasing it (wipe-out-*). The name says which way the edge travels.
   | 'wipe-left'
