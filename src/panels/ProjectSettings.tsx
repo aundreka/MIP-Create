@@ -9,7 +9,7 @@ import { setActiveVariant } from '../variantMode'
 import { listGroups } from '../projectGroups'
 import { projectsInGroup } from '../projects'
 import { fileBaseName, mipName, todayLabel } from '../mipName'
-import { Chips, ColorField, Drawer, NumField, Row, Select, Slider } from '../ui'
+import { Checkbox, Chips, ColorField, Drawer, NumField, Row, Select, Slider } from '../ui'
 import { Check, Icon, Play, X } from '../icons'
 import { AssetPicker } from './AssetPicker'
 import { getEditLocale, setEditLocale } from '../locale'
@@ -118,10 +118,16 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
       <Row label="MIP name">
         <input value={mipName(m)} readOnly title="Auto-named from Client + MIP + Date" />
       </Row>
+      <Checkbox
+        label="Unique creative"
+        checked={m.unique !== false}
+        title="Off names the export …_human_none instead of …_human_unique"
+        onChange={(v) => patchMeta({ unique: v })}
+      />
       <Row label="Export file">
         <input value={fileBaseName(project)} readOnly title="Export filename stem" />
       </Row>
-      <div className="hint pad">Auto-named <b>Client + MIP + Date</b>. Export files use <b>client_acslanot_mip_date_mip_emily_game_mechanic_human_unique</b>.</div>
+      <div className="hint pad">Auto-named <b>Client + MIP + Date</b>. Export files use <b>client_acslanot_mip_date_mip_emily_game_mechanic_human_unique</b>. A MIP with no minigame names the mechanic slot <b>unknown</b>; clearing <b>Unique creative</b> ends the name in <b>none</b>.</div>
       <div className="grid2">
         <NumField label="Base W" value={m.baseW} suffix="px" onChange={(n) => patchMeta({ baseW: n })} />
         <NumField label="Base H" value={m.baseH} suffix="px" onChange={(n) => patchMeta({ baseH: n })} />

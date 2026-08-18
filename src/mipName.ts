@@ -62,9 +62,11 @@ function firstGameTemplateId(project: Pick<Project, 'scenes'>): string | undefin
   return undefined
 }
 
+// The mechanic slot. A MIP with no game mount has no mechanic to name, so it
+// ships as the literal "unknown" rather than a plausible-looking guess.
 function exportMechanicToken(project: Pick<Project, 'scenes'>): string {
   const templateId = firstGameTemplateId(project)
-  if (!templateId) return 'game'
+  if (!templateId) return 'unknown'
   const aliases: Record<string, string> = {
     scratch: 'scratch',
     scratch_grid: 'scratch',
@@ -77,7 +79,10 @@ function exportMechanicToken(project: Pick<Project, 'scenes'>): string {
 
 /**
  * The export file base name. Format:
- * "<client>_acslanot_mip_<date>_<version>_emily_game_<mechanic>_human_unique"
+ * "<client>_acslanot_mip_<date>_<version>_emily_game_<mechanic>_human_<unique>"
+ * where `<mechanic>` is "unknown" when the MIP has no game mount, and
+ * `<unique>` is "unique" unless Project settings marks the MIP non-unique
+ * ("none").
  */
 export function fileBaseName(project: Pick<Project, 'meta' | 'scenes'>): string {
   const meta = project.meta
@@ -85,5 +90,6 @@ export function fileBaseName(project: Pick<Project, 'meta' | 'scenes'>): string 
   const date = compactDateToken(meta.exportDate || meta.mipDate)
   const version = mipVersionToken(meta)
   const mechanic = exportMechanicToken(project)
-  return `${client}_acslanot_mip_${date}_${version}_emily_game_${mechanic}_human_unique`
+  const unique = meta.unique === false ? 'none' : 'unique'
+  return `${client}_acslanot_mip_${date}_${version}_emily_game_${mechanic}_human_${unique}`
 }

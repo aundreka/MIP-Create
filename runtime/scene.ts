@@ -847,6 +847,10 @@ export interface ProjectMeta {
   // delivery naming can follow a different schedule than the MIP's canonical
   // identity date.
   exportDate?: string
+  // Delivery naming: whether this creative is a unique build. Drives the last
+  // token of the export filename ('unique' vs 'none'). Undefined reads as true
+  // so existing MIPs keep the name they already ship with.
+  unique?: boolean
   // Project grouping: several MIPs (each a `Project` in the code) belong to one
   // real-world "project" (brand + date + theme, e.g. "Bioma 2026-07 Scratch").
   // `projectId` is the stable group id (see src/projectGroups.ts); `projectName`

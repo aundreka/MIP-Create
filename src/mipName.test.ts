@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { fileBaseName } from './mipName'
 import type { Project } from '../runtime/scene'
 
-function project(overrides: Partial<Project['meta']> = {}, templateId = 'scratch'): Project {
+function project(overrides: Partial<Project['meta']> = {}, templateId: string | null = 'scratch'): Project {
   return {
     meta: {
       schemaVersion: 2,
@@ -20,7 +20,9 @@ function project(overrides: Partial<Project['meta']> = {}, templateId = 'scratch
       name: 'Game',
       kind: 'game',
       advance: { on: 'manual' },
-      elements: [{ id: 'game1', type: 'game-mount', name: 'Game', x: 0, y: 0, anchor: 'center', zIndex: 1, mode: 'fit', game: { templateId, params: {} } }],
+      elements: templateId
+        ? [{ id: 'game1', type: 'game-mount', name: 'Game', x: 0, y: 0, anchor: 'center', zIndex: 1, mode: 'fit', game: { templateId, params: {} } }]
+        : [],
     }],
     startSceneId: 'scene1',
   }
@@ -33,6 +35,17 @@ describe('fileBaseName', () => {
 
   it('normalizes scratch grid to scratch and uses the mip token for the version slot', () => {
     expect(fileBaseName(project({ mip: 'MIP7', mipVersion: '02' }, 'scratch_grid'))).toBe('the_loaded_tea_shop_acslanot_mip_20260730_07_emily_game_scratch_human_unique')
+  })
+
+  it('names the mechanic slot unknown when the MIP has no minigame', () => {
+    expect(fileBaseName(project({ client: 'Laura Geller', mip: 'MIP2', exportDate: '2026-08-17' }, null)))
+      .toBe('laura_geller_acslanot_mip_20260817_02_emily_game_unknown_human_unique')
+  })
+
+  it('ends in none when the MIP is marked non-unique', () => {
+    expect(fileBaseName(project({ client: 'Laura Geller', mip: 'MIP2', exportDate: '2026-08-17', unique: false }, null)))
+      .toBe('laura_geller_acslanot_mip_20260817_02_emily_game_unknown_human_none')
+    expect(fileBaseName(project({ unique: true }))).toBe('the_loaded_tea_shop_acslanot_mip_20260730_04_emily_game_scratch_human_unique')
   })
 
   it('falls back to mipDate and today when export pieces are missing', () => {
