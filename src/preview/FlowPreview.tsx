@@ -10,7 +10,16 @@ import type { AssetMap } from '../../runtime/types'
 import { ChevronRight, Icon, LayoutGrid, Play, RotateCcw, SCENE_KIND_ICON, Star, X } from '../icons'
 
 function toScene(project: Project, def: SceneDef): Scene {
-  return { meta: { ...project.meta, bgMatchColor: def.bgColor !== undefined ? def.bgColor : project.meta.bgMatchColor }, elements: def.elements, kind: def.kind, overlay: def.overlay }
+  return {
+    meta: { ...project.meta, bgMatchColor: def.bgColor !== undefined ? def.bgColor : project.meta.bgMatchColor },
+    elements: def.elements,
+    kind: def.kind,
+    overlay: def.overlay,
+    // Storyboard thumbnails draw the pinned header exactly where the flow would.
+    asEndscene: def.asEndscene,
+    hideHeader: def.hideHeader,
+    showHeader: def.showHeader,
+  }
 }
 
 function advanceLabel(project: Project, def: SceneDef): string {

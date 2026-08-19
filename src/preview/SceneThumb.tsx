@@ -4,12 +4,20 @@
 // "cover" (given a width, fills the box and crops — anchored to the top).
 
 import { useEffect, useMemo, useRef } from 'react'
+import { headerAllowedFor } from '../../runtime/scene'
 import type { Project, Scene, SceneDef } from '../../runtime/scene'
 import type { AssetMap } from '../../runtime/types'
 import { sceneAssets } from '../export'
 
 function toScene(project: Project, def: SceneDef): Scene {
-  return { meta: { ...project.meta, bgMatchColor: def.bgColor !== undefined ? def.bgColor : project.meta.bgMatchColor }, elements: def.elements, overlay: def.overlay }
+  return {
+    meta: { ...project.meta, bgMatchColor: def.bgColor !== undefined ? def.bgColor : project.meta.bgMatchColor },
+    elements: def.elements,
+    overlay: def.overlay,
+    // Resolved here rather than by passing `kind` through: a thumbnail deliberately
+    // renders overlay scenes without their dim, so only the header decision travels.
+    hideHeader: !headerAllowedFor(def),
+  }
 }
 
 export function SceneThumb(props: { project: Project; def: SceneDef; assets: AssetMap; h: number; w?: number; cover?: boolean }): JSX.Element {

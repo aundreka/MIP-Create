@@ -4,7 +4,7 @@
 // element mutations operate on the active scene.
 
 import { useSyncExternalStore } from 'react'
-import type { OrientationOverride, Project, ProjectMeta, Scene, SceneDef, SceneElement, Variant } from '../runtime/scene'
+import type { HeaderConfig, OrientationOverride, Project, ProjectMeta, Scene, SceneDef, SceneElement, Variant } from '../runtime/scene'
 import type { AssetEntry, AssetMap, CompressProfile } from '../runtime/types'
 import { getActiveVariant } from './variantMode'
 import { applyVariantPatches } from './variants'
@@ -107,6 +107,11 @@ function deriveScene(project: Project, activeSceneId: string): Scene {
     elements,
     kind: sd?.kind,
     overlay: sd?.overlay,
+    // Carried so the canvas frame can decide whether to draw the pinned header on this
+    // scene, with the same rule the flow uses (headerAllowedFor).
+    asEndscene: sd?.asEndscene,
+    hideHeader: sd?.hideHeader,
+    showHeader: sd?.showHeader,
   }
 }
 
@@ -865,6 +870,26 @@ export function convertElement(id: string, to: ConvertTo): void {
 }
 
 // ---- project / scene meta -------------------------------------------------
+/**
+ * Merge a patch into the pinned header config: the ACTIVE LANGUAGE's complete header
+ * when a locale is being edited (localized headers are whole configs, not deltas),
+ * otherwise the project default. Shared by the Header popover and the canvas drag so
+ * both write to the same place.
+ */
+export function patchHeader(patch: Partial<HeaderConfig>, locale?: string | null): void {
+  const meta = state.project.meta
+  if (!locale) {
+    patchMeta({ header: { ...(meta.header ?? {}), ...patch } })
+    return
+  }
+  patchMeta({
+    headerI18n: {
+      ...(meta.headerI18n ?? {}),
+      [locale]: { ...(meta.header ?? {}), ...(localizeHeader(meta, locale) ?? {}), ...patch },
+    },
+  })
+}
+
 export function patchMeta(patch: Partial<ProjectMeta>): void {
   // Keep meta.name canonical ("<Client> <MIP> <Date>") after every edit so the
   // topbar, Home, team library, and JSON download all agree.

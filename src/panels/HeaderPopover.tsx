@@ -4,14 +4,15 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { addAsset, patchMeta, useEditorState } from '../store'
+import { addAsset, patchHeader, patchMeta, useEditorState } from '../store'
 import { ColorField, NumField, Row, Select, Toggle } from '../ui'
 import { Icon, Upload, X } from '../icons'
 import { importFont } from '../bridge'
 import { DATE_LOCALE_OPTIONS } from '../dateLocales'
 import { useEditLocale } from '../locale'
 import { localeEntry } from '../../runtime/i18n'
-import type { AnimPresetId, AnimSpec } from '../../runtime/scene'
+import { effectiveHeader } from '../../runtime/header'
+import type { AnimPresetId, AnimSpec, HeaderConfig, HeaderOrientationOverride } from '../../runtime/scene'
 
 const HEADER_ENTRANCE_PRESETS: { value: AnimPresetId; label: string }[] = [
   { value: 'fade', label: 'Fade' },
@@ -40,7 +41,8 @@ const DEFAULT_HEADER_ENTRANCE: AnimSpec = { preset: 'fade', durationMs: 520, del
 const DEFAULT_HEADER_LOOP: AnimSpec = { preset: 'pulse', durationMs: 1200, delayMs: 0, easing: 'ease-in-out', iterations: 'infinite' }
 
 export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): JSX.Element {
-  const { project, assets } = useEditorState()
+  const { project, assets, orientation } = useEditorState()
+  const landscape = orientation === 'landscape'
   const editLocale = useEditLocale()
   const localizedHeader = localeEntry(project.meta.headerI18n, editLocale)
   const h = editLocale ? localizedHeader ?? project.meta.header : project.meta.header
@@ -70,21 +72,30 @@ export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): 
   }, [])
 
   // Merge into the active language's complete header, or the default header.
-  const set = (patch: Record<string, unknown>): void => {
-    if (!editLocale) { patchMeta({ header: { ...h, ...patch } }); return }
-    patchMeta({
-      headerI18n: {
-        ...(project.meta.headerI18n ?? {}),
-        [editLocale]: { ...(project.meta.header ?? {}), ...(localizedHeader ?? {}), ...patch },
-      },
-    })
-  }
+  const set = (patch: Partial<HeaderConfig>): void => patchHeader(patch, editLocale)
   const toggleHeader = (on: boolean): void => {
     if (!editLocale) { patchMeta({ header: on ? (h ?? {}) : undefined }); return }
     const headers = { ...(project.meta.headerI18n ?? {}) }
     if (on) headers[editLocale] = { ...(project.meta.header ?? {}), ...(localizedHeader ?? {}) }
     else delete headers[editLocale]
     patchMeta({ headerI18n: Object.keys(headers).length ? headers : undefined })
+  }
+  // Layout fields (size, padding, alignment, position) write into the LANDSCAPE override
+  // while the canvas is in landscape and a separate landscape layout exists; everything
+  // else — content, colours, animation — is shared by both orientations.
+  const lsLayout = landscape && !!h?.landscape
+  const L = h ? effectiveHeader(h, lsLayout) : ({} as HeaderConfig)
+  const setLayout = (patch: HeaderOrientationOverride): void =>
+    lsLayout ? set({ landscape: { ...(h?.landscape ?? {}), ...patch } }) : set(patch)
+  // Turning the override ON snapshots today's portrait layout, so the two orientations
+  // start identical and then drift only where you change them.
+  const seedLandscape = (): HeaderOrientationOverride => {
+    const seed: HeaderOrientationOverride = {}
+    for (const k of ['heightPx', 'fontSizePx', 'fontWeight', 'topPaddingPx', 'align', 'letterSpacingPx', 'offsetXPx', 'offsetYPx'] as const) {
+      const v = h?.[k]
+      if (v !== undefined) (seed as Record<string, unknown>)[k] = v
+    }
+    return seed
   }
   const setEntrance = (patch: Partial<AnimSpec>): void => set({ entrance: { ...(h?.entrance ?? DEFAULT_HEADER_ENTRANCE), ...patch } })
   const setLoop = (patch: Partial<AnimSpec>): void => set({ loop: { ...(h?.loop ?? DEFAULT_HEADER_LOOP), ...patch } })
@@ -214,28 +225,61 @@ export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): 
                 </Row>
               )
             })()}
+            <div className="group-title">Layout {lsLayout ? '(landscape)' : h.landscape ? '(portrait)' : ''}</div>
             <div className="grid2">
-              <NumField label="Font size" value={h.fontSizePx ?? 64} min={1} suffix="px" onChange={(n) => set({ fontSizePx: n })} />
-              <NumField label="Weight" value={h.fontWeight ?? 500} min={100} max={900} step={100} onChange={(n) => set({ fontWeight: n })} />
+              <NumField label="Font size" value={L.fontSizePx ?? 64} min={1} suffix="px" onChange={(n) => setLayout({ fontSizePx: n })} />
+              <NumField label="Weight" value={L.fontWeight ?? 500} min={100} max={900} step={100} onChange={(n) => setLayout({ fontWeight: n })} />
             </div>
             <div className="grid2">
-              <NumField label="Height" value={h.heightPx ?? 120} min={0} suffix="px" onChange={(n) => set({ heightPx: n })} />
-              <NumField label="Top padding" value={h.topPaddingPx ?? 0} min={0} suffix="px" onChange={(n) => set({ topPaddingPx: n })} />
+              <NumField label="Height" value={L.heightPx ?? 120} min={0} suffix="px" onChange={(n) => setLayout({ heightPx: n })} />
+              <NumField label="Top padding" value={L.topPaddingPx ?? 0} min={0} suffix="px" onChange={(n) => setLayout({ topPaddingPx: n })} />
             </div>
             <div className="grid2">
               <Row label="Alignment">
                 <Select
-                  value={h.align ?? 'center'}
+                  value={L.align ?? 'center'}
                   options={[
                     { value: 'left', label: 'Left' },
                     { value: 'center', label: 'Center' },
                     { value: 'right', label: 'Right' },
                   ]}
-                  onChange={(v) => set({ align: v })}
+                  onChange={(v) => setLayout({ align: v as HeaderOrientationOverride['align'] })}
                 />
               </Row>
-              <NumField label="Spacing" value={h.letterSpacingPx ?? 0} suffix="px" onChange={(n) => set({ letterSpacingPx: n })} />
+              <NumField label="Spacing" value={L.letterSpacingPx ?? 0} suffix="px" onChange={(n) => setLayout({ letterSpacingPx: n })} />
             </div>
+            {/* Position — design px from the pinned top-centre. Drag on the canvas or type. */}
+            <div className="grid2">
+              <NumField label="Move X" value={L.offsetXPx ?? 0} suffix="px" onChange={(n) => setLayout({ offsetXPx: n || undefined })} />
+              <NumField label="Move Y" value={L.offsetYPx ?? 0} suffix="px" onChange={(n) => setLayout({ offsetYPx: n || undefined })} />
+            </div>
+            <button
+              className="wide"
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('pa:header-edit'))
+                props.onClose()
+              }}
+            >
+              Drag into place on the canvas
+            </button>
+            <div className="hint pad">
+              Drag the highlighted band on the canvas; double-click it to snap back to the top; Esc finishes. The band still spans the full width, so <b>Move X</b> only shows once
+              it is aligned left/right or narrower than the screen.
+            </div>
+            <Toggle
+              label="Separate landscape layout"
+              checked={!!h.landscape}
+              onChange={(v) => set({ landscape: v ? seedLandscape() : undefined })}
+            />
+            {h.landscape && (
+              <>
+                <Toggle label="Hide the header in landscape" checked={!!h.landscape.hidden} onChange={(v) => set({ landscape: { ...h.landscape, hidden: v || undefined } })} />
+                <div className="hint pad">
+                  Size, padding, alignment and position above are authored per orientation — you are editing the <b>{lsLayout ? 'landscape' : 'portrait'}</b> one. Switch the canvas
+                  with the <b>▭ landscape</b> chip on the active frame to compose the other. Content, colours and animation stay shared.
+                </div>
+              </>
+            )}
             <div className="grid2">
               <Row label="Prefix">
                 <input

@@ -5,6 +5,8 @@
 //               transitions between scenes).
 
 import { computeMetrics, metrics, setDesign, setVAlign } from './responsive'
+import { mountHeader } from './header'
+import { headerAllowedFor } from './scene'
 import { buildScene, type StageHandle } from './stage'
 import { setActiveLocale } from './i18n'
 import { playProject, type SceneManager } from './scenes'
@@ -20,12 +22,39 @@ let cachedAssets: AssetMap = {} // last received assets — skipped in pa:render
 // every render: a structural edit rebuilds the stage from scratch, and the new stage
 // starts with no preview, which would pop timed-out elements back onto the canvas.
 let lastSeek: { ms: number | null; playing: boolean } = { ms: null, playing: false }
+// The pinned band on the CANVAS (pa:render). The flow mode mounts its own inside
+// playProject, so this is only ever used for the single-scene render — it lets the
+// editor compose against the real header and drag it into place. Re-created whenever
+// the config or the scene's own header visibility changes.
+let header: ReturnType<typeof mountHeader> | null = null
+let headerKey = ''
 
 function size(): { w: number; h: number } {
   return { w: Math.max(1, window.innerWidth), h: Math.max(1, window.innerHeight) }
 }
 function post(msg: unknown): void {
   window.parent.postMessage(msg, '*')
+}
+
+function headerRect(): FrameRect | undefined {
+  const band = header ? document.querySelector<HTMLElement>('.pa-header') : null
+  if (!band || band.style.display === 'none') return undefined
+  const r = band.getBoundingClientRect()
+  return { id: '__header', type: 'header', x: r.left, y: r.top, w: r.width, h: r.height }
+}
+
+// The canvas header follows the scene it is rendering: the project's config, but only on
+// scenes that actually show it (endscenes need showHeader, hideHeader always wins).
+function syncHeader(next: Scene): void {
+  const cfg = headerAllowedFor(next) ? next.meta.header : undefined
+  const key = cfg ? JSON.stringify(cfg) : ''
+  if (key === headerKey) {
+    header?.relayout()
+    return
+  }
+  headerKey = key
+  header?.destroy()
+  header = cfg ? mountHeader(document.body, cfg) : null
 }
 
 function postLayout(): void {
@@ -41,7 +70,7 @@ function postLayout(): void {
   let mediaMs = 0
   for (const v of Array.from(document.querySelectorAll('video')))
     if (isFinite(v.duration) && v.duration > 0) mediaMs = Math.max(mediaMs, v.duration * 1000)
-  post({ type: 'pa:layout', metrics: metrics(), rects, mediaMs })
+  post({ type: 'pa:layout', metrics: metrics(), rects, mediaMs, header: headerRect() })
 }
 
 // Video duration is unknown until metadata lands, which is normally AFTER the layout
@@ -59,6 +88,7 @@ function render(next: Scene, assets: AssetMap, interactive: boolean): void {
   setDesign(next.meta.baseW || 1080, next.meta.baseH || 1920)
   setVAlign(next.meta.vAlign)
   computeMetrics(size().w, size().h)
+  syncHeader(next)
   if (stage && stage.update(next, assets)) {
     stage.startGames(interactive)
     requestAnimationFrame(postLayout)
@@ -80,6 +110,9 @@ function play(project: Project, assets: AssetMap): void {
     scene = null
   }
   if (manager) manager.destroy()
+  header?.destroy() // the flow mounts (and owns) its own band
+  header = null
+  headerKey = ''
   setDesign(project.meta.baseW || 1080, project.meta.baseH || 1920)
   setVAlign(project.meta.vAlign)
   computeMetrics(size().w, size().h)
@@ -88,6 +121,7 @@ function play(project: Project, assets: AssetMap): void {
 
 function relayout(): void {
   computeMetrics(size().w, size().h)
+  header?.relayout()
   if (manager) manager.relayout()
   else if (stage) {
     stage.layoutAll()

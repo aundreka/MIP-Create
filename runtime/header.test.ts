@@ -4,7 +4,7 @@
 
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { mountHeader } from './header'
-import { setDesign } from './responsive'
+import { computeMetrics, setDesign } from './responsive'
 
 setDesign(1080, 1920)
 
@@ -144,6 +144,55 @@ describe('header modes', () => {
   it('stays above every runtime overlay tier by default', () => {
     mount({})
     expect(bandEl()?.style.zIndex).toBe('20000')
+  })
+})
+
+// Placement: an authored offset moves the band away from the pinned top-centre in DESIGN
+// px, and a landscape override can give a wide screen its own size/position (or drop the
+// band entirely) without touching the portrait layout.
+describe('header placement and per-orientation layout', () => {
+  const band = (): HTMLElement | null => document.querySelector<HTMLElement>('.pa-header')
+  const surface = (): HTMLElement | null => document.querySelector<HTMLElement>('.pa-header-surface')
+
+  afterEach(() => {
+    setDesign(1080, 1920)
+    computeMetrics(1080, 1920) // back to portrait, scale 1, for the rest of the file
+  })
+
+  it('pins to the top with no transform of its own by default', () => {
+    computeMetrics(540, 960)
+    mount({})
+    expect(band()?.style.transform).toBe('translateX(-50%) scale(0.5)')
+  })
+
+  it('moves by the authored offset, scaled to the viewport', () => {
+    computeMetrics(540, 960) // FIT scale 0.5
+    mount({ offsetXPx: 40, offsetYPx: 100 })
+    expect(band()?.style.transform).toBe('translateX(-50%) translate(20px, 50px) scale(0.5)')
+  })
+
+  it('applies the landscape layout only while the viewport is wide', () => {
+    const cfg = { heightPx: 120, fontSizePx: 64, offsetYPx: 0, landscape: { heightPx: 80, fontSizePx: 40, offsetYPx: 60 } }
+    computeMetrics(1080, 1920)
+    const h = mount(cfg)
+    expect(band()?.style.height).toBe('120px')
+    expect(surface()?.style.fontSize).toBe('64px')
+
+    computeMetrics(1920, 1080) // rotate; only relayout runs
+    h.relayout()
+    expect(band()?.style.height).toBe('80px')
+    expect(surface()?.style.fontSize).toBe('40px')
+    expect(band()?.style.transform).toContain('translate(0px, 33.75px)') // 60 design px × the landscape scale
+  })
+
+  it('drops the band in landscape when the override hides it', () => {
+    computeMetrics(1080, 1920)
+    const h = mount({ landscape: { hidden: true } })
+    expect(band()?.style.display).toBe('grid')
+
+    computeMetrics(1920, 1080)
+    h.relayout()
+    expect(band()?.style.display).toBe('none')
   })
 })
 

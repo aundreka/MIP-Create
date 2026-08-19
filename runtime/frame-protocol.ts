@@ -34,4 +34,6 @@ export type FrameToParent =
   // mediaMs: the longest <video> in the scene, so the editor's timeline ruler can
   // span the footage instead of cutting it off at the default length. 0 = no video
   // (or its metadata hasn't loaded yet — a later pa:layout carries the real value).
-  | { type: 'pa:layout'; metrics: FrameMetrics; rects: FrameRect[]; mediaMs?: number }
+  // header: the pinned band's rect on the CANVAS (id '__header'), when this scene shows
+  // one. Kept out of `rects` so element selection/marquee logic never sees a non-element.
+  | { type: 'pa:layout'; metrics: FrameMetrics; rects: FrameRect[]; mediaMs?: number; header?: FrameRect }

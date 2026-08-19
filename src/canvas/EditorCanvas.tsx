@@ -6,7 +6,9 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { FrameMetrics, FrameRect, FrameToParent, ParentToFrame } from '../../runtime/frame-protocol'
-import type { Anchor, ProjectMeta, Scene, SceneDef, SceneElement } from '../../runtime/scene'
+import { headerAllowedFor } from '../../runtime/scene'
+import { effectiveHeader } from '../../runtime/header'
+import type { Anchor, HeaderOrientationOverride, ProjectMeta, Scene, SceneDef, SceneElement } from '../../runtime/scene'
 import type { AssetMap } from '../../runtime/types'
 import { ContextMenu, type MenuItem } from '../panels/ContextMenu'
 import { getFramePos, setFramePos } from '../canvasLayout'
@@ -33,6 +35,7 @@ import {
   pasteElements,
   patchElement,
   patchGeometry,
+  patchHeader,
   pasteStyle,
   redo,
   removeSelected,
@@ -128,7 +131,7 @@ function CanvasFrame(props: {
   assets: AssetMap
   renderKey: number
   locale: string | null
-  onLayout: (id: string, rects: FrameRect[], metrics: FrameMetrics, mediaMs?: number) => void
+  onLayout: (id: string, rects: FrameRect[], metrics: FrameMetrics, mediaMs?: number, header?: FrameRect) => void
   iframeRef?: (el: HTMLIFrameElement | null) => void
 }): JSX.Element {
   const { sceneId, def, meta, assets, renderKey, locale, onLayout, iframeRef } = props
@@ -156,6 +159,11 @@ function CanvasFrame(props: {
       elements: displayDef.elements,
       kind: displayDef.kind,
       overlay: displayDef.overlay,
+      // The canvas renders the pinned header itself (see frame.ts) — these decide whether
+      // THIS scene shows it, matching the flow.
+      asEndscene: displayDef.asEndscene,
+      hideHeader: displayDef.hideHeader,
+      showHeader: displayDef.showHeader,
     }
     const changed = lastSentAssets.current !== frameAssets
     lastSentAssets.current = frameAssets
@@ -173,7 +181,7 @@ function CanvasFrame(props: {
         ready.current = true
         post()
       } else if (d.type === 'pa:layout') {
-        onLayout(sceneId, d.rects, d.metrics, d.mediaMs)
+        onLayout(sceneId, d.rects, d.metrics, d.mediaMs, d.header)
       }
     }
     window.addEventListener('message', onMsg)
@@ -339,6 +347,15 @@ export function EditorCanvas(props: Props): JSX.Element {
   // dragged, and the live position (percent of the cell — shared by every cell).
   const [dateEdit, setDateEdit] = useState<string | null>(null)
   const [dateLive, setDateLive] = useState<{ x: number; y: number } | null>(null)
+  // ---- pinned-header placement ----------------------------------------------
+  // The band is rendered by the frame itself (frame.ts) and reports its rect separately
+  // from the element rects. In header-edit mode that rect becomes a draggable ghost that
+  // writes meta.header.offsetXPx/offsetYPx — the landscape override while the canvas is
+  // in landscape, so the two orientations can be placed independently.
+  const [headerEdit, setHeaderEdit] = useState(false)
+  const [headerLive, setHeaderLive] = useState<{ x: number; y: number } | null>(null)
+  const [headerRects, setHeaderRects] = useState<Record<string, FrameRect | undefined>>({})
+  const headerDrag = useRef<{ px: number; py: number; base: { x: number; y: number }; last: { x: number; y: number } | null } | null>(null)
   const dateDrag = useRef<{ base: { x: number; y: number; w: number; h: number }; last: { x: number; y: number } | null } | null>(null)
   const curDateRef = useRef<{ x: number; y: number }>({ x: 50, y: 50 })
   // Flipbook book editor: double-click the book → drag the fold line onto the spine
@@ -393,6 +410,9 @@ export function EditorCanvas(props: Props): JSX.Element {
       elements: sd.elements,
       kind: sd.kind,
       overlay: sd.overlay,
+      asEndscene: sd.asEndscene,
+      hideHeader: sd.hideHeader,
+      showHeader: sd.showHeader,
     }
     // Assets are not included here — the iframe caches them from the last full render.
     iw.postMessage({ type: 'pa:render', scene, interactive: false, locale: editLocaleRef.current }, '*')
@@ -593,6 +613,41 @@ export function EditorCanvas(props: Props): JSX.Element {
     return () => window.removeEventListener('keydown', onKey)
   }, [dateEdit])
 
+  // Header placement mode is entered from the Header popover (a button dispatches this).
+  useEffect(() => {
+    const onEnter = (): void => {
+      setRevealEdit(null)
+      setRevealLive(null)
+      setZoneEdit(null)
+      setZoneLive(null)
+      setDateEdit(null)
+      setDateLive(null)
+      setHeaderLive(null)
+      setHeaderEdit(true)
+    }
+    window.addEventListener('pa:header-edit', onEnter)
+    return () => window.removeEventListener('pa:header-edit', onEnter)
+  }, [])
+  useEffect(() => {
+    if (!headerEdit) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        headerDrag.current = null
+        setHeaderEdit(false)
+        setHeaderLive(null)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [headerEdit])
+  // Leave the mode if the band itself goes away (header removed, or a scene that hides it).
+  useEffect(() => {
+    if (headerEdit && !(project.meta.header && headerAllowedFor(scene))) {
+      setHeaderEdit(false)
+      setHeaderLive(null)
+    }
+  }, [headerEdit, project.meta.header, scene])
+
   // ---- Canva-style image crop ----------------------------------------------
   // Enter crop mode for an image: ensure it has an explicit box (so it clips) + a
   // crop config, normalise its anchor to top-left (so the box maths is direct), then
@@ -659,10 +714,11 @@ export function EditorCanvas(props: Props): JSX.Element {
     return () => window.removeEventListener('keydown', onKey)
   }, [cropEdit, exitCrop])
 
-  const handleLayout = useCallback((id: string, r: FrameRect[], m: FrameMetrics, mediaMs?: number): void => {
+  const handleLayout = useCallback((id: string, r: FrameRect[], m: FrameMetrics, mediaMs?: number, headerR?: FrameRect): void => {
     metricsByScene.current[id] = m
     if (id === liveRef.current.activeSceneId) metricsRef.current = m
     setRectsByScene((prev) => ({ ...prev, [id]: r }))
+    setHeaderRects((prev) => (prev[id] === headerR || (!prev[id] && !headerR) ? prev : { ...prev, [id]: headerR }))
     // Lets the timeline ruler grow to cover a video in this scene.
     if (mediaMs != null) setSceneMediaMs(id, mediaMs)
   }, [])
@@ -889,6 +945,12 @@ export function EditorCanvas(props: Props): JSX.Element {
       // Clicking outside a date marker (markers stop their own events) exits date-edit.
       setDateEdit(null)
       setDateLive(null)
+      return
+    }
+    if (headerEdit) {
+      // Clicking off the band (which stops its own events) exits header placement.
+      setHeaderEdit(false)
+      setHeaderLive(null)
       return
     }
     if (trackerEdit) {
@@ -1932,6 +1994,61 @@ export function EditorCanvas(props: Props): JSX.Element {
     }
   }
 
+  // ---- pinned-header placement -----------------------------------------------
+  // The band's own rect comes from the frame (it is not a scene element). Dragging the
+  // ghost moves it in DESIGN px — the same units the runtime applies — and commits on
+  // release, in landscape into meta.header.landscape so each orientation can sit
+  // somewhere different.
+  const headerCfg = project.meta.header
+  const headerRect = headerRects[activeSceneId]
+  const headerBase = ((): { x: number; y: number } => {
+    const eff = headerCfg ? effectiveHeader(headerCfg, landscape) : null
+    return { x: eff?.offsetXPx ?? 0, y: eff?.offsetYPx ?? 0 }
+  })()
+  const curHeaderOff = headerLive ?? headerBase
+  const onHeaderDown = (e: React.PointerEvent): void => {
+    e.stopPropagation()
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    headerDrag.current = { px: e.clientX, py: e.clientY, base: headerBase, last: null }
+  }
+  const onHeaderMove = (e: React.PointerEvent): void => {
+    const d = headerDrag.current
+    if (!d) return
+    e.stopPropagation()
+    // Screen px → design px: undo the canvas zoom, then the runtime's own FIT scale.
+    const z = liveRef.current.zoom
+    const s = metricsRef.current.s || 1
+    const next = {
+      x: Math.round(d.base.x + (e.clientX - d.px) / z / s),
+      y: Math.round(d.base.y + (e.clientY - d.py) / z / s),
+    }
+    d.last = next
+    setHeaderLive(next)
+  }
+  const onHeaderUp = (e: React.PointerEvent): void => {
+    e.stopPropagation()
+    const d = headerDrag.current
+    headerDrag.current = null
+    if (!d?.last || !headerCfg) return
+    const { x, y } = d.last
+    if (landscape) {
+      const ls: HeaderOrientationOverride = { ...(headerCfg.landscape ?? {}), offsetXPx: x || undefined, offsetYPx: y || undefined }
+      patchHeader({ landscape: Object.values(ls).some((v) => v !== undefined) ? ls : undefined }, editLocale)
+    } else {
+      patchHeader({ offsetXPx: x || undefined, offsetYPx: y || undefined }, editLocale)
+    }
+  }
+  const resetHeaderOffset = (): void => {
+    if (!headerCfg) return
+    setHeaderLive({ x: 0, y: 0 })
+    if (landscape) {
+      const { offsetXPx: _x, offsetYPx: _y, ...rest } = headerCfg.landscape ?? {}
+      patchHeader({ landscape: Object.keys(rest).length ? (rest as HeaderOrientationOverride) : undefined }, editLocale)
+    } else {
+      patchHeader({ offsetXPx: undefined, offsetYPx: undefined }, editLocale)
+    }
+  }
+
   // ---- flipbook book editor --------------------------------------------------
   // Two things live on the canvas here, both measured against the BOOK (an
   // aspect-locked box centered in the element) rather than the element itself:
@@ -2272,6 +2389,7 @@ export function EditorCanvas(props: Props): JSX.Element {
                     !cropEdit &&
                     !trackerEdit &&
                     !spineEdit &&
+                    !headerEdit &&
                     selectedIds.map((id) => {
                       const r = rects.find((x) => x.id === id)
                       if (!r) return null
@@ -2754,6 +2872,38 @@ export function EditorCanvas(props: Props): JSX.Element {
                         </div>
                       ))}
                     </>
+                  )}
+                  {/* Pinned-header placement: the band's ghost, draggable in design px. */}
+                  {headerEdit && headerRect && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        left: headerRect.x + (curHeaderOff.x - headerBase.x) * (metricsRef.current.s || 1),
+                        top: headerRect.y + (curHeaderOff.y - headerBase.y) * (metricsRef.current.s || 1),
+                        width: headerRect.w,
+                        height: headerRect.h,
+                        border: '2px solid var(--accent)',
+                        background: 'rgba(80,140,255,0.16)',
+                        boxSizing: 'border-box',
+                        cursor: 'move',
+                        touchAction: 'none',
+                        display: 'grid',
+                        placeItems: 'center',
+                      }}
+                      title="Drag the date header into place. Esc to finish."
+                      onPointerDown={onHeaderDown}
+                      onPointerMove={onHeaderMove}
+                      onPointerUp={onHeaderUp}
+                      onPointerCancel={onHeaderUp}
+                      onDoubleClick={(e) => {
+                        e.stopPropagation()
+                        resetHeaderOffset()
+                      }}
+                    >
+                      <span className="scratch-mark cover" style={{ pointerEvents: 'none' }}>
+                        header {landscape ? '(landscape)' : ''} {curHeaderOff.x || curHeaderOff.y ? `${curHeaderOff.x}, ${curHeaderOff.y}` : 'pinned top'}
+                      </span>
+                    </div>
                   )}
                   {dateEdit &&
                     dateCellRects.length > 0 &&
