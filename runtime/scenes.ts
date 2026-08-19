@@ -10,6 +10,7 @@ import { notifyGameClose, notifyGameEnd, triggerCTA } from './networks'
 import { createSfxManager, type SfxManager } from './sfx'
 import { mountHeader } from './header'
 import { preloadScratchCover } from './games/scratch'
+import { followLoopCss } from './anim'
 import { localizeHeader, localizeSceneDef } from './i18n'
 import type { Project, Scene, SceneDef, SceneElement, Transition } from './scene'
 import type { AssetMap } from './types'
@@ -401,8 +402,20 @@ export function playProject(
     def.kind === 'endscene' || (def.kind === 'overlay' && def.asEndscene === true)
 
   // Per-scene header visibility: scenes flagged hideHeader suppress the pinned date band while
-  // they're current, and endscenes NEVER show it (an end card carries no date/countdown urgency).
-  const headerAllowed = (def: SceneDef): boolean => !def.hideHeader && !isEndscene(def)
+  // they're current. End cards hide it by default (an end card usually carries no date/countdown
+  // urgency) unless they opt back in with showHeader; hideHeader still wins over that opt-in.
+  const headerAllowed = (def: SceneDef): boolean =>
+    !def.hideHeader && (!isEndscene(def) || def.showHeader === true)
+
+  // meta.header.loopFollowsCta: the band beats with the CTA button of whatever scene is on
+  // screen. Copy that element's loop (its pulse, or an explicit loop spec) and hand it to the
+  // header at mount time, so both animations start on the same frame and stay in phase.
+  // Scenes without a CTA pass null — the header falls back to its own authored loop.
+  const syncHeaderCta = (def: SceneDef): void => {
+    if (!header) return
+    const cta = def.elements.find((e) => e.type === 'cta' && !e.hidden)
+    header.followCta(cta ? followLoopCss(cta, opts.interactive) || null : null)
+  }
 
   // A reload must never drop the player back onto a finished play-through.
   const clearResume = (): void => {
@@ -465,6 +478,7 @@ export function playProject(
       // target — and it must still be an end card when it does.
       if (isEndscene(displayDef)) armEndcard(displayDef, stage.root)
     }
+    syncHeaderCta(displayDef)
     return stage
   }
 
@@ -591,6 +605,7 @@ export function playProject(
       // mountScene. Restored to the underlying scene's setting on dismiss (see restoreImmune);
       // a redirect's mountScene sets it for the destination scene.
       if (!headerAllowed(def)) header?.setVisible(false)
+      else if (def.showHeader) header?.setVisible(true) // end card opted the band back in
       // An overlay opted into asEndscene is the end card itself: it floats over the finished
       // game (dim/blur showing the board through) and STAYS. Nothing dismisses it, so its
       // advance rule is ignored below.
@@ -653,6 +668,7 @@ export function playProject(
       overStage.layoutAll()
       overStage.startGames(true)
       overStage.playEntrances()
+      syncHeaderCta(def) // an end-card overlay carries its own CTA — follow THAT one
       overlayStages.add(overStage)
 
       // Lift the overlay scene's OWN "top layer" (overlayTop) elements OUT of overlayDiv.
@@ -672,6 +688,7 @@ export function playProject(
         // Header follows whichever scene is current after the overlay closes: the game scene
         // on a plain dismiss, or the redirect destination (mountScene already set it; same value).
         if (current) header?.setVisible(headerAllowed(current.def))
+        if (current) syncHeaderCta(localizeSceneDef(current.def)) // back to the underlying scene's CTA
         if (current) syncPersist(current.def.id)
       }
       const removeOverlayDom = (): void => {

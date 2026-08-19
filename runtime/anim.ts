@@ -179,6 +179,34 @@ export function oneShotAnimationCss(spec: AnimSpec): string {
   return animationCss(spec, false)
 }
 
+/** Public looping shorthand for the same non-stage surfaces — infinite, no fill.
+ * `delayMs` overrides the spec's own delay (the header uses it to hold the loop
+ * back until its entrance has finished, exactly like a scene element does). */
+export function loopAnimationCss(spec: AnimSpec, delayMs?: number): string {
+  return animationCss(spec, true, delayMs)
+}
+
+/** The loop another surface must run to beat IN STEP with this element: the same
+ * keyframes, duration and post-entrance delay the element itself uses during playback.
+ * That is an explicit `loop` spec, or — for a CTA with none — its pulse. The pinned
+ * header copies this so the date/countdown pulses with the CTA button.
+ * `includeEntranceDelay` mirrors playback (true) vs. the static editor canvas (false).
+ * '' when the element has no loop and is not a pulsing CTA. */
+export function followLoopCss(el: SceneElement, includeEntranceDelay: boolean): string {
+  // Same delay composeElementAnim gives the element's own loop during playback: after the
+  // last node entrance ends (pseudo/JS-driven entrance presets don't hold it back).
+  const loopDelay = includeEntranceDelay
+    ? Math.max(0, ...phaseSpecs(el, 'entrance')
+        .filter((e) => e.preset !== 'lightray' && e.preset !== 'typewriter')
+        .map((e) => (e.delayMs || 0) + e.durationMs), 0)
+    : 0
+  const loops = phaseSpecs(el, 'loop').filter((s) => s.preset !== 'lightray') // pseudo-driven sweep
+  if (phaseSpecs(el, 'loop').length) {
+    return loops.map((l) => animationCss(l, true, loopDelay)).filter(Boolean).join(', ')
+  }
+  return ctaPulseCss(el, loopDelay)
+}
+
 /** The CSS `animation` shorthand for a CTA's pulse (used in static export contexts). */
 export function ctaPulseAnimation(cta: import('./scene').CtaConfig | undefined): string {
   if (cta?.pulse === 'custom') return 'none'

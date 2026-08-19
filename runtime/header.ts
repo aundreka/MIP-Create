@@ -4,7 +4,7 @@
 import { cssFontFamily } from './font'
 import { scale, viewW } from './responsive'
 import { braceBareTokens, formatTickerIntervalMs, renderCountdownFormat } from './elements/countdown'
-import { injectAnimStyles, oneShotAnimationCss } from './anim'
+import { injectAnimStyles, loopAnimationCss, oneShotAnimationCss } from './anim'
 import type { AnimSpec } from './scene'
 
 export interface HeaderConfig {
@@ -32,12 +32,24 @@ export interface HeaderConfig {
   dateLocale?: string
   dateStyle?: 'short' | 'long' | 'numeric' | 'monthDay'
   entrance?: AnimSpec
+  // Looping motion for the band's TEXT (the date/countdown itself — the bar art stays put,
+  // since scaling the fixed-height band would clip against its own overflow:hidden).
+  // Starts after `entrance` finishes, like a scene element's loop does.
+  loop?: AnimSpec
+  // Beat with the CTA instead of authoring `loop`: the header copies the pulse of the
+  // current scene's CTA button — same keyframes, duration and post-entrance delay, restarted
+  // together with it so the two run in phase. Scenes with no CTA fall back to `loop`.
+  loopFollowsCta?: boolean
 }
 
 interface HeaderHandle {
   relayout(): void
   /** Show/hide the band (per-scene `hideHeader`). Fades after the first call; instant at mount. */
   setVisible(visible: boolean): void
+  /** Adopt the loop of the scene's CTA (`loopFollowsCta`). `css` is that element's loop
+   * shorthand — see followLoopCss — or null for a scene with no CTA, which restores the
+   * header's own `loop`. A no-op unless the header opted into following. */
+  followCta(css: string | null): void
   /** Freeze a live countdown at its current displayed instant for the rest of this playable. */
   freezeCountdown(): void
   destroy(): void
@@ -113,6 +125,22 @@ export function mountHeader(container: HTMLElement, opts: HeaderConfig): HeaderH
   text.style.whiteSpace = 'pre-line'
   surface.appendChild(text)
   band.appendChild(surface)
+
+  // The loop lives on the text node, not the surface: it can then run alongside a
+  // transform-based entrance (different nodes never fight over `transform`) and it
+  // pulses the date rather than the band's background.
+  const entranceEndMs = opts.entrance ? (opts.entrance.delayMs || 0) + opts.entrance.durationMs : 0
+  const ownLoopCss = opts.loop ? loopAnimationCss(opts.loop, entranceEndMs) : ''
+  // Restarted on each assignment (animation:none + reflow) so a followed CTA pulse starts
+  // its cycle with the CTA that was just mounted instead of mid-beat.
+  const applyLoop = (css: string): void => {
+    if (css) injectAnimStyles()
+    text.style.animation = 'none'
+    void text.offsetWidth // force reflow so the next assignment restarts the animation
+    text.style.animation = css
+    text.style.willChange = css ? 'transform' : ''
+  }
+  if (ownLoopCss) applyLoop(ownLoopCss)
 
   // 'countdown' mode ticks down from countdownSeconds after load — or, with
   // countdownTarget 'midnight', from however much of the viewer's day is left
@@ -222,6 +250,10 @@ export function mountHeader(container: HTMLElement, opts: HeaderConfig): HeaderH
       band.style.transition = visInit ? 'opacity 250ms ease' : ''
       band.style.opacity = visible ? '1' : '0'
       visInit = true
+    },
+    followCta(css: string | null) {
+      if (!opts.loopFollowsCta) return
+      applyLoop(css || ownLoopCss)
     },
     freezeCountdown,
     destroy() {

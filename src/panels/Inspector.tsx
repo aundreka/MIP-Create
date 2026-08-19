@@ -1985,14 +1985,19 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
             {isOverlayKind && sd.asEndscene && (
               <div className="hint pad">
                 This overlay <b>is</b> the end card. It stays floated over the finished game — the dim/blur shows the board through — and gets the endscene wrap: tap anywhere to
-                install, <b>gameEnd</b> signalled to the network, no date header. It is
+                install, <b>gameEnd</b> signalled to the network, no date header unless you turn it on below. It is
                 <b> terminal</b>, so its Advance rule below is ignored: nothing dismisses it and it never continues to another scene.
               </div>
             )}
             {state.scene.meta.header && !actsAsEndscene && (
               <Toggle label="Hide date header in this scene" checked={!!sd.hideHeader} onChange={(v) => patchSceneDef(sd.id, { hideHeader: v || undefined })} />
             )}
-            {state.scene.meta.header && actsAsEndscene && <div className="hint pad">The date header never shows on an end card.</div>}
+            {state.scene.meta.header && actsAsEndscene && (
+              <>
+                <Toggle label="Show date header on this end card" checked={!!sd.showHeader} onChange={(v) => patchSceneDef(sd.id, { showHeader: v || undefined })} />
+                <div className="hint pad">End cards hide the pinned date/countdown header by default. Turn this on to band it across the end card too — it stays tap-through, so the whole card still clicks out.</div>
+              </>
+            )}
             {sd.kind === 'endscene' && (
               <div className="hint pad">
                 Endscene = MRAID <b>end card</b>: in Preview/export the whole scene is tap-to-install and signals the network the ad ended. Add a <b>video endscene</b> element for
@@ -3394,6 +3399,53 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
       {hasTextStyle && el.text && (
         <>
           <Accordion id="inspector.text" title="Text">
+            {el.type !== 'countdown' &&
+              (() => {
+                // Attach: the label's position AND size come from the target's rendered
+                // box, so it can never drift out of the image/bar it sits on when the
+                // screen aspect changes. Countdowns keep their own picker below.
+                const targets = state.scene.elements.filter((t) => t.id !== id && (t.type === 'image' || t.type === 'bar'))
+                const stale = el.attachToId && !targets.some((t) => t.id === el.attachToId)
+                if (!targets.length && !stale) return null
+                return (
+                  <>
+                    <Row label="Attach to">
+                      <Select
+                        value={el.attachToId ?? ''}
+                        onChange={(v) => patchElement(id, { attachToId: v || undefined })}
+                        options={[
+                          { value: '', label: 'None (free position)' },
+                          ...targets.map((t) => ({ value: t.id, label: t.name || t.id })),
+                          ...(stale ? [{ value: el.attachToId!, label: `${el.attachToId} (missing)` }] : []),
+                        ]}
+                      />
+                    </Row>
+                    {!el.attachToId && (
+                      <Row label="Header scaling">
+                        <Toggle
+                          label="Scale like the date band"
+                          checked={!!el.headerScale}
+                          onChange={(v) => patchElement(id, { headerScale: v || undefined })}
+                        />
+                      </Row>
+                    )}
+                    {!el.attachToId && el.headerScale && (
+                      <div className="hint pad">
+                        Sizes this text with a single transform, the way the pinned date band does, instead of multiplying font size, spacing and padding by the layout scale
+                        one at a time. Nothing lands on a rounded pixel, so it holds its exact design position and size at every screen — use it when a label must stay put
+                        inside artwork.
+                      </div>
+                    )}
+                    {el.attachToId && (
+                      <div className="hint pad">
+                        Locked to the target's rendered box: this text keeps the same offset and the same proportional size relative to that image at every screen size,
+                        orientation and zoom. Drag it where you want it — the offset sticks. Note a landscape override on this text (and not on the target) still shifts it in
+                        landscape; clear it under <b>Landscape layout</b> if you want them identical in both orientations.
+                      </div>
+                    )}
+                  </>
+                )
+              })()}
             {el.type !== 'countdown' && (
               <Row label={editLocale ? `Value (${editLocale})` : 'Value'}>
                 {editLocale ? (

@@ -2609,7 +2609,7 @@ function applyBoxStyle(node: HTMLElement, box: SceneElement['box'], s: number): 
   node.style.boxSizing = 'border-box'
 }
 
-// Resolve an attachToId countdown's position + scale from its TARGET's rendered
+// Resolve an attached text/countdown's position + scale from its TARGET's rendered
 // rect. Returns null when the target is missing/hidden (→ normal FIT layout).
 // For a plain FIT target this is mathematically identical to sx/sy positioning;
 // it only diverges when the target lays out differently (extend/pinned bars,
@@ -2618,7 +2618,7 @@ function applyBoxStyle(node: HTMLElement, box: SceneElement['box'], s: number): 
 // applied to the text's font metrics so its height stays proportional to the
 // target, and to the authored design-px offset so the gap scales in lockstep.
 function attachedTextPos(rec: Rec, e: Effective): { left: number; top: number; k: number } | null {
-  const attachId = rec.el.type === 'countdown' ? rec.el.countdown?.attachToId : undefined
+  const attachId = rec.el.attachToId ?? (rec.el.type === 'countdown' ? rec.el.countdown?.attachToId : undefined)
   const root = rec.outer.parentElement
   if (!root) return null
   let target: Rec | undefined
@@ -2840,12 +2840,20 @@ function layoutText(rec: Rec, e: Effective): void {
   const inner = box.firstElementChild as HTMLElement | null
   if (!inner) return
   const attached = attachedTextPos(rec, e)
+  // Header-style scaling (see header.ts): instead of multiplying every interior value
+  // by the layout scale — font size, letter spacing, stroke, box padding, each landing
+  // on its own rounded pixel — leave the whole box in raw DESIGN px and let ONE CSS
+  // transform scale it, exactly like the pinned date band does. The band holds its
+  // design-space position to two decimal places at every viewport because nothing
+  // inside it is ever computed per-value; this gives a text element the same property.
+  // Not compatible with attachToId (which derives its own scale from a target rect).
+  const headerScale = !!rec.el.headerScale && !attached
   // e.scale multiplies the whole text box (font, spacing, stroke, box padding).
   // Text has no other per-orientation size channel — fontSizePx is shared config —
   // so a landscape override's `scale` is how landscape resizes text independently.
   // (Historically ignored for text, but the editor never exposed scale on text
   // elements, so honoring it changes nothing for existing scenes.)
-  const s = (attached ? attached.k : scale()) * (e.scale || 1)
+  const s = (headerScale ? 1 : attached ? attached.k : scale()) * (e.scale || 1)
 
   // inner text styling (re-applied each layout so edits stay reactive).
   // Countdown elements show the live formatted time, not the static value.
@@ -2903,11 +2911,29 @@ function layoutText(rec: Rec, e: Effective): void {
   // don't set width/height so the nested inline-block chain sizes correctly.
   const [tx, ty] = ANCHOR[e.anchor]
   outer.style.position = ''
-  outer.style.left = round(attached ? attached.left : sx(e.x)) + 'px'
-  outer.style.top = round(attached ? attached.top : sy(e.y)) + 'px'
   outer.style.width = ''
   outer.style.height = ''
-  outer.style.transform = `translate(${tx}%,${ty}%)` + (e.rotation ? ` rotate(${e.rotation}deg)` : '')
+  const rot = e.rotation ? ` rotate(${e.rotation}deg)` : ''
+  if (headerScale) {
+    // The anchor point is placed UNROUNDED (a rounded left/top is the other half of
+    // the drift: two elements 3 design px apart each round to their own whole pixel
+    // and separate by up to 1px). transform-origin 0 0 means scale() pivots on that
+    // anchor, and the following translate is expressed in the element's own design px
+    // — so the design-sized box lands exactly where sx/sy say, at exactly scale× size.
+    outer.style.transformOrigin = '0 0'
+    outer.style.left = sx(e.x) + 'px'
+    outer.style.top = sy(e.y) + 'px'
+    outer.style.transform = `scale(${scale()}) translate(${tx}%,${ty}%)` + rot
+    return
+  }
+  outer.style.transformOrigin = ''
+  outer.style.left = round(sx(e.x)) + 'px'
+  outer.style.top = round(sy(e.y)) + 'px'
+  if (attached) {
+    outer.style.left = round(attached.left) + 'px'
+    outer.style.top = round(attached.top) + 'px'
+  }
+  outer.style.transform = `translate(${tx}%,${ty}%)` + rot
 }
 
 // Style a CTA button: background box + (for text CTAs) flex-centered scaled label.

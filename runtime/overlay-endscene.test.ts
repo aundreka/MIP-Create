@@ -28,7 +28,7 @@ const textEl = (id: string, extra: Partial<SceneDef['elements'][number]> = {}) =
 
 // game1 (winnable) → card (overlay) → after1. The ONLY difference between the two runs is
 // the asEndscene flag on `card`, so the opposite outcomes below are attributable to it.
-function makeProject(asEndscene: boolean): Project {
+function makeProject(asEndscene: boolean, showHeader = false): Project {
   return {
     meta: {
       schemaVersion: 1, name: 'overlay-endcard', clickUrl: { ios: '', android: '' },
@@ -46,6 +46,7 @@ function makeProject(asEndscene: boolean): Project {
       {
         id: 'card', name: 'Card', kind: 'overlay',
         ...(asEndscene ? { asEndscene: true } : {}),
+        ...(showHeader ? { showHeader: true } : {}),
         overlay: { opacity: 0.6, color: '#000000' },
         elements: [textEl('cardtext')],
         // A live rule that WOULD dismiss/redirect a plain overlay — ignored when terminal.
@@ -89,8 +90,8 @@ describe('overlay scene doubling as the MRAID end card', () => {
   })
 
   // Win the game and let the gameWin advance fire, landing us on `card`.
-  const playToCard = (asEndscene: boolean): void => {
-    mgr = playProject(makeProject(asEndscene), {}, { mount, interactive: true })
+  const playToCard = (asEndscene: boolean, showHeader = false): void => {
+    mgr = playProject(makeProject(asEndscene, showHeader), {}, { mount, interactive: true })
     emit('game-complete')
     vi.runOnlyPendingTimers()
   }
@@ -143,6 +144,13 @@ describe('overlay scene doubling as the MRAID end card', () => {
   it('hides the date header, like any end card', () => {
     playToCard(true)
     expect(headerBand()?.style.opacity).toBe('0')
+  })
+
+  // Opt-in: an end card that WANTS the dynamic date/countdown band keeps it. Same project,
+  // same flags, only showHeader differs from the test above.
+  it('keeps the date header when the end card opts in with showHeader', () => {
+    playToCard(true, true)
+    expect(headerBand()?.style.opacity).toBe('1')
   })
 
   it('without the flag the same overlay still dismisses and redirects onward', () => {

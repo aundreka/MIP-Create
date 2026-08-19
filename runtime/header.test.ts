@@ -146,3 +146,50 @@ describe('header modes', () => {
     expect(bandEl()?.style.zIndex).toBe('20000')
   })
 })
+
+// The band can loop as well as enter. The loop rides the TEXT node so it never fights the
+// entrance (which owns the surface's transform) and never scales the bar art out of its
+// overflow:hidden box.
+describe('header loop animation', () => {
+  const textEl = (): HTMLElement | null => document.querySelector<HTMLElement>('.pa-header-text')
+  const surfaceEl = (): HTMLElement | null => document.querySelector<HTMLElement>('.pa-header-surface')
+
+  it('runs an authored loop infinitely on the text, leaving the surface free for the entrance', () => {
+    mount({ loop: { preset: 'pulse', durationMs: 900, delayMs: 0, easing: 'ease-in-out', iterations: 'infinite' } })
+    expect(textEl()?.style.animation).toBe('pa-pulse 900ms ease-in-out 0ms infinite normal none')
+    expect(surfaceEl()?.style.animation).toBe('')
+  })
+
+  it('holds the loop back until the entrance has finished', () => {
+    mount({
+      entrance: { preset: 'slide-down', durationMs: 450, delayMs: 300, easing: 'ease-out' },
+      loop: { preset: 'float', durationMs: 2000, delayMs: 0, easing: 'ease-in-out' },
+    })
+    // 300ms delay + 450ms entrance = the loop starts at 750ms.
+    expect(textEl()?.style.animation).toBe('pa-float 2000ms ease-in-out 750ms infinite normal none')
+  })
+
+  it('ignores a followed CTA pulse unless the header opted in', () => {
+    const h = mount({ loop: { preset: 'pulse', durationMs: 900, delayMs: 0, easing: 'ease-in-out' } })
+    h.followCta('pa-cta-pulse-strong 1200ms ease-in-out infinite')
+    expect(textEl()?.style.animation).toBe('pa-pulse 900ms ease-in-out 0ms infinite normal none')
+  })
+
+  it('adopts the scene CTA pulse when following, and falls back to its own loop without one', () => {
+    const h = mount({ loopFollowsCta: true, loop: { preset: 'pulse', durationMs: 900, delayMs: 0, easing: 'ease-in-out' } })
+    h.followCta('pa-cta-strong 1200ms ease-in-out infinite')
+    expect(textEl()?.style.animation).toBe('pa-cta-strong 1200ms ease-in-out infinite')
+
+    h.followCta(null) // a scene with no CTA
+    expect(textEl()?.style.animation).toBe('pa-pulse 900ms ease-in-out 0ms infinite normal none')
+  })
+
+  it('follows the CTA with no loop of its own, and clears again on a CTA-less scene', () => {
+    const h = mount({ loopFollowsCta: true })
+    expect(textEl()?.style.animation).toBe('')
+    h.followCta('pa-cta-strong 1200ms ease-in-out infinite')
+    expect(textEl()?.style.animation).toBe('pa-cta-strong 1200ms ease-in-out infinite')
+    h.followCta(null)
+    expect(textEl()?.style.animation).toBe('')
+  })
+})

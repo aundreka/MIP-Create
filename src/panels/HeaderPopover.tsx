@@ -25,7 +25,19 @@ const HEADER_ENTRANCE_PRESETS: { value: AnimPresetId; label: string }[] = [
   { value: 'wipe-up', label: 'Wipe up' },
 ]
 
+const HEADER_LOOP_PRESETS: { value: AnimPresetId; label: string }[] = [
+  { value: 'pulse', label: 'Pulse' },
+  { value: 'float', label: 'Float' },
+  { value: 'subtle-float', label: 'Subtle float' },
+  { value: 'wave', label: 'Wave' },
+  { value: 'shake', label: 'Shake' },
+  { value: 'bounce', label: 'Bounce' },
+  { value: 'glow', label: 'Glow' },
+  { value: 'shine', label: 'Shine' },
+]
+
 const DEFAULT_HEADER_ENTRANCE: AnimSpec = { preset: 'fade', durationMs: 520, delayMs: 0, easing: 'ease-out' }
+const DEFAULT_HEADER_LOOP: AnimSpec = { preset: 'pulse', durationMs: 1200, delayMs: 0, easing: 'ease-in-out', iterations: 'infinite' }
 
 export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): JSX.Element {
   const { project, assets } = useEditorState()
@@ -75,6 +87,7 @@ export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): 
     patchMeta({ headerI18n: Object.keys(headers).length ? headers : undefined })
   }
   const setEntrance = (patch: Partial<AnimSpec>): void => set({ entrance: { ...(h?.entrance ?? DEFAULT_HEADER_ENTRANCE), ...patch } })
+  const setLoop = (patch: Partial<AnimSpec>): void => set({ loop: { ...(h?.loop ?? DEFAULT_HEADER_LOOP), ...patch } })
 
   return createPortal(
     <div ref={ref} className="header-pop" style={{ top: pos.top, right: pos.right }} role="dialog" aria-label="Header">
@@ -248,6 +261,29 @@ export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): 
                 <div className="grid2">
                   <NumField label="Duration" value={h.entrance.durationMs} min={0} step={50} suffix="ms" onChange={(n) => setEntrance({ durationMs: n })} />
                   <NumField label="Delay" value={h.entrance.delayMs} min={0} step={50} suffix="ms" onChange={(n) => setEntrance({ delayMs: n })} />
+                </div>
+              </>
+            )}
+            <Toggle
+              label="Pulse with the CTA button"
+              checked={!!h.loopFollowsCta}
+              onChange={(v) => set({ loopFollowsCta: v || undefined })}
+            />
+            {h.loopFollowsCta && (
+              <div className="hint pad">
+                The date copies the CTA’s pulse — same shape, same speed — and restarts with it on every scene, so the two beat together. Scenes without a CTA use the loop below
+                (or stay still if there isn’t one).
+              </div>
+            )}
+            <Toggle label={h.loopFollowsCta ? 'Loop animation (no-CTA scenes)' : 'Loop animation'} checked={!!h.loop} onChange={(v) => set({ loop: v ? DEFAULT_HEADER_LOOP : undefined })} />
+            {h.loop && (
+              <>
+                <Row label="Loop preset">
+                  <Select value={h.loop.preset} options={HEADER_LOOP_PRESETS} onChange={(v) => setLoop({ preset: v as AnimPresetId })} />
+                </Row>
+                <div className="grid2">
+                  <NumField label="Duration" value={h.loop.durationMs} min={0} step={50} suffix="ms" onChange={(n) => setLoop({ durationMs: n })} />
+                  <NumField label="Delay" value={h.loop.delayMs} min={0} step={50} suffix="ms" onChange={(n) => setLoop({ delayMs: n })} />
                 </div>
               </>
             )}

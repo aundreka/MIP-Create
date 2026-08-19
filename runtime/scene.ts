@@ -689,6 +689,25 @@ export interface SceneElement {
   // instead of tracking the FIT layout vertically. Width still uses coverScale.
   pin?: 'top' | 'bottom'
   relativeToBasketBar?: boolean
+  // Glue a TEXT (or countdown) element to another element — usually the image or
+  // bar it sits on. Position AND font size are then derived from the target's
+  // RENDERED rect instead of the global FIT math, so the label keeps the same
+  // relative offset and proportional height at every viewport size, orientation
+  // and zoom. Two independently-positioned elements each round to their own whole
+  // pixel and can drift apart by ~1px per axis; an attached one is measured from
+  // the target's own box, so it cannot separate from it. x/y stay authored in
+  // design px and read as an offset from the target's design position, so dragging
+  // it on the canvas works exactly as before. Falls back to normal FIT layout when
+  // the target is missing or hidden. (CountdownConfig.attachToId predates this and
+  // is still honoured for older projects.)
+  attachToId?: string
+  // Scale this text the way the pinned header band does (header.ts): the box stays in
+  // raw design px and ONE css transform scales it, instead of multiplying font size,
+  // spacing, stroke and padding by the layout scale individually. Its anchor is also
+  // placed unrounded. Nothing is quantised to a whole pixel, so the element holds its
+  // exact design-space position and size at every viewport — the property that makes
+  // the date band never drift. Text/countdown only; ignored when attachToId is set.
+  headerScale?: boolean
 
   hidden?: boolean
   locked?: boolean // not selectable/movable on the editor canvas
@@ -814,6 +833,14 @@ export interface HeaderConfig {
   // Optional one-shot entrance for the whole header surface. It uses the same
   // preset/duration/delay/easing shape as scene-element entrances.
   entrance?: AnimSpec
+  // Optional looping animation for the band's TEXT (the date/countdown itself — the bar
+  // art stays put, since scaling the fixed-height band would clip it). Starts once
+  // `entrance` has finished, exactly like a scene element's loop.
+  loop?: AnimSpec
+  // Beat with the CTA instead of authoring `loop`: the band adopts the pulse of the CTA
+  // button in whatever scene is on screen — same keyframes, duration and post-entrance
+  // delay, restarted with it so the two run in phase. Scenes with no CTA fall back to `loop`.
+  loopFollowsCta?: boolean
 }
 
 export interface ProjectMeta {
@@ -954,6 +981,10 @@ export interface SceneDef {
   advance: AdvanceRule
   transition?: Transition // how THIS scene ENTERS
   hideHeader?: boolean // hide the pinned date/countdown header (meta.header) while this scene is current
+  // End cards hide the pinned date/countdown header by default. Set this on an endscene
+  // (or an overlay opted into asEndscene) to keep the header banded across the end card too
+  // — the same dynamic date/countdown the game scenes show. `hideHeader` still wins.
+  showHeader?: boolean
   // Length of the editor's timeline ruler for this scene, in ms (editor-only —
   // the runtime never reads it; element timing windows are absolute). Absent =
   // the timeline sizes itself to the longest clip.
