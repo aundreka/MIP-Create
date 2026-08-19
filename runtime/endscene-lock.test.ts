@@ -33,6 +33,11 @@ function makeProject(): Project {
     { id: 'badge', type: 'image', name: 'Badge', x: 500, y: 1500, w: 100, h: 98, anchor: 'top-left', zIndex: 2, mode: 'fit', assetId: 'badge' },
     { id: 'label', type: 'text', name: 'Label', x: 500, y: 1500, anchor: 'top-left', zIndex: 3, mode: 'fit', text: { value: 'SALE', fontSizePx: 100 } },
     { id: 'btn', type: 'cta', name: 'Cta', x: 500, y: 1700, w: 400, h: 120, anchor: 'top-left', zIndex: 4, mode: 'fit', text: { value: 'GET IT', fontSizePx: 48 } },
+    {
+      id: 'date', type: 'countdown', name: 'Dynamic date', x: 500, y: 1300, anchor: 'top-left', zIndex: 5, mode: 'fit',
+      text: { value: '', fontSizePx: 52, fontWeight: 700, align: 'center' },
+      countdown: { mode: 'dynamic', dynamicDays: 3, format: 'Offer ends {date}', dateStyle: 'short' },
+    },
   ]
   return {
     meta: { schemaVersion: 1, name: 'endscene-lock', clickUrl: { ios: '', android: '' }, baseW: DESIGN_W, baseH: DESIGN_H, vAlign: 'center' },
@@ -134,6 +139,30 @@ describe('elements over a cover endscene lock to the clip', () => {
       .map((n) => parseFloat(n.style.fontSize))
       .find((v) => v > 0)!
     expect(btnFont).toBeGreaterThan(48 * fit)
+  })
+
+  // The "Dynamic date" the generator drops on an end card is a countdown element, and it
+  // rides the clip on the same terms as the artwork it is placed against.
+  it('locks a dynamic date to the clip in both orientations', () => {
+    const fontFrac = (vw: number, vh: number): number => {
+      const el = mount(vw, vh)
+      const nat = vw > vh ? assets.lvid : assets.pvid
+      const m = cover(vw, vh, nat.w, nat.h)
+      return parseFloat(q(el, 'date').querySelector<HTMLElement>('.pa-text-inner')!.style.fontSize) / m.height
+    }
+    const refP = onClip(1080, 1920, 'date')
+    const refPFont = fontFrac(1080, 1920)
+    for (const [vw, vh] of portrait.slice(1)) {
+      const got = onClip(vw, vh, 'date')
+      expect(got.fx).toBeCloseTo(refP.fx, 2)
+      expect(got.fy).toBeCloseTo(refP.fy, 2)
+      expect(fontFrac(vw, vh)).toBeCloseTo(refPFont, 4)
+    }
+    const wide = onClip(1540, 1135, 'date')
+    const wider = onClip(2000, 900, 'date')
+    expect(wider.fx).toBeCloseTo(wide.fx, 2)
+    expect(wider.fy).toBeCloseTo(wide.fy, 2)
+    expect(fontFrac(2000, 900)).toBeCloseTo(fontFrac(1540, 1135), 4)
   })
 
   it('locks the same elements in landscape, where the FIT frame is a narrow column', () => {

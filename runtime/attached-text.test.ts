@@ -372,61 +372,62 @@ describe('countdown attachToId', () => {
     expect(parseFloat(cd.style.top)).toBeCloseTo(696 * Math.min(1022 / DESIGN_W, 944 / DESIGN_H), 4)
   })
 
-  it('keeps non-16:9 landscape endscene countdowns from drifting downward', () => {
+  // Both cases below are a COVER card in landscape, where the clip fills the frame and
+  // there is no letterbox for the date to belong to. These used to hold the authored FIT
+  // y and font size — the date then slid off the artwork it was placed against as the clip
+  // cropped. It now LOCKS to the clip like every other element over a card
+  // (endsceneMediaPos): the same point of the clip, at the same size relative to it, at
+  // every width. A 'contain' card still keeps the FIT frame — see the two tests above.
+  const coverBox = (w: number, h: number, nw: number, nh: number): { top: number; height: number } => {
+    const k = Math.max(w / nw, h / nh)
+    return { top: (h - nh * k) / 2, height: nh * k }
+  }
+
+  const measureLandscapeLock = (project: Project): { onClip: (w: number) => { fy: number; ff: number }; plainFitTop: number } => {
     document.body.innerHTML = ''
     const mount = document.createElement('div')
     document.body.appendChild(mount)
     setDesign(DESIGN_W, DESIGN_H)
     setVAlign('center')
     computeMetrics(844, 390)
-    const mgr = playProject(makeWideStepLandscapeCountdownProject(), videoAssets, { mount, interactive: true })
+    const mgr = playProject(project, videoAssets, { mount, interactive: true })
     const vid = q(mount, 'vid')
     const cd = q(mount, 'cd')
-
-    const measureAt = (w: number): { top: number; fontSize: number } => {
-      computeMetrics(w, 390)
-      vid.getBoundingClientRect = () => fakeRect(0, 0, w, 390)
-      mgr.relayout()
-      return {
-        top: parseFloat(cd.style.top),
-        fontSize: parseFloat(cd.querySelector<HTMLElement>('.pa-text-inner')!.style.fontSize),
-      }
+    return {
+      // The date's top and font size as a FRACTION of the live clip — constant iff locked.
+      onClip: (w: number) => {
+        computeMetrics(w, 390)
+        vid.getBoundingClientRect = () => fakeRect(0, 0, w, 390)
+        mgr.relayout()
+        const c = coverBox(w, 390, videoAssets.wideL.w, videoAssets.wideL.h)
+        return {
+          fy: (parseFloat(cd.style.top) - c.top) / c.height,
+          ff: parseFloat(cd.querySelector<HTMLElement>('.pa-text-inner')!.style.fontSize) / c.height,
+        }
+      },
+      plainFitTop: 1383 * Math.min(844 / DESIGN_W, 390 / DESIGN_H),
     }
-    const plainFitTop = 1383 * Math.min(844 / DESIGN_W, 390 / DESIGN_H)
-    const wide = measureAt(844)
-    const narrow = measureAt(700)
+  }
 
-    expect(wide.top).toBeCloseTo(plainFitTop, 4)
-    expect(narrow.top).toBeCloseTo(plainFitTop, 4)
-    expect(narrow.fontSize).toBeCloseTo(wide.fontSize, 1)
+  it('locks auto-attached landscape endscene countdowns to a cover clip', () => {
+    const { onClip } = measureLandscapeLock(makeWideStepLandscapeCountdownProject())
+    const wide = onClip(844)
+    const narrow = onClip(700)
+
+    expect(narrow.fy).toBeCloseTo(wide.fy, 3)
+    expect(narrow.ff).toBeCloseTo(wide.ff, 4)
   })
 
-  it('keeps explicitly attached landscape endscene countdowns at their authored y', () => {
-    document.body.innerHTML = ''
-    const mount = document.createElement('div')
-    document.body.appendChild(mount)
-    setDesign(DESIGN_W, DESIGN_H)
-    setVAlign('center')
-    computeMetrics(844, 390)
-    const mgr = playProject(makeWideStepAttachedLandscapeCountdownProject(), videoAssets, { mount, interactive: true })
-    const vid = q(mount, 'vid')
-    const cd = q(mount, 'cd')
+  it('locks explicitly attached landscape endscene countdowns to a cover clip', () => {
+    const { onClip, plainFitTop } = measureLandscapeLock(makeWideStepAttachedLandscapeCountdownProject())
+    const wide = onClip(844)
+    const narrow = onClip(700)
 
-    const measureAt = (w: number): { top: number; fontSize: number } => {
-      computeMetrics(w, 390)
-      vid.getBoundingClientRect = () => fakeRect(0, 0, w, 390)
-      mgr.relayout()
-      return {
-        top: parseFloat(cd.style.top),
-        fontSize: parseFloat(cd.querySelector<HTMLElement>('.pa-text-inner')!.style.fontSize),
-      }
-    }
-    const expectedTop = 1383 * Math.min(844 / DESIGN_W, 390 / DESIGN_H)
-    const wide = measureAt(844)
-    const narrow = measureAt(700)
-
-    expect(wide.top).toBeCloseTo(expectedTop, 4)
-    expect(narrow.top).toBeCloseTo(expectedTop, 4)
-    expect(narrow.fontSize).toBeCloseTo(wide.fontSize, 1)
+    expect(narrow.fy).toBeCloseTo(wide.fy, 3)
+    expect(narrow.ff).toBeCloseTo(wide.ff, 4)
+    // The clip crops differently at each width, so riding it means NOT sitting at the
+    // authored FIT y any more — the behaviour these two tests used to pin.
+    const c = coverBox(700, 390, videoAssets.wideL.w, videoAssets.wideL.h)
+    expect(c.top + narrow.fy * c.height).not.toBeCloseTo(plainFitTop, 1)
   })
 })

@@ -2671,6 +2671,18 @@ function attachedTextPos(rec: Rec, e: Effective): { left: number; top: number; k
   const fit = target.content instanceof HTMLElement ? (isLandscape() ? target.content.dataset.fitL : target.content.dataset.fitP) || 'cover' : 'cover'
   const keepGlobalY = fit === 'contain'
 
+  // A COVER-fitted endscene has no letterbox: the clip is the whole frame, so a
+  // dynamic date / countdown over it locks to the clip exactly like an image or a CTA
+  // does (endsceneMediaPos) — same mapping whether the card was auto-picked or named
+  // by attachToId. Both of the branches below then only ever run for a 'contain' card,
+  // where the FIT frame is still the thing the date was authored against: a contained
+  // clip letterboxes, and the date belongs to the letterboxed composition, not to the
+  // clip's own box.
+  if (target.el.type === 'endscene' && !keepGlobalY) {
+    const locked = endsceneMediaPos(rec, e, target)
+    if (locked) return locked
+  }
+
   if (isAutoEndscene && media) {
     const ref = autoEndsceneReferenceRect(target, e)
     if (ref) {
@@ -2708,6 +2720,8 @@ function attachedTextPos(rec: Rec, e: Effective): { left: number; top: number; k
   if (media) {
     const nx = (e.x - tLeftD) / targetDesignW
     const ny = (e.y - tTopD) / targetDesignH
+    // Only reachable for a cover card whose clip refused to map (no reference rect):
+    // hold the authored FIT y rather than guessing from a box we could not resolve.
     const lockLandscapeY = target.el.type === 'endscene' && isLandscape() && keepGlobalY === false
     return {
       left: media.left - rootRect.left + nx * media.width,
@@ -2845,11 +2859,11 @@ function autoEndsceneReferenceRect(
 // ratio into the draw size, so the image tracks the card's own overlay scale.
 // Returns null when there is no endscene underneath or its media is not measurable
 // yet (→ plain FIT).
-function endsceneMediaPos(rec: Rec, e: Effective): { left: number; top: number; k: number } | null {
+function endsceneMediaPos(rec: Rec, e: Effective, explicitTarget?: Rec): { left: number; top: number; k: number } | null {
   const root = rec.outer.parentElement
   if (!root) return null
-  const target = autoEndsceneTarget(rec)
-  if (!target) return null
+  const target = explicitTarget ?? autoEndsceneTarget(rec)
+  if (!target || target.el.type !== 'endscene') return null
   // Element order in a scene is arbitrary — make sure the endscene's geometry is
   // current for this pass before measuring it.
   layoutRec(target)
