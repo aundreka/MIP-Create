@@ -1,6 +1,5 @@
 import type { GameContext, GameModule, GameTemplate, HintMove, Pt } from './types'
 import { injectAnimStyles } from '../anim'
-import { designW, inverseX, inverseY, viewW } from '../responsive'
 import '../catch.css'
 
 interface Drop {
@@ -96,43 +95,6 @@ export function createCatch(): GameModule {
         scoreCounter.textContent = `${displayScore()}`
       }
     }
-  }
-
-  // --- score text: pinned exactly like the header band ------------------------
-  // The score counter is an ordinary text element, so stage.ts lays it out as FIT
-  // content: top = sy(y) = letterbox offset + y * scale. The pinned header band
-  // (runtime/header.ts) ignores that offset — it is fixed to the PHYSICAL top of
-  // the screen and only ever multiplied by the FIT scale. The two therefore
-  // diverge on any device where the letterbox offset is non-zero (a project using
-  // meta.vAlign 'center' pools spare height at the top): the header holds the top
-  // edge while the score slides down by however much spare height that device has.
-  // Re-place the score with the header's own math — left = viewport centre +
-  // (x - design centre) * scale, top = y * scale — so it keeps a constant scaled
-  // distance from the physical top on every screen. relayout() is called by
-  // stage.layoutAll() AFTER layoutRec, so these values are the ones that stick.
-  let scoreDesign: { x: number; y: number } | null = null
-  let scoreWrote: { left: string; top: string } | null = null
-
-  const pinScoreLikeHeader = () => {
-    if (!paRoot) return
-    const el = paRoot.querySelector('[data-id="score_counter"]') as HTMLElement | null
-    if (!el) return
-    // Recover the design-space coords from the values stage just wrote. Skip that
-    // when the element still carries OUR values (an extra relayout() with no layout
-    // pass in between) — inverting our own output would walk the score up the screen.
-    if (!scoreWrote || scoreWrote.left !== el.style.left || scoreWrote.top !== el.style.top) {
-      const l = parseFloat(el.style.left)
-      const t = parseFloat(el.style.top)
-      if (!Number.isFinite(l) || !Number.isFinite(t)) return
-      scoreDesign = { x: inverseX(l), y: inverseY(t) }
-    }
-    if (!scoreDesign) return
-    const cs = s()
-    const left = `${Math.round(viewW() / 2 + (scoreDesign.x - designW() / 2) * cs)}px`
-    const top = `${Math.round(scoreDesign.y * cs)}px`
-    el.style.left = left
-    el.style.top = top
-    scoreWrote = { left, top }
   }
 
   const stopSpawning = () => {
@@ -796,7 +758,6 @@ export function createCatch(): GameModule {
       
       // Update UI on layout (e.g. initial render)
       updateScoreUI()
-      pinScoreLikeHeader()
     },
     getHint(): HintMove | null {
       if (done || !drops.length || !frontBasket || !paRoot) return null

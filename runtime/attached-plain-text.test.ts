@@ -78,10 +78,13 @@ describe('attachToId on a plain text element', () => {
       relayout()
       // Label centre must land on the badge's own 68/40 design offset, within the
       // single physical pixel the layout rounds positions to.
+      // Exact, not within-a-pixel: an attached label is placed unrounded, so it holds
+      // its design-space offset inside the badge at every viewport — the property that
+      // stops it creeping downward as the screen narrows.
       const dx = parseFloat(label.style.left) - (offX + (BADGE.x - BADGE.w / 2) * s) - 68 * s
       const dy = parseFloat(label.style.top) - (BADGE.y - BADGE.h / 2) * s - 40 * s
-      expect(Math.abs(dx)).toBeLessThanOrEqual(1)
-      expect(Math.abs(dy)).toBeLessThanOrEqual(1)
+      expect(dx).toBeCloseTo(0, 6)
+      expect(dy).toBeCloseTo(0, 6)
     }
   })
 

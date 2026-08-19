@@ -2927,12 +2927,20 @@ function layoutText(rec: Rec, e: Effective): void {
     return
   }
   outer.style.transformOrigin = ''
+  if (attached) {
+    // Attached text is placed UNROUNDED, like the header band (which positions itself
+    // with left:50% + a transform and never quantises anything). Rounding here is what
+    // made an attached label creep out of its artwork: the error is at most half a
+    // PHYSICAL pixel, but expressed in design px it is 0.5/scale — so it grows as the
+    // screen narrows, and on a badge only ~19px tall it reads as the text sliding down.
+    // Unrounded, the label holds its exact design-space position at every viewport.
+    outer.style.left = attached.left + 'px'
+    outer.style.top = attached.top + 'px'
+    outer.style.transform = `translate(${tx}%,${ty}%)` + rot
+    return
+  }
   outer.style.left = round(sx(e.x)) + 'px'
   outer.style.top = round(sy(e.y)) + 'px'
-  if (attached) {
-    outer.style.left = round(attached.left) + 'px'
-    outer.style.top = round(attached.top) + 'px'
-  }
   outer.style.transform = `translate(${tx}%,${ty}%)` + rot
 }
 

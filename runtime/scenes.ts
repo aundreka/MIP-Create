@@ -12,6 +12,7 @@ import { mountHeader } from './header'
 import { preloadScratchCover } from './games/scratch'
 import { followLoopCss } from './anim'
 import { localizeHeader, localizeSceneDef } from './i18n'
+import { headerAllowedFor } from './scene'
 import type { Project, Scene, SceneDef, SceneElement, Transition } from './scene'
 import type { AssetMap } from './types'
 
@@ -404,8 +405,8 @@ export function playProject(
   // Per-scene header visibility: scenes flagged hideHeader suppress the pinned date band while
   // they're current. End cards hide it by default (an end card usually carries no date/countdown
   // urgency) unless they opt back in with showHeader; hideHeader still wins over that opt-in.
-  const headerAllowed = (def: SceneDef): boolean =>
-    !def.hideHeader && (!isEndscene(def) || def.showHeader === true)
+  // headerAllowedFor is shared with the editor canvas (frame.ts) so both agree.
+  const headerAllowed = (def: SceneDef): boolean => headerAllowedFor(def)
 
   // meta.header.loopFollowsCta: the band beats with the CTA button of whatever scene is on
   // screen. Copy that element's loop (its pulse, or an explicit loop spec) and hand it to the

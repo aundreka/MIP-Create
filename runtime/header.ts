@@ -2,7 +2,7 @@
 // letterbox reflow). Fixed positioning + transform scale only — no _offY term.
 
 import { cssFontFamily } from './font'
-import { scale, viewW } from './responsive'
+import { isLandscape, scale, viewW } from './responsive'
 import { braceBareTokens, formatTickerIntervalMs, renderCountdownFormat } from './elements/countdown'
 import { injectAnimStyles, loopAnimationCss, oneShotAnimationCss } from './anim'
 import type { AnimSpec } from './scene'
@@ -40,6 +40,30 @@ export interface HeaderConfig {
   // current scene's CTA button — same keyframes, duration and post-entrance delay, restarted
   // together with it so the two run in phase. Scenes with no CTA fall back to `loop`.
   loopFollowsCta?: boolean
+  // Nudge the band away from the physical top-centre, in DESIGN px (they scale with
+  // everything else). +x right, +y down. The band keeps its full-bleed width, so an
+  // x offset only matters once it is narrower than the screen or its text is aligned.
+  offsetXPx?: number
+  offsetYPx?: number
+  // Optional LANDSCAPE-only layout. Present keys win in landscape; absent ones inherit
+  // the portrait values above, so a header can sit lower and smaller on a wide screen
+  // without duplicating its content settings. `hidden` drops the band in that
+  // orientation entirely.
+  landscape?: HeaderOrientationOverride
+}
+
+/** The header layout fields that can differ between portrait and landscape. Content
+ * (mode, format, prefix/suffix, colours, animations) is shared by both. */
+export interface HeaderOrientationOverride {
+  heightPx?: number
+  fontSizePx?: number
+  fontWeight?: number
+  topPaddingPx?: number
+  align?: 'left' | 'center' | 'right'
+  letterSpacingPx?: number
+  offsetXPx?: number
+  offsetYPx?: number
+  hidden?: boolean
 }
 
 interface HeaderHandle {
@@ -78,15 +102,20 @@ function formatHeaderDate(d = new Date(), locale = 'en-US'): string {
   }
 }
 
+/** The config in force for the current orientation: portrait values, with any
+ * landscape override merged over them while the viewport is wide. */
+export function effectiveHeader(opts: HeaderConfig, landscape = isLandscape()): HeaderConfig {
+  if (!landscape || !opts.landscape) return opts
+  const out: HeaderConfig = { ...opts }
+  for (const [k, v] of Object.entries(opts.landscape)) {
+    if (v !== undefined) (out as Record<string, unknown>)[k] = v
+  }
+  return out
+}
+
 export function mountHeader(container: HTMLElement, opts: HeaderConfig): HeaderHandle {
   const band = document.createElement('div')
   band.className = 'pa-header'
-  const height = opts.heightPx ?? 120
-  const align = opts.align ?? 'center'
-  const justify = align === 'left' ? 'start' : align === 'right' ? 'end' : 'center'
-  // When a top padding is set, top-anchor the text so the gap is measured from the
-  // band's top edge; otherwise keep the original vertically-centred behaviour.
-  const topPadded = opts.topPaddingPx != null
 
   // Position:fixed anchors to the physical viewport top (always top:0, never drifts
   // with _offY). Transform scale only — the sole viewport-dependent term is scale().
@@ -95,7 +124,6 @@ export function mountHeader(container: HTMLElement, opts: HeaderConfig): HeaderH
     'box-sizing:border-box;line-height:1.15;' +
     'white-space:pre-line;pointer-events:none;transform-origin:top center;'
 
-  band.style.height = height + 'px'
   band.style.zIndex = String(Math.max(opts.zIndex ?? 0, HEADER_OVERLAY_Z))
 
   // Keep the responsive scale/position on `band` and animate this full-size inner
@@ -104,16 +132,29 @@ export function mountHeader(container: HTMLElement, opts: HeaderConfig): HeaderH
   const surface = document.createElement('div')
   surface.className = 'pa-header-surface'
   surface.style.cssText = 'width:100%;height:100%;display:grid;box-sizing:border-box;line-height:1.15;white-space:pre-line;'
-  surface.style.alignItems = topPadded ? 'start' : 'center'
-  surface.style.justifyItems = justify
-  surface.style.textAlign = align
-  surface.style.padding = (topPadded ? opts.topPaddingPx : 0) + 'px 24px 0'
   if (opts.bgColor) surface.style.backgroundColor = opts.bgColor
   surface.style.color = opts.color ?? '#ffffff'
-  surface.style.fontSize = (opts.fontSizePx ?? 64) + 'px'
-  surface.style.fontWeight = String(opts.fontWeight ?? 500)
   surface.style.fontFamily = cssFontFamily(opts.fontFamily) || '-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif'
-  if (opts.letterSpacingPx) surface.style.letterSpacing = opts.letterSpacingPx + 'px'
+
+  // Everything that a landscape override may change is (re)applied here, so a rotation
+  // — which only re-runs relayout() — picks up the other orientation's layout.
+  const applyLayout = (): HeaderConfig => {
+    const cfg = effectiveHeader(opts)
+    const align = cfg.align ?? 'center'
+    // When a top padding is set, top-anchor the text so the gap is measured from the
+    // band's top edge; otherwise keep the original vertically-centred behaviour.
+    const topPadded = cfg.topPaddingPx != null
+    band.style.height = (cfg.heightPx ?? 120) + 'px'
+    band.style.display = cfg.landscape?.hidden && isLandscape() ? 'none' : 'grid'
+    surface.style.alignItems = topPadded ? 'start' : 'center'
+    surface.style.justifyItems = align === 'left' ? 'start' : align === 'right' ? 'end' : 'center'
+    surface.style.textAlign = align
+    surface.style.padding = (topPadded ? cfg.topPaddingPx : 0) + 'px 24px 0'
+    surface.style.fontSize = (cfg.fontSizePx ?? 64) + 'px'
+    surface.style.fontWeight = String(cfg.fontWeight ?? 500)
+    surface.style.letterSpacing = cfg.letterSpacingPx ? cfg.letterSpacingPx + 'px' : ''
+    return cfg
+  }
 
   if (opts.entrance) {
     injectAnimStyles()
@@ -233,9 +274,16 @@ export function mountHeader(container: HTMLElement, opts: HeaderConfig): HeaderH
   container.appendChild(band)
 
   const relayout = (): void => {
+    const cfg = applyLayout() // orientation may have flipped since the last pass
     const s = scale() // from responsive.ts — NO _offY term
     band.style.width = (viewW() + 24) / s + 'px'
-    band.style.transform = `translateX(-50%) scale(${s})`
+    // The authored offset is in design px, so it scales with the band. It is applied
+    // BEFORE scale() in screen px (hence the × s) and after the -50% centring, which
+    // is measured against the band's own unscaled width.
+    const dx = (cfg.offsetXPx ?? 0) * s
+    const dy = (cfg.offsetYPx ?? 0) * s
+    const move = dx || dy ? ` translate(${dx}px, ${dy}px)` : ''
+    band.style.transform = `translateX(-50%)${move} scale(${s})`
   }
 
   relayout()

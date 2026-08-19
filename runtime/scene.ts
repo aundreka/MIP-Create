@@ -841,6 +841,26 @@ export interface HeaderConfig {
   // button in whatever scene is on screen — same keyframes, duration and post-entrance
   // delay, restarted with it so the two run in phase. Scenes with no CTA fall back to `loop`.
   loopFollowsCta?: boolean
+  // Nudge the band away from the physical top-centre, in DESIGN px (so it scales with
+  // everything else). +x right, +y down. Set by dragging the band on the editor canvas.
+  offsetXPx?: number
+  offsetYPx?: number
+  // Optional LANDSCAPE-only layout: present keys win while the ad is wide, absent ones
+  // inherit the portrait values. Content (mode, format, prefix, colours, animations) is
+  // always shared. `hidden` drops the band in landscape entirely.
+  landscape?: HeaderOrientationOverride
+}
+
+export interface HeaderOrientationOverride {
+  heightPx?: number
+  fontSizePx?: number
+  fontWeight?: number
+  topPaddingPx?: number
+  align?: 'left' | 'center' | 'right'
+  letterSpacingPx?: number
+  offsetXPx?: number
+  offsetYPx?: number
+  hidden?: boolean
 }
 
 export interface ProjectMeta {
@@ -924,6 +944,21 @@ export interface Scene {
   sfx?: SfxBinding[]
   bgm?: { assetId: string; volume: number }
   timelineMs?: number
+  // Carried from the SceneDef so a single-scene render (the editor canvas) can decide
+  // whether the pinned header belongs on THIS scene, exactly as the flow does. See
+  // headerAllowedFor().
+  asEndscene?: boolean
+  hideHeader?: boolean
+  showHeader?: boolean
+}
+
+/** Does the pinned `meta.header` band belong on this scene? End cards (a real endscene,
+ * or an overlay doubling as one) hide it unless they opt back in with showHeader;
+ * hideHeader always wins. Shared by the flow (scenes.ts) and the editor canvas (frame.ts)
+ * so what you compose is what plays. */
+export function headerAllowedFor(def: { kind?: SceneKind; asEndscene?: boolean; hideHeader?: boolean; showHeader?: boolean }): boolean {
+  const endcard = def.kind === 'endscene' || (def.kind === 'overlay' && def.asEndscene === true)
+  return !def.hideHeader && (!endcard || def.showHeader === true)
 }
 
 export type AdvanceOn = 'gameWin' | 'timer' | 'tap' | 'manual'

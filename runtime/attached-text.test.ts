@@ -239,8 +239,8 @@ describe('countdown attachToId', () => {
     const mediaH = 1080 * k
     const expectedTop = (390 - mediaH) / 2 + (1600 / DESIGN_H) * mediaH
     const cd = q(mount, 'cd')
-    expect(parseFloat(cd.style.left)).toBe(Math.round((844 - mediaW) / 2 + (540 / DESIGN_W) * mediaW))
-    expect(parseFloat(cd.style.top)).toBe(Math.round(expectedTop))
+    expect(parseFloat(cd.style.left)).toBeCloseTo((844 - mediaW) / 2 + (540 / DESIGN_W) * mediaW, 4)
+    expect(parseFloat(cd.style.top)).toBeCloseTo(expectedTop, 4)
     expect(parseFloat(cd.querySelector<HTMLElement>('.pa-text-inner')!.style.fontSize)).toBeCloseTo(60 * (mediaH / DESIGN_H), 1)
   })
 
@@ -289,8 +289,8 @@ describe('countdown attachToId', () => {
       height: 1080 * k,
     }
     const cd = q(mount, 'cd')
-    expect(parseFloat(cd.style.left)).toBe(Math.round(media.left + nx * media.width))
-    expect(parseFloat(cd.style.top)).toBe(Math.round(media.top + ny * media.height))
+    expect(parseFloat(cd.style.left)).toBeCloseTo(media.left + nx * media.width, 4)
+    expect(parseFloat(cd.style.top)).toBeCloseTo(media.top + ny * media.height, 4)
     expect(parseFloat(cd.querySelector<HTMLElement>('.pa-text-inner')!.style.fontSize)).toBeCloseTo(64 * 2.531 * refFit * (media.height / refMedia.height), 1)
   })
 
@@ -354,7 +354,7 @@ describe('countdown attachToId', () => {
     mgr.relayout()
 
     const cd = q(mount, 'cd')
-    expect(parseFloat(cd.style.top)).toBe(Math.round(1533 * Math.min(1122 / DESIGN_W, 920 / DESIGN_H)))
+    expect(parseFloat(cd.style.top)).toBeCloseTo(1533 * Math.min(1122 / DESIGN_W, 920 / DESIGN_H), 4)
   })
 
   it('keeps SIP3-style upper landscape countdown overlays from nudging vertically', () => {
@@ -369,7 +369,7 @@ describe('countdown attachToId', () => {
     mgr.relayout()
 
     const cd = q(mount, 'cd')
-    expect(parseFloat(cd.style.top)).toBe(Math.round(696 * Math.min(1022 / DESIGN_W, 944 / DESIGN_H)))
+    expect(parseFloat(cd.style.top)).toBeCloseTo(696 * Math.min(1022 / DESIGN_W, 944 / DESIGN_H), 4)
   })
 
   it('keeps non-16:9 landscape endscene countdowns from drifting downward', () => {
@@ -392,12 +392,12 @@ describe('countdown attachToId', () => {
         fontSize: parseFloat(cd.querySelector<HTMLElement>('.pa-text-inner')!.style.fontSize),
       }
     }
-    const plainFitTop = Math.round(1383 * Math.min(844 / DESIGN_W, 390 / DESIGN_H))
+    const plainFitTop = 1383 * Math.min(844 / DESIGN_W, 390 / DESIGN_H)
     const wide = measureAt(844)
     const narrow = measureAt(700)
 
-    expect(wide.top).toBe(plainFitTop)
-    expect(narrow.top).toBe(plainFitTop)
+    expect(wide.top).toBeCloseTo(plainFitTop, 4)
+    expect(narrow.top).toBeCloseTo(plainFitTop, 4)
     expect(narrow.fontSize).toBeCloseTo(wide.fontSize, 1)
   })
 
@@ -421,12 +421,12 @@ describe('countdown attachToId', () => {
         fontSize: parseFloat(cd.querySelector<HTMLElement>('.pa-text-inner')!.style.fontSize),
       }
     }
-    const expectedTop = Math.round(1383 * Math.min(844 / DESIGN_W, 390 / DESIGN_H))
+    const expectedTop = 1383 * Math.min(844 / DESIGN_W, 390 / DESIGN_H)
     const wide = measureAt(844)
     const narrow = measureAt(700)
 
-    expect(wide.top).toBe(expectedTop)
-    expect(narrow.top).toBe(expectedTop)
+    expect(wide.top).toBeCloseTo(expectedTop, 4)
+    expect(narrow.top).toBeCloseTo(expectedTop, 4)
     expect(narrow.fontSize).toBeCloseTo(wide.fontSize, 1)
   })
 })
