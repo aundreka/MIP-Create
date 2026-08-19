@@ -51,10 +51,25 @@ const fakeRect = (left: number, top: number, width: number, height: number): DOM
 
 const q = (mount: HTMLElement, id: string): HTMLElement => mount.querySelector<HTMLElement>(`.pa-el[data-id="${id}"]`)!
 
-// The cover-fit box of a clip of natural size (nw,nh) inside a w x h frame.
+// The frame a SIP clamps its cover box to on an EXTREME viewport (long/short past 1.8):
+// a centred band of exactly 16:9 (9:16 in portrait). Re-derived here rather than imported
+// so these tests stay an independent statement of the rule. Mirrors endsceneCoverFrame.
+function coverFrame(w: number, h: number): { left: number; top: number; width: number; height: number } {
+  if (Math.max(w, h) / Math.min(w, h) <= 1.8) return { left: 0, top: 0, width: w, height: h }
+  if (h > w) {
+    const bh = w * (16 / 9)
+    return { left: 0, top: (h - bh) / 2, width: w, height: bh }
+  }
+  const bw = h * (16 / 9)
+  return { left: (w - bw) / 2, top: 0, width: bw, height: h }
+}
+
+// The cover-fit box of a clip of natural size (nw,nh) inside a w x h frame — filling the
+// clamped band, which is the whole frame on every non-extreme viewport.
 function cover(w: number, h: number, nw: number, nh: number): { left: number; top: number; width: number; height: number } {
-  const k = Math.max(w / nw, h / nh)
-  return { left: (w - nw * k) / 2, top: (h - nh * k) / 2, width: nw * k, height: nh * k }
+  const f = coverFrame(w, h)
+  const k = Math.max(f.width / nw, f.height / nh)
+  return { left: f.left + (f.width - nw * k) / 2, top: f.top + (f.height - nh * k) / 2, width: nw * k, height: nh * k }
 }
 
 function mount(vw: number, vh: number): HTMLElement {
@@ -133,12 +148,14 @@ describe('elements over a cover endscene lock to the clip', () => {
     const m = cover(390, 844, assets.pvid.w, assets.pvid.h)
     // Locked: 400 design px of a clip that is 1440.9 design px wide at the design frame.
     expect(parseFloat(q(el, 'btn').style.width) / m.width).toBeCloseTo(400 / cover(DESIGN_W, DESIGN_H, assets.pvid.w, assets.pvid.h).width, 3)
-    // The label inside it scales with the clip too, not with the FIT frame.
-    const fit = Math.min(390 / DESIGN_W, 844 / DESIGN_H)
+    // The label inside it is sized by the CLIP's scale, not the FIT frame's. (On a
+    // clamped band the two happen to agree — the band shares the design aspect — so the
+    // width check above is what separates them; this pins the label to the same source.)
+    const ref = cover(DESIGN_W, DESIGN_H, assets.pvid.w, assets.pvid.h)
     const btnFont = Array.from(q(el, 'btn').querySelectorAll<HTMLElement>('*'))
       .map((n) => parseFloat(n.style.fontSize))
       .find((v) => v > 0)!
-    expect(btnFont).toBeGreaterThan(48 * fit)
+    expect(btnFont).toBeCloseTo(48 * (m.height / ref.height), 3)
   })
 
   // The "Dynamic date" the generator drops on an end card is a countdown element, and it
@@ -171,6 +188,27 @@ describe('elements over a cover endscene lock to the clip', () => {
     expect(wider.fx).toBeCloseTo(wide.fx, 2)
     expect(wider.fy).toBeCloseTo(wide.fy, 2)
     expect(wider.fw).toBeCloseTo(wide.fw, 3)
+  })
+
+  // The clip itself must land on the band the elements are measured against, or the two
+  // drift apart. Verified against the real template in bugs/…_sip_… at seven viewports:
+  // the box below is what its #video-container reports at 390x844.
+  it('sizes the clip to the SIP band on an extreme viewport, and full-bleed otherwise', () => {
+    const clip = (vw: number, vh: number): CSSStyleDeclaration =>
+      mount(vw, vh).querySelector<HTMLVideoElement>('.pa-endscene-video')!.style
+
+    const band = clip(390, 844) // 2.16:1 — past the 1.8 threshold
+    expect(parseFloat(band.left)).toBeCloseTo(0, 3)
+    expect(parseFloat(band.top)).toBeCloseTo((75.333 / 844) * 100, 2)
+    expect(parseFloat(band.width)).toBeCloseTo(100, 3)
+    expect(parseFloat(band.height)).toBeCloseTo((693.333 / 844) * 100, 2)
+    expect(band.objectFit).toBe('cover')
+
+    const full = clip(1080, 1920) // 1.78:1 — the design frame is never extreme
+    expect(full.left).toBe('0px')
+    expect(full.top).toBe('0px')
+    expect(full.width).toBe('100%')
+    expect(full.height).toBe('100%')
   })
 
   it('leaves elements with no endscene under them on plain FIT layout', () => {

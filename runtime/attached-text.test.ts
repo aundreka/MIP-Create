@@ -244,7 +244,13 @@ describe('countdown attachToId', () => {
     expect(parseFloat(cd.querySelector<HTMLElement>('.pa-text-inner')!.style.fontSize)).toBeCloseTo(60 * (mediaH / DESIGN_H), 1)
   })
 
-  it('does not move upward in portrait when cover crops the video sides', () => {
+  // Narrowing a portrait screen used to only crop the clip's sides, so the date held its
+  // exact y and that is what this test asserted. Under the SIP band rule a narrower screen
+  // means a SMALLER centred 16:9 band, so the whole composition shrinks toward the middle
+  // — content in the lower half moves UP with the band's bottom edge, exactly as it does
+  // in the SIP. Absolute y is therefore no longer the guarantee; staying glued to the
+  // artwork is, and that is what the original bug was really about.
+  it('stays glued to the same point of the clip as a portrait screen narrows', () => {
     document.body.innerHTML = ''
     const mount = document.createElement('div')
     document.body.appendChild(mount)
@@ -252,16 +258,18 @@ describe('countdown attachToId', () => {
     computeMetrics(390, 844)
     const mgr = playProject(makeVideoProject(), videoAssets, { mount, interactive: true })
     const vid = q(mount, 'vid')
-    vid.getBoundingClientRect = () => fakeRect(0, 0, 390, 844)
-    mgr.relayout()
-    const topA = parseFloat(q(mount, 'cd').style.top)
+    const at = (w: number): { top: number; fy: number } => {
+      computeMetrics(w, 844)
+      vid.getBoundingClientRect = () => fakeRect(0, 0, w, 844)
+      mgr.relayout()
+      const c = coverBox(w, 844, videoAssets.pvid.w, videoAssets.pvid.h)
+      const top = parseFloat(q(mount, 'cd').style.top)
+      return { top, fy: (top - c.top) / c.height }
+    }
+    const wide = at(390)
+    const narrow = at(340)
 
-    computeMetrics(340, 844)
-    vid.getBoundingClientRect = () => fakeRect(0, 0, 340, 844)
-    mgr.relayout()
-    const topB = parseFloat(q(mount, 'cd').style.top)
-
-    expect(topB).toBe(topA)
+    expect(narrow.fy).toBeCloseTo(wide.fy, 3)
   })
 
   it('auto-attaches legacy dynamic dates to the endscene video frame', () => {
@@ -379,8 +387,13 @@ describe('countdown attachToId', () => {
   // (endsceneMediaPos): the same point of the clip, at the same size relative to it, at
   // every width. A 'contain' card still keeps the FIT frame — see the two tests above.
   const coverBox = (w: number, h: number, nw: number, nh: number): { top: number; height: number } => {
-    const k = Math.max(w / nw, h / nh)
-    return { top: (h - nh * k) / 2, height: nh * k }
+    // The SIP band: a cover card clamps to a centred 16:9 (9:16 in portrait) once the
+    // viewport passes 1.8 long/short. Mirrors endsceneCoverFrame in elements/endscene.ts.
+    const extreme = Math.max(w, h) / Math.min(w, h) > 1.8
+    const fw = extreme && w > h ? h * (16 / 9) : w
+    const fh = extreme && h > w ? w * (16 / 9) : h
+    const k = Math.max(fw / nw, fh / nh)
+    return { top: (h - fh) / 2 + (fh - nh * k) / 2, height: nh * k }
   }
 
   const measureLandscapeLock = (project: Project): { onClip: (w: number) => { fy: number; ff: number }; plainFitTop: number } => {

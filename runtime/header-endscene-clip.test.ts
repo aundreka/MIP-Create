@@ -55,10 +55,25 @@ function proj(fit: 'cover' | 'contain' = 'cover', withCard = true): Project {
 const fakeRect = (left: number, top: number, width: number, height: number): DOMRect =>
   ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect
 
-// The cover-fit box of a clip of natural size (nw,nh) inside a w x h frame.
+// The frame a SIP clamps its cover box to on an EXTREME viewport (long/short past 1.8):
+// a centred band of exactly 16:9 (9:16 in portrait). Re-derived here rather than imported
+// so these tests stay an independent statement of the rule. Mirrors endsceneCoverFrame.
+function coverFrame(w: number, h: number): { left: number; top: number; width: number; height: number } {
+  if (Math.max(w, h) / Math.min(w, h) <= 1.8) return { left: 0, top: 0, width: w, height: h }
+  if (h > w) {
+    const bh = w * (16 / 9)
+    return { left: 0, top: (h - bh) / 2, width: w, height: bh }
+  }
+  const bw = h * (16 / 9)
+  return { left: (w - bw) / 2, top: 0, width: bw, height: h }
+}
+
+// The cover-fit box of a clip of natural size (nw,nh) inside a w x h frame — filling the
+// clamped band, which is the whole frame on every non-extreme viewport.
 function cover(w: number, h: number, nw: number, nh: number): { top: number; height: number } {
-  const k = Math.max(w / nw, h / nh)
-  return { top: (h - nh * k) / 2, height: nh * k }
+  const f = coverFrame(w, h)
+  const k = Math.max(f.width / nw, f.height / nh)
+  return { top: f.top + (f.height - nh * k) / 2, height: nh * k }
 }
 
 function band(vw: number, vh: number, project = proj()): { top: number; scale: number } {
@@ -93,7 +108,6 @@ describe('the pinned date band over an endscene card', () => {
     // The design frame is the reference, so the band's scale is the ratio of the two
     // cover scales — NOT the letterboxed FIT scale.
     expect(b.scale).toBeCloseTo(m.height / ref.height, 4)
-    expect(b.scale).not.toBeCloseTo(scale(), 3)
     // Design y 0 sits this far into the reference clip; the band lands at the same
     // point of the live one. (At this aspect the clip is height-driven, so that point
     // is still the screen top — the SCALE is what has changed.)
@@ -106,6 +120,10 @@ describe('the pinned date band over an endscene card', () => {
     expect(mw.top).toBeLessThan(0)
     expect(wideish.top).toBeCloseTo(mw.top + ((0 - ref.top) / ref.height) * mw.height, 3)
     expect(wideish.top).toBeLessThan(0)
+    // That viewport is not extreme, so the clip covers the whole card and its scale is
+    // genuinely not the letterboxed FIT scale. (`scale()` is whatever the last band()
+    // call computed metrics for — this one.)
+    expect(wideish.scale).not.toBeCloseTo(scale(), 3)
   })
 
   it('holds the same point and size on the clip as the viewport crops', () => {

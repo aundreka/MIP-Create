@@ -62,10 +62,25 @@ const fakeRect = (left: number, top: number, width: number, height: number): DOM
 
 const q = (mount: HTMLElement, id: string): HTMLElement => mount.querySelector<HTMLElement>(`.pa-el[data-id="${id}"]`)!
 
-// The cover-fit box of a clip of natural size (nw,nh) inside a w x h frame.
+// The frame a SIP clamps its cover box to on an EXTREME viewport (long/short past 1.8):
+// a centred band of exactly 16:9 (9:16 in portrait). Re-derived here rather than imported
+// so these tests stay an independent statement of the rule. Mirrors endsceneCoverFrame.
+function coverFrame(w: number, h: number): { left: number; top: number; width: number; height: number } {
+  if (Math.max(w, h) / Math.min(w, h) <= 1.8) return { left: 0, top: 0, width: w, height: h }
+  if (h > w) {
+    const bh = w * (16 / 9)
+    return { left: 0, top: (h - bh) / 2, width: w, height: bh }
+  }
+  const bw = h * (16 / 9)
+  return { left: (w - bw) / 2, top: 0, width: bw, height: h }
+}
+
+// The cover-fit box of a clip of natural size (nw,nh) inside a w x h frame — filling the
+// clamped band, which is the whole frame on every non-extreme viewport.
 function cover(w: number, h: number, nw: number, nh: number): { left: number; top: number; width: number; height: number } {
-  const k = Math.max(w / nw, h / nh)
-  return { left: (w - nw * k) / 2, top: (h - nh * k) / 2, width: nw * k, height: nh * k }
+  const f = coverFrame(w, h)
+  const k = Math.max(f.width / nw, f.height / nh)
+  return { left: f.left + (f.width - nw * k) / 2, top: f.top + (f.height - nh * k) / 2, width: nw * k, height: nh * k }
 }
 
 // Where the badge SHOULD land: its design anchor expressed as a fraction of the

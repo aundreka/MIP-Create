@@ -13,7 +13,7 @@
 import type { Anchor, AnimSpec, Scene, SceneElement, SceneOverlay, SfxBinding } from './scene'
 import type { AssetEntry, AssetMap, RuntimeCtx } from './types'
 import { cssFontFamily } from './font'
-import { designH, designW as baseDesignW, isLandscape, scale, sx, sy, viewH } from './responsive'
+import { designH, designW as baseDesignW, isLandscape, scale, sx, sy, viewH, viewW } from './responsive'
 import {
   composeElementAnim,
   composeGameWinAnim,
@@ -37,7 +37,7 @@ import { createChoiceContent } from './elements/choice'
 import { elementHintPoint, holdPress, tapPress } from './hint'
 import { localize, localizeElement } from './i18n'
 import { getPicks, isPicked, togglePick } from './selection'
-import { createEndsceneContent, updateEndsceneMedia, htmlEndsceneMediaEl, mediaNaturalSize } from './elements/endscene'
+import { createEndsceneContent, updateEndsceneMedia, htmlEndsceneMediaEl, mediaNaturalSize, endsceneCoverFrame } from './elements/endscene'
 import { applyUnboxingImages, createUnboxingContent } from './elements/unboxing'
 import { createConfetti, createConfettiContent, type ConfettiController } from './elements/confetti'
 import { computeDeadline, formatCountdown, formatTickerIntervalMs, needsTicker } from './elements/countdown'
@@ -2815,7 +2815,8 @@ function attachedTargetMediaRect(
   // An HTML card owns its clip's box, so measure it rather than assuming it fills
   // the endscene element. (The design-frame pass has nothing to measure and keeps
   // `rect`, which is what the card does at the unclipped design aspect.)
-  const box = (isHtml && html === 'live' ? htmlMediaBox(target, htmlEl!) : null) ?? rect
+  const measured = isHtml && html === 'live' ? htmlMediaBox(target, htmlEl!) : null
+  const box = measured ?? rect
   const fullH = landscape ? d.fhL === '1' : d.fhP === '1'
   const zoom = parseFloat((landscape ? d.zoomL : d.zoomP) || '1') || 1
   if (fullH) {
@@ -2824,11 +2825,20 @@ function attachedTargetMediaRect(
     return { left: box.left + (box.width - w) / 2, top: box.top + (box.height - h) / 2, width: w, height: h }
   }
   const fit = (landscape ? d.fitL : d.fitP) || 'cover'
-  const base = fit === 'contain' ? Math.min(box.width / naturalW, box.height / naturalH) : Math.max(box.width / naturalW, box.height / naturalH)
+  // Cover fills the SIP's centred band on an extreme viewport, not the whole card — the
+  // same frame applyEndsceneMediaFit sizes the clip to, so what rides the clip and the
+  // clip itself can never disagree. A MEASURED html clip is already the card's own final
+  // box (the card applied its own frame rule), so it is never re-framed here.
+  let frame = box
+  if (fit !== 'contain' && !measured) {
+    const band = endsceneCoverFrame(box.width, box.height)
+    frame = { left: box.left + band.left, top: box.top + band.top, width: band.width, height: band.height }
+  }
+  const base = fit === 'contain' ? Math.min(box.width / naturalW, box.height / naturalH) : Math.max(frame.width / naturalW, frame.height / naturalH)
   const k = base * zoom
   const w = naturalW * k
   const h = naturalH * k
-  return { left: box.left + (box.width - w) / 2, top: box.top + (box.height - h) / 2, width: w, height: h }
+  return { left: frame.left + (frame.width - w) / 2, top: frame.top + (frame.height - h) / 2, width: w, height: h }
 }
 
 // The rendered box of an HTML card's clip, in page coordinates. The clip's own rect
@@ -3116,6 +3126,10 @@ function layoutBackground(rec: Rec): void {
 function layoutEndscene(rec: Rec, e: Effective): void {
   const outer = rec.outer
   const fullScreen = e.mode === 'extend'
+  // The box the card fills — the viewport when it is full-bleed. The cover fit needs it
+  // to place the centred band on an extreme viewport (see endsceneCoverFrame).
+  let boxW = viewW()
+  let boxH = viewH()
   if (fullScreen) {
     // Edge gaps on AppLovin are covered by the pa-bleed element (outside pa-root).
     outer.style.position = ''
@@ -3135,9 +3149,11 @@ function layoutEndscene(rec: Rec, e: Effective): void {
     const h = e.h != null ? e.h * s : a.h * e.scale * s
     const [tx, ty] = ANCHOR[e.anchor]
     applyBox(outer, px, py, w, h, tx, ty, e.rotation)
+    boxW = w
+    boxH = h
   }
   if (rec.content) {
-    updateEndsceneMedia(rec.content, isLandscape())
+    updateEndsceneMedia(rec.content, isLandscape(), { w: boxW, h: boxH })
     const fill = rec.content.style.background
     const root = outer.closest<HTMLElement>('.pa-root')
     const mount = root?.parentElement

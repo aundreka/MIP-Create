@@ -327,7 +327,37 @@ export function createEndsceneContent(el: SceneElement, ctx: RuntimeCtx): HTMLEl
 // the current orientation. Re-run on every orientation change so portrait and landscape
 // can use different fits. Sets individual properties (not cssText) so `display` — owned
 // by the source/visibility logic — is preserved.
-function applyEndsceneMediaFit(el: HTMLElement, wrap: HTMLElement): void {
+// The frame a COVER end card actually fills, matching the SIP video template these
+// cards are authored against (see setVideoForOrientation in any exported …_sip_… file).
+//
+// A SIP normally lets its video container fill the screen. On an EXTREME viewport —
+// long side / short side past 1.8 — it pulls the container back to a CENTRED band of
+// exactly 16:9 (9:16 in portrait) and covers that instead, so a very tall phone
+// letterboxes rather than cropping the clip's sides away. Our end cards have to crop
+// identically or the same clip reads differently in a MIP than in the SIP it came from.
+//
+// One function for both halves of the runtime: the DOM fit below sizes the <video> to
+// this frame, and stage.ts measures against it, so the two can never disagree about
+// where the clip is. The design frame (1080x1920 = 16:9) is never extreme, so authoring
+// is unaffected — the band only appears on devices past the threshold.
+export const COVER_TARGET_ASPECT = 16 / 9
+export const COVER_EXTREME_RATIO = 1.8
+
+export function endsceneCoverFrame(width: number, height: number): { left: number; top: number; width: number; height: number } {
+  const full = { left: 0, top: 0, width, height }
+  if (!(width > 0) || !(height > 0)) return full
+  const long = Math.max(width, height)
+  const short = Math.min(width, height)
+  if (long / short <= COVER_EXTREME_RATIO) return full
+  if (height > width) {
+    const h = width * COVER_TARGET_ASPECT
+    return { left: 0, top: (height - h) / 2, width, height: h }
+  }
+  const w = height * COVER_TARGET_ASPECT
+  return { left: (width - w) / 2, top: 0, width: w, height }
+}
+
+function applyEndsceneMediaFit(el: HTMLElement, wrap: HTMLElement, box?: { w: number; h: number }): void {
   const d = wrap.dataset
   const landscape = d.land === '1'
   const fullH = landscape ? d.fhL === '1' : d.fhP === '1'
@@ -347,12 +377,19 @@ function applyEndsceneMediaFit(el: HTMLElement, wrap: HTMLElement): void {
     el.style.objectFit = ''
     el.style.transform = `translate(-50%,-50%) scale(${zoom})`
   } else {
-    el.style.left = '0'
-    el.style.top = '0'
-    el.style.right = '0'
-    el.style.bottom = '0'
-    el.style.width = '100%'
-    el.style.height = '100%'
+    // Cover on an extreme viewport fills the centred band instead of the whole card;
+    // everywhere else `band` IS the card's box and this is the plain inset-0 fit.
+    // Null on every non-extreme viewport, where the band IS the card's box — the clip
+    // then keeps the plain inset-0 fit rather than an equivalent 0%/100% restatement.
+    const frame = fit === 'cover' && box ? endsceneCoverFrame(box.w, box.h) : null
+    const band = frame && (frame.width !== box!.w || frame.height !== box!.h) ? frame : null
+    const pct = (v: number, of: number): string => (of > 0 ? (v / of) * 100 : 0) + '%'
+    el.style.left = band ? pct(band.left, box!.w) : '0'
+    el.style.top = band ? pct(band.top, box!.h) : '0'
+    el.style.right = band ? '' : '0'
+    el.style.bottom = band ? '' : '0'
+    el.style.width = band ? pct(band.width, box!.w) : '100%'
+    el.style.height = band ? pct(band.height, box!.h) : '100%'
     el.style.maxWidth = ''
     el.style.objectFit = fit
     el.style.transform = `scale(${zoom})`
@@ -613,7 +650,7 @@ function autoplayHtmlEndscene(wrap: HTMLElement, iframe: HTMLIFrameElement): voi
 // the letterbox fill, and start playback when a clip becomes visible. Called from
 // the stage layout pass so a device rotation re-chooses clip + fill without a
 // DOM rebuild.
-export function updateEndsceneMedia(wrap: HTMLElement, landscape: boolean): void {
+export function updateEndsceneMedia(wrap: HTMLElement, landscape: boolean, box?: { w: number; h: number }): void {
   const ph = wrap.querySelector('.pa-endscene-ph') as HTMLElement | null
 
   // HTML mode
@@ -660,8 +697,8 @@ export function updateEndsceneMedia(wrap: HTMLElement, landscape: boolean): void
   wrap.dataset.land = landscape ? '1' : ''
   applyEndsceneFill(wrap, landscape)
   // Re-apply the (possibly per-orientation) fit to both media elements.
-  applyEndsceneMediaFit(video, wrap)
-  applyEndsceneMediaFit(img, wrap)
+  applyEndsceneMediaFit(video, wrap, box)
+  applyEndsceneMediaFit(img, wrap, box)
 
   const vSrc = (landscape ? video.dataset.l : video.dataset.p) || ''
   const iSrc = (landscape ? img.dataset.l : img.dataset.p) || ''
