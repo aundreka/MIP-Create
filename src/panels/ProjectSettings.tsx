@@ -8,7 +8,7 @@ import { addVariant, assignProjectGroup, patchMeta, removeVariant, renameVariant
 import { setActiveVariant } from '../variantMode'
 import { listGroups } from '../projectGroups'
 import { projectsInGroup } from '../projects'
-import { fileBaseName, mipName, todayLabel } from '../mipName'
+import { fileBaseName, isSip, mipName, todayLabel } from '../mipName'
 import { Checkbox, Chips, ColorField, Drawer, NumField, Row, Select, Slider } from '../ui'
 import { Check, Icon, Play, X } from '../icons'
 import { AssetPicker } from './AssetPicker'
@@ -124,10 +124,22 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
         title="Off names the export …_human_none instead of …_human_unique"
         onChange={(v) => patchMeta({ unique: v })}
       />
+      {isSip(project) && (
+        <Row label="SIP format">
+          <Select
+            value={m.sipFormat ?? 'carousel'}
+            options={[
+              { value: 'carousel', label: 'Carousel (…_emily_product_carousel_…)' },
+              { value: 'card', label: 'Card (…_emily_product_card_…)' },
+            ]}
+            onChange={(v) => patchMeta({ sipFormat: v as 'carousel' | 'card' })}
+          />
+        </Row>
+      )}
       <Row label="Export file">
         <input value={fileBaseName(project)} readOnly title="Export filename stem" />
       </Row>
-      <div className="hint pad">Auto-named <b>Client + MIP + Date</b>. Export files use <b>client_acslanot_mip_date_mip_emily_game_mechanic_human_unique</b>. A MIP with no minigame names the mechanic slot <b>unknown</b>; clearing <b>Unique creative</b> ends the name in <b>none</b>.</div>
+      <div className="hint pad">Auto-named <b>Client + MIP + Date</b>. Export files use <b>client_acslanot_mip_date_mip_emily_game_mechanic_human_unique</b>. A MIP with no minigame names the mechanic slot <b>unknown</b>; clearing <b>Unique creative</b> ends the name in <b>none</b>. A <b>SIP</b> — one scene, and that scene is an end card — names itself <b>client_acslanot_sip_date_mip_emily_product_carousel_human_unique</b>, with <b>SIP format</b> switching <b>carousel</b> ↔ <b>card</b>.</div>
       <div className="grid2">
         <NumField label="Base W" value={m.baseW} suffix="px" onChange={(n) => patchMeta({ baseW: n })} />
         <NumField label="Base H" value={m.baseH} suffix="px" onChange={(n) => patchMeta({ baseH: n })} />

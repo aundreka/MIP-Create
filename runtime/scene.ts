@@ -918,6 +918,11 @@ export interface ProjectMeta {
   // token of the export filename ('unique' vs 'none'). Undefined reads as true
   // so existing MIPs keep the name they already ship with.
   unique?: boolean
+  // Delivery naming for a SIP (a single-scene endscene build): whether the end
+  // card reads as a product 'carousel' or a product 'card'. Drives the mechanic
+  // slot of the export filename ('product_carousel' vs 'product_card').
+  // Undefined reads as 'carousel'. Ignored by multi-scene / game MIPs.
+  sipFormat?: 'carousel' | 'card'
   // Project grouping: several MIPs (each a `Project` in the code) belong to one
   // real-world "project" (brand + date + theme, e.g. "Bioma 2026-07 Scratch").
   // `projectId` is the stable group id (see src/projectGroups.ts); `projectName`

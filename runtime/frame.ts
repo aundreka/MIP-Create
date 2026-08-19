@@ -51,7 +51,9 @@ function syncHeader(next: Scene): void {
   if (key !== headerKey) {
     headerKey = key
     header?.destroy()
-    header = cfg ? mountHeader(document.body, cfg) : null
+    // Same clip lock the flow mode gives the band (see StageHandle.endsceneClip), so the
+    // canvas composes against the position and size the export will actually render.
+    header = cfg ? mountHeader(document.body, cfg, () => stage?.endsceneClip() ?? null) : null
   }
   // This scene's own placement (SceneDef.header) rides on top of the project layout —
   // applied separately so editing it doesn't rebuild the band.
@@ -93,6 +95,7 @@ function render(next: Scene, assets: AssetMap, interactive: boolean): void {
   syncHeader(next)
   if (stage && stage.update(next, assets)) {
     stage.startGames(interactive)
+    header?.relayout() // the band rides THIS scene's card — re-read it now the stage holds it
     requestAnimationFrame(postLayout)
     return
   }
@@ -101,6 +104,9 @@ function render(next: Scene, assets: AssetMap, interactive: boolean): void {
   stage.layoutAll()
   stage.startGames(interactive)
   if (lastSeek.ms != null) stage.seekTimeline(lastSeek.ms, lastSeek.playing)
+  // syncHeader ran before this stage existed, so the band was laid out against the
+  // previous scene's card (or none at all).
+  header?.relayout()
   requestAnimationFrame(postLayout)
 }
 

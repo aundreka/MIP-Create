@@ -78,18 +78,35 @@ function exportMechanicToken(project: Pick<Project, 'scenes'>): string {
 }
 
 /**
+ * A SIP is a build made of ONE scene that is an end card - no game, no flow,
+ * just the product surface. It is delivered under its own name (see
+ * fileBaseName), so this is the single test both the name and the UI use.
+ */
+export function isSip(project: Pick<Project, 'scenes'>): boolean {
+  if (project.scenes.length !== 1) return false
+  const scene = project.scenes[0]
+  return scene.kind === 'endscene' || (scene.kind === 'overlay' && scene.asEndscene === true)
+}
+
+/**
  * The export file base name. Format:
  * "<client>_acslanot_mip_<date>_<version>_emily_game_<mechanic>_human_<unique>"
  * where `<mechanic>` is "unknown" when the MIP has no game mount, and
  * `<unique>` is "unique" unless Project settings marks the MIP non-unique
  * ("none").
+ *
+ * A SIP (one scene, and that scene is an end card - see isSip) swaps the two
+ * type slots instead: "..._acslanot_sip_..._emily_product_<format>_human_..."
+ * where `<format>` is "carousel" (the default) or "card", per meta.sipFormat.
  */
 export function fileBaseName(project: Pick<Project, 'meta' | 'scenes'>): string {
   const meta = project.meta
   const client = slugToken(meta.client, 'client')
   const date = compactDateToken(meta.exportDate || meta.mipDate)
   const version = mipVersionToken(meta)
-  const mechanic = exportMechanicToken(project)
   const unique = meta.unique === false ? 'none' : 'unique'
-  return `${client}_acslanot_mip_${date}_${version}_emily_game_${mechanic}_human_${unique}`
+  const sip = isSip(project)
+  const type = sip ? 'sip' : 'mip'
+  const kind = sip ? `product_${meta.sipFormat === 'card' ? 'card' : 'carousel'}` : `game_${exportMechanicToken(project)}`
+  return `${client}_acslanot_${type}_${date}_${version}_emily_${kind}_human_${unique}`
 }

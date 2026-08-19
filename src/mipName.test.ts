@@ -48,6 +48,29 @@ describe('fileBaseName', () => {
     expect(fileBaseName(project({ unique: true }))).toBe('the_loaded_tea_shop_acslanot_mip_20260730_04_emily_game_scratch_human_unique')
   })
 
+  it('names a single endscene project as a sip product carousel', () => {
+    const p = project({ client: 'Buckley Belts', mip: 'MIP2', exportDate: '2026-08-14' }, null)
+    p.scenes = [{ id: 'end1', name: 'End card', kind: 'endscene', advance: { on: 'manual' }, elements: [] }]
+    p.startSceneId = 'end1'
+    expect(fileBaseName(p)).toBe('buckley_belts_acslanot_sip_20260814_02_emily_product_carousel_human_unique')
+    p.meta.sipFormat = 'card'
+    expect(fileBaseName(p)).toBe('buckley_belts_acslanot_sip_20260814_02_emily_product_card_human_unique')
+    p.meta.unique = false
+    expect(fileBaseName(p)).toBe('buckley_belts_acslanot_sip_20260814_02_emily_product_card_human_none')
+  })
+
+  it('treats a lone overlay end card as a sip, but never a multi-scene project', () => {
+    const p = project({ client: 'Buckley Belts', mip: 'MIP2', exportDate: '2026-08-14' }, null)
+    p.scenes = [{ id: 'end1', name: 'End card', kind: 'overlay', asEndscene: true, advance: { on: 'manual' }, elements: [] }]
+    expect(fileBaseName(p)).toBe('buckley_belts_acslanot_sip_20260814_02_emily_product_carousel_human_unique')
+    p.scenes = [...p.scenes, { id: 'end2', name: 'End card 2', kind: 'endscene', advance: { on: 'manual' }, elements: [] }]
+    expect(fileBaseName(p)).toBe('buckley_belts_acslanot_mip_20260814_02_emily_game_unknown_human_unique')
+  })
+
+  it('keeps the mip name for a lone game scene', () => {
+    expect(fileBaseName(project())).toContain('_acslanot_mip_')
+  })
+
   it('falls back to mipDate and today when export pieces are missing', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-03T09:00:00'))

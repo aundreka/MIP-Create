@@ -5,7 +5,7 @@
 // editor canvas renders a single scene directly (no flow).
 
 import { emit, on } from './emitter'
-import { buildScene, type StageHandle } from './stage'
+import { buildScene, type EndsceneClip, type StageHandle } from './stage'
 import { notifyGameClose, notifyGameEnd, triggerCTA } from './networks'
 import { createSfxManager, type SfxManager } from './sfx'
 import { mountHeader } from './header'
@@ -107,19 +107,33 @@ export function playProject(
     }
   }
 
+  // Declared before the header so the band's clip provider (below) can read it — the
+  // band relayouts once during mountHeader, before any scene exists.
+  let current: { def: SceneDef; stage: StageHandle } | null = null
+
   // The pinned date header is opt-in: only mount it when the project explicitly
   // configures `meta.header`. Projects without it export with no date band.
   const headerConfig = () => localizeHeader(project.meta)
-  let header = headerConfig() ? mountHeader(container, headerConfig()!) : null
+  // On a scene whose end card is a full-bleed clip, the band rides that clip instead of
+  // the FIT frame (see StageHandle.endsceneClip). Read live on every header relayout, so
+  // a scene change, a rotation, or a clip that has only just reported its size all land
+  // without re-mounting the band. Every other scene returns null and keeps the band
+  // pinned to the physical screen top.
+  const headerClip = (): EndsceneClip | null => current?.stage.endsceneClip() ?? null
+  let header = headerConfig() ? mountHeader(container, headerConfig()!, headerClip) : null
   const refreshHeader = (): void => {
     header?.destroy()
     const config = headerConfig()
-    header = config ? mountHeader(container, config) : null
+    header = config ? mountHeader(container, config, headerClip) : null
   }
 
-  const sfx: SfxManager | null = opts.interactive ? createSfxManager(project, assets, container) : null
+  // A clip's natural size can arrive after the card mounts (a <video> reports it on
+  // loadedmetadata) and an HTML card re-sizes its own clip after a rotation. Both fire
+  // this event; re-lay the band out so it locks the moment there is something to lock to.
+  const onEndsceneMedia = (): void => header?.relayout()
+  container.addEventListener('pa-endscene-media-reset', onEndsceneMedia)
 
-  let current: { def: SceneDef; stage: StageHandle } | null = null
+  const sfx: SfxManager | null = opts.interactive ? createSfxManager(project, assets, container) : null
   let transitioning = false
   let advanceTimer = 0
   let tapHandler: ((ev: Event) => void) | null = null
@@ -422,6 +436,12 @@ export function playProject(
   // its own SceneDef.header when it has one, null to go back to the project layout.
   const syncHeaderLayout = (def: SceneDef): void => header?.setSceneLayout(def.header ?? null)
 
+  // The band rides the CURRENT scene's end-card clip (headerClip), so every scene change
+  // has to re-lay it out — even when the header layout itself is unchanged, which is the
+  // case setSceneLayout early-returns on. Called after `current` is swapped, never before:
+  // the provider reads whatever `current` points at.
+  const syncHeaderClip = (): void => header?.relayout()
+
   // A reload must never drop the player back onto a finished play-through.
   const clearResume = (): void => {
     try { window.sessionStorage.removeItem('pa:resume-scene') } catch { /* storage unavailable */ }
@@ -559,6 +579,7 @@ export function playProject(
     unparkInto(old.stage) // parked header leaves with the old scene, not on top of the new one
     const stage = mountScene(def)
     current = { def, stage }
+    syncHeaderClip()
     applyTransition(old.stage.root, stage.root, def.transition ?? { type: 'fade', durationMs: 350 }, () => {
       old.stage.destroy()
       transitioning = false
@@ -719,6 +740,7 @@ export function playProject(
         const old = current
         const stage = mountScene(next)
         current = { def: next, stage }
+        syncHeaderClip()
         const t = next.transition
         const dur = t && t.type === 'fade' && t.durationMs > 0 ? t.durationMs : 380
         // z above the overlay (9000) and BOTH immune tiers (10000 / overlayTop 10050) so
@@ -781,6 +803,7 @@ export function playProject(
     // talk to — the layer then outlives every scene until destroy().
     buildPersist()
     current = { def: startDef, stage: mountScene(startDef) }
+    syncHeaderClip()
     armAdvance(startDef)
   }
 
@@ -806,6 +829,7 @@ export function playProject(
       destroyPersist() // carry-over elements carry text/assets too — rebuild in the new locale
       buildPersist()
       current = { def, stage: mountScene(def) }
+      syncHeaderClip()
       armAdvance(def)
     },
     destroy() {
@@ -819,6 +843,7 @@ export function playProject(
       overlayCovers.clear() // cover divs are torn down with the container below
       destroyPersist()
       sfx?.destroy()
+      container.removeEventListener('pa-endscene-media-reset', onEndsceneMedia)
       header?.destroy()
       current?.stage.destroy()
       container.remove()

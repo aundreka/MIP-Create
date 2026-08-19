@@ -150,7 +150,17 @@ export function effectiveHeader(opts: HeaderConfig, landscape = isLandscape(), s
   return out
 }
 
-export function mountHeader(container: HTMLElement, opts: HeaderConfig): HeaderHandle {
+/**
+ * The endscene clip the band should ride, if any. Read fresh on every relayout, so a
+ * scene change / rotation / a clip that has only just reported its size all land
+ * without the caller re-mounting the band. See StageHandle.endsceneClip.
+ */
+export interface HeaderClip {
+  k: number
+  mapY(designY: number): number
+}
+
+export function mountHeader(container: HTMLElement, opts: HeaderConfig, clip?: () => HeaderClip | null): HeaderHandle {
   const band = document.createElement('div')
   band.className = 'pa-header'
 
@@ -315,8 +325,17 @@ export function mountHeader(container: HTMLElement, opts: HeaderConfig): HeaderH
 
   const relayout = (): void => {
     const cfg = applyLayout() // orientation may have flipped since the last pass
-    const s = scale() // from responsive.ts — NO _offY term
+    // Over a full-bleed endscene card the band rides the CLIP instead of the FIT frame:
+    // the clip is one element that extends past the scene, and the date belongs to the
+    // card's composition, so it scales and sits where the card's own top does — the same
+    // lock every element drawn over the card gets (endsceneMediaPos in stage.ts). Every
+    // other scene keeps the band pinned to the physical screen top at the FIT scale.
+    const onClip = clip?.() ?? null
+    const s = onClip ? onClip.k : scale() // from responsive.ts — NO _offY term
+    // Full-bleed either way: the width is divided by the scale the transform then
+    // re-applies, so the band still reaches both screen edges at any clip scale.
     band.style.width = (viewW() + 24) / s + 'px'
+    band.style.top = onClip ? onClip.mapY(0) + 'px' : '0'
     // The authored offset is in design px, so it scales with the band. It is applied
     // BEFORE scale() in screen px (hence the × s) and after the -50% centring, which
     // is measured against the band's own unscaled width.

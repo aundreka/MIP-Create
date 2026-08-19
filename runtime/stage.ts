@@ -565,9 +565,28 @@ interface Effective {
   opacity?: number
 }
 
+/**
+ * How a full-bleed endscene card's clip maps a DESIGN-space y onto the screen.
+ * `k` is the clip's own scale — what `scale()` is for plain FIT content — and `mapY`
+ * turns a design y into the page y that rides the clip. Handed to the pinned header
+ * band, which is not a scene element but has to ride the card exactly like one.
+ */
+export interface EndsceneClip {
+  k: number
+  mapY(designY: number): number
+}
+
 export interface StageHandle {
   root: HTMLDivElement
   layoutAll(): void
+  /**
+   * The current scene's endscene clip, or null when there is nothing to ride: no
+   * full-bleed card, a card whose clip is not measurable yet, or a 'contain' card —
+   * a contained clip letterboxes, and content authored over it belongs to the
+   * letterboxed composition rather than to the clip's own box (same rule the scene
+   * elements follow, see endsceneMediaPos).
+   */
+  endsceneClip(): EndsceneClip | null
   setHidden(id: string, hidden: boolean): void
   /**
    * Apply a new scene WITHOUT rebuilding the DOM, for smooth live editing.
@@ -1506,6 +1525,37 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
 
   const handle: StageHandle = {
     root,
+    endsceneClip() {
+      // The topmost full-bleed card in the scene — the one every overlay rides.
+      let target: Rec | undefined
+      for (const rec of recs) {
+        if (rec.el.type !== 'endscene') continue
+        const e = effective(rec.el)
+        if (e.hidden || e.mode !== 'extend') continue
+        if (!target || (rec.el.zIndex ?? 0) >= (target.el.zIndex ?? 0)) target = rec
+      }
+      if (!target) return null
+      const d = target.content instanceof HTMLElement ? target.content.dataset : null
+      const fit = (isLandscape() ? d?.fitL : d?.fitP) || 'cover'
+      if (fit === 'contain') return null
+      // The card's geometry has to be current before it is measured (the header
+      // relayouts before the stage does).
+      layoutRec(target)
+      const tRect = target.outer.getBoundingClientRect()
+      if (tRect.width < 1 || tRect.height < 1) return null
+      const media = attachedTargetMediaRect(target, tRect, 'live')
+      const designWpx = baseDesignW()
+      const designHpx = designH()
+      const refW = isLandscape() ? designHpx : designWpx
+      const refH = isLandscape() ? designWpx : designHpx
+      const fitScale = Math.min(refW / designWpx, refH / designHpx)
+      const refMedia = attachedTargetMediaRect(target, { left: 0, top: 0, width: refW, height: refH }, 'reference')
+      if (!media || !refMedia || !(media.height > 0) || !(refMedia.height > 0)) return null
+      return {
+        k: fitScale * (media.height / refMedia.height),
+        mapY: (designY: number) => media.top + ((designY * fitScale - refMedia.top) / refMedia.height) * media.height,
+      }
+    },
     layoutAll() {
       for (const rec of recs) layoutRec(rec)
       for (const rec of recs) if (rec.host) rec.host.relayout()
