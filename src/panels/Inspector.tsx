@@ -35,6 +35,7 @@ import type {
 } from '../../runtime/scene'
 import { headerAllowedFor } from '../../runtime/scene'
 import { effectiveHeader } from '../../runtime/header'
+import { projectHeaderOffset, sceneOffsetOf } from '../headerLayout'
 import { TAP_FADE_DEFAULT_MS } from '../../runtime/elements/button'
 import { GAME_TEMPLATES } from '../../runtime/games/registry'
 import { splitList } from '../../runtime/games/holdgauge'
@@ -56,6 +57,7 @@ import {
   pasteStyle,
   patchElement,
   patchGeometry,
+  patchHeader,
   resetLocaleLayout,
   resetLocaleOverride,
   patchSceneDef,
@@ -2020,6 +2022,12 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                     checked={!!sd.header}
                     onChange={(v) => patchSceneDef(sd.id, { header: v ? {} : undefined })}
                   />
+                  {!sd.header && (
+                    <div className="hint pad">
+                      This scene shows the header where the project puts it. Turn this on — or just drag the band on the canvas — to place it here only; other scenes keep their own
+                      position.
+                    </div>
+                  )}
                   {sd.header && (
                     <>
                       <div className="grid2">
@@ -2041,13 +2049,22 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                           onChange={(v) => setHeaderLayout({ align: v as HeaderOrientationOverride['align'] })}
                         />
                       </Row>
+                      <button
+                        className="wide"
+                        onClick={() => {
+                          const { x, y } = sceneOffsetOf(sd.header, landscape)
+                          patchHeader(projectHeaderOffset(projectHeader, landscape, x, y), editLocale)
+                          patchSceneDef(sd.id, { header: undefined })
+                        }}
+                      >
+                        Use this placement in every scene
+                      </button>
                       <button className="wide" onClick={() => patchSceneDef(sd.id, { header: undefined })}>
                         Follow the project header layout again
                       </button>
                       <div className="hint pad">
                         Only what you change here differs — everything else still follows the project header, so editing it in the Header popover keeps updating this scene too. You
                         are editing the <b>{landscape ? 'landscape' : 'portrait'}</b> layout{landscape ? ' (portrait is untouched)' : ''}; switch with the frame’s orientation chip.
-                        Dragging the band on the canvas writes here while this is on.
                       </div>
                     </>
                   )}

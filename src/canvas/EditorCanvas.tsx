@@ -8,11 +8,12 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { FrameMetrics, FrameRect, FrameToParent, ParentToFrame } from '../../runtime/frame-protocol'
 import { headerAllowedFor } from '../../runtime/scene'
 import { effectiveHeader } from '../../runtime/header'
-import type { Anchor, HeaderOrientationOverride, HeaderSceneOverride, ProjectMeta, Scene, SceneDef, SceneElement } from '../../runtime/scene'
+import type { Anchor, ProjectMeta, Scene, SceneDef, SceneElement } from '../../runtime/scene'
 import type { AssetMap } from '../../runtime/types'
 import { ContextMenu, type MenuItem } from '../panels/ContextMenu'
 import { getFramePos, setFramePos } from '../canvasLayout'
 import { flipbookBoxes, flipbookOpts, resizeBox, type Box } from './geometry'
+import { sceneHeaderOffset } from '../headerLayout'
 import { isSceneHidden, useCanvasView } from '../canvasView'
 import { useActiveVariant } from '../variantMode'
 import { endPathDraw, pathDrawTarget, usePathDraw } from '../drawMode'
@@ -35,7 +36,6 @@ import {
   pasteElements,
   patchElement,
   patchGeometry,
-  patchHeader,
   patchSceneDef,
   pasteStyle,
   redo,
@@ -76,13 +76,6 @@ const EDGES: Handle[] = [
 ]
 
 // How many elements in a scene carry their own landscape geometry (any override field).
-/** Drop undefined keys — and the whole object when nothing is left — so an override that
- * has been cleared disappears from the project JSON instead of lingering as `{}`. */
-function prune<T extends object>(o: T): T | undefined {
-  const out = Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && !(v && typeof v === 'object' && !Object.keys(v).length)))
-  return Object.keys(out).length ? (out as T) : undefined
-}
-
 const landscapeCount = (sd: SceneDef): number => sd.elements.filter((e) => e.landscape && Object.keys(e.landscape).length > 0).length
 
 function effGeom(el: SceneElement, landscape: boolean, locale?: string | null) {
@@ -2011,11 +2004,10 @@ export function EditorCanvas(props: Props): JSX.Element {
   // somewhere different.
   const headerCfg = project.meta.header
   const headerRect = headerRects[activeSceneId]
-  // A scene with its own header layout (SceneDef.header) is edited at THAT level — the
-  // drag then moves the band on this scene only. Scenes without one edit the project
-  // layout, so the band keeps moving everywhere as before.
+  // Dragging always places the band for THIS SCENE (SceneDef.header) — a scene without an
+  // override picks one up on its first drag. Composing one scene can therefore never move
+  // the band in another; the Header popover's Move X/Y still moves it in every scene.
   const headerScene = scene.headerOverride
-  const headerScope: 'scene' | 'project' = headerScene ? 'scene' : 'project'
   const headerBase = ((): { x: number; y: number } => {
     const eff = headerCfg ? effectiveHeader(headerCfg, landscape, headerScene) : null
     return { x: eff?.offsetXPx ?? 0, y: eff?.offsetYPx ?? 0 }
@@ -2049,23 +2041,10 @@ export function EditorCanvas(props: Props): JSX.Element {
   }
   /** Commit an offset to whichever layout this scene is being edited at, into the slot
    * for the orientation on screen. `undefined` for 0 keeps the JSON free of no-ops. */
+  /** Commit a placement to the ACTIVE SCENE's own layout, in the slot for the orientation
+   * on screen. Never touches the project header, so other scenes stay where they are. */
   const writeHeaderOffset = (x: number | undefined, y: number | undefined): void => {
-    const ox = x || undefined
-    const oy = y || undefined
-    if (headerScope === 'scene') {
-      const cur = headerScene ?? {}
-      const next: HeaderSceneOverride = landscape
-        ? { ...cur, landscape: prune({ ...(cur.landscape ?? {}), offsetXPx: ox, offsetYPx: oy }) }
-        : { ...cur, offsetXPx: ox, offsetYPx: oy }
-      patchSceneDef(activeSceneId, { header: prune(next) })
-      return
-    }
-    if (landscape) {
-      const ls: HeaderOrientationOverride = { ...(headerCfg?.landscape ?? {}), offsetXPx: ox, offsetYPx: oy }
-      patchHeader({ landscape: prune(ls) }, editLocale)
-    } else {
-      patchHeader({ offsetXPx: ox, offsetYPx: oy }, editLocale)
-    }
+    patchSceneDef(activeSceneId, { header: sceneHeaderOffset(headerScene, landscape, x, y) })
   }
   const resetHeaderOffset = (): void => {
     if (!headerCfg) return
@@ -2925,8 +2904,8 @@ export function EditorCanvas(props: Props): JSX.Element {
                       }}
                     >
                       <span className="scratch-mark cover" style={{ pointerEvents: 'none' }}>
-                        header · {headerScope === 'scene' ? 'this scene' : 'all scenes'}
-                        {landscape ? ' · landscape' : ''} · {curHeaderOff.x || curHeaderOff.y ? `${curHeaderOff.x}, ${curHeaderOff.y}` : 'pinned top'}
+                        header · this scene{landscape ? ' · landscape' : ''} ·{' '}
+                        {curHeaderOff.x || curHeaderOff.y ? `${curHeaderOff.x}, ${curHeaderOff.y}` : 'pinned top'}
                       </span>
                     </div>
                   )}

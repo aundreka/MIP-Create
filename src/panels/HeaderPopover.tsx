@@ -263,8 +263,9 @@ export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): 
               Drag into place on the canvas
             </button>
             <div className="hint pad">
-              Drag the highlighted band on the canvas; double-click it to snap back to the top; Esc finishes. The band still spans the full width, so <b>Move X</b> only shows once
-              it is aligned left/right or narrower than the screen.
+              <b>Move X/Y here moves the band in every scene.</b> Dragging it on the canvas instead places it for <b>that scene only</b> — the scene picks up its own placement, and
+              the rest stay where they are (Scene panel → <i>Own header placement in this scene</i>). Double-click the band to snap it back, Esc finishes. It still spans the full
+              width, so <b>Move X</b> only shows once it is aligned left/right or narrower than the screen.
             </div>
             <Toggle
               label="Separate landscape layout"
