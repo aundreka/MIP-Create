@@ -51,7 +51,7 @@ describe('per-scene header layout', () => {
   }
 
   it('re-places the band on the scene that owns a layout, and restores it after', () => {
-    playProject(proj({ offsetYPx: 900, heightPx: 200 }), {}, { mount, interactive: true })
+    playProject(proj({ portrait: { offsetYPx: 900, heightPx: 200 } }), {}, { mount, interactive: true })
     expect(transform()).toBe('translateX(-50%) translate(0px, 20px) scale(1)')
     expect(height()).toBe('120px')
 
@@ -75,7 +75,7 @@ describe('per-scene header layout', () => {
 
   it('places the band for a floated overlay scene too', () => {
     const p = proj({})
-    p.scenes[1] = { ...p.scenes[1], kind: 'overlay', header: { offsetYPx: 640 }, advance: { on: 'manual' } }
+    p.scenes[1] = { ...p.scenes[1], kind: 'overlay', header: { portrait: { offsetYPx: 640 } }, advance: { on: 'manual' } }
     p.scenes[0] = { ...p.scenes[0], advance: { on: 'gameWin', to: 'scene2', delayMs: 0 } }
     playProject(p, {}, { mount, interactive: true })
     emit('game-complete')

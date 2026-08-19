@@ -32,6 +32,26 @@ describe('migrateProject', () => {
     expect(twice).toBe(once) // already current → no further copy
   })
 
+  // v2 → v3: a flat scene header layout (which applied to BOTH orientations) becomes two
+  // independent slots. The rendered result must be identical — same values in both — and
+  // from then on the orientations can diverge.
+  it('folds a legacy flat scene header layout into portrait/landscape slots', () => {
+    const p = proj(2)
+    ;(p.scenes[0] as { header?: unknown }).header = { offsetYPx: 300, heightPx: 200, landscape: { offsetYPx: 700 } }
+    const out = migrateProject(p)
+    expect(out.scenes[0].header).toEqual({
+      portrait: { offsetYPx: 300, heightPx: 200 },
+      landscape: { offsetYPx: 700, heightPx: 200 },
+    })
+  })
+
+  it('leaves a scene header that is already slotted alone', () => {
+    const p = proj(2)
+    const header = { portrait: { offsetYPx: 300 } }
+    ;(p.scenes[0] as { header?: unknown }).header = header
+    expect(migrateProject(p).scenes[0].header).toBe(header)
+  })
+
   it('preserves scenes and other meta fields', () => {
     const out = migrateProject(proj(0))
     expect(out.scenes).toHaveLength(1)

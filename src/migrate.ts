@@ -6,9 +6,9 @@
 // To evolve the model: bump CURRENT_SCHEMA, add a `from < N` block that transforms
 // the project, and the stamp at the end records the new version.
 
-import type { Project } from '../runtime/scene'
+import type { HeaderOrientationOverride, HeaderSceneOverride, Project } from '../runtime/scene'
 
-export const CURRENT_SCHEMA = 2
+export const CURRENT_SCHEMA = 3
 
 export function migrateProject(project: Project): Project {
   if (!project || !project.meta) return project
@@ -29,6 +29,25 @@ export function migrateProject(project: Project): Project {
         const k = s.kind as string
         if (k === 'win' || k === 'custom') return { ...s, kind: 'overlay' as const }
         return s
+      }),
+    }
+  }
+
+  // v2 → v3: a scene's header layout was stored FLAT (applying to both orientations) with
+  // an optional nested `landscape`. It is now two independent slots — SceneDef.header
+  // .portrait / .landscape — so composing one orientation can never shift the other. Fold
+  // the old shape into both slots: the rendered result is identical, and from here on the
+  // two are separate. See src/headerLayout.ts.
+  if (from < 3) {
+    p = {
+      ...p,
+      scenes: p.scenes.map((s) => {
+        const h = s.header as (HeaderSceneOverride & HeaderOrientationOverride) | undefined
+        if (!h) return s
+        const { portrait, landscape, ...flat } = h
+        if (!Object.keys(flat).length) return s // already the new shape
+        const both = { ...flat, ...portrait }
+        return { ...s, header: { portrait: both, landscape: { ...flat, ...landscape } } }
       }),
     }
   }

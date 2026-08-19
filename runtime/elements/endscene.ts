@@ -277,6 +277,17 @@ export function createEndsceneContent(el: SceneElement, ctx: RuntimeCtx): HTMLEl
 
   ph.textContent = 'Sample Endscene'
 
+  // Elements locked to the clip (endsceneMediaPos) need its NATURAL size, which a
+  // <video> only reports once metadata has arrived — and the project's asset record
+  // may not carry one either. Announce the moment it becomes known so those elements
+  // are re-laid out against the real crop instead of keeping the plain-FIT position
+  // they were given while the clip still measured 0x0.
+  const announceMedia = (): void => {
+    wrap.dispatchEvent(new CustomEvent('pa-endscene-media-reset', { bubbles: true }))
+  }
+  video.addEventListener('loadedmetadata', announceMedia)
+  img.addEventListener('load', announceMedia)
+
   wrap.appendChild(video)
   wrap.appendChild(img)
   wrap.appendChild(ph)

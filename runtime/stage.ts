@@ -52,6 +52,12 @@ interface Rec {
   anim: HTMLDivElement
   content: HTMLElement | null
   intrinsic: { w: number; h: number }
+  // The scene root this element was built into. Not the same as outer.parentElement:
+  // immune elements (every CTA, opted-in bars) are parked out into pa-stage for the
+  // scene's whole life (parkImmune in scenes.ts), so a parked element that has to find
+  // another element — the endscene it rides, an attach target — cannot look in its own
+  // parent alone. See layoutScopes.
+  sceneRoot: HTMLElement
   host?: GameHost | null
   deadline?: number // countdown target (ms epoch)
   ticker?: number // countdown setInterval id
@@ -1126,7 +1132,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
 
     const a = ctx.asset(el.assetId)
     const intrinsic = a ? { w: a.w, h: a.h } : { w: 100, h: 100 }
-    const rec: Rec = { el, outer, anim, content, intrinsic }
+    const rec: Rec = { el, outer, anim, content, intrinsic, sceneRoot: root }
     if (el.type === 'confetti' && content) rec.confetti = createConfetti(content as HTMLCanvasElement, () => rec.el)
     recs.push(rec)
     byId.set(el.id, rec)
@@ -1467,8 +1473,9 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     if (timelinePreview?.playing) armTimeline(0)
     // Elements riding the endscene's media crop (endsceneMediaPos) were positioned
     // against whatever was measurable at the time — a clip that has only just
-    // reported its size, or resized itself, moves them.
-    for (const rec of recs) if (rec.el.type === 'image') layoutRec(rec)
+    // reported its size, or resized itself, moves them. Every type can ride it, so
+    // relayout them all (the card itself is re-laid by the elements riding it).
+    for (const rec of recs) if (rec.el.type !== 'endscene') layoutRec(rec)
   }
   root.addEventListener('pa-endscene-media-reset', onEndsceneMediaReset)
 
@@ -2290,10 +2297,11 @@ function layoutRec(rec: Rec): void {
     case 'countdown':
       layoutText(rec, e)
       return
-    case 'bar':
-      layoutAsset(rec, e, e.mode === 'fit' ? 'fit' : 'extend')
-      applyFrame(rec)
+    case 'bar': {
+      const k = layoutAsset(rec, e, e.mode === 'fit' ? 'fit' : 'extend')
+      applyFrame(rec, k)
       return
+    }
     case 'endscene':
       layoutEndscene(rec, e)
       return
@@ -2309,18 +2317,23 @@ function layoutRec(rec: Rec): void {
       outer.style.height = '100%'
       outer.style.transform = e.rotation ? `rotate(${e.rotation}deg)` : 'none'
       return
-    default:
-      layoutAsset(rec, e, e.mode === 'extend' ? 'extend' : 'fit')
-      if ((rec.el.type === 'cta' || rec.el.type === 'choice' || rec.el.type === 'button') && rec.content) styleCta(rec.content, rec.el, scale())
+    default: {
+      // `k` is the scale the box was drawn at — the endscene clip's own scale when the
+      // element is locked to a card, otherwise the FIT scale. Everything inside the box
+      // uses it too, so a locked CTA's label and stroke grow and shrink with the clip
+      // instead of with the letterboxed FIT frame.
+      const k = layoutAsset(rec, e, e.mode === 'extend' ? 'extend' : 'fit')
+      if ((rec.el.type === 'cta' || rec.el.type === 'choice' || rec.el.type === 'button') && rec.content) styleCta(rec.content, rec.el, k)
       else {
-        applyFrame(rec) // image / handguide / game-mount: stroke + radius + padding
+        applyFrame(rec, k) // image / handguide / game-mount: stroke + radius + padding
         if (rec.el.container) {
           rec.anim.style.boxSizing = 'border-box'
-          rec.anim.style.padding = `${((rec.el.container.padPx ?? 0) * scale()).toFixed(1)}px`
+          rec.anim.style.padding = `${((rec.el.container.padPx ?? 0) * k).toFixed(1)}px`
         } else if (rec.anim.style.padding) {
           rec.anim.style.padding = ''
         }
       }
+    }
   }
 }
 
@@ -2329,10 +2342,9 @@ function layoutRec(rec: Rec): void {
 // which draws beyond the box and never shrinks the content); "padding" becomes the
 // gap between the element and the stroke (outline-offset). Corner radius rounds the
 // element and clips its content; the outline follows the radius.
-function applyFrame(rec: Rec): void {
+function applyFrame(rec: Rec, s = scale()): void {
   const box = rec.el.box
   const anim = rec.anim
-  const s = scale()
   const radius = !box ? '' : box.pill ? '9999px' : box.radiusPx ? box.radiusPx * s + 'px' : ''
   anim.style.borderRadius = radius
   // Clip the box for rounded corners OR when an image is being cropped to it.
@@ -2420,7 +2432,11 @@ function applyBox(outer: HTMLDivElement, px: number, py: number, w: number, h: n
   outer.style.transform = `translate(${tx}%,${ty}%)` + (rotation ? ` rotate(${rotation}deg)` : '')
 }
 
-function layoutAsset(rec: Rec, e: Effective, mode: 'fit' | 'extend'): void {
+// Lays the element out and returns the scale its box was drawn at — `scale()` for
+// plain FIT content, the endscene clip's own scale for an element locked to a card
+// (see endsceneMediaPos). Callers style the element's INTERIOR (CTA label, stroke,
+// container padding) at that same scale, so a locked element scales as one piece.
+function layoutAsset(rec: Rec, e: Effective, mode: 'fit' | 'extend'): number {
   const a = rec.intrinsic
   const s = scale()
   const outer = rec.outer
@@ -2547,13 +2563,15 @@ function layoutAsset(rec: Rec, e: Effective, mode: 'fit' | 'extend'): void {
     if (!pin && !autoTop && isBarDiv) {
       ;(rec.content as HTMLDivElement).style.backgroundColor = ''
     }
-    return
+    return s
   }
 
   // FIT
-  // An image over an endscene follows the card's media crop instead (see
-  // endsceneMediaPos); everything else is plain design-space FIT.
-  const onEndscene = rec.el.type === 'image' ? endsceneMediaPos(rec, e) : null
+  // ANY element drawn over an endscene follows the card's media crop instead (see
+  // endsceneMediaPos) — the clip is one element that extends past the scene, and
+  // everything riding it stays locked to it however it crops. Elements with no
+  // endscene under them are plain design-space FIT.
+  const onEndscene = endsceneMediaPos(rec, e)
   let px = onEndscene ? onEndscene.left : sx(e.x)
   let py = onEndscene ? onEndscene.top : sy(e.y)
 
@@ -2584,6 +2602,7 @@ function layoutAsset(rec: Rec, e: Effective, mode: 'fit' | 'extend'): void {
   if (rec.el.type === 'handguide') {
     outer.style.zIndex = '9999'
   }
+  return k
 }
 
 function sceneBgCss(c1?: string, c2?: string): string {
@@ -2623,14 +2642,17 @@ function attachedTextPos(rec: Rec, e: Effective): { left: number; top: number; k
   if (!root) return null
   let target: Rec | undefined
   if (attachId) {
-    for (const child of Array.from(root.children)) {
-      if ((child as HTMLElement).dataset?.id === attachId) {
-        target = recByOuter.get(child)
-        break
+    for (const scope of layoutScopes(rec)) {
+      for (const child of Array.from(scope.children)) {
+        if ((child as HTMLElement).dataset?.id === attachId) {
+          target = recByOuter.get(child)
+          break
+        }
       }
+      if (target) break
     }
   } else if (rec.el.type === 'countdown') {
-    target = autoEndsceneTarget(rec, root)
+    target = autoEndsceneTarget(rec)
   }
   const isAutoEndscene = !attachId && target?.el.type === 'endscene'
   if (!target || target === rec) return null
@@ -2756,17 +2778,31 @@ function htmlMediaBox(target: Rec, mediaEl: HTMLElement): { left: number; top: n
   return { left: f.left + m.left, top: f.top + m.top, width: m.width, height: m.height }
 }
 
-function autoEndsceneTarget(rec: Rec, root: Element): Rec | undefined {
+// Where to look for another element in this scene: the element's own parent first
+// (a parked immune element's siblings are parked with it), then the scene root it was
+// built into — which is where everything that was NOT parked still lives. Without the
+// second scope a parked element (every CTA is one) can never see the endscene under it
+// and silently falls back to plain FIT layout.
+function layoutScopes(rec: Rec): Element[] {
+  const host = rec.outer.parentElement
+  const scopes: Element[] = []
+  if (host) scopes.push(host)
+  if (rec.sceneRoot && rec.sceneRoot !== host) scopes.push(rec.sceneRoot)
+  return scopes
+}
+
+function autoEndsceneTarget(rec: Rec): Rec | undefined {
   const currentZ = rec.el.zIndex ?? 0
   const candidates: Rec[] = []
-  for (const child of Array.from(root.children)) {
-    const other = recByOuter.get(child)
-    if (!other || other === rec || other.el.type !== 'endscene') continue
-    const e = effective(other.el)
-    if (e.hidden || e.mode !== 'extend') continue
-    if ((other.el.zIndex ?? 0) > currentZ) continue
-    candidates.push(other)
-  }
+  for (const scope of layoutScopes(rec))
+    for (const child of Array.from(scope.children)) {
+      const other = recByOuter.get(child)
+      if (!other || other === rec || other.el.type !== 'endscene') continue
+      const e = effective(other.el)
+      if (e.hidden || e.mode !== 'extend') continue
+      if ((other.el.zIndex ?? 0) > currentZ) continue
+      candidates.push(other)
+    }
   candidates.sort((a, b) => (b.el.zIndex ?? 0) - (a.el.zIndex ?? 0))
   return candidates[0]
 }
@@ -2812,7 +2848,7 @@ function autoEndsceneReferenceRect(
 function endsceneMediaPos(rec: Rec, e: Effective): { left: number; top: number; k: number } | null {
   const root = rec.outer.parentElement
   if (!root) return null
-  const target = autoEndsceneTarget(rec, root)
+  const target = autoEndsceneTarget(rec)
   if (!target) return null
   // Element order in a scene is arbitrary — make sure the endscene's geometry is
   // current for this pass before measuring it.
@@ -2839,7 +2875,15 @@ function layoutText(rec: Rec, e: Effective): void {
   if (!t || !box) return
   const inner = box.firstElementChild as HTMLElement | null
   if (!inner) return
-  const attached = attachedTextPos(rec, e)
+  // A plain text element over an endscene locks to the card's media crop, exactly like
+  // an image does (endsceneMediaPos) — the label authored beside a line of the card has
+  // to crop and scale with the clip, not with the letterboxed FIT frame.
+  // A COUNTDOWN keeps the attach path's own endscene handling instead: legacy dynamic
+  // dates were authored against the FIT frame in landscape and must stay there
+  // (see attachedTextPos).
+  const attached =
+    attachedTextPos(rec, e) ??
+    (rec.el.type === 'text' && !rec.el.attachToId && !rec.el.headerScale ? endsceneMediaPos(rec, e) : null)
   // Header-style scaling (see header.ts): instead of multiplying every interior value
   // by the layout scale — font size, letter spacing, stroke, box padding, each landing
   // on its own rounded pixel — leave the whole box in raw DESIGN px and let ONE CSS

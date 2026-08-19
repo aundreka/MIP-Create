@@ -34,8 +34,7 @@ import type {
   UnboxingConfig,
 } from '../../runtime/scene'
 import { headerAllowedFor } from '../../runtime/scene'
-import { effectiveHeader } from '../../runtime/header'
-import { projectHeaderOffset, sceneOffsetOf } from '../headerLayout'
+import { ownsSlot, patchSlot, projectLayoutPatch, resolvedLayout, seedSlot, withOwnSlot, withoutSlot, type Orient } from '../headerLayout'
 import { TAP_FADE_DEFAULT_MS } from '../../runtime/elements/button'
 import { GAME_TEMPLATES } from '../../runtime/games/registry'
 import { splitList } from '../../runtime/games/holdgauge'
@@ -2003,32 +2002,37 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 <div className="hint pad">End cards hide the pinned date/countdown header by default. Turn this on to band it across the end card too — it stays tap-through, so the whole card still clicks out.</div>
               </>
             )}
-            {/* Per-scene header LAYOUT. The band's content is always the project's; a scene
-                can move/resize it for itself — in portrait, in landscape, or both. Scenes
-                without an override follow the project layout and stay in sync with it. */}
+            {/* Per-scene header LAYOUT — two independent switches, one per orientation.
+                Each owns a complete snapshot of the layout, so an opted-in scene/orientation
+                can never be moved by the project header or by another scene. Everything
+                goes through src/headerLayout.ts. */}
             {state.scene.meta.header && headerAllowedFor(sd) && (() => {
               const projectHeader = state.scene.meta.header!
-              const eff = effectiveHeader(projectHeader, landscape, sd.header)
-              const setHeaderLayout = (patch: HeaderOrientationOverride): void => {
-                const cur = sd.header ?? {}
-                patchSceneDef(sd.id, {
-                  header: landscape ? { ...cur, landscape: { ...(cur.landscape ?? {}), ...patch } } : { ...cur, ...patch },
-                })
-              }
+              const orient: Orient = landscape ? 'landscape' : 'portrait'
+              const other: Orient = landscape ? 'portrait' : 'landscape'
+              const owns = ownsSlot(sd.header, orient)
+              const eff = resolvedLayout(projectHeader, sd.header, orient)
+              // Any field edit lands in THIS scene's THIS-orientation slot (seeded on first
+              // touch so it is a full snapshot, never a half-inherited override).
+              const setHeaderLayout = (patch: HeaderOrientationOverride): void =>
+                patchSceneDef(sd.id, { header: patchSlot(projectHeader, sd.header, orient, patch) })
               return (
                 <>
+                  <div className="group-title">Header in this scene ({orient})</div>
                   <Toggle
-                    label="Own header placement in this scene"
-                    checked={!!sd.header}
-                    onChange={(v) => patchSceneDef(sd.id, { header: v ? {} : undefined })}
+                    label={`Own header layout in ${orient}`}
+                    checked={owns}
+                    onChange={(v) =>
+                      patchSceneDef(sd.id, { header: v ? withOwnSlot(projectHeader, sd.header, orient) : withoutSlot(sd.header, orient) })
+                    }
                   />
-                  {!sd.header && (
+                  {!owns && (
                     <div className="hint pad">
-                      This scene shows the header where the project puts it. Turn this on — or just drag the band on the canvas — to place it here only; other scenes keep their own
-                      position.
+                      This scene follows the project header in {orient}. Turn this on — or just drag the band on the canvas — and it keeps a copy of what it shows now: from then on
+                      nothing you change in the Header popover, or in another scene, can move it here.
                     </div>
                   )}
-                  {sd.header && (
+                  {owns && (
                     <>
                       <div className="grid2">
                         <NumField label="Move X" value={eff.offsetXPx ?? 0} suffix="px" onChange={(n) => setHeaderLayout({ offsetXPx: n || undefined })} />
@@ -2052,22 +2056,21 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                       <button
                         className="wide"
                         onClick={() => {
-                          const { x, y } = sceneOffsetOf(sd.header, landscape)
-                          patchHeader(projectHeaderOffset(projectHeader, landscape, x, y), editLocale)
-                          patchSceneDef(sd.id, { header: undefined })
+                          patchHeader(projectLayoutPatch(projectHeader, orient, seedSlot(projectHeader, sd.header, orient)), editLocale)
+                          patchSceneDef(sd.id, { header: withoutSlot(sd.header, orient) })
                         }}
                       >
-                        Use this placement in every scene
+                        Use this {orient} layout in every scene
                       </button>
-                      <button className="wide" onClick={() => patchSceneDef(sd.id, { header: undefined })}>
-                        Follow the project header layout again
+                      <button className="wide" onClick={() => patchSceneDef(sd.id, { header: withoutSlot(sd.header, orient) })}>
+                        Follow the project header again in {orient}
                       </button>
-                      <div className="hint pad">
-                        Only what you change here differs — everything else still follows the project header, so editing it in the Header popover keeps updating this scene too. You
-                        are editing the <b>{landscape ? 'landscape' : 'portrait'}</b> layout{landscape ? ' (portrait is untouched)' : ''}; switch with the frame’s orientation chip.
-                      </div>
                     </>
                   )}
+                  <div className="hint pad">
+                    {other} is {ownsSlot(sd.header, other) ? <>this scene’s own too — switch the frame’s orientation chip to edit it</> : <>following the project header</>}. The two
+                    orientations are stored separately, so one never changes the other. Content, colours and animation always come from the project header.
+                  </div>
                 </>
               )
             })()}

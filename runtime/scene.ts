@@ -853,10 +853,21 @@ export interface HeaderConfig {
   hidden?: boolean
 }
 
-/** One scene's own header layout (SceneDef.header): the same fields as a landscape
- * override, plus its own landscape variant. Scenes that author nothing keep the project
- * layout, so a header stays consistent until a scene deliberately moves it. */
-export interface HeaderSceneOverride extends HeaderOrientationOverride {
+/**
+ * One scene's own header layout (SceneDef.header). TWO INDEPENDENT SLOTS, one per
+ * orientation: a write only ever lands in the slot for the orientation being composed, and
+ * a slot only ever affects the scene it belongs to. A scene with no slot for an orientation
+ * follows the project layout there, so scenes stay in sync until one deliberately opts out.
+ *
+ * Slots are written as complete snapshots of the layout in force when the scene opts in
+ * (see seedSceneSlot in src/headerLayout.ts), so nothing edited later at the project level
+ * — or in another scene — can move an opted-in scene.
+ *
+ * Pre-v3 projects stored the fields flat here, with a nested `landscape`; migrate.ts folds
+ * that into the two slots, and sceneHeaderSlot() still reads it defensively.
+ */
+export interface HeaderSceneOverride {
+  portrait?: HeaderOrientationOverride
   landscape?: HeaderOrientationOverride
 }
 

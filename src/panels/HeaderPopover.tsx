@@ -12,7 +12,7 @@ import { DATE_LOCALE_OPTIONS } from '../dateLocales'
 import { useEditLocale } from '../locale'
 import { localeEntry } from '../../runtime/i18n'
 import { effectiveHeader } from '../../runtime/header'
-import { seedLandscapeHeader } from '../headerLayout'
+import { scenesOwning, seedSlot } from '../headerLayout'
 import type { AnimPresetId, AnimSpec, HeaderConfig, HeaderOrientationOverride } from '../../runtime/scene'
 
 const HEADER_ENTRANCE_PRESETS: { value: AnimPresetId; label: string }[] = [
@@ -217,6 +217,17 @@ export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): 
               )
             })()}
             <div className="group-title">Layout {lsLayout ? '(landscape)' : h.landscape ? '(portrait)' : ''}</div>
+            {(() => {
+              // Scenes that own this orientation are independent by design — say so, so a
+              // project-level edit that "does nothing" to them is never a mystery.
+              const owned = scenesOwning(project.scenes, landscape ? 'landscape' : 'portrait')
+              return owned > 0 ? (
+                <div className="hint pad">
+                  {owned} {owned === 1 ? 'scene has' : 'scenes have'} their own {landscape ? 'landscape' : 'portrait'} placement and will not move — change those in the Scene panel
+                  (or by dragging the band on that scene).
+                </div>
+              ) : null
+            })()}
             <div className="grid2">
               <NumField label="Font size" value={L.fontSizePx ?? 64} min={1} suffix="px" onChange={(n) => setLayout({ fontSizePx: n })} />
               <NumField label="Weight" value={L.fontWeight ?? 500} min={100} max={900} step={100} onChange={(n) => setLayout({ fontWeight: n })} />
@@ -261,7 +272,7 @@ export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): 
             <Toggle
               label="Separate landscape layout"
               checked={!!h.landscape}
-              onChange={(v) => set({ landscape: v ? seedLandscapeHeader(h) : undefined })}
+              onChange={(v) => set({ landscape: v ? seedSlot(h, undefined, 'portrait') : undefined })}
             />
             {!h.landscape && (
               <div className="hint pad">

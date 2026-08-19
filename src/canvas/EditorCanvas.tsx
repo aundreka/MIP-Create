@@ -7,13 +7,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { FrameMetrics, FrameRect, FrameToParent, ParentToFrame } from '../../runtime/frame-protocol'
 import { headerAllowedFor } from '../../runtime/scene'
-import { effectiveHeader } from '../../runtime/header'
 import type { Anchor, ProjectMeta, Scene, SceneDef, SceneElement } from '../../runtime/scene'
 import type { AssetMap } from '../../runtime/types'
 import { ContextMenu, type MenuItem } from '../panels/ContextMenu'
 import { getFramePos, setFramePos } from '../canvasLayout'
 import { flipbookBoxes, flipbookOpts, resizeBox, type Box } from './geometry'
-import { sceneHeaderOffset } from '../headerLayout'
+import { orientOf, ownsSlot, patchSlot, resolvedLayout, withoutSlot } from '../headerLayout'
 import { isSceneHidden, useCanvasView } from '../canvasView'
 import { useActiveVariant } from '../variantMode'
 import { endPathDraw, pathDrawTarget, usePathDraw } from '../drawMode'
@@ -2009,7 +2008,7 @@ export function EditorCanvas(props: Props): JSX.Element {
   // the band in another; the Header popover's Move X/Y still moves it in every scene.
   const headerScene = scene.headerOverride
   const headerBase = ((): { x: number; y: number } => {
-    const eff = headerCfg ? effectiveHeader(headerCfg, landscape, headerScene) : null
+    const eff = headerCfg ? resolvedLayout(headerCfg, headerScene, orientOf(landscape)) : null
     return { x: eff?.offsetXPx ?? 0, y: eff?.offsetYPx ?? 0 }
   })()
   const curHeaderOff = headerLive ?? headerBase
@@ -2041,15 +2040,19 @@ export function EditorCanvas(props: Props): JSX.Element {
   }
   /** Commit an offset to whichever layout this scene is being edited at, into the slot
    * for the orientation on screen. `undefined` for 0 keeps the JSON free of no-ops. */
-  /** Commit a placement to the ACTIVE SCENE's own layout, in the slot for the orientation
-   * on screen. Never touches the project header, so other scenes stay where they are. */
+  /** Commit a placement to the ACTIVE SCENE's slot for the orientation on screen — the only
+   * thing a drag can ever write. Other scenes, the other orientation and the project layout
+   * are untouched; a scene that was following the project is snapshotted first (patchSlot),
+   * so it lands independent rather than half-inheriting. */
   const writeHeaderOffset = (x: number | undefined, y: number | undefined): void => {
-    patchSceneDef(activeSceneId, { header: sceneHeaderOffset(headerScene, landscape, x, y) })
+    const header = patchSlot(headerCfg, headerScene, orientOf(landscape), { offsetXPx: x || undefined, offsetYPx: y || undefined })
+    patchSceneDef(activeSceneId, { header })
   }
+  /** Double-click: this scene follows the project layout again in this orientation. */
   const resetHeaderOffset = (): void => {
     if (!headerCfg) return
     setHeaderLive(null)
-    writeHeaderOffset(undefined, undefined)
+    patchSceneDef(activeSceneId, { header: withoutSlot(headerScene, orientOf(landscape)) })
   }
 
   // ---- flipbook book editor --------------------------------------------------
@@ -2904,8 +2907,9 @@ export function EditorCanvas(props: Props): JSX.Element {
                       }}
                     >
                       <span className="scratch-mark cover" style={{ pointerEvents: 'none' }}>
-                        header · this scene{landscape ? ' · landscape' : ''} ·{' '}
+                        header · this scene · {landscape ? 'landscape' : 'portrait'} ·{' '}
                         {curHeaderOff.x || curHeaderOff.y ? `${curHeaderOff.x}, ${curHeaderOff.y}` : 'pinned top'}
+                        {ownsSlot(headerScene, orientOf(landscape)) ? '' : ' · from project'}
                       </span>
                     </div>
                   )}

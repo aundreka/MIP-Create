@@ -20,8 +20,18 @@ const render = (scene: Scene): void => {
 }
 const band = (): HTMLElement | null => document.querySelector<HTMLElement>('.pa-header')
 
+// jsdom's window is 1024×768 (landscape) by default; the canvas frames the editor renders
+// are portrait unless the orientation chip is flipped, so pin the viewport per test.
+const viewport = (w: number, h: number): void => {
+  Object.defineProperty(window, 'innerWidth', { value: w, configurable: true })
+  Object.defineProperty(window, 'innerHeight', { value: h, configurable: true })
+}
+
 describe('canvas header (pa:render)', () => {
-  beforeEach(() => setDesign(1080, 1920))
+  beforeEach(() => {
+    setDesign(1080, 1920)
+    viewport(540, 960)
+  })
 
   it('draws the band on an ordinary scene', () => {
     render(sceneMsg('game'))
@@ -52,13 +62,23 @@ describe('canvas header (pa:render)', () => {
 
   it('places the band with the scene’s own layout when it has one', () => {
     render(sceneMsg('game'))
-    const band0 = band()!.style.transform
-    render(sceneMsg('game', { headerOverride: { offsetYPx: 500 } }))
-    expect(band()?.style.transform).not.toBe(band0)
-    expect(band()?.style.transform).toContain('translate(')
+    const band0 = band()!.style.transform // project layout: no offset of its own
+    render(sceneMsg('game', { headerOverride: { portrait: { offsetYPx: 500 } } }))
+    expect(band()?.style.transform).toBe('translateX(-50%) translate(0px, 250px) scale(0.5)') // 500 × 0.5
 
     render(sceneMsg('game')) // a scene that follows the project layout again
     expect(band()?.style.transform).toBe(band0)
+  })
+
+  // The property the slots exist for: composing one orientation cannot shift the other.
+  it('applies only the slot for the orientation the frame is in', () => {
+    const scene = sceneMsg('game', { headerOverride: { landscape: { offsetYPx: 500 } } })
+    render(scene)
+    expect(band()?.style.transform).toBe('translateX(-50%) scale(0.5)') // portrait frame: untouched
+
+    viewport(960, 540) // the same scene on a landscape frame
+    window.dispatchEvent(new Event('resize'))
+    expect(band()?.style.transform).toContain('translate(0px, 140.625px)') // 500 × 0.28125
   })
 
   it('reports the band rect to the editor alongside the element rects', async () => {

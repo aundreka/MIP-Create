@@ -55,10 +55,10 @@ export interface HeaderConfig {
   hidden?: boolean
 }
 
-/** A single scene's own header layout (SceneDef.header). Same fields as the landscape
- * override, plus its own landscape variant — so one scene can move the band in portrait,
- * in landscape, or in both, while every other scene keeps the project layout. */
-export interface HeaderSceneOverride extends HeaderOrientationOverride {
+/** A single scene's own header layout (SceneDef.header): one independent slot per
+ * orientation. See the doc comment on the same type in scene.ts. */
+export interface HeaderSceneOverride {
+  portrait?: HeaderOrientationOverride
   landscape?: HeaderOrientationOverride
 }
 
@@ -123,20 +123,30 @@ function mergeDefined(into: HeaderConfig, from: HeaderOrientationOverride | Head
 }
 
 /**
+ * The scene's slot for one orientation — the ONLY part of a scene override that can affect
+ * what is on screen. Pre-v3 projects stored the layout flat on the override (meaning "both
+ * orientations", with a nested `landscape` on top); that shape is still read here so an
+ * unmigrated project in memory renders exactly as it did.
+ */
+export function sceneHeaderSlot(scene: HeaderSceneOverride | null | undefined, landscape: boolean): HeaderOrientationOverride | undefined {
+  if (!scene) return undefined
+  const slot = landscape ? scene.landscape : scene.portrait
+  const legacy = Object.entries(scene as Record<string, unknown>).filter(([k]) => k !== 'portrait' && k !== 'landscape')
+  if (!legacy.length) return slot
+  return { ...(Object.fromEntries(legacy) as HeaderOrientationOverride), ...(landscape ? scene.landscape : {}), ...slot }
+}
+
+/**
  * The layout in force right now, most specific last:
- *   project portrait → project landscape → THIS SCENE's layout → this scene's landscape.
- * A scene that authors nothing simply plays the project header, so scenes stay in sync
- * until one of them deliberately opts out.
+ *   project portrait → project landscape → THIS SCENE's slot for this orientation.
+ * A scene with no slot for the orientation on screen simply plays the project header.
  */
 export function effectiveHeader(opts: HeaderConfig, landscape = isLandscape(), scene?: HeaderSceneOverride | null): HeaderConfig {
-  const hasScene = scene && Object.keys(scene).length > 0
-  if (!hasScene && (!landscape || !opts.landscape)) return opts
+  const slot = sceneHeaderSlot(scene, landscape)
+  if (!slot && (!landscape || !opts.landscape)) return opts
   const out: HeaderConfig = { ...opts }
   if (landscape) mergeDefined(out, opts.landscape)
-  if (hasScene) {
-    mergeDefined(out, scene)
-    if (landscape) mergeDefined(out, scene.landscape)
-  }
+  mergeDefined(out, slot)
   return out
 }
 
