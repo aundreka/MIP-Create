@@ -48,13 +48,15 @@ function headerRect(): FrameRect | undefined {
 function syncHeader(next: Scene): void {
   const cfg = headerAllowedFor(next) ? next.meta.header : undefined
   const key = cfg ? JSON.stringify(cfg) : ''
-  if (key === headerKey) {
-    header?.relayout()
-    return
+  if (key !== headerKey) {
+    headerKey = key
+    header?.destroy()
+    header = cfg ? mountHeader(document.body, cfg) : null
   }
-  headerKey = key
-  header?.destroy()
-  header = cfg ? mountHeader(document.body, cfg) : null
+  // This scene's own placement (SceneDef.header) rides on top of the project layout —
+  // applied separately so editing it doesn't rebuild the band.
+  header?.setSceneLayout(next.headerOverride ?? null)
+  header?.relayout()
 }
 
 function postLayout(): void {

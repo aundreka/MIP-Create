@@ -418,6 +418,10 @@ export function playProject(
     header.followCta(cta ? followLoopCss(cta, opts.interactive) || null : null)
   }
 
+  // The band is mounted once for the whole flow, so each scene hands it ITS layout —
+  // its own SceneDef.header when it has one, null to go back to the project layout.
+  const syncHeaderLayout = (def: SceneDef): void => header?.setSceneLayout(def.header ?? null)
+
   // A reload must never drop the player back onto a finished play-through.
   const clearResume = (): void => {
     try { window.sessionStorage.removeItem('pa:resume-scene') } catch { /* storage unavailable */ }
@@ -479,6 +483,7 @@ export function playProject(
       // target — and it must still be an end card when it does.
       if (isEndscene(displayDef)) armEndcard(displayDef, stage.root)
     }
+    syncHeaderLayout(displayDef)
     syncHeaderCta(displayDef)
     return stage
   }
@@ -669,6 +674,7 @@ export function playProject(
       overStage.layoutAll()
       overStage.startGames(true)
       overStage.playEntrances()
+      syncHeaderLayout(def) // a floated overlay places the band too (it never passes through mountScene)
       syncHeaderCta(def) // an end-card overlay carries its own CTA — follow THAT one
       overlayStages.add(overStage)
 
@@ -689,6 +695,7 @@ export function playProject(
         // Header follows whichever scene is current after the overlay closes: the game scene
         // on a plain dismiss, or the redirect destination (mountScene already set it; same value).
         if (current) header?.setVisible(headerAllowed(current.def))
+        if (current) syncHeaderLayout(localizeSceneDef(current.def)) // back to the underlying scene's layout
         if (current) syncHeaderCta(localizeSceneDef(current.def)) // back to the underlying scene's CTA
         if (current) syncPersist(current.def.id)
       }

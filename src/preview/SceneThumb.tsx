@@ -17,6 +17,7 @@ function toScene(project: Project, def: SceneDef): Scene {
     // Resolved here rather than by passing `kind` through: a thumbnail deliberately
     // renders overlay scenes without their dim, so only the header decision travels.
     hideHeader: !headerAllowedFor(def),
+    headerOverride: def.header,
   }
 }
 

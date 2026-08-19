@@ -50,6 +50,17 @@ describe('canvas header (pa:render)', () => {
     expect(band()).toBeTruthy()
   })
 
+  it('places the band with the scene’s own layout when it has one', () => {
+    render(sceneMsg('game'))
+    const band0 = band()!.style.transform
+    render(sceneMsg('game', { headerOverride: { offsetYPx: 500 } }))
+    expect(band()?.style.transform).not.toBe(band0)
+    expect(band()?.style.transform).toContain('translate(')
+
+    render(sceneMsg('game')) // a scene that follows the project layout again
+    expect(band()?.style.transform).toBe(band0)
+  })
+
   it('reports the band rect to the editor alongside the element rects', async () => {
     render(sceneMsg('game'))
     const msg = await new Promise<{ header?: { id: string } }>((resolve) => {

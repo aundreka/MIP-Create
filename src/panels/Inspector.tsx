@@ -18,6 +18,7 @@ import type {
   EndsceneConfig,
   HandguideConfig,
   HandguideNode,
+  HeaderOrientationOverride,
   KeyframeStep,
   LayoutMode,
   ObjectFit,
@@ -32,6 +33,8 @@ import type {
   TransitionType,
   UnboxingConfig,
 } from '../../runtime/scene'
+import { headerAllowedFor } from '../../runtime/scene'
+import { effectiveHeader } from '../../runtime/header'
 import { TAP_FADE_DEFAULT_MS } from '../../runtime/elements/button'
 import { GAME_TEMPLATES } from '../../runtime/games/registry'
 import { splitList } from '../../runtime/games/holdgauge'
@@ -1998,6 +2001,59 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 <div className="hint pad">End cards hide the pinned date/countdown header by default. Turn this on to band it across the end card too — it stays tap-through, so the whole card still clicks out.</div>
               </>
             )}
+            {/* Per-scene header LAYOUT. The band's content is always the project's; a scene
+                can move/resize it for itself — in portrait, in landscape, or both. Scenes
+                without an override follow the project layout and stay in sync with it. */}
+            {state.scene.meta.header && headerAllowedFor(sd) && (() => {
+              const projectHeader = state.scene.meta.header!
+              const eff = effectiveHeader(projectHeader, landscape, sd.header)
+              const setHeaderLayout = (patch: HeaderOrientationOverride): void => {
+                const cur = sd.header ?? {}
+                patchSceneDef(sd.id, {
+                  header: landscape ? { ...cur, landscape: { ...(cur.landscape ?? {}), ...patch } } : { ...cur, ...patch },
+                })
+              }
+              return (
+                <>
+                  <Toggle
+                    label="Own header placement in this scene"
+                    checked={!!sd.header}
+                    onChange={(v) => patchSceneDef(sd.id, { header: v ? {} : undefined })}
+                  />
+                  {sd.header && (
+                    <>
+                      <div className="grid2">
+                        <NumField label="Move X" value={eff.offsetXPx ?? 0} suffix="px" onChange={(n) => setHeaderLayout({ offsetXPx: n || undefined })} />
+                        <NumField label="Move Y" value={eff.offsetYPx ?? 0} suffix="px" onChange={(n) => setHeaderLayout({ offsetYPx: n || undefined })} />
+                      </div>
+                      <div className="grid2">
+                        <NumField label="Font size" value={eff.fontSizePx ?? 64} min={1} suffix="px" onChange={(n) => setHeaderLayout({ fontSizePx: n })} />
+                        <NumField label="Height" value={eff.heightPx ?? 120} min={0} suffix="px" onChange={(n) => setHeaderLayout({ heightPx: n })} />
+                      </div>
+                      <Row label="Alignment">
+                        <Select
+                          value={eff.align ?? 'center'}
+                          options={[
+                            { value: 'left', label: 'Left' },
+                            { value: 'center', label: 'Center' },
+                            { value: 'right', label: 'Right' },
+                          ]}
+                          onChange={(v) => setHeaderLayout({ align: v as HeaderOrientationOverride['align'] })}
+                        />
+                      </Row>
+                      <button className="wide" onClick={() => patchSceneDef(sd.id, { header: undefined })}>
+                        Follow the project header layout again
+                      </button>
+                      <div className="hint pad">
+                        Only what you change here differs — everything else still follows the project header, so editing it in the Header popover keeps updating this scene too. You
+                        are editing the <b>{landscape ? 'landscape' : 'portrait'}</b> layout{landscape ? ' (portrait is untouched)' : ''}; switch with the frame’s orientation chip.
+                        Dragging the band on the canvas writes here while this is on.
+                      </div>
+                    </>
+                  )}
+                </>
+              )
+            })()}
             {sd.kind === 'endscene' && (
               <div className="hint pad">
                 Endscene = MRAID <b>end card</b>: in Preview/export the whole scene is tap-to-install and signals the network the ad ended. Add a <b>video endscene</b> element for

@@ -19,6 +19,7 @@ function toScene(project: Project, def: SceneDef): Scene {
     asEndscene: def.asEndscene,
     hideHeader: def.hideHeader,
     showHeader: def.showHeader,
+    headerOverride: def.header,
   }
 }
 

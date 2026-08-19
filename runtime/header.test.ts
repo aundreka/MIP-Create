@@ -185,6 +185,41 @@ describe('header placement and per-orientation layout', () => {
     expect(band()?.style.transform).toContain('translate(0px, 33.75px)') // 60 design px × the landscape scale
   })
 
+  it('lets one scene move the band without touching the project layout', () => {
+    computeMetrics(1080, 1920) // scale 1
+    const h = mount({ offsetYPx: 10, heightPx: 120 })
+    expect(band()?.style.transform).toBe('translateX(-50%) translate(0px, 10px) scale(1)')
+
+    h.setSceneLayout({ offsetYPx: 400, heightPx: 200 }) // scene 2 places it lower and taller
+    expect(band()?.style.transform).toBe('translateX(-50%) translate(0px, 400px) scale(1)')
+    expect(band()?.style.height).toBe('200px')
+
+    h.setSceneLayout(null) // back on a scene that follows the project
+    expect(band()?.style.transform).toBe('translateX(-50%) translate(0px, 10px) scale(1)')
+    expect(band()?.style.height).toBe('120px')
+  })
+
+  it('inherits every field the scene does not override', () => {
+    computeMetrics(1080, 1920)
+    const h = mount({ fontSizePx: 64, heightPx: 120, offsetYPx: 30 })
+    h.setSceneLayout({ offsetYPx: 200 })
+    expect(surface()?.style.fontSize).toBe('64px') // still the project's
+    expect(band()?.style.height).toBe('120px')
+    expect(band()?.style.transform).toBe('translateX(-50%) translate(0px, 200px) scale(1)')
+  })
+
+  it('gives a scene its own landscape slot, most specific last', () => {
+    const cfg = { offsetYPx: 10, landscape: { offsetYPx: 50 } }
+    computeMetrics(1080, 1920)
+    const h = mount(cfg)
+    h.setSceneLayout({ offsetYPx: 100, landscape: { offsetYPx: 300 } })
+    expect(band()?.style.transform).toBe('translateX(-50%) translate(0px, 100px) scale(1)') // scene portrait
+
+    computeMetrics(1920, 1080) // rotate: scene landscape wins over project landscape
+    h.relayout()
+    expect(band()?.style.transform).toContain('translate(0px, 168.75px)') // 300 × 0.5625
+  })
+
   it('drops the band in landscape when the override hides it', () => {
     computeMetrics(1080, 1920)
     const h = mount({ landscape: { hidden: true } })

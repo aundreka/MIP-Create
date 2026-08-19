@@ -112,6 +112,7 @@ function deriveScene(project: Project, activeSceneId: string): Scene {
     asEndscene: sd?.asEndscene,
     hideHeader: sd?.hideHeader,
     showHeader: sd?.showHeader,
+    headerOverride: sd?.header,
   }
 }
 

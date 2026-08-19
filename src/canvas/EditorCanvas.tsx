@@ -8,7 +8,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { FrameMetrics, FrameRect, FrameToParent, ParentToFrame } from '../../runtime/frame-protocol'
 import { headerAllowedFor } from '../../runtime/scene'
 import { effectiveHeader } from '../../runtime/header'
-import type { Anchor, HeaderOrientationOverride, ProjectMeta, Scene, SceneDef, SceneElement } from '../../runtime/scene'
+import type { Anchor, HeaderOrientationOverride, HeaderSceneOverride, ProjectMeta, Scene, SceneDef, SceneElement } from '../../runtime/scene'
 import type { AssetMap } from '../../runtime/types'
 import { ContextMenu, type MenuItem } from '../panels/ContextMenu'
 import { getFramePos, setFramePos } from '../canvasLayout'
@@ -36,6 +36,7 @@ import {
   patchElement,
   patchGeometry,
   patchHeader,
+  patchSceneDef,
   pasteStyle,
   redo,
   removeSelected,
@@ -75,6 +76,13 @@ const EDGES: Handle[] = [
 ]
 
 // How many elements in a scene carry their own landscape geometry (any override field).
+/** Drop undefined keys — and the whole object when nothing is left — so an override that
+ * has been cleared disappears from the project JSON instead of lingering as `{}`. */
+function prune<T extends object>(o: T): T | undefined {
+  const out = Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && !(v && typeof v === 'object' && !Object.keys(v).length)))
+  return Object.keys(out).length ? (out as T) : undefined
+}
+
 const landscapeCount = (sd: SceneDef): number => sd.elements.filter((e) => e.landscape && Object.keys(e.landscape).length > 0).length
 
 function effGeom(el: SceneElement, landscape: boolean, locale?: string | null) {
@@ -164,6 +172,7 @@ function CanvasFrame(props: {
       asEndscene: displayDef.asEndscene,
       hideHeader: displayDef.hideHeader,
       showHeader: displayDef.showHeader,
+      headerOverride: displayDef.header,
     }
     const changed = lastSentAssets.current !== frameAssets
     lastSentAssets.current = frameAssets
@@ -413,6 +422,7 @@ export function EditorCanvas(props: Props): JSX.Element {
       asEndscene: sd.asEndscene,
       hideHeader: sd.hideHeader,
       showHeader: sd.showHeader,
+      headerOverride: sd.header,
     }
     // Assets are not included here — the iframe caches them from the last full render.
     iw.postMessage({ type: 'pa:render', scene, interactive: false, locale: editLocaleRef.current }, '*')
@@ -2001,8 +2011,13 @@ export function EditorCanvas(props: Props): JSX.Element {
   // somewhere different.
   const headerCfg = project.meta.header
   const headerRect = headerRects[activeSceneId]
+  // A scene with its own header layout (SceneDef.header) is edited at THAT level — the
+  // drag then moves the band on this scene only. Scenes without one edit the project
+  // layout, so the band keeps moving everywhere as before.
+  const headerScene = scene.headerOverride
+  const headerScope: 'scene' | 'project' = headerScene ? 'scene' : 'project'
   const headerBase = ((): { x: number; y: number } => {
-    const eff = headerCfg ? effectiveHeader(headerCfg, landscape) : null
+    const eff = headerCfg ? effectiveHeader(headerCfg, landscape, headerScene) : null
     return { x: eff?.offsetXPx ?? 0, y: eff?.offsetYPx ?? 0 }
   })()
   const curHeaderOff = headerLive ?? headerBase
@@ -2030,23 +2045,32 @@ export function EditorCanvas(props: Props): JSX.Element {
     const d = headerDrag.current
     headerDrag.current = null
     if (!d?.last || !headerCfg) return
-    const { x, y } = d.last
+    writeHeaderOffset(d.last.x, d.last.y)
+  }
+  /** Commit an offset to whichever layout this scene is being edited at, into the slot
+   * for the orientation on screen. `undefined` for 0 keeps the JSON free of no-ops. */
+  const writeHeaderOffset = (x: number | undefined, y: number | undefined): void => {
+    const ox = x || undefined
+    const oy = y || undefined
+    if (headerScope === 'scene') {
+      const cur = headerScene ?? {}
+      const next: HeaderSceneOverride = landscape
+        ? { ...cur, landscape: prune({ ...(cur.landscape ?? {}), offsetXPx: ox, offsetYPx: oy }) }
+        : { ...cur, offsetXPx: ox, offsetYPx: oy }
+      patchSceneDef(activeSceneId, { header: prune(next) })
+      return
+    }
     if (landscape) {
-      const ls: HeaderOrientationOverride = { ...(headerCfg.landscape ?? {}), offsetXPx: x || undefined, offsetYPx: y || undefined }
-      patchHeader({ landscape: Object.values(ls).some((v) => v !== undefined) ? ls : undefined }, editLocale)
+      const ls: HeaderOrientationOverride = { ...(headerCfg?.landscape ?? {}), offsetXPx: ox, offsetYPx: oy }
+      patchHeader({ landscape: prune(ls) }, editLocale)
     } else {
-      patchHeader({ offsetXPx: x || undefined, offsetYPx: y || undefined }, editLocale)
+      patchHeader({ offsetXPx: ox, offsetYPx: oy }, editLocale)
     }
   }
   const resetHeaderOffset = (): void => {
     if (!headerCfg) return
-    setHeaderLive({ x: 0, y: 0 })
-    if (landscape) {
-      const { offsetXPx: _x, offsetYPx: _y, ...rest } = headerCfg.landscape ?? {}
-      patchHeader({ landscape: Object.keys(rest).length ? (rest as HeaderOrientationOverride) : undefined }, editLocale)
-    } else {
-      patchHeader({ offsetXPx: undefined, offsetYPx: undefined }, editLocale)
-    }
+    setHeaderLive(null)
+    writeHeaderOffset(undefined, undefined)
   }
 
   // ---- flipbook book editor --------------------------------------------------
@@ -2901,7 +2925,8 @@ export function EditorCanvas(props: Props): JSX.Element {
                       }}
                     >
                       <span className="scratch-mark cover" style={{ pointerEvents: 'none' }}>
-                        header {landscape ? '(landscape)' : ''} {curHeaderOff.x || curHeaderOff.y ? `${curHeaderOff.x}, ${curHeaderOff.y}` : 'pinned top'}
+                        header · {headerScope === 'scene' ? 'this scene' : 'all scenes'}
+                        {landscape ? ' · landscape' : ''} · {curHeaderOff.x || curHeaderOff.y ? `${curHeaderOff.x}, ${curHeaderOff.y}` : 'pinned top'}
                       </span>
                     </div>
                   )}

@@ -175,7 +175,10 @@ export function gameTemplateStarters(): Starter[] {
       const isScratch = t.id === 'scratch' || t.id === 'scratch_grid'
       const isCatch = t.id === 'catch'
       const catchElements: SceneElement[] = isCatch ? [
-        { id: 'score_counter', type: 'text', name: 'Score Counter', x: C, y: 150, anchor: 'center', zIndex: 13, mode: 'fit', text: { value: '0', fontSizePx: 48, fontWeight: 800, color: '#ffffff', align: 'center' } },
+        // headerScale: sized by one transform with an unrounded anchor, the way the pinned
+        // date band is (header.ts). A score sits inside artwork, where a half-pixel of layout
+        // rounding reads as the number creeping out of its badge as the screen resizes.
+        { id: 'score_counter', type: 'text', name: 'Score Counter', x: C, y: 150, anchor: 'center', zIndex: 13, mode: 'fit', headerScale: true, text: { value: '0', fontSizePx: 48, fontWeight: 800, color: '#ffffff', align: 'center' } },
         { id: 'basket_bar', type: 'bar', name: 'Footer bar', x: C, y: 1920, h: 170, anchor: 'bottom', zIndex: 10, mode: 'extend', pin: 'bottom', bar: { color: '#1b2a4a' } },
       ] : []
       return {

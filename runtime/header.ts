@@ -50,6 +50,16 @@ export interface HeaderConfig {
   // without duplicating its content settings. `hidden` drops the band in that
   // orientation entirely.
   landscape?: HeaderOrientationOverride
+  // Only ever arrives from an orientation/scene override (see effectiveHeader) — the band
+  // is dropped entirely while it is true.
+  hidden?: boolean
+}
+
+/** A single scene's own header layout (SceneDef.header). Same fields as the landscape
+ * override, plus its own landscape variant — so one scene can move the band in portrait,
+ * in landscape, or in both, while every other scene keeps the project layout. */
+export interface HeaderSceneOverride extends HeaderOrientationOverride {
+  landscape?: HeaderOrientationOverride
 }
 
 /** The header layout fields that can differ between portrait and landscape. Content
@@ -70,6 +80,9 @@ interface HeaderHandle {
   relayout(): void
   /** Show/hide the band (per-scene `hideHeader`). Fades after the first call; instant at mount. */
   setVisible(visible: boolean): void
+  /** Apply the CURRENT scene's own layout override (SceneDef.header), or null to fall
+   * back to the project layout. Re-lays the band out immediately. */
+  setSceneLayout(override: HeaderSceneOverride | null | undefined): void
   /** Adopt the loop of the scene's CTA (`loopFollowsCta`). `css` is that element's loop
    * shorthand — see followLoopCss — or null for a scene with no CTA, which restores the
    * header's own `loop`. A no-op unless the header opted into following. */
@@ -102,13 +115,27 @@ function formatHeaderDate(d = new Date(), locale = 'en-US'): string {
   }
 }
 
-/** The config in force for the current orientation: portrait values, with any
- * landscape override merged over them while the viewport is wide. */
-export function effectiveHeader(opts: HeaderConfig, landscape = isLandscape()): HeaderConfig {
-  if (!landscape || !opts.landscape) return opts
+function mergeDefined(into: HeaderConfig, from: HeaderOrientationOverride | HeaderSceneOverride | undefined): void {
+  if (!from) return
+  for (const [k, v] of Object.entries(from as Record<string, unknown>)) {
+    if (k !== 'landscape' && v !== undefined) (into as Record<string, unknown>)[k] = v
+  }
+}
+
+/**
+ * The layout in force right now, most specific last:
+ *   project portrait → project landscape → THIS SCENE's layout → this scene's landscape.
+ * A scene that authors nothing simply plays the project header, so scenes stay in sync
+ * until one of them deliberately opts out.
+ */
+export function effectiveHeader(opts: HeaderConfig, landscape = isLandscape(), scene?: HeaderSceneOverride | null): HeaderConfig {
+  const hasScene = scene && Object.keys(scene).length > 0
+  if (!hasScene && (!landscape || !opts.landscape)) return opts
   const out: HeaderConfig = { ...opts }
-  for (const [k, v] of Object.entries(opts.landscape)) {
-    if (v !== undefined) (out as Record<string, unknown>)[k] = v
+  if (landscape) mergeDefined(out, opts.landscape)
+  if (hasScene) {
+    mergeDefined(out, scene)
+    if (landscape) mergeDefined(out, scene.landscape)
   }
   return out
 }
@@ -138,14 +165,17 @@ export function mountHeader(container: HTMLElement, opts: HeaderConfig): HeaderH
 
   // Everything that a landscape override may change is (re)applied here, so a rotation
   // — which only re-runs relayout() — picks up the other orientation's layout.
+  let sceneLayout: HeaderSceneOverride | null = null
   const applyLayout = (): HeaderConfig => {
-    const cfg = effectiveHeader(opts)
+    const cfg = effectiveHeader(opts, isLandscape(), sceneLayout)
     const align = cfg.align ?? 'center'
     // When a top padding is set, top-anchor the text so the gap is measured from the
     // band's top edge; otherwise keep the original vertically-centred behaviour.
     const topPadded = cfg.topPaddingPx != null
     band.style.height = (cfg.heightPx ?? 120) + 'px'
-    band.style.display = cfg.landscape?.hidden && isLandscape() ? 'none' : 'grid'
+    // `hidden` is only ever set on an orientation override, so it reaches cfg's root only
+    // when that override is the one in force.
+    band.style.display = cfg.hidden ? 'none' : 'grid'
     surface.style.alignItems = topPadded ? 'start' : 'center'
     surface.style.justifyItems = align === 'left' ? 'start' : align === 'right' ? 'end' : 'center'
     surface.style.textAlign = align
@@ -298,6 +328,12 @@ export function mountHeader(container: HTMLElement, opts: HeaderConfig): HeaderH
       band.style.transition = visInit ? 'opacity 250ms ease' : ''
       band.style.opacity = visible ? '1' : '0'
       visInit = true
+    },
+    setSceneLayout(override) {
+      const next = override && Object.keys(override).length ? override : null
+      if (JSON.stringify(next) === JSON.stringify(sceneLayout)) return
+      sceneLayout = next
+      relayout() // applyLayout runs inside, so size AND position land together
     },
     followCta(css: string | null) {
       if (!opts.loopFollowsCta) return

@@ -849,6 +849,15 @@ export interface HeaderConfig {
   // inherit the portrait values. Content (mode, format, prefix, colours, animations) is
   // always shared. `hidden` drops the band in landscape entirely.
   landscape?: HeaderOrientationOverride
+  // Set only by the override merge (effectiveHeader) — never authored at this level.
+  hidden?: boolean
+}
+
+/** One scene's own header layout (SceneDef.header): the same fields as a landscape
+ * override, plus its own landscape variant. Scenes that author nothing keep the project
+ * layout, so a header stays consistent until a scene deliberately moves it. */
+export interface HeaderSceneOverride extends HeaderOrientationOverride {
+  landscape?: HeaderOrientationOverride
 }
 
 export interface HeaderOrientationOverride {
@@ -950,6 +959,9 @@ export interface Scene {
   asEndscene?: boolean
   hideHeader?: boolean
   showHeader?: boolean
+  // The scene's own header layout (SceneDef.header), so a single-scene canvas render
+  // places the band exactly where the flow would.
+  headerOverride?: HeaderSceneOverride
 }
 
 /** Does the pinned `meta.header` band belong on this scene? End cards (a real endscene,
@@ -1016,6 +1028,10 @@ export interface SceneDef {
   advance: AdvanceRule
   transition?: Transition // how THIS scene ENTERS
   hideHeader?: boolean // hide the pinned date/countdown header (meta.header) while this scene is current
+  // This scene's OWN layout for the pinned header — position, size, alignment, and its own
+  // landscape variant. Absent (the default) = play the project layout, so scenes stay in
+  // sync; present = only this scene moves. Content is always the project's.
+  header?: HeaderSceneOverride
   // End cards hide the pinned date/countdown header by default. Set this on an endscene
   // (or an overlay opted into asEndscene) to keep the header banded across the end card too
   // — the same dynamic date/countdown the game scenes show. `hideHeader` still wins.
