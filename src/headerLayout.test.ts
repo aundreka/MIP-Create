@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { projectHeaderOffset, prune, sceneHeaderOffset, sceneOffsetOf } from './headerLayout'
+import { projectHeaderOffset, prune, sceneHeaderOffset, sceneOffsetOf, seedLandscapeHeader } from './headerLayout'
 
 describe('header placement targets', () => {
   it('writes a scene placement into the portrait slot', () => {
@@ -34,6 +34,24 @@ describe('header placement targets', () => {
     expect(sceneOffsetOf(scene, false)).toEqual({ x: undefined, y: 300 })
     expect(sceneOffsetOf(scene, true)).toEqual({ x: undefined, y: 700 })
     expect(sceneOffsetOf(undefined, true)).toEqual({ x: undefined, y: undefined })
+  })
+
+  // The snapshot has to write RESOLVED values: a field left unset keeps inheriting
+  // portrait, which is what made a portrait font-size edit resize the landscape band too.
+  it('snapshots the resolved portrait layout, defaults included', () => {
+    expect(seedLandscapeHeader({})).toEqual({ heightPx: 120, fontSizePx: 64, fontWeight: 500, align: 'center', letterSpacingPx: 0, offsetXPx: 0, offsetYPx: 0 })
+  })
+
+  it('snapshots the authored values when they exist', () => {
+    expect(seedLandscapeHeader({ fontSizePx: 90, heightPx: 200, align: 'left', offsetYPx: 40 })).toMatchObject({
+      fontSizePx: 90, heightPx: 200, align: 'left', offsetYPx: 40, fontWeight: 500,
+    })
+  })
+
+  it('copies top padding only when it is set (it switches the band to top-anchored text)', () => {
+    expect(seedLandscapeHeader({}).topPaddingPx).toBeUndefined()
+    expect(seedLandscapeHeader({ topPaddingPx: 0 }).topPaddingPx).toBe(0)
+    expect(seedLandscapeHeader({ topPaddingPx: 30 }).topPaddingPx).toBe(30)
   })
 
   it('prunes empty objects away entirely', () => {

@@ -8,6 +8,32 @@
 
 import type { HeaderConfig, HeaderOrientationOverride, HeaderSceneOverride } from '../runtime/scene'
 
+/** The runtime's own fallbacks (header.ts applyLayout) — a snapshot has to write these
+ * out, not leave them unset, or the orientation would go on inheriting them. */
+const HEADER_DEFAULTS = { heightPx: 120, fontSizePx: 64, fontWeight: 500, align: 'center', letterSpacingPx: 0, offsetXPx: 0, offsetYPx: 0 } as const
+
+/**
+ * The landscape layout to store when "Separate landscape layout" is switched on: today's
+ * RESOLVED portrait layout, defaults included. Snapshotting the resolved values (rather
+ * than only the explicitly-set ones) is what makes the two orientations independent — a
+ * field left unset would keep inheriting portrait, so changing the portrait font size
+ * would still resize the landscape band. `topPaddingPx` is copied only when it is actually
+ * set, because setting it at all switches the band from centred to top-anchored text.
+ */
+export function seedLandscapeHeader(h: HeaderConfig | undefined): HeaderOrientationOverride {
+  const seed: HeaderOrientationOverride = {
+    heightPx: h?.heightPx ?? HEADER_DEFAULTS.heightPx,
+    fontSizePx: h?.fontSizePx ?? HEADER_DEFAULTS.fontSizePx,
+    fontWeight: h?.fontWeight ?? HEADER_DEFAULTS.fontWeight,
+    align: h?.align ?? HEADER_DEFAULTS.align,
+    letterSpacingPx: h?.letterSpacingPx ?? HEADER_DEFAULTS.letterSpacingPx,
+    offsetXPx: h?.offsetXPx ?? HEADER_DEFAULTS.offsetXPx,
+    offsetYPx: h?.offsetYPx ?? HEADER_DEFAULTS.offsetYPx,
+  }
+  if (h?.topPaddingPx != null) seed.topPaddingPx = h.topPaddingPx
+  return seed
+}
+
 /** Drop undefined values (and objects left empty) so a cleared override disappears from
  * the saved JSON instead of lingering as `{}`. */
 export function prune<T extends object>(o: T): T | undefined {

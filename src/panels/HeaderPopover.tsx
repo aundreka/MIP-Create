@@ -12,6 +12,7 @@ import { DATE_LOCALE_OPTIONS } from '../dateLocales'
 import { useEditLocale } from '../locale'
 import { localeEntry } from '../../runtime/i18n'
 import { effectiveHeader } from '../../runtime/header'
+import { seedLandscapeHeader } from '../headerLayout'
 import type { AnimPresetId, AnimSpec, HeaderConfig, HeaderOrientationOverride } from '../../runtime/scene'
 
 const HEADER_ENTRANCE_PRESETS: { value: AnimPresetId; label: string }[] = [
@@ -87,16 +88,6 @@ export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): 
   const L = h ? effectiveHeader(h, lsLayout) : ({} as HeaderConfig)
   const setLayout = (patch: HeaderOrientationOverride): void =>
     lsLayout ? set({ landscape: { ...(h?.landscape ?? {}), ...patch } }) : set(patch)
-  // Turning the override ON snapshots today's portrait layout, so the two orientations
-  // start identical and then drift only where you change them.
-  const seedLandscape = (): HeaderOrientationOverride => {
-    const seed: HeaderOrientationOverride = {}
-    for (const k of ['heightPx', 'fontSizePx', 'fontWeight', 'topPaddingPx', 'align', 'letterSpacingPx', 'offsetXPx', 'offsetYPx'] as const) {
-      const v = h?.[k]
-      if (v !== undefined) (seed as Record<string, unknown>)[k] = v
-    }
-    return seed
-  }
   const setEntrance = (patch: Partial<AnimSpec>): void => set({ entrance: { ...(h?.entrance ?? DEFAULT_HEADER_ENTRANCE), ...patch } })
   const setLoop = (patch: Partial<AnimSpec>): void => set({ loop: { ...(h?.loop ?? DEFAULT_HEADER_LOOP), ...patch } })
 
@@ -270,14 +261,21 @@ export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): 
             <Toggle
               label="Separate landscape layout"
               checked={!!h.landscape}
-              onChange={(v) => set({ landscape: v ? seedLandscape() : undefined })}
+              onChange={(v) => set({ landscape: v ? seedLandscapeHeader(h) : undefined })}
             />
+            {!h.landscape && (
+              <div className="hint pad">
+                Landscape currently mirrors portrait, so the size and position above apply to both. Turn this on to snapshot them into landscape and size the band differently on a
+                wide screen — where the whole design scales down hardest.
+              </div>
+            )}
             {h.landscape && (
               <>
                 <Toggle label="Hide the header in landscape" checked={!!h.landscape.hidden} onChange={(v) => set({ landscape: { ...h.landscape, hidden: v || undefined } })} />
                 <div className="hint pad">
-                  Size, padding, alignment and position above are authored per orientation — you are editing the <b>{lsLayout ? 'landscape' : 'portrait'}</b> one. Switch the canvas
-                  with the <b>▭ landscape</b> chip on the active frame to compose the other. Content, colours and animation stay shared.
+                  Font size, weight, height, padding, alignment and position are now authored <b>per orientation</b> — you are editing the{' '}
+                  <b>{lsLayout ? 'landscape' : 'portrait'}</b> one, and the other keeps its own values. Switch the canvas with the <b>▭ landscape</b> chip on the active frame to
+                  compose it. Content, colours and animation stay shared.
                 </div>
               </>
             )}
