@@ -6,7 +6,7 @@
 //   * a slot holds at most one element — putting a new element in frees the old one
 //   * an element holds at most one slot — assigning one that already sits somewhere
 //     MOVES it rather than cloning the role
-//   * a layer keeps its canvas-visibility flag when it moves slots
+//   * a layer or drag art keeps its canvas-visibility flag when it moves slots
 //   * the three drag models (combo role / basket item / plain draggable) are exclusive
 
 import type { ComboRoleConfig, SceneElement } from '../runtime/scene'
@@ -47,9 +47,10 @@ export function assignComboSlot(args: AssignArgs): ComboSlotEdit[] {
         role,
         question,
         choice,
-        // Whether a layer is shown on the canvas is a property of that element's
-        // authoring state, not of the slot, so it survives a move.
-        showOnCanvas: role === 'layer' ? existing?.comboRole?.showOnCanvas : undefined,
+        // Whether one of the hidden kinds is shown on the canvas is a property of
+        // that element's authoring state, not of the slot, so it survives a move.
+        showOnCanvas: role === 'layer' || role === 'dragArt' ? existing?.comboRole?.showOnCanvas : undefined,
+        follow: role === 'dragArt' ? existing?.comboRole?.follow : undefined,
       },
       basketItem: undefined,
       drag: undefined,
@@ -78,6 +79,7 @@ export function comboOptionLabel(el: SceneElement): string {
   if (!r) return base
   if (r.role === 'anchor') return `${base} — anchor`
   if (r.role === 'title') return `${base} — Q${r.question ?? 1} title`
+  if (r.role === 'dragArt') return `${base} — drag art`
   if (r.role === 'layer') return `${base} — Q${r.question ?? 1} layer ${r.choice ?? 1}`
   return `${base} — Q${r.question ?? 1} option ${r.choice ?? 1}`
 }
@@ -86,14 +88,21 @@ export function comboOptionLabel(el: SceneElement): string {
 export function comboSlotSummary(role: ComboRoleConfig): string {
   if (role.role === 'anchor') return 'the anchor image'
   if (role.role === 'title') return `question ${role.question ?? 1}'s title`
+  if (role.role === 'dragArt') return 'the drag art, shown while an option is held'
   if (role.role === 'layer') return `question ${role.question ?? 1}'s layer for option ${role.choice ?? 1}`
   return `question ${role.question ?? 1}, option ${role.choice ?? 1}`
 }
 
-/** Show or hide a layer on the editor canvas. Authoring-only: play always starts with
- * every layer hidden, so this can never leak into the playable. */
-export function setLayerCanvasVisible(el: SceneElement, visible: boolean): ComboSlotEdit {
+/** Show or hide a hidden-by-default element (a layer, or the drag art) on the editor
+ * canvas. Authoring-only: play always starts with both hidden, so this can never leak
+ * into the playable. Stored as absent rather than false, to keep saved projects lean. */
+export function setCanvasVisible(el: SceneElement, visible: boolean): ComboSlotEdit {
   return { id: el.id, patch: { comboRole: { ...(el.comboRole ?? { role: 'layer' }), showOnCanvas: visible || undefined } } }
+}
+
+/** Make the drag art ride along with the option being dragged, or stay where placed. */
+export function setDragArtFollow(el: SceneElement, follow: boolean): ComboSlotEdit {
+  return { id: el.id, patch: { comboRole: { ...(el.comboRole ?? { role: 'dragArt' }), follow: follow || undefined } } }
 }
 
 /** Every layer of this game, so the panel can offer a show-all / hide-all pair. */

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SceneElement } from '../runtime/scene'
-import { assignComboSlot, comboCandidates, comboLayers, comboMembers, comboOptionLabel, comboSlotSummary, setLayerCanvasVisible } from './comboSlots'
+import { assignComboSlot, comboCandidates, comboLayers, comboMembers, comboOptionLabel, comboSlotSummary, setCanvasVisible, setDragArtFollow } from './comboSlots'
 
 function el(id: string, extra: Partial<SceneElement> = {}): SceneElement {
   return { id, type: 'image', name: id, x: 0, y: 0, anchor: 'center', zIndex: 1, mode: 'fit', ...extra } as SceneElement
@@ -69,14 +69,33 @@ describe('combo slot assignment', () => {
 describe('combo layer visibility', () => {
   it('toggles a layer on and drops the flag entirely when off', () => {
     const l = el('l', { comboRole: { gameId: GAME, role: 'layer', question: 1, choice: 1 } })
-    expect(setLayerCanvasVisible(l, true).patch.comboRole?.showOnCanvas).toBe(true)
+    expect(setCanvasVisible(l, true).patch.comboRole?.showOnCanvas).toBe(true)
     // Off is stored as absent rather than false, so it never bloats saved projects.
-    expect(setLayerCanvasVisible(l, false).patch.comboRole?.showOnCanvas).toBeUndefined()
+    expect(setCanvasVisible(l, false).patch.comboRole?.showOnCanvas).toBeUndefined()
   })
 
   it('keeps the rest of the role intact while toggling', () => {
     const l = el('l', { comboRole: { gameId: GAME, role: 'layer', question: 4, choice: 2 } })
-    expect(setLayerCanvasVisible(l, true).patch.comboRole).toMatchObject({ gameId: GAME, role: 'layer', question: 4, choice: 2 })
+    expect(setCanvasVisible(l, true).patch.comboRole).toMatchObject({ gameId: GAME, role: 'layer', question: 4, choice: 2 })
+  })
+})
+
+describe('combo drag art', () => {
+  it('keeps the follow flag across a move, and never puts it on another role', () => {
+    const a = el('cue', { comboRole: { gameId: GAME, role: 'dragArt', follow: true, showOnCanvas: true } })
+    const moved = assignComboSlot({ nextId: 'cue', current: undefined, role: 'dragArt', gameId: GAME, elements: [a] })
+    expect(moved[0].patch.comboRole).toMatchObject({ follow: true, showOnCanvas: true })
+
+    const asLayer = assignComboSlot({ nextId: 'cue', current: undefined, role: 'layer', gameId: GAME, question: 1, choice: 1, elements: [a] })
+    expect(asLayer[0].patch.comboRole?.follow).toBeUndefined()
+    // Canvas visibility is shared by the two hidden kinds, so it does carry over.
+    expect(asLayer[0].patch.comboRole?.showOnCanvas).toBe(true)
+  })
+
+  it('stores follow as absent when off', () => {
+    const a = el('cue', { comboRole: { gameId: GAME, role: 'dragArt', follow: true } })
+    expect(setDragArtFollow(a, false).patch.comboRole?.follow).toBeUndefined()
+    expect(setDragArtFollow(a, true).patch.comboRole?.follow).toBe(true)
   })
 })
 
@@ -117,6 +136,7 @@ describe('combo labels', () => {
     expect(comboOptionLabel(el('Hat', { comboRole: { role: 'title', question: 2 } }))).toBe('Hat — Q2 title')
     expect(comboOptionLabel(el('Hat', { comboRole: { role: 'option', question: 2, choice: 1 } }))).toBe('Hat — Q2 option 1')
     expect(comboOptionLabel(el('Hat', { comboRole: { role: 'layer', question: 3, choice: 2 } }))).toBe('Hat — Q3 layer 2')
+    expect(comboOptionLabel(el('Glow', { comboRole: { role: 'dragArt' } }))).toBe('Glow — drag art')
   })
 
   it('summarises a role in plain language for the element panel', () => {
@@ -124,5 +144,6 @@ describe('combo labels', () => {
     expect(comboSlotSummary({ role: 'title', question: 2 })).toBe("question 2's title")
     expect(comboSlotSummary({ role: 'layer', question: 1, choice: 2 })).toBe("question 1's layer for option 2")
     expect(comboSlotSummary({ role: 'option', question: 4, choice: 1 })).toBe('question 4, option 1')
+    expect(comboSlotSummary({ role: 'dragArt' })).toBe('the drag art, shown while an option is held')
   })
 })

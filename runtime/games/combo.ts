@@ -42,6 +42,15 @@ interface OptionEl {
   dragging: boolean
 }
 
+interface DragArtEl {
+  el: HTMLElement
+  /** Ride along with the dragged option instead of staying where it was placed. */
+  follow: boolean
+  canvasShown: boolean
+  /** Resting centre, sampled once when a drag begins, so following is a pure offset. */
+  home: Pt
+}
+
 interface LayerEl {
   el: HTMLElement
   question: number
@@ -69,6 +78,25 @@ function center(el: HTMLElement): Pt {
   return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
 }
 
+/**
+ * Where to hang a scale so it grows the element ABOUT ITS VISIBLE CENTRE.
+ *
+ * The outer .pa-el is positioned by layoutRec with `transform: translate(tx%,ty%)`,
+ * and the CSS `scale` property composes AFTER that (order: translate, rotate, scale,
+ * transform) about `transform-origin: center center` — the centre of the box BEFORE
+ * that positional shift. Scaling the outer therefore slides the element by
+ * (1-s)·W/2: a 200px option picked up at 1.25x jumps 25px up-left instead of
+ * swelling in place, and the same drift throws the flight off its target.
+ *
+ * The inner .pa-el-anim fills the box and carries no positional transform, so its
+ * own origin already IS the visible centre. Scaling there is drift-free, and it
+ * leaves the outer's box (and so getBoundingClientRect) at natural size, which is
+ * what the fly-to maths wants to measure against.
+ */
+function scaleNode(el: HTMLElement): HTMLElement {
+  return el.querySelector<HTMLElement>('.pa-el-anim') ?? el
+}
+
 function clampPct(value: unknown, fallback: number): number {
   return Math.max(0, Math.min(100, num(value, fallback)))
 }
@@ -81,12 +109,14 @@ export function createCombo(): GameModule {
   let snapBorderPct = 6
   let advanceDelayMs = 600
   let flyMs = 520
+  let landScale = 0.92
   let crossFadeMs = 300
   let dismissMs = 260
   let zonePct: Zone = { x: 18, y: 60, w: 64, h: 32 }
 
   const options: OptionEl[] = []
   const layers: LayerEl[] = []
+  const dragArt: DragArtEl[] = []
   const anchors: HTMLElement[] = []
   const titles: { el: HTMLElement; question: number }[] = []
   /** Chosen option index per question (0-based question), -1 = unanswered. */
@@ -131,11 +161,21 @@ export function createCombo(): GameModule {
   const setOffset = (item: OptionEl, dx: number, dy: number, ease: boolean): void => {
     item.dx = dx
     item.dy = dy
-    item.el.style.transition = ease ? `translate ${dismissMs}ms ease, scale ${dismissMs}ms ease` : 'scale 140ms ease'
+    item.el.style.transition = ease ? `translate ${dismissMs}ms ease` : ''
     item.el.style.translate = `${dx}px ${dy}px`
   }
 
+  /** Scale the option about its visible centre, optionally eased. */
+  const setScale = (item: OptionEl, value: number, ms: number, easing = 'ease'): void => {
+    const node = scaleNode(item.el)
+    node.style.transition = ms > 0 ? `scale ${ms}ms ${easing}` : ''
+    node.style.scale = String(value)
+  }
+
   const resetOption = (item: OptionEl): void => {
+    const node = scaleNode(item.el)
+    node.style.transition = ''
+    node.style.scale = ''
     item.el.style.transition = ''
     item.el.style.translate = ''
     item.el.style.scale = ''
@@ -182,6 +222,39 @@ export function createCombo(): GameModule {
    * author left visible on the canvas while positioning them. */
   const hideAllLayers = (): void => {
     for (const l of layers) hide(l.el)
+  }
+
+  // ---- drag art ------------------------------------------------------------
+  // Optional cue that exists only while the player is holding an option: a "drop it
+  // here" callout, a glow, a blown-up preview. Placed on the canvas like everything
+  // else, so its look and position are the author's.
+  const showDragArt = (item: OptionEl): void => {
+    for (const art of dragArt) {
+      // Sample the resting centre BEFORE showing it: the class only toggles opacity
+      // and visibility, so the box is measurable either way, and a fresh sample keeps
+      // following correct across resizes.
+      art.home = center(art.el)
+      art.el.style.transition = ''
+      art.el.style.translate = ''
+      show(art.el)
+      if (art.follow) followDragArt(item)
+    }
+  }
+
+  const followDragArt = (item: OptionEl): void => {
+    if (!dragArt.some((a) => a.follow)) return
+    const p = center(item.el)
+    for (const art of dragArt) {
+      if (!art.follow) continue
+      art.el.style.translate = `${p.x - art.home.x}px ${p.y - art.home.y}px`
+    }
+  }
+
+  const hideDragArt = (): void => {
+    for (const art of dragArt) {
+      hide(art.el)
+      art.el.style.translate = ''
+    }
   }
 
   /** Bring a layer up from transparent over `ms`, so it arrives as the option on top
@@ -267,9 +340,9 @@ export function createCombo(): GameModule {
 
     for (const other of optionsFor(q + 1)) {
       if (other === item) continue
-      other.el.style.transition = `opacity ${dismissMs}ms ease, scale ${dismissMs}ms ease`
+      other.el.style.transition = `opacity ${dismissMs}ms ease`
       other.el.style.opacity = '0'
-      other.el.style.scale = '0.7'
+      setScale(other, 0.7, dismissMs)
       after(dismissMs, () => hide(other.el))
     }
 
@@ -282,27 +355,33 @@ export function createCombo(): GameModule {
       return
     }
 
-    // Fly the option to the CENTRE of its layer's box and match its size, so the two
-    // are superimposed by the time they trade places. Both elements scale about their
-    // own centre, so aligning centres is what makes the swap invisible.
+    // Fly the option onto the CENTRE of the placed art and shrink it down onto it, so
+    // the two are superimposed by the time they trade places.
+    //
+    // Both rects are natural box geometry: the drag scale lives on the inner node
+    // (see scaleNode), so neither the option's pick-up growth nor its landing shrink
+    // distorts what is measured here. `home` is the option's resting centre — its
+    // live centre minus the drag offset it is carrying — and translating by
+    // (target - home) puts its centre exactly on the target's.
     //
     // Size is matched contain-style — the smaller of the two ratios — rather than by
     // width alone: when the option art and the placed art have different aspects,
-    // matching width alone leaves the option spilling out past the layer it is
+    // matching width alone leaves the option spilling out past the thing it is
     // supposed to be turning into, which is exactly when the seam shows.
     const to = destination.getBoundingClientRect()
     const rect = item.el.getBoundingClientRect()
     const fit =
       rect.width > 0 && rect.height > 0 && to.width > 0 && to.height > 0 ? Math.min(to.width / rect.width, to.height / rect.height) : 1
-    // The element's resting centre — its live centre minus the drag offset it carries.
     const home = { x: rect.left + rect.width / 2 - item.dx, y: rect.top + rect.height / 2 - item.dy }
     // The cross-fade occupies the TAIL of the flight, so the option is still moving
     // while it dissolves instead of landing and then blinking out.
     const cross = Math.min(crossFadeMs, flyMs)
     const ease = 'cubic-bezier(.4,0,.2,1)'
-    item.el.style.transition = `translate ${flyMs}ms ${ease}, scale ${flyMs}ms ${ease}, opacity ${cross}ms linear ${flyMs - cross}ms`
+    item.el.style.transition = `translate ${flyMs}ms ${ease}, opacity ${cross}ms linear ${flyMs - cross}ms`
     item.el.style.translate = `${to.left + to.width / 2 - home.x}px ${to.top + to.height / 2 - home.y}px`
-    item.el.style.scale = String(Math.max(0.05, fit))
+    // Settling a touch UNDER the placed art's size reads as the pick being absorbed
+    // into it; landScale 1 lands on an exact size match instead.
+    setScale(item, Math.max(0.05, fit * landScale), flyMs, ease)
     if (cross > 0) item.el.style.opacity = '0'
 
     // Start the layer's fade-in at the same moment the option starts fading out. A
@@ -336,12 +415,14 @@ export function createCombo(): GameModule {
       const base = { x: item.dx, y: item.dy }
       item.el.style.zIndex = '99999'
       item.el.style.cursor = 'grabbing'
-      item.el.style.scale = String(pickupScale)
+      setScale(item, pickupScale, 140)
+      showDragArt(item)
       ctx.sfx.play('comboPick')
 
       const move = (moveEvent: PointerEvent): void => {
         setOffset(item, base.x + moveEvent.clientX - start.x, base.y + moveEvent.clientY - start.y, false)
         const p = center(item.el)
+        followDragArt(item)
         target.dataset.comboNear = insideTarget(p.x, p.y) ? '1' : '0'
       }
 
@@ -351,6 +432,9 @@ export function createCombo(): GameModule {
         item.el.removeEventListener('pointercancel', cancel)
         item.dragging = false
         target.dataset.comboNear = '0'
+        // The cue exists only for as long as the option is held — whether the drop
+        // lands or springs back.
+        hideDragArt()
         const p = center(item.el)
         const dropped = !cancelled && insideTarget(p.x, p.y)
         if (dropped) {
@@ -360,7 +444,7 @@ export function createCombo(): GameModule {
         } else {
           item.el.style.zIndex = item.homeZ
           item.el.style.cursor = 'grab'
-          item.el.style.scale = '1'
+          setScale(item, 1, 140)
           setOffset(item, 0, 0, true)
         }
         if (typeof item.el.releasePointerCapture === 'function' && item.el.hasPointerCapture?.(eventToRelease.pointerId)) {
@@ -398,6 +482,8 @@ export function createCombo(): GameModule {
         options.push({ el, question, choice, homeZ: el.style.zIndex, dx: 0, dy: 0, dragging: false })
       } else if (role === 'layer') {
         layers.push({ el, question, choice, canvasShown: el.dataset.comboCanvasShow === '1' })
+      } else if (role === 'dragArt') {
+        dragArt.push({ el, follow: el.dataset.comboFollow === '1', canvasShown: el.dataset.comboCanvasShow === '1', home: { x: 0, y: 0 } })
       } else if (role === 'title') {
         titles.push({ el, question })
       } else if (role === 'anchor') {
@@ -414,6 +500,7 @@ export function createCombo(): GameModule {
       snapBorderPct = Math.max(0, Math.min(25, num(params.snapBorderPct, 6)))
       advanceDelayMs = Math.max(0, Math.min(5000, num(params.advanceDelayMs, 600)))
       flyMs = Math.max(0, Math.min(3000, num(params.flyMs, 520)))
+      landScale = Math.max(0.1, Math.min(2, num(params.landScale, 0.92)))
       crossFadeMs = Math.max(0, Math.min(3000, num(params.crossFadeMs, 300)))
       dismissMs = Math.max(0, Math.min(2000, num(params.dismissMs, 260)))
       const x = Math.min(98, clampPct(params.zoneX, 18))
@@ -445,6 +532,7 @@ export function createCombo(): GameModule {
       started = true
       // Whatever the author left visible while positioning, play starts clean.
       hideAllLayers()
+      hideDragArt()
       current = nextPlayable(0)
       if (current >= questions) {
         // Nothing is wired up at all — win immediately rather than stranding the player.
@@ -493,9 +581,17 @@ export function createCombo(): GameModule {
         else l.el.classList.add(OFF_CLASS)
         delete l.el.dataset.comboClaimedBy
       }
+      for (const art of dragArt) {
+        if (art.canvasShown) art.el.classList.remove(OFF_CLASS)
+        else art.el.classList.add(OFF_CLASS)
+        art.el.style.translate = ''
+        art.el.style.transition = ''
+        delete art.el.dataset.comboClaimedBy
+      }
       for (const anchor of anchors) delete anchor.dataset.comboClaimedBy
       options.length = 0
       layers.length = 0
+      dragArt.length = 0
       titles.length = 0
       anchors.length = 0
       answers.length = 0
@@ -515,6 +611,7 @@ export const COMBO_TEMPLATE: GameTemplate = {
     { key: 'pickupScale', label: 'Drag grow scale', type: 'number', min: 1, max: 2, step: 0.05 },
     { key: 'snapBorderPct', label: 'Snap border (%)', type: 'number', min: 0, max: 25, step: 1 },
     { key: 'flyMs', label: 'Fly-to-layer (ms)', type: 'number', min: 0, max: 3000, step: 20 },
+    { key: 'landScale', label: 'Land scale (1 = exact match)', type: 'number', min: 0.1, max: 2, step: 0.02 },
     { key: 'crossFadeMs', label: 'Cross-fade into the layer (ms)', type: 'number', min: 0, max: 3000, step: 20 },
     { key: 'advanceDelayMs', label: 'Delay before next question (ms)', type: 'number', min: 0, max: 5000, step: 50 },
     { key: 'dismissMs', label: 'Unpicked option exit (ms)', type: 'number', min: 0, max: 2000, step: 20 },
@@ -524,6 +621,7 @@ export const COMBO_TEMPLATE: GameTemplate = {
     pickupScale: 1.25,
     snapBorderPct: 6,
     flyMs: 520,
+    landScale: 0.92,
     crossFadeMs: 300,
     advanceDelayMs: 600,
     dismissMs: 260,

@@ -1196,13 +1196,15 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       if (el.comboRole.gameId) outer.dataset.comboGameId = el.comboRole.gameId
       if (el.comboRole.question) outer.dataset.comboQuestion = String(el.comboRole.question)
       if (el.comboRole.choice) outer.dataset.comboChoice = String(el.comboRole.choice)
-      // A layer starts hidden — the game reveals it when its option is picked. The
-      // author can keep one visible on the editor canvas while positioning it; play
-      // hides every layer regardless, so this never reaches the player.
-      if (el.comboRole.role === 'layer') {
+      // A layer starts hidden — the game reveals it when its option is picked — and so
+      // does drag art, which only appears while an option is being held. The author
+      // can keep one visible on the editor canvas while positioning it; play hides
+      // both regardless, so this never reaches the player.
+      if (el.comboRole.role === 'layer' || el.comboRole.role === 'dragArt') {
         if (el.comboRole.showOnCanvas) outer.dataset.comboCanvasShow = '1'
         else outer.classList.add(COMBO_OFF_CLASS)
       }
+      if (el.comboRole.role === 'dragArt' && el.comboRole.follow) outer.dataset.comboFollow = '1'
     }
 
     const anim = document.createElement('div')

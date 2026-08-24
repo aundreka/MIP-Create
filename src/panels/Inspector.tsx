@@ -104,7 +104,8 @@ import {
   comboMembers,
   comboOptionLabel,
   comboSlotSummary,
-  setLayerCanvasVisible,
+  setCanvasVisible,
+  setDragArtFollow,
   type ComboSlotEdit,
 } from '../comboSlots'
 import { DATE_LOCALE_OPTIONS } from '../dateLocales'
@@ -1172,7 +1173,8 @@ function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps):
   const assign = (nextId: string, current: SceneElement | undefined, role: ComboRoleConfig['role'], question?: number, choice?: number): void =>
     apply(assignComboSlot({ nextId, current, role, gameId: elementId, question, choice, elements: siblings }))
 
-  const setLayersVisible = (els: SceneElement[], visible: boolean): void => apply(els.map((e) => setLayerCanvasVisible(e, visible)))
+  const setLayersVisible = (els: SceneElement[], visible: boolean): void => apply(els.map((e) => setCanvasVisible(e, visible)))
+  const art = mine.find((e) => e.comboRole?.role === 'dragArt')
 
   const jump = (el: SceneElement, label = 'Show on canvas'): JSX.Element => (
     <button className="btn" style={{ width: '100%', marginTop: 4 }} onClick={() => selectOnly(el.id)}>
@@ -1273,6 +1275,24 @@ function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps):
         Draw the invisible area an option must be released into. There is exactly one drop area for the whole game — drag the box to move it, corner handles to resize, Esc to
         finish.
       </div>
+
+      <div className="group-title2">Drag art (optional)</div>
+      <Row label="Image">
+        <Select value={art?.id ?? ''} onChange={(v) => assign(v, art, 'dragArt')} options={choices(art)} />
+      </Row>
+      {art ? (
+        <>
+          <Toggle label="Follow the dragged option" checked={!!art.comboRole?.follow} onChange={(v) => apply([setDragArtFollow(art, v)])} />
+          <Toggle label="Show it on the canvas" checked={!!art.comboRole?.showOnCanvas} onChange={(v) => setLayersVisible([art], v)} />
+          {jump(art, `Position “${art.name || art.id}” on canvas`)}
+          <div className="hint pad">
+            Appears the moment an option is picked up and goes again when it is released, whether the drop landed or sprang back. Off by default, it stays where you placed it —
+            a &ldquo;drop it here&rdquo; callout over the drop area. Turn on following and it rides along under the enlarged option instead, as a glow or a bigger preview.
+          </div>
+        </>
+      ) : (
+        <div className="hint pad">Optional: an element shown only while the player is holding an option. Leave it empty for none.</div>
+      )}
 
       <div className="group-title2">Anchor images ({anchors.length})</div>
       {anchors.map((a) => (

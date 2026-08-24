@@ -35,8 +35,9 @@ const HAND_H = 56
 // under the hand and driven by the same cycle phase, so the first ring is born
 // on the dip rather than free-running against it.
 const RIPPLE_COUNT = 3
-/** Ring radius in px at fit=1 when fully spread. */
-const RIPPLE_MAX = 54
+/** Ring radius in px at fit=1 when fully spread. Rings have to clear the hand by
+ * a good margin or they read as a halo stuck to it rather than a spreading pulse. */
+const RIPPLE_MAX = 78
 const RIPPLE_COLOR = 'rgba(150,130,235,'
 /** Hand width the ripple is sized against: `fit` 1 = a 46px hand. An editable
  * handguide is any size, so it divides its own hand width by this to keep the
@@ -160,8 +161,11 @@ export function createRipple(host: HTMLElement): TapRipple {
     // out; with the default content-box the growing stroke would drift the circle.
     ring.style.cssText =
       `position:absolute;left:${-RIPPLE_MAX}px;top:${-RIPPLE_MAX}px;width:${RIPPLE_MAX * 2}px;height:${RIPPLE_MAX * 2}px;` +
-      `box-sizing:border-box;border-radius:50%;border:3px solid ${RIPPLE_COLOR}.9);` +
-      `box-shadow:0 0 12px ${RIPPLE_COLOR}.35),inset 0 0 12px ${RIPPLE_COLOR}.25);` +
+      // A stroke alone all but disappears over busy art: the wash inside it is what
+      // makes the pulse read at a glance, and the glow keeps the edge off dark art.
+      `box-sizing:border-box;border-radius:50%;border:4px solid ${RIPPLE_COLOR}.95);` +
+      `background:radial-gradient(circle,${RIPPLE_COLOR}.22) 0%,${RIPPLE_COLOR}.1) 55%,${RIPPLE_COLOR}0) 100%);` +
+      `box-shadow:0 0 18px ${RIPPLE_COLOR}.5),inset 0 0 22px ${RIPPLE_COLOR}.3);` +
       'opacity:0;will-change:transform,opacity;'
     ripple.appendChild(ring)
     rings.push(ring)
@@ -190,9 +194,11 @@ export function createRipple(host: HTMLElement): TapRipple {
         // Ease-out radius: a real ring loses speed as it widens. Opacity and stroke
         // both thin with it so the ring dissolves instead of blinking off.
         const spread = 1 - (1 - p) * (1 - p)
-        ring.style.transform = `scale(${((0.15 + 0.85 * spread) * fit).toFixed(3)})`
-        ring.style.opacity = ((1 - p) * 0.7).toFixed(3)
-        ring.style.borderWidth = `${(3 - 2 * spread).toFixed(2)}px`
+        // Born at a third of full size rather than from nothing: a ring that starts
+        // as a dot spends its brightest moment too small to see.
+        ring.style.transform = `scale(${((0.34 + 0.66 * spread) * fit).toFixed(3)})`
+        ring.style.opacity = ((1 - p) * 0.9).toFixed(3)
+        ring.style.borderWidth = `${(4 - 2.5 * spread).toFixed(2)}px`
       }
     },
   }

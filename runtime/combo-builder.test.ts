@@ -10,6 +10,16 @@ function stubRect(el: HTMLElement, x: number, y: number, w: number, h: number): 
     ({ left: x, top: y, right: x + w, bottom: y + h, width: w, height: h, x, y, toJSON: () => ({}) }) as DOMRect
 }
 
+/** The scale lives on the inner .pa-el-anim, which carries no positional transform —
+ * scaling the outer .pa-el would slide the element by (1-s)·W/2. */
+function scaleOf(el: HTMLElement): string {
+  return (el.querySelector<HTMLElement>('.pa-el-anim') ?? el).style.scale
+}
+
+function transitionOf(el: HTMLElement): string {
+  return (el.querySelector<HTMLElement>('.pa-el-anim') ?? el).style.transition
+}
+
 function pointer(type: string, x: number, y: number): PointerEvent {
   return new MouseEvent(type, { clientX: x, clientY: y, bubbles: true }) as unknown as PointerEvent
 }
@@ -61,6 +71,24 @@ function option(id: string, question: number, choice: number, assetId: string): 
     zIndex: 5,
     mode: 'fit',
     comboRole: { gameId: 'combo-game', role: 'option', question, choice },
+  } as SceneElement
+}
+
+/** Optional cue shown only while an option is held. */
+function dragArt(id: string, follow?: boolean, showOnCanvas?: boolean): SceneElement {
+  return {
+    id,
+    type: 'image',
+    name: id,
+    assetId: 'layerA',
+    x: 540,
+    y: 1600,
+    w: 400,
+    h: 120,
+    anchor: 'center',
+    zIndex: 8,
+    mode: 'fit',
+    comboRole: { gameId: 'combo-game', role: 'dragArt', follow, showOnCanvas },
   } as SceneElement
 }
 
@@ -261,7 +289,7 @@ describe('combo builder', () => {
     opt.dispatchEvent(pointer('pointerdown', 250, 250))
     expect(heard).toContain('pickSfx')
     expect(anim.style.animation).toContain('pa-pop')
-    expect(opt.style.scale).toBe('1.25')
+    expect(scaleOf(opt)).toBe('1.25')
 
     opt.dispatchEvent(pointer('pointerup', 250, 250))
     expect(heard).toContain('dropSfx')
@@ -335,8 +363,25 @@ describe('combo builder', () => {
       // 100x100 option into a 400x200 layer: width ratio 4, height ratio 2. Taking the
       // width ratio would make it 400x400 — 100px of overhang top and bottom right as
       // the two are supposed to be indistinguishable.
-      const { opt, stage } = dropOnto({ flyMs: 400, crossFadeMs: 200 }, [0, 0, 100, 100], [0, 0, 400, 200])
-      expect(opt.style.scale).toBe('2')
+      const { opt, stage } = dropOnto({ flyMs: 400, crossFadeMs: 200, landScale: 1 }, [0, 0, 100, 100], [0, 0, 400, 200])
+      expect(scaleOf(opt)).toBe('2')
+      stage.destroy()
+    })
+
+    it('shrinks under the placed art by the land scale', () => {
+      // 100x100 option into a 200x200 layer is a 2x fit; landScale 0.9 settles it a
+      // touch smaller so the pick reads as being absorbed into the placed art.
+      const { opt, stage } = dropOnto({ flyMs: 400, crossFadeMs: 200, landScale: 0.9 }, [0, 0, 100, 100], [0, 0, 200, 200])
+      expect(Number(scaleOf(opt))).toBeCloseTo(1.8, 5)
+      stage.destroy()
+    })
+
+    it('measures the flight against natural boxes, not the picked-up size', () => {
+      // The option is held at 1.25x when it is dropped. Because the drag scale lives
+      // on the inner node, the outer box stays natural — so a 100x100 option landing
+      // on a 100x100 layer is a 1.0 fit, not 1/1.25.
+      const { opt, stage } = dropOnto({ flyMs: 400, crossFadeMs: 200, landScale: 1 }, [0, 0, 100, 100], [0, 0, 100, 100])
+      expect(Number(scaleOf(opt))).toBeCloseTo(1, 5)
       stage.destroy()
     })
 
@@ -398,8 +443,9 @@ describe('combo builder', () => {
     it('fades the unpicked option out rather than only shrinking it', () => {
       const { loser, stage } = dropOnto({ flyMs: 400, crossFadeMs: 200, dismissMs: 150 }, [0, 0, 100, 100], [0, 0, 100, 100])
       expect(loser.style.opacity).toBe('0')
-      expect(loser.style.scale).toBe('0.7')
+      expect(scaleOf(loser)).toBe('0.7')
       expect(loser.style.transition).toContain('opacity 150ms')
+      expect(transitionOf(loser)).toContain('scale 150ms')
       stage.destroy()
     })
   })
@@ -446,6 +492,107 @@ describe('combo builder', () => {
     stage.destroy()
   })
 
+  it('scales about the visible centre, so a pick-up swells in place', () => {
+    // The outer .pa-el is positioned with transform: translate(tx%,ty%), and the CSS
+    // `scale` property composes after it about the UNTRANSFORMED box centre — so
+    // scaling the outer slides the element by (1-s)·W/2 (a 200px option at 1.25x
+    // jumps 25px up-left). The scale must therefore sit on the inner node.
+    const stage = build([GAME, ANCHOR, option('a1', 1, 1, 'optA')])
+    stage.layoutAll()
+    stage.startGames(true)
+    const opt = stage.root.querySelector<HTMLElement>('[data-id="a1"]')!
+    const target = stage.root.querySelector<HTMLElement>('[data-combo-target="1"]')!
+    stubRect(target, 0, 0, 10, 10)
+    stubRect(opt, 400, 400, 200, 200)
+    opt.dispatchEvent(pointer('pointerdown', 500, 500))
+
+    expect(scaleOf(opt)).toBe('1.25')
+    // Nothing on the OUTER may carry a scale, or the drift comes back.
+    expect(opt.style.scale).toBe('')
+    stage.destroy()
+  })
+
+  describe('drag art', () => {
+    function held(art: SceneElement): { art: HTMLElement; opt: HTMLElement; stage: ReturnType<typeof buildScene> } {
+      const stage = build([GAME, ANCHOR, option('a1', 1, 1, 'optA'), art])
+      stage.layoutAll()
+      stage.startGames(true)
+      const opt = stage.root.querySelector<HTMLElement>('[data-id="a1"]')!
+      const node = stage.root.querySelector<HTMLElement>(`[data-id="${art.id}"]`)!
+      const target = stage.root.querySelector<HTMLElement>('[data-combo-target="1"]')!
+      stubRect(target, 0, 0, 10, 10)
+      stubRect(opt, 400, 400, 100, 100)
+      stubRect(node, 100, 900, 400, 120)
+      return { art: node, opt, stage }
+    }
+
+    it('stays hidden until an option is picked up, then hides again on release', () => {
+      const { art, opt, stage } = held(dragArt('cue'))
+      expect(art.classList.contains('pa-combo-off')).toBe(true)
+
+      opt.dispatchEvent(pointer('pointerdown', 450, 450))
+      expect(art.classList.contains('pa-combo-off')).toBe(false)
+
+      // Released outside the drop area — the cue goes with the grab, not the pick.
+      opt.dispatchEvent(pointer('pointerup', 450, 450))
+      expect(art.classList.contains('pa-combo-off')).toBe(true)
+      stage.destroy()
+    })
+
+    it('rides along with the option when set to follow', () => {
+      const { art, opt, stage } = held(dragArt('cue', true))
+      opt.dispatchEvent(pointer('pointerdown', 450, 450))
+      // Resting centre (300,960) sampled at grab; option centre is (450,450).
+      expect(art.style.translate).toBe('150px -510px')
+
+      stubRect(opt, 600, 300, 100, 100)
+      opt.dispatchEvent(pointer('pointermove', 650, 350))
+      expect(art.style.translate).toBe('350px -610px')
+
+      opt.dispatchEvent(pointer('pointerup', 650, 350))
+      expect(art.style.translate).toBe('')
+      stage.destroy()
+    })
+
+    it('stays put when follow is off', () => {
+      const { art, opt, stage } = held(dragArt('cue', false))
+      opt.dispatchEvent(pointer('pointerdown', 450, 450))
+      expect(art.style.translate).toBe('')
+      stage.destroy()
+    })
+
+    it('is optional — the game plays fine with none', () => {
+      const stage = build([GAME, ANCHOR, option('a1', 1, 1, 'optA')])
+      stage.layoutAll()
+      stage.startGames(true)
+      const opt = stage.root.querySelector<HTMLElement>('[data-id="a1"]')!
+      const target = stage.root.querySelector<HTMLElement>('[data-combo-target="1"]')!
+      stubRect(target, 0, 0, 500, 500)
+      stubRect(opt, 100, 100, 100, 100)
+      expect(() => {
+        opt.dispatchEvent(pointer('pointerdown', 150, 150))
+        opt.dispatchEvent(pointer('pointerup', 150, 150))
+      }).not.toThrow()
+      stage.destroy()
+    })
+
+    it('honours showOnCanvas while editing but never during play', () => {
+      const els = [GAME, ANCHOR, option('a1', 1, 1, 'optA'), dragArt('cue', false, true)]
+      const editor = build(els)
+      editor.layoutAll()
+      editor.startGames(false)
+      expect(editor.root.querySelector<HTMLElement>('[data-id="cue"]')!.classList.contains('pa-combo-off')).toBe(false)
+      editor.destroy()
+
+      document.body.innerHTML = ''
+      const play = build(els)
+      play.layoutAll()
+      play.startGames(true)
+      expect(play.root.querySelector<HTMLElement>('[data-id="cue"]')!.classList.contains('pa-combo-off')).toBe(true)
+      play.destroy()
+    })
+  })
+
   it('springs an option back home when it is released outside the drop area', () => {
     const stage = build([GAME, ANCHOR, option('a1', 1, 1, 'optA'), option('a2', 1, 2, 'optB'), layer('l-a1', 1, 1, 'layerA')])
     stage.layoutAll()
@@ -459,7 +606,7 @@ describe('combo builder', () => {
     opt.dispatchEvent(pointer('pointerdown', 850, 850))
     opt.dispatchEvent(pointer('pointerup', 850, 850))
     expect(opt.style.translate).toBe('0px 0px')
-    expect(opt.style.scale).toBe('1')
+    expect(scaleOf(opt)).toBe('1')
     expect(opt.classList.contains('pa-combo-off')).toBe(false)
     // Nothing was picked, so no layer was revealed.
     expect(stage.root.querySelector<HTMLElement>('[data-id="l-a1"]')!.classList.contains('pa-combo-off')).toBe(true)
