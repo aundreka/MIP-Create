@@ -404,6 +404,48 @@ describe('combo builder', () => {
     })
   })
 
+  it('publishes the live option as data-combo-hint and moves it on each pick', () => {
+    const stage = build([
+      GAME,
+      ANCHOR,
+      option('a1', 1, 1, 'optA'),
+      option('a2', 1, 2, 'optB'),
+      layer('l-a1', 1, 1, 'layerA'),
+      option('b1', 2, 1, 'optA'),
+    ])
+    stage.layoutAll()
+    stage.startGames(true)
+
+    const q = (id: string): HTMLElement => stage.root.querySelector<HTMLElement>(`[data-id="${id}"]`)!
+    // A placed handguide in 'combo' mode follows this marker, so exactly one option
+    // carries it and it always belongs to the live question.
+    expect(q('a1').dataset.comboHint).toBe('1')
+    expect(q('a2').dataset.comboHint).toBeUndefined()
+    expect(q('b1').dataset.comboHint).toBeUndefined()
+
+    const target = stage.root.querySelector<HTMLElement>('[data-combo-target="1"]')!
+    stubRect(target, 100, 100, 400, 400)
+    stubRect(q('a1'), 200, 200, 100, 100)
+    stubRect(q('l-a1'), 0, 0, 100, 100)
+    q('a1').dispatchEvent(pointer('pointerdown', 250, 250))
+    q('a1').dispatchEvent(pointer('pointerup', 250, 250))
+
+    // Mid-pick there is nothing to point at, so the hand hides rather than lingering
+    // over an option that is already flying away.
+    expect(q('a1').dataset.comboHint).toBeUndefined()
+
+    vi.advanceTimersByTime(400)
+    expect(q('b1').dataset.comboHint).toBe('1')
+
+    // Won: no marker at all.
+    stubRect(q('b1'), 200, 200, 100, 100)
+    q('b1').dispatchEvent(pointer('pointerdown', 250, 250))
+    q('b1').dispatchEvent(pointer('pointerup', 250, 250))
+    vi.advanceTimersByTime(400)
+    expect(stage.root.querySelectorAll('[data-combo-hint]').length).toBe(0)
+    stage.destroy()
+  })
+
   it('springs an option back home when it is released outside the drop area', () => {
     const stage = build([GAME, ANCHOR, option('a1', 1, 1, 'optA'), option('a2', 1, 2, 'optB'), layer('l-a1', 1, 1, 'layerA')])
     stage.layoutAll()

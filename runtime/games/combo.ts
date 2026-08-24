@@ -113,6 +113,21 @@ export function createCombo(): GameModule {
 
   const optionsFor = (question: number): OptionEl[] => options.filter((o) => o.question === question)
 
+  /** The option a hint should point at: the first one still up for grabs. */
+  const liveOption = (): OptionEl | undefined =>
+    done || busy ? undefined : optionsFor(current + 1).find((o) => !o.el.classList.contains(OFF_CLASS))
+
+  /** Publish that option as `data-combo-hint`, the way the basket game publishes its
+   * next unplaced item. An editable handguide element in 'combo' mode follows this
+   * attribute, so the placed hand advances by itself as questions go by. */
+  const markHint = (): void => {
+    const live = liveOption()
+    for (const o of options) {
+      if (o === live) o.el.dataset.comboHint = '1'
+      else delete o.el.dataset.comboHint
+    }
+  }
+
   const setOffset = (item: OptionEl, dx: number, dy: number, ease: boolean): void => {
     item.dx = dx
     item.dy = dy
@@ -212,6 +227,7 @@ export function createCombo(): GameModule {
     if (done) return
     done = true
     target.dataset.comboComplete = '1'
+    markHint()
     ctx.sfx.play('gameWin')
     winCb?.()
     completeCb?.()
@@ -233,10 +249,11 @@ export function createCombo(): GameModule {
       return
     }
     showQuestion(current)
+    busy = false
+    markHint()
     // Fired AFTER the incoming elements are visible, so an authored 'comboNext'
     // animation on them actually plays instead of running while they're hidden.
     ctx.sfx.play('comboNext')
-    busy = false
   }
 
   /** Pick `item` for the current question: dismiss its siblings, fly it into the
@@ -245,6 +262,7 @@ export function createCombo(): GameModule {
     const q = current
     answers[q] = item.choice
     busy = true
+    markHint()
     ctx.sfx.play('comboDrop')
 
     for (const other of optionsFor(q + 1)) {
@@ -435,6 +453,7 @@ export function createCombo(): GameModule {
         return
       }
       showQuestion(current)
+      markHint()
       options.forEach(attachDrag)
     },
     relayout() {
@@ -442,8 +461,7 @@ export function createCombo(): GameModule {
       for (const item of options) if (!item.dragging && answers[item.question - 1] < 0) setOffset(item, 0, 0, false)
     },
     getHint(): HintMove | null {
-      if (done || busy) return null
-      const item = optionsFor(current + 1).find((o) => !o.el.classList.contains(OFF_CLASS))
+      const item = liveOption()
       if (!item) return null
       return { from: center(item.el), to: center(target), kind: 'drag' }
     },
@@ -461,6 +479,7 @@ export function createCombo(): GameModule {
         item.el.classList.remove(OFF_CLASS)
         item.el.style.pointerEvents = ''
         item.el.style.rotate = ''
+        delete item.el.dataset.comboHint
         delete item.el.dataset.comboClaimedBy
       }
       for (const t of titles) {
@@ -514,5 +533,8 @@ export const COMBO_TEMPLATE: GameTemplate = {
     zoneH: 32,
   },
   defaultHintIdleMs: 3000,
+  // Seeds a placed handguide that follows the live option into the drop area. The
+  // node only sets where the hand starts before the game has anything to point at.
+  defaultHandguide: { mode: 'combo', nodes: [{ x: 0.3, y: 0.5 }], periodMs: 1900 },
   create: createCombo,
 }

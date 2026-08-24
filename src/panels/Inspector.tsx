@@ -3479,12 +3479,14 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                   options={[
                     { value: 'smart', label: 'Smart (auto-point at CTA / game)' },
                     { value: 'tap', label: 'Tap (bounce in place)' },
+                    { value: 'radialtap', label: 'Radial tap (bounce + ping rings)' },
                     { value: 'hold', label: 'Hold (press and stay pressed)' },
                     { value: 'slide', label: 'Slide along a path' },
                     { value: 'scratch', label: 'Scratch (back-and-forth rub)' },
                     { value: 'match', label: 'Match pairs (follow the game’s next card)' },
                     { value: 'thoughtwhack', label: 'Whack-a-mole (follow an unwhacked thought)' },
                     { value: 'basket', label: 'Basket (drag next unplaced item)' },
+                    { value: 'combo', label: 'Combo (drag the live option to the drop area)' },
                     { value: 'brush', label: 'Point at the scratch brush (after its intro)' },
                     { value: 'still', label: 'Still (no movement at all)' },
                   ]}
@@ -3567,7 +3569,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               </Row>
               <NumField
                 label="Loop speed (ms)"
-                value={hg.periodMs ?? (hg.mode === 'tap' || hg.mode === 'thoughtwhack' ? 900 : 1500)}
+                value={hg.periodMs ?? (hg.mode === 'tap' || hg.mode === 'radialtap' || hg.mode === 'thoughtwhack' ? 900 : 1500)}
                 step={100}
                 min={300}
                 onChange={(n) => setHg({ periodMs: n })}

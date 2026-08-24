@@ -35,7 +35,7 @@ import { createTextContent } from './elements/text'
 import { createCtaContent } from './elements/cta'
 import { createButtonContent, tapFeedbackByNode, wireSceneNav, type TapFeedback } from './elements/button'
 import { createChoiceContent } from './elements/choice'
-import { elementHintPoint, holdPress, tapPress } from './hint'
+import { createRipple, dragGesture, elementHintPoint, holdPress, RIPPLE_HAND_REF_W, RIPPLE_TIMING, tapPress } from './hint'
 import { localize, localizeElement } from './i18n'
 import { getPicks, isPicked, togglePick } from './selection'
 import { createEndsceneContent, updateEndsceneMedia, htmlEndsceneMediaEl, mediaNaturalSize, endsceneCoverFrame } from './elements/endscene'
@@ -158,9 +158,11 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
   // Waypoints (design px). 'slide' uses the configured nodes (or legacy toX/toY);
   // 'smart' targets the CTA/game; 'tap' stays in place (no waypoints).
   let pts: { x: number; y: number; pauseMs?: number }[] = []
-  let kind: 'tap' | 'slide' | 'scratch' | 'match' | 'thoughtwhack' | 'basket' | 'brush' | 'still' | 'hold' = 'tap'
+  let kind: 'tap' | 'radialtap' | 'slide' | 'scratch' | 'match' | 'thoughtwhack' | 'basket' | 'combo' | 'brush' | 'still' | 'hold' = 'tap'
   if (cfg.mode === 'still') {
     kind = 'still'
+  } else if (cfg.mode === 'radialtap') {
+    kind = 'radialtap'
   } else if (cfg.mode === 'hold') {
     kind = 'hold'
   } else if (cfg.mode === 'slide') {
@@ -181,11 +183,14 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     kind = 'thoughtwhack'
   } else if (cfg.mode === 'basket') {
     kind = 'basket'
+  } else if (cfg.mode === 'combo') {
+    kind = 'combo'
   } else if (cfg.mode === 'brush') {
     kind = 'brush'
   }
   // A hold has to read as a HOLD, so its default cycle is longer than a tap's.
-  const travel = cfg.periodMs && cfg.periodMs > 0 ? cfg.periodMs : kind === 'scratch' ? 600 : kind === 'slide' ? 1500 : kind === 'hold' ? 2000 : 900
+  const travel =
+    cfg.periodMs && cfg.periodMs > 0 ? cfg.periodMs : kind === 'scratch' ? 600 : kind === 'slide' ? 1500 : kind === 'combo' ? 1900 : kind === 'hold' ? 2000 : 900
   const cubic = (t: number): number => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
   const EASE: Record<string, (t: number) => number> = {
     linear: (t) => t,
@@ -252,12 +257,23 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
       brushHostEl.appendChild(content)
     }
   }
+  // 'radialtap' adds the radial ping (hint.ts) under the hand. It lives on the stage
+  // layer rather than inside the handguide element, whose box is only as big as the
+  // hand — rings spread well past it and would be clipped by any frame/radius on it.
+  const rippleHost = kind === 'radialtap' ? ((rec.outer.closest('.pa-stage') as HTMLElement | null) ?? root) : null
+  const ripple = rippleHost ? createRipple(rippleHost) : null
+  // Ring size relative to the hand, measured once from the untransformed hand so the
+  // press dip doesn't make the rings breathe with it.
+  let rippleFit = 0
+
   const frame = (now: number): void => {
     if (!running || !content) return
     const s = scale()
     let ox = 0
     let oy = 0
     let press = 0
+    // 'combo' only: carrying something reads as the hand swelling, not shrinking.
+    let swell = 0
     if (kind === 'brush') {
       // Mime dragging the brush across the card. The hand sits IN FRONT of the brush and BELOW it
       // (offset, not centered), optionally rotated, and only after the brush's intro (data-brush-ready).
@@ -403,6 +419,33 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
       ox = fingerX - (guideRect.left + guideRect.width * 0.22)
       oy = fingerY - (guideRect.top + guideRect.height * 0.12)
       press = phase < 0.15 ? cubic(phase / 0.15) : phase > 0.85 ? cubic((1 - phase) / 0.15) : 1
+    } else if (kind === 'combo') {
+      // Follow the Combo builder's live option and mime dragging it into the drop
+      // area. The game moves data-combo-hint to the next question's option after
+      // every pick, so this same hand advances on its own without touching a real
+      // element. Uses the shared drag curve, so the placed hand and the coded one
+      // perform the identical grab / carry / release gesture.
+      const optionEl = root.querySelector<HTMLElement>('[data-combo-hint]')
+      const zoneEl = root.querySelector<HTMLElement>('[data-combo-target]')
+      if (!optionEl || !zoneEl) {
+        content.style.opacity = '0'
+        raf = requestAnimationFrame(frame)
+        return
+      }
+      const optionRect = optionEl.getBoundingClientRect()
+      const zoneRect = zoneEl.getBoundingClientRect()
+      const guideRect = rec.outer.getBoundingClientRect()
+      const g = dragGesture(((now - t0) % travel) / travel)
+      const fromX = optionRect.left + optionRect.width / 2
+      const fromY = optionRect.top + optionRect.height / 2
+      const fingerX = fromX + (zoneRect.left + zoneRect.width / 2 - fromX) * g.travel
+      const fingerY = fromY + (zoneRect.top + zoneRect.height / 2 - fromY) * g.travel
+      ox = fingerX - (guideRect.left + guideRect.width * 0.22)
+      oy = fingerY - (guideRect.top + guideRect.height * 0.12)
+      press = g.press
+      swell = g.carry
+      // Fade out after the release so the loop's jump back to the option is unseen.
+      content.style.opacity = g.alpha.toFixed(3)
     } else if (kind === 'slide') {
       const c = (now - t0) % total
       let rem = c
@@ -436,11 +479,32 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
       // it goes again. A tap's in-and-out dip reads as "tap here"; this reads as
       // "and keep holding".
       press = holdPress(((now - t0) % travel) / travel)
+    } else if (kind === 'radialtap') {
+      // Same dip as 'tap', but on tapPress — the ring timings in hint.ts are written
+      // against that curve, so sharing it lands the first ring exactly on contact.
+      const phase = ((now - t0) % travel) / travel
+      press = tapPress(phase)
+      if (ripple && rippleHost) {
+        // The fingertip is transformOrigin (22%/12%) and stays put under the press
+        // scale, so it can be read straight off the live rect at any scale.
+        const cr = content.getBoundingClientRect()
+        const hostRect = rippleHost.getBoundingClientRect()
+        if (!rippleFit && cr.width > 1) rippleFit = cr.width / RIPPLE_HAND_REF_W
+        ripple.draw(
+          { x: cr.left + cr.width * 0.22 - hostRect.left, y: cr.top + cr.height * 0.12 - hostRect.top },
+          phase,
+          rippleFit || 1,
+          RIPPLE_TIMING.tap,
+        )
+      }
     } else {
       const phase = ((now - t0) % travel) / travel
       press = phase < 0.5 ? Math.sin(phase * Math.PI) : 0
     }
-    content.style.transform = `translate(${Math.round(ox)}px,${Math.round(oy)}px) scale(${(1 - press * 0.18).toFixed(3)})`
+    // A drag softens the contact dip to leave room for the carry swell; every other
+    // mode keeps the original press-only scale.
+    const dip = kind === 'combo' ? 0.1 : 0.18
+    content.style.transform = `translate(${Math.round(ox)}px,${Math.round(oy)}px) scale(${(1 - press * dip + swell * 0.14).toFixed(3)})`
     raf = requestAnimationFrame(frame)
   }
   const show = (): void => {
@@ -460,6 +524,9 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     if (raf) cancelAnimationFrame(raf)
     raf = 0
     if (content) content.style.opacity = '0'
+    // The loop stops here, so without this the last painted rings would freeze on
+    // screen with no hand behind them.
+    ripple?.hide()
   }
   // Idle visibility: hide on the player's tap, reappear after idleMs of stillness,
   // repeating. hideOnInteract=false keeps the old always-looping behavior.
@@ -504,6 +571,7 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     stop() {
       running = false
       if (raf) cancelAnimationFrame(raf)
+      ripple?.destroy()
       window.clearTimeout(idleTimer)
       root.removeEventListener('pointerdown', onInteractStart, true)
       root.removeEventListener('pointerup', onInteractEnd, true)

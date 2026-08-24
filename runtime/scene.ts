@@ -420,9 +420,13 @@ export interface HandguideConfig {
   // 'brush' points the hand at the scratch card's brush (appears only after the brush's intro).
   // 'still' places the hand and leaves it there — no motion of any kind (idle
   // show/hide still applies; it just never moves).
+  // 'radialtap' is 'tap' plus the radial ping: concentric rings spreading out of
+  // the fingertip on contact, for when the tap target has no affordance of its own.
   // 'hold' presses in place and STAYS pressed for most of the cycle before
   // lifting — the press-and-hold gesture, as opposed to 'tap''s quick dip.
-  mode: 'smart' | 'tap' | 'slide' | 'scratch' | 'match' | 'thoughtwhack' | 'basket' | 'brush' | 'still' | 'hold'
+  // 'combo' follows the Combo builder's live option and mimes dragging it into the
+  // drop area, advancing to the next question's option on its own.
+  mode: 'smart' | 'tap' | 'radialtap' | 'slide' | 'scratch' | 'match' | 'thoughtwhack' | 'basket' | 'combo' | 'brush' | 'still' | 'hold'
   toX?: number
   toY?: number
   nodes?: HandguideNode[]

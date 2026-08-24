@@ -38,8 +38,12 @@ const RIPPLE_COUNT = 3
 /** Ring radius in px at fit=1 when fully spread. */
 const RIPPLE_MAX = 54
 const RIPPLE_COLOR = 'rgba(150,130,235,'
+/** Hand width the ripple is sized against: `fit` 1 = a 46px hand. An editable
+ * handguide is any size, so it divides its own hand width by this to keep the
+ * rings the same size RELATIVE to the hand as they are on the coded one. */
+export const RIPPLE_HAND_REF_W = HAND_W
 
-interface RippleTiming {
+export interface RippleTiming {
   /** Cycle phase at which the first ring is emitted. */
   start: number
   /** Phase gap between consecutive rings. */
@@ -50,7 +54,7 @@ interface RippleTiming {
 
 // Only the stationary gestures ping; a slide/scratch hand is already moving, and
 // rings trailing behind it read as smear rather than as touch.
-const RIPPLE_TIMING: Partial<Record<HandKind, RippleTiming>> = {
+export const RIPPLE_TIMING: Partial<Record<HandKind, RippleTiming>> = {
   // tapPress dips from 0 and bottoms out at 0.275 — emit just as it lands.
   tap: { start: 0.16, stagger: 0.13, life: 0.5 },
   // holdPress is down from 0.1 to 0.75: spread the rings across the held stretch
@@ -58,7 +62,7 @@ const RIPPLE_TIMING: Partial<Record<HandKind, RippleTiming>> = {
   hold: { start: 0.08, stagger: 0.2, life: 0.62 },
   // A drag is moving, so it gets no rings while it travels — but the DROP AREA it
   // travels to is invisible by design, and rings are the only thing that says
-  // "let go right here". drawRipple is already anchored on the gesture's target
+  // "let go right here". The painter is already anchored on the gesture's target
   // point, so timing them to the release window lands them on the drop area.
   drag: { start: 0.74, stagger: 0.05, life: 0.2 },
 }
@@ -134,10 +138,20 @@ export function dragGesture(phase: number): DragGesture {
   return { travel, press, carry, alpha }
 }
 
-/** `imgSrc` swaps the built-in white hand for a custom image (contain-fit in the
- * same box, so show()'s fit/scale math is unchanged). */
-export function createHand(root: HTMLElement, imgSrc?: string): Hand {
+export interface TapRipple {
+  /** Paint one frame. `point` is in `host`'s own coordinate space (the space the
+   * hand is positioned in), `phase` is 0..1 of the gesture cycle, `fit` scales the
+   * rings. Omitting `timing` hides them — a gesture with no ping. */
+  draw(point: HandPoint, phase: number, fit: number, timing?: RippleTiming): void
+  hide(): void
+  destroy(): void
+}
+
+/** The radial ping on its own layer, so both the coded hand (below) and the
+ * editable handguide element's 'radialtap' mode (stage.ts) ping identically. */
+export function createRipple(host: HTMLElement): TapRipple {
   const ripple = document.createElement('div')
+  ripple.dataset.paRipple = '1' // marker: the ping layer, for tests and debugging
   ripple.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;pointer-events:none;z-index:199999;display:none;'
   const rings: HTMLElement[] = []
   for (let i = 0; i < RIPPLE_COUNT; i++) {
@@ -152,7 +166,44 @@ export function createHand(root: HTMLElement, imgSrc?: string): Hand {
     ripple.appendChild(ring)
     rings.push(ring)
   }
-  root.appendChild(ripple)
+  host.appendChild(ripple)
+
+  const hide = (): void => {
+    ripple.style.display = 'none'
+  }
+  return {
+    hide,
+    destroy() {
+      ripple.remove()
+    },
+    draw(point, phase, fit, timing) {
+      if (!timing) return hide()
+      ripple.style.display = 'block'
+      ripple.style.transform = `translate(${Math.round(point.x)}px,${Math.round(point.y)}px)`
+      for (let i = 0; i < rings.length; i++) {
+        const ring = rings[i]
+        const p = (phase - timing.start - i * timing.stagger) / timing.life
+        if (p < 0 || p > 1) {
+          ring.style.opacity = '0'
+          continue
+        }
+        // Ease-out radius: a real ring loses speed as it widens. Opacity and stroke
+        // both thin with it so the ring dissolves instead of blinking off.
+        const spread = 1 - (1 - p) * (1 - p)
+        ring.style.transform = `scale(${((0.15 + 0.85 * spread) * fit).toFixed(3)})`
+        ring.style.opacity = ((1 - p) * 0.7).toFixed(3)
+        ring.style.borderWidth = `${(3 - 2 * spread).toFixed(2)}px`
+      }
+    },
+  }
+}
+
+/** `imgSrc` swaps the built-in white hand for a custom image (contain-fit in the
+ * same box, so show()'s fit/scale math is unchanged). */
+export function createHand(root: HTMLElement, imgSrc?: string): Hand {
+  // Built first so the hand element stays root's LAST child: callers (and tests)
+  // read the hand back as root.lastElementChild.
+  const ripple = createRipple(root)
 
   const el = document.createElement('div')
   el.style.cssText =
@@ -170,31 +221,6 @@ export function createHand(root: HTMLElement, imgSrc?: string): Hand {
     raf = 0
   }
 
-  const hideRipple = (): void => {
-    ripple.style.display = 'none'
-  }
-
-  /** Paint one frame of the radial ping centred on the fingertip's target. */
-  const drawRipple = (point: HandPoint, phase: number, fit: number, timing?: RippleTiming): void => {
-    if (!timing) return hideRipple()
-    ripple.style.display = 'block'
-    ripple.style.transform = `translate(${Math.round(point.x)}px,${Math.round(point.y)}px)`
-    for (let i = 0; i < rings.length; i++) {
-      const ring = rings[i]
-      const p = (phase - timing.start - i * timing.stagger) / timing.life
-      if (p < 0 || p > 1) {
-        ring.style.opacity = '0'
-        continue
-      }
-      // Ease-out radius: a real ring loses speed as it widens. Opacity and stroke
-      // both thin with it so the ring dissolves instead of blinking off.
-      const spread = 1 - (1 - p) * (1 - p)
-      ring.style.transform = `scale(${((0.15 + 0.85 * spread) * fit).toFixed(3)})`
-      ring.style.opacity = ((1 - p) * 0.7).toFixed(3)
-      ring.style.borderWidth = `${(3 - 2 * spread).toFixed(2)}px`
-    }
-  }
-
   const loop = (from: PointSource, to: PointSource, kind: HandKind, t0: number, fit: number): void => {
     const period = kind === 'slide' ? 1500 : kind === 'drag' ? 1900 : kind === 'scratch' ? 600 : kind === 'hold' ? 2000 : 900
     const resolve = (source: PointSource): HandPoint | null => (typeof source === 'function' ? source() : source)
@@ -204,7 +230,7 @@ export function createHand(root: HTMLElement, imgSrc?: string): Hand {
       const toPoint = from === to ? fromPoint : resolve(to)
       if (!fromPoint || !toPoint) {
         el.style.opacity = '0'
-        hideRipple()
+        ripple.hide()
         raf = requestAnimationFrame(frame)
         return
       }
@@ -254,7 +280,7 @@ export function createHand(root: HTMLElement, imgSrc?: string): Hand {
         y = toPoint.y - 16 * fit * (1 - dip)
         press = dip
       }
-      drawRipple(toPoint, phase, fit, RIPPLE_TIMING[kind])
+      ripple.draw(toPoint, phase, fit, RIPPLE_TIMING[kind])
       // Contact shrinks the hand a touch; carrying something swells it. A drag does
       // both, so its press dip is softened to leave room for the swell to show.
       const scale = (kind === 'drag' ? 1 - press * 0.1 + carry * 0.14 : 1 - press * 0.18) * fit
@@ -302,13 +328,13 @@ export function createHand(root: HTMLElement, imgSrc?: string): Hand {
       active = false
       stop()
       el.style.display = 'none'
-      hideRipple()
+      ripple.hide()
     },
     destroy() {
       active = false
       stop()
       el.remove()
-      ripple.remove()
+      ripple.destroy()
     },
   }
 }

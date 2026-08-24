@@ -103,7 +103,7 @@ export interface GameTemplate {
    * the rest are slide waypoints. Omit for a simple centered tap hint. A `mode`
    * picks a game-aware logic template instead (e.g. 'match' follows the game's
    * data-mm-hint card); nodes then only place the hand's initial position. */
-  defaultHandguide?: { mode?: 'match' | 'hold' | 'thoughtwhack' | 'basket'; nodes: { x: number; y: number; pauseMs?: number }[]; periodMs?: number }
+  defaultHandguide?: { mode?: 'match' | 'hold' | 'thoughtwhack' | 'basket' | 'combo'; nodes: { x: number; y: number; pauseMs?: number }[]; periodMs?: number }
   create(): GameModule
 }
 
