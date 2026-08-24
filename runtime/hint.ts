@@ -171,12 +171,19 @@ export interface TapRipple {
   destroy(): void
 }
 
+/** Opacity a ring is born at, before it fades out across its life. */
+export const RIPPLE_DEFAULT_OPACITY = 0.9
+
 export interface RippleColors {
   /** The ring outline (and the glow it throws). Default: the built-in violet. */
   stroke?: string
   /** The wash inside the ring. Default: the stroke's own hue, so a ping reads as
    * one color unless it is deliberately given two. */
   fill?: string
+  /** 0..1 strength of the whole ping — stroke, wash and glow together, since they
+   * are one mark and pulling them apart makes an outline float over a stray cloud.
+   * Each ring still fades to nothing from here across its own life. */
+  opacity?: number
 }
 
 /** The radial ping on its own layer, so both the coded hand (below) and the
@@ -184,6 +191,7 @@ export interface RippleColors {
  * Colors are any hex or rgb() string; the ring's size is set per-frame by draw()'s
  * `fit`. */
 export function createRipple(host: HTMLElement, colors?: RippleColors): TapRipple {
+  const peak = Math.max(0, Math.min(1, colors?.opacity ?? RIPPLE_DEFAULT_OPACITY))
   const strokeRgb = rippleRgb(colors?.stroke)
   const fillRgb = colors?.fill ? rippleRgb(colors.fill) : strokeRgb
   const stroke = (alpha: number): string => `rgba(${strokeRgb},${alpha})`
@@ -236,7 +244,7 @@ export function createRipple(host: HTMLElement, colors?: RippleColors): TapRippl
         // Born at a third of full size rather than from nothing: a ring that starts
         // as a dot spends its brightest moment too small to see.
         ring.style.transform = `scale(${((0.34 + 0.66 * spread) * fit).toFixed(3)})`
-        ring.style.opacity = ((1 - p) * 0.9).toFixed(3)
+        ring.style.opacity = ((1 - p) * peak).toFixed(3)
         ring.style.borderWidth = `${(4 - 2.5 * spread).toFixed(2)}px`
       }
     },

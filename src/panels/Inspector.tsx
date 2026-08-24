@@ -37,7 +37,7 @@ import type {
 import { headerAllowedFor } from '../../runtime/scene'
 import { ownsSlot, patchSlot, projectLayoutPatch, resolvedLayout, seedSlot, withOwnSlot, withoutSlot, type Orient } from '../headerLayout'
 import { TAP_FADE_DEFAULT_MS } from '../../runtime/elements/button'
-import { RIPPLE_DEFAULT_COLOR, RIPPLE_HAND_REF_W, RIPPLE_MAX_R } from '../../runtime/hint'
+import { RIPPLE_DEFAULT_COLOR, RIPPLE_DEFAULT_OPACITY, RIPPLE_HAND_REF_W, RIPPLE_MAX_R } from '../../runtime/hint'
 import { GAME_TEMPLATES } from '../../runtime/games/registry'
 import { splitList } from '../../runtime/games/holdgauge'
 import type { ParamField } from '../../runtime/games/types'
@@ -3525,6 +3525,16 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                     value={hg.rippleFillColor ?? hg.rippleColor ?? RIPPLE_DEFAULT_COLOR}
                     allowNone
                     onChange={(c) => setHg({ rippleFillColor: c ?? undefined })}
+                  />
+                  <Slider
+                    label="Ring opacity"
+                    suffix="%"
+                    min={0}
+                    max={100}
+                    step={5}
+                    // Stored 0..1 like every other opacity; shown as a percentage.
+                    value={Math.round((hg.rippleOpacity ?? RIPPLE_DEFAULT_OPACITY) * 100)}
+                    onChange={(n) => setHg({ rippleOpacity: n / 100 })}
                   />
                   <NumField
                     label="Ring radius"

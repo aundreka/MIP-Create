@@ -437,6 +437,9 @@ export interface HandguideConfig {
   // The wash INSIDE the ring. Absent = the stroke's own hue, so a ping reads as one
   // color until it is deliberately given two.
   rippleFillColor?: string
+  // 0..1 strength of the whole ping (stroke, wash and glow together). Absent = 0.9.
+  // Each ring still fades from here to nothing over its own life.
+  rippleOpacity?: number
   // How far the rings spread, in DESIGN px (like every other authored size), so the
   // ping keeps its proportions on any screen. Absent = sized off the hand itself.
   rippleRadius?: number

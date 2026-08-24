@@ -261,7 +261,7 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
   // layer rather than inside the handguide element, whose box is only as big as the
   // hand — rings spread well past it and would be clipped by any frame/radius on it.
   const rippleHost = kind === 'radialtap' ? ((rec.outer.closest('.pa-stage') as HTMLElement | null) ?? root) : null
-  const ripple = rippleHost ? createRipple(rippleHost, { stroke: cfg.rippleColor, fill: cfg.rippleFillColor }) : null
+  const ripple = rippleHost ? createRipple(rippleHost, { stroke: cfg.rippleColor, fill: cfg.rippleFillColor, opacity: cfg.rippleOpacity }) : null
   // Ring size relative to the hand, measured once from the untransformed hand so the
   // press dip doesn't make the rings breathe with it.
   let rippleFit = 0

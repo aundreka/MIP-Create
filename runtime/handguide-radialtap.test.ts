@@ -130,6 +130,15 @@ describe('handguide: radial tap mode', () => {
     expect(scaleOf(ripple()?.firstElementChild as HTMLElement)).toBeCloseTo(small * 2, 2) // 2dp: the transform is written rounded to 3
   })
 
+  it('scales the whole ping by an authored opacity', () => {
+    mount('radialtap', { rippleOpacity: 0.3 })
+    const dim = ringsAt(0.2 * PERIOD)[0]
+    mount('radialtap', { rippleOpacity: 0.6 })
+    const bright = ringsAt(0.2 * PERIOD)[0]
+    expect(dim).toBeGreaterThan(0) // still on screen, just quieter
+    expect(bright).toBeCloseTo(dim * 2, 2) // and it is a straight multiplier
+  })
+
   it('gives a plain tap no rings at all', () => {
     mount('tap')
     expect(ripple()).toBeNull()
