@@ -74,8 +74,8 @@ function option(id: string, question: number, choice: number, assetId: string): 
   } as SceneElement
 }
 
-/** Optional cue shown only while an option is held. */
-function dragArt(id: string, follow?: boolean, showOnCanvas?: boolean): SceneElement {
+/** Optional per-option cue, shown only while THAT option is held. */
+function dragArt(id: string, question: number, choice: number, follow?: boolean, showOnCanvas?: boolean): SceneElement {
   return {
     id,
     type: 'image',
@@ -88,7 +88,7 @@ function dragArt(id: string, follow?: boolean, showOnCanvas?: boolean): SceneEle
     anchor: 'center',
     zIndex: 8,
     mode: 'fit',
-    comboRole: { gameId: 'combo-game', role: 'dragArt', follow, showOnCanvas },
+    comboRole: { gameId: 'combo-game', role: 'dragArt', question, choice, follow, showOnCanvas },
   } as SceneElement
 }
 
@@ -526,8 +526,53 @@ describe('combo builder', () => {
       return { art: node, opt, stage }
     }
 
+    it('shows only the held option’s own cue, not the sibling’s', () => {
+      const stage = build([
+        GAME,
+        ANCHOR,
+        option('a1', 1, 1, 'optA'),
+        option('a2', 1, 2, 'optB'),
+        dragArt('cue1', 1, 1),
+        dragArt('cue2', 1, 2),
+        dragArt('cue-q2', 2, 1),
+      ])
+      stage.layoutAll()
+      stage.startGames(true)
+      const q = (id: string): HTMLElement => stage.root.querySelector<HTMLElement>(`[data-id="${id}"]`)!
+      const target = stage.root.querySelector<HTMLElement>('[data-combo-target="1"]')!
+      stubRect(target, 0, 0, 10, 10)
+      stubRect(q('a1'), 400, 400, 100, 100)
+      stubRect(q('a2'), 700, 400, 100, 100)
+
+      q('a1').dispatchEvent(pointer('pointerdown', 450, 450))
+      expect(q('cue1').classList.contains('pa-combo-off')).toBe(false)
+      expect(q('cue2').classList.contains('pa-combo-off')).toBe(true)
+      expect(q('cue-q2').classList.contains('pa-combo-off')).toBe(true)
+      q('a1').dispatchEvent(pointer('pointerup', 450, 450))
+
+      // The other option brings up its own cue instead.
+      q('a2').dispatchEvent(pointer('pointerdown', 750, 450))
+      expect(q('cue2').classList.contains('pa-combo-off')).toBe(false)
+      expect(q('cue1').classList.contains('pa-combo-off')).toBe(true)
+      stage.destroy()
+    })
+
+    it('leaves an option with no cue of its own showing nothing', () => {
+      const stage = build([GAME, ANCHOR, option('a1', 1, 1, 'optA'), option('a2', 1, 2, 'optB'), dragArt('cue1', 1, 1)])
+      stage.layoutAll()
+      stage.startGames(true)
+      const q = (id: string): HTMLElement => stage.root.querySelector<HTMLElement>(`[data-id="${id}"]`)!
+      const target = stage.root.querySelector<HTMLElement>('[data-combo-target="1"]')!
+      stubRect(target, 0, 0, 10, 10)
+      stubRect(q('a2'), 700, 400, 100, 100)
+
+      q('a2').dispatchEvent(pointer('pointerdown', 750, 450))
+      expect(q('cue1').classList.contains('pa-combo-off')).toBe(true)
+      stage.destroy()
+    })
+
     it('stays hidden until an option is picked up, then hides again on release', () => {
-      const { art, opt, stage } = held(dragArt('cue'))
+      const { art, opt, stage } = held(dragArt('cue', 1, 1))
       expect(art.classList.contains('pa-combo-off')).toBe(true)
 
       opt.dispatchEvent(pointer('pointerdown', 450, 450))
@@ -540,7 +585,7 @@ describe('combo builder', () => {
     })
 
     it('rides along with the option when set to follow', () => {
-      const { art, opt, stage } = held(dragArt('cue', true))
+      const { art, opt, stage } = held(dragArt('cue', 1, 1, true))
       opt.dispatchEvent(pointer('pointerdown', 450, 450))
       // Resting centre (300,960) sampled at grab; option centre is (450,450).
       expect(art.style.translate).toBe('150px -510px')
@@ -555,7 +600,7 @@ describe('combo builder', () => {
     })
 
     it('stays put when follow is off', () => {
-      const { art, opt, stage } = held(dragArt('cue', false))
+      const { art, opt, stage } = held(dragArt('cue', 1, 1, false))
       opt.dispatchEvent(pointer('pointerdown', 450, 450))
       expect(art.style.translate).toBe('')
       stage.destroy()
@@ -577,7 +622,7 @@ describe('combo builder', () => {
     })
 
     it('honours showOnCanvas while editing but never during play', () => {
-      const els = [GAME, ANCHOR, option('a1', 1, 1, 'optA'), dragArt('cue', false, true)]
+      const els = [GAME, ANCHOR, option('a1', 1, 1, 'optA'), dragArt('cue', 1, 1, false, true)]
       const editor = build(els)
       editor.layoutAll()
       editor.startGames(false)

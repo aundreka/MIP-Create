@@ -79,7 +79,7 @@ export function comboOptionLabel(el: SceneElement): string {
   if (!r) return base
   if (r.role === 'anchor') return `${base} — anchor`
   if (r.role === 'title') return `${base} — Q${r.question ?? 1} title`
-  if (r.role === 'dragArt') return `${base} — drag art`
+  if (r.role === 'dragArt') return `${base} — Q${r.question ?? 1} drag art ${r.choice ?? 1}`
   if (r.role === 'layer') return `${base} — Q${r.question ?? 1} layer ${r.choice ?? 1}`
   return `${base} — Q${r.question ?? 1} option ${r.choice ?? 1}`
 }
@@ -88,7 +88,7 @@ export function comboOptionLabel(el: SceneElement): string {
 export function comboSlotSummary(role: ComboRoleConfig): string {
   if (role.role === 'anchor') return 'the anchor image'
   if (role.role === 'title') return `question ${role.question ?? 1}'s title`
-  if (role.role === 'dragArt') return 'the drag art, shown while an option is held'
+  if (role.role === 'dragArt') return `question ${role.question ?? 1}'s drag art for option ${role.choice ?? 1}`
   if (role.role === 'layer') return `question ${role.question ?? 1}'s layer for option ${role.choice ?? 1}`
   return `question ${role.question ?? 1}, option ${role.choice ?? 1}`
 }

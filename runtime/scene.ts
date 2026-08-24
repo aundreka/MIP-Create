@@ -521,16 +521,17 @@ export interface BasketItemConfig {
 //             on advance — it never reacts to WHICH option was picked.
 //   'anchor'  the base art the layers build on top of. Purely the backdrop: it is
 //             where an option flies when its question has no layer element yet.
-//   'dragArt' optional. Hidden until the player picks an option up, shown for as long
-//             as they hold it — a "drop it here" cue, a glow, a bigger preview. It
-//             can sit where it was placed or ride along with the option.
+//   'dragArt' optional, one per option. Hidden until the player picks THAT option up,
+//             shown for as long as they hold it — a "drop it here" cue, a glow, a
+//             preview of what they are choosing. It can sit where it was placed or
+//             ride along with the option.
 export interface ComboRoleConfig {
   gameId?: string
   role: 'option' | 'layer' | 'title' | 'anchor' | 'dragArt'
-  /** 'option' / 'layer' / 'title': which question this belongs to (1-based). */
+  /** 'option' / 'layer' / 'dragArt' / 'title': which question this belongs to (1-based). */
   question?: number
-  /** 'option' / 'layer': which of the question's two choices (1 or 2). A layer pairs
-   * with the option that has the same question + choice. */
+  /** 'option' / 'layer' / 'dragArt': which of the question's two choices (1 or 2).
+   * A layer and a drag art each pair with the option of the same question + choice. */
   choice?: number
   /** 'layer' / 'dragArt', authoring-only: keep this element visible on the editor
    * canvas while it is being positioned. Both kinds are always hidden when real play

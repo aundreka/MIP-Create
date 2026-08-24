@@ -1154,7 +1154,7 @@ function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps):
   const anchors = mine.filter((e) => e.comboRole?.role === 'anchor')
   const allLayers = comboLayers(siblings, elementId)
   const titleFor = (n: number): SceneElement | undefined => mine.find((e) => e.comboRole?.role === 'title' && (e.comboRole.question ?? 1) === n)
-  const slotFor = (role: 'option' | 'layer', n: number, choice: number): SceneElement | undefined =>
+  const slotFor = (role: 'option' | 'layer' | 'dragArt', n: number, choice: number): SceneElement | undefined =>
     mine.find((e) => e.comboRole?.role === role && (e.comboRole.question ?? 1) === n && (e.comboRole.choice ?? 1) === choice)
   const optionCount = (n: number): number => mine.filter((e) => e.comboRole?.role === 'option' && (e.comboRole.question ?? 1) === n).length
 
@@ -1175,7 +1175,6 @@ function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps):
     apply(assignComboSlot({ nextId, current, role, gameId: elementId, question, choice, elements: siblings }))
 
   const setLayersVisible = (els: SceneElement[], visible: boolean): void => apply(els.map((e) => setCanvasVisible(e, visible)))
-  const art = mine.find((e) => e.comboRole?.role === 'dragArt')
 
   const jump = (el: SceneElement, label = 'Show on canvas'): JSX.Element => (
     <button className="btn" style={{ width: '100%', marginTop: 4 }} onClick={() => selectOnly(el.id)}>
@@ -1185,10 +1184,12 @@ function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps):
 
   const title = titleFor(q + 1)
 
-  /** One option and the layer it leaves behind — the pair the author thinks in. */
+  /** One option with the layer it leaves behind and the cue shown while it is held —
+   * the trio the author thinks in. */
   const optionSlot = (choice: number): JSX.Element => {
     const opt = slotFor('option', q + 1, choice)
     const layer = slotFor('layer', q + 1, choice)
+    const art = slotFor('dragArt', q + 1, choice)
     return (
       <div key={choice}>
         <div className="group-title2">
@@ -1213,6 +1214,20 @@ function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps):
           </>
         )}
         {opt && !layer && <div className="hint pad">This option leaves nothing behind — it will just fly to the anchor and vanish.</div>}
+        <Row label="Drag art (optional)">
+          <Select value={art?.id ?? ''} onChange={(v) => assign(v, art, 'dragArt', q + 1, choice)} options={choices(art)} />
+        </Row>
+        {art && (
+          <>
+            <Toggle label="Follow the dragged option" checked={!!art.comboRole?.follow} onChange={(v) => apply([setDragArtFollow(art, v)])} />
+            <Toggle label="Show it on the canvas" checked={!!art.comboRole?.showOnCanvas} onChange={(v) => setLayersVisible([art], v)} />
+            {jump(art, `Position “${art.name || art.id}” on canvas`)}
+            <div className="hint pad">
+              Shown the moment THIS option is picked up and gone again when it is released, whether the drop landed or sprang back. Off by default it stays where you placed it —
+              a &ldquo;drop it here&rdquo; callout. Turn on following and it rides along under the enlarged option instead, as a glow or a bigger preview.
+            </div>
+          </>
+        )}
       </div>
     )
   }
@@ -1276,24 +1291,6 @@ function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps):
         Draw the invisible area an option must be released into. There is exactly one drop area for the whole game — drag the box to move it, corner handles to resize, Esc to
         finish.
       </div>
-
-      <div className="group-title2">Drag art (optional)</div>
-      <Row label="Image">
-        <Select value={art?.id ?? ''} onChange={(v) => assign(v, art, 'dragArt')} options={choices(art)} />
-      </Row>
-      {art ? (
-        <>
-          <Toggle label="Follow the dragged option" checked={!!art.comboRole?.follow} onChange={(v) => apply([setDragArtFollow(art, v)])} />
-          <Toggle label="Show it on the canvas" checked={!!art.comboRole?.showOnCanvas} onChange={(v) => setLayersVisible([art], v)} />
-          {jump(art, `Position “${art.name || art.id}” on canvas`)}
-          <div className="hint pad">
-            Appears the moment an option is picked up and goes again when it is released, whether the drop landed or sprang back. Off by default, it stays where you placed it —
-            a &ldquo;drop it here&rdquo; callout over the drop area. Turn on following and it rides along under the enlarged option instead, as a glow or a bigger preview.
-          </div>
-        </>
-      ) : (
-        <div className="hint pad">Optional: an element shown only while the player is holding an option. Leave it empty for none.</div>
-      )}
 
       <div className="group-title2">Anchor images ({anchors.length})</div>
       {anchors.map((a) => (

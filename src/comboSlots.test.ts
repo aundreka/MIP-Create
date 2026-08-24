@@ -82,9 +82,10 @@ describe('combo layer visibility', () => {
 
 describe('combo drag art', () => {
   it('keeps the follow flag across a move, and never puts it on another role', () => {
-    const a = el('cue', { comboRole: { gameId: GAME, role: 'dragArt', follow: true, showOnCanvas: true } })
-    const moved = assignComboSlot({ nextId: 'cue', current: undefined, role: 'dragArt', gameId: GAME, elements: [a] })
-    expect(moved[0].patch.comboRole).toMatchObject({ follow: true, showOnCanvas: true })
+    const a = el('cue', { comboRole: { gameId: GAME, role: 'dragArt', question: 1, choice: 1, follow: true, showOnCanvas: true } })
+    const moved = assignComboSlot({ nextId: 'cue', current: undefined, role: 'dragArt', gameId: GAME, question: 2, choice: 2, elements: [a] })
+    // Moving it to another option keeps how it behaves, but re-keys which option it belongs to.
+    expect(moved[0].patch.comboRole).toMatchObject({ follow: true, showOnCanvas: true, question: 2, choice: 2 })
 
     const asLayer = assignComboSlot({ nextId: 'cue', current: undefined, role: 'layer', gameId: GAME, question: 1, choice: 1, elements: [a] })
     expect(asLayer[0].patch.comboRole?.follow).toBeUndefined()
@@ -136,7 +137,7 @@ describe('combo labels', () => {
     expect(comboOptionLabel(el('Hat', { comboRole: { role: 'title', question: 2 } }))).toBe('Hat — Q2 title')
     expect(comboOptionLabel(el('Hat', { comboRole: { role: 'option', question: 2, choice: 1 } }))).toBe('Hat — Q2 option 1')
     expect(comboOptionLabel(el('Hat', { comboRole: { role: 'layer', question: 3, choice: 2 } }))).toBe('Hat — Q3 layer 2')
-    expect(comboOptionLabel(el('Glow', { comboRole: { role: 'dragArt' } }))).toBe('Glow — drag art')
+    expect(comboOptionLabel(el('Glow', { comboRole: { role: 'dragArt', question: 2, choice: 1 } }))).toBe('Glow — Q2 drag art 1')
   })
 
   it('summarises a role in plain language for the element panel', () => {
@@ -144,6 +145,6 @@ describe('combo labels', () => {
     expect(comboSlotSummary({ role: 'title', question: 2 })).toBe("question 2's title")
     expect(comboSlotSummary({ role: 'layer', question: 1, choice: 2 })).toBe("question 1's layer for option 2")
     expect(comboSlotSummary({ role: 'option', question: 4, choice: 1 })).toBe('question 4, option 1')
-    expect(comboSlotSummary({ role: 'dragArt' })).toBe('the drag art, shown while an option is held')
+    expect(comboSlotSummary({ role: 'dragArt', question: 3, choice: 2 })).toBe("question 3's drag art for option 2")
   })
 })

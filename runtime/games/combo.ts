@@ -44,6 +44,9 @@ interface OptionEl {
 
 interface DragArtEl {
   el: HTMLElement
+  /** Which option this belongs to — drag art is per-option, like a layer. */
+  question: number
+  choice: number
   /** Ride along with the dragged option instead of staying where it was placed. */
   follow: boolean
   canvasShown: boolean
@@ -225,11 +228,15 @@ export function createCombo(): GameModule {
   }
 
   // ---- drag art ------------------------------------------------------------
-  // Optional cue that exists only while the player is holding an option: a "drop it
-  // here" callout, a glow, a blown-up preview. Placed on the canvas like everything
-  // else, so its look and position are the author's.
+  // Optional per-option cue that exists only while the player is holding THAT option:
+  // a "drop it here" callout, a glow, a blown-up preview of what they are about to
+  // choose. Keyed by question + choice exactly like a layer, so each option can show
+  // something of its own. Placed on the canvas like everything else, so its look and
+  // position are the author's.
+  const dragArtFor = (option: OptionEl): DragArtEl[] => dragArt.filter((a) => a.question === option.question && a.choice === option.choice)
+
   const showDragArt = (item: OptionEl): void => {
-    for (const art of dragArt) {
+    for (const art of dragArtFor(item)) {
       // Sample the resting centre BEFORE showing it: the class only toggles opacity
       // and visibility, so the box is measurable either way, and a fresh sample keeps
       // following correct across resizes.
@@ -237,19 +244,19 @@ export function createCombo(): GameModule {
       art.el.style.transition = ''
       art.el.style.translate = ''
       show(art.el)
-      if (art.follow) followDragArt(item)
     }
+    followDragArt(item)
   }
 
   const followDragArt = (item: OptionEl): void => {
-    if (!dragArt.some((a) => a.follow)) return
+    const riders = dragArtFor(item).filter((a) => a.follow)
+    if (!riders.length) return
     const p = center(item.el)
-    for (const art of dragArt) {
-      if (!art.follow) continue
-      art.el.style.translate = `${p.x - art.home.x}px ${p.y - art.home.y}px`
-    }
+    for (const art of riders) art.el.style.translate = `${p.x - art.home.x}px ${p.y - art.home.y}px`
   }
 
+  /** Hide ALL of it, not just this option's — cheap, and it can't leave a stale cue
+   * up if a drag is interrupted between questions. */
   const hideDragArt = (): void => {
     for (const art of dragArt) {
       hide(art.el)
@@ -483,7 +490,14 @@ export function createCombo(): GameModule {
       } else if (role === 'layer') {
         layers.push({ el, question, choice, canvasShown: el.dataset.comboCanvasShow === '1' })
       } else if (role === 'dragArt') {
-        dragArt.push({ el, follow: el.dataset.comboFollow === '1', canvasShown: el.dataset.comboCanvasShow === '1', home: { x: 0, y: 0 } })
+        dragArt.push({
+          el,
+          question,
+          choice,
+          follow: el.dataset.comboFollow === '1',
+          canvasShown: el.dataset.comboCanvasShow === '1',
+          home: { x: 0, y: 0 },
+        })
       } else if (role === 'title') {
         titles.push({ el, question })
       } else if (role === 'anchor') {
