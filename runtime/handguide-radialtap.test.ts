@@ -11,11 +11,11 @@ import type { Scene, SceneElement } from './scene'
 
 const PERIOD = 1000
 
-function hand(mode: string): SceneElement {
+function hand(mode: string, hg: Record<string, unknown> = {}): SceneElement {
   return {
     id: 'hg', type: 'handguide', name: 'Hint hand', x: 540, y: 900, w: 60, h: 74,
     anchor: 'center', zIndex: 9, mode: 'fit', assetId: 'hand',
-    handguide: { mode, periodMs: PERIOD },
+    handguide: { mode, periodMs: PERIOD, ...hg },
   } as unknown as SceneElement
 }
 
@@ -27,11 +27,12 @@ const scene = (el: SceneElement): Scene => ({
 
 let now = 0
 
-function mount(mode: string): { hand: HTMLElement; host: HTMLElement } {
+function mount(mode: string, hg: Record<string, unknown> = {}): { hand: HTMLElement; host: HTMLElement } {
   document.body.innerHTML = ''
+  now = 0 // every mount starts its cycle at t=0, so remounting inside one test is safe
   const host = document.createElement('div')
   document.body.appendChild(host)
-  const stage = buildScene(scene(hand(mode)), { hand: { src: 'hand.png', w: 46, h: 56 } }, { mount: host })
+  const stage = buildScene(scene(hand(mode, hg)), { hand: { src: 'hand.png', w: 46, h: 56 } }, { mount: host })
   stage.layoutAll()
   stage.startGames(true)
   return { hand: host.querySelector('.pa-el[data-id="hg"] img') as HTMLElement, host }
@@ -45,6 +46,8 @@ function ringsAt(ms: number): number[] {
   vi.advanceTimersByTime(20)
   return Array.from(ripple()?.children ?? []).map((r) => parseFloat((r as HTMLElement).style.opacity) || 0)
 }
+
+const scaleOf = (el: HTMLElement): number => parseFloat(/scale\(([\d.]+)\)/.exec(el.style.transform)?.[1] ?? 'NaN')
 
 /** How far down the hand is pressed right now, read back off its scale. */
 function pressAt(el: HTMLElement, ms: number): number {
@@ -96,6 +99,25 @@ describe('handguide: radial tap mode', () => {
     expect(ripple()?.style.display).toBe('block')
     el.dispatchEvent(new Event('pointerdown', { bubbles: true })) // the player touches the screen
     expect(ripple()?.style.display).toBe('none')
+  })
+
+  it('pings in an authored color', () => {
+    mount('radialtap', { rippleColor: '#ff8a3d' })
+    ringsAt(0.2 * PERIOD)
+    const ring = ripple()?.firstElementChild as HTMLElement
+    expect(ring.style.borderColor.replace(/\s/g, '')).toContain('255,138,61')
+    expect(ring.style.backgroundImage.replace(/\s/g, '')).toContain('255,138,61')
+  })
+
+  it('spreads to an authored radius instead of sizing off the hand', () => {
+    // Radius is design px and the stage is at 1:1 here, so doubling it has to double
+    // the rings — that is the whole contract of the field.
+    mount('radialtap', { rippleRadius: 78 })
+    ringsAt(0.2 * PERIOD)
+    const small = scaleOf(ripple()?.firstElementChild as HTMLElement)
+    mount('radialtap', { rippleRadius: 156 })
+    ringsAt(0.2 * PERIOD)
+    expect(scaleOf(ripple()?.firstElementChild as HTMLElement)).toBeCloseTo(small * 2, 2) // 2dp: the transform is written rounded to 3
   })
 
   it('gives a plain tap no rings at all', () => {

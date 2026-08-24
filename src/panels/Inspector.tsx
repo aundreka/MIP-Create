@@ -37,6 +37,7 @@ import type {
 import { headerAllowedFor } from '../../runtime/scene'
 import { ownsSlot, patchSlot, projectLayoutPatch, resolvedLayout, seedSlot, withOwnSlot, withoutSlot, type Orient } from '../headerLayout'
 import { TAP_FADE_DEFAULT_MS } from '../../runtime/elements/button'
+import { RIPPLE_DEFAULT_COLOR, RIPPLE_HAND_REF_W, RIPPLE_MAX_R } from '../../runtime/hint'
 import { GAME_TEMPLATES } from '../../runtime/games/registry'
 import { splitList } from '../../runtime/games/holdgauge'
 import type { ParamField } from '../../runtime/games/types'
@@ -3512,6 +3513,26 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                   ]}
                 />
               </Row>
+              {hg.mode === 'radialtap' && (
+                <>
+                  <ColorField
+                    label="Ring color"
+                    value={hg.rippleColor ?? RIPPLE_DEFAULT_COLOR}
+                    allowNone
+                    onChange={(c) => setHg({ rippleColor: c ?? undefined })}
+                  />
+                  <NumField
+                    label="Ring radius"
+                    suffix="px"
+                    step={4}
+                    min={0}
+                    // Unset = sized off the hand, so the field shows the radius that
+                    // actually produces — editing it pins that number instead.
+                    value={hg.rippleRadius ?? Math.round(((el.w ?? 60) * RIPPLE_MAX_R) / RIPPLE_HAND_REF_W)}
+                    onChange={(n) => setHg({ rippleRadius: n > 0 ? n : undefined })}
+                  />
+                </>
+              )}
               {hg.mode === 'slide' &&
                 (() => {
                   const nodes: HandguideNode[] = hg.nodes && hg.nodes.length ? hg.nodes : hg.toX != null && hg.toY != null ? [{ x: hg.toX, y: hg.toY }] : []

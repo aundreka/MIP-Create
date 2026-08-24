@@ -36,9 +36,32 @@ const HAND_H = 56
 // on the dip rather than free-running against it.
 const RIPPLE_COUNT = 3
 /** Ring radius in px at fit=1 when fully spread. Rings have to clear the hand by
- * a good margin or they read as a halo stuck to it rather than a spreading pulse. */
-const RIPPLE_MAX = 78
-const RIPPLE_COLOR = 'rgba(150,130,235,'
+ * a good margin or they read as a halo stuck to it rather than a spreading pulse.
+ * Exported as the unit `fit` is measured in, so a caller can ask for a radius in
+ * real px instead (see rippleFitForRadius). */
+export const RIPPLE_MAX_R = 78
+const RIPPLE_MAX = RIPPLE_MAX_R
+export const RIPPLE_DEFAULT_COLOR = '#9682eb'
+
+/** `fit` that spreads the rings to exactly `px`. */
+export function rippleFitForRadius(px: number): number {
+  return Math.max(0, px) / RIPPLE_MAX_R
+}
+
+/** Ring colors are written as one hue at several alphas (stroke, wash, glow), so an
+ * authored color has to be split into components first. Anything unparseable falls
+ * back to the default rather than painting nothing. */
+function rippleRgb(color?: string): string {
+  const c = (color ?? '').trim()
+  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(c)
+  if (hex) {
+    const h = hex[1].length === 3 ? hex[1].replace(/./g, (d) => d + d) : hex[1]
+    return `${parseInt(h.slice(0, 2), 16)},${parseInt(h.slice(2, 4), 16)},${parseInt(h.slice(4, 6), 16)}`
+  }
+  const rgb = /^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/i.exec(c)
+  if (rgb) return `${Math.round(+rgb[1])},${Math.round(+rgb[2])},${Math.round(+rgb[3])}`
+  return '150,130,235'
+}
 /** Hand width the ripple is sized against: `fit` 1 = a 46px hand. An editable
  * handguide is any size, so it divides its own hand width by this to keep the
  * rings the same size RELATIVE to the hand as they are on the coded one. */
@@ -149,8 +172,12 @@ export interface TapRipple {
 }
 
 /** The radial ping on its own layer, so both the coded hand (below) and the
- * editable handguide element's 'radialtap' mode (stage.ts) ping identically. */
-export function createRipple(host: HTMLElement): TapRipple {
+ * editable handguide element's 'radialtap' mode (stage.ts) ping identically.
+ * `color` is any hex or rgb() string (default: the built-in violet); the ring's
+ * size is set per-frame by draw()'s `fit`. */
+export function createRipple(host: HTMLElement, color?: string): TapRipple {
+  const rgb = rippleRgb(color)
+  const tone = (alpha: number): string => `rgba(${rgb},${alpha})`
   const ripple = document.createElement('div')
   ripple.dataset.paRipple = '1' // marker: the ping layer, for tests and debugging
   ripple.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;pointer-events:none;z-index:199999;display:none;'
@@ -163,9 +190,9 @@ export function createRipple(host: HTMLElement): TapRipple {
       `position:absolute;left:${-RIPPLE_MAX}px;top:${-RIPPLE_MAX}px;width:${RIPPLE_MAX * 2}px;height:${RIPPLE_MAX * 2}px;` +
       // A stroke alone all but disappears over busy art: the wash inside it is what
       // makes the pulse read at a glance, and the glow keeps the edge off dark art.
-      `box-sizing:border-box;border-radius:50%;border:4px solid ${RIPPLE_COLOR}.95);` +
-      `background:radial-gradient(circle,${RIPPLE_COLOR}.22) 0%,${RIPPLE_COLOR}.1) 55%,${RIPPLE_COLOR}0) 100%);` +
-      `box-shadow:0 0 18px ${RIPPLE_COLOR}.5),inset 0 0 22px ${RIPPLE_COLOR}.3);` +
+      `box-sizing:border-box;border-radius:50%;border:4px solid ${tone(0.95)};` +
+      `background:radial-gradient(circle,${tone(0.22)} 0%,${tone(0.1)} 55%,${tone(0)} 100%);` +
+      `box-shadow:0 0 18px ${tone(0.5)},inset 0 0 22px ${tone(0.3)};` +
       'opacity:0;will-change:transform,opacity;'
     ripple.appendChild(ring)
     rings.push(ring)

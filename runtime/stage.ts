@@ -35,7 +35,7 @@ import { createTextContent } from './elements/text'
 import { createCtaContent } from './elements/cta'
 import { createButtonContent, tapFeedbackByNode, wireSceneNav, type TapFeedback } from './elements/button'
 import { createChoiceContent } from './elements/choice'
-import { createRipple, dragGesture, elementHintPoint, holdPress, RIPPLE_HAND_REF_W, RIPPLE_TIMING, tapPress } from './hint'
+import { createRipple, dragGesture, elementHintPoint, holdPress, rippleFitForRadius, RIPPLE_HAND_REF_W, RIPPLE_TIMING, tapPress } from './hint'
 import { localize, localizeElement } from './i18n'
 import { getPicks, isPicked, togglePick } from './selection'
 import { createEndsceneContent, updateEndsceneMedia, htmlEndsceneMediaEl, mediaNaturalSize, endsceneCoverFrame } from './elements/endscene'
@@ -261,7 +261,7 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
   // layer rather than inside the handguide element, whose box is only as big as the
   // hand — rings spread well past it and would be clipped by any frame/radius on it.
   const rippleHost = kind === 'radialtap' ? ((rec.outer.closest('.pa-stage') as HTMLElement | null) ?? root) : null
-  const ripple = rippleHost ? createRipple(rippleHost) : null
+  const ripple = rippleHost ? createRipple(rippleHost, cfg.rippleColor) : null
   // Ring size relative to the hand, measured once from the untransformed hand so the
   // press dip doesn't make the rings breathe with it.
   let rippleFit = 0
@@ -489,7 +489,11 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
         // scale, so it can be read straight off the live rect at any scale.
         const cr = content.getBoundingClientRect()
         const hostRect = rippleHost.getBoundingClientRect()
-        if (!rippleFit && cr.width > 1) rippleFit = cr.width / RIPPLE_HAND_REF_W
+        // An authored radius is design px, so it re-reads the stage scale every frame
+        // (it has to survive a resize/orientation flip); the hand-relative default is
+        // measured once, off the untransformed hand.
+        if (cfg.rippleRadius && cfg.rippleRadius > 0) rippleFit = rippleFitForRadius(cfg.rippleRadius * s)
+        else if (!rippleFit && cr.width > 1) rippleFit = cr.width / RIPPLE_HAND_REF_W
         ripple.draw(
           { x: cr.left + cr.width * 0.22 - hostRect.left, y: cr.top + cr.height * 0.12 - hostRect.top },
           phase,
