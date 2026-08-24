@@ -11,7 +11,9 @@ export interface Pt {
 export interface HintMove {
   from: Pt
   to: Pt
-  kind?: 'slide' | 'tap' | 'scratch' | 'hold'
+  /** 'drag' is the pick-up / carry / release gesture for dropping something into an
+   * area; 'slide' is a flat wipe across the surface. */
+  kind?: 'slide' | 'tap' | 'scratch' | 'hold' | 'drag'
   /** Optional hand-size multiplier (1 = natural). Lets a game shrink the hint hand so
    * it fits inside small targets — e.g. a short cell in a 1-column scratch grid. */
   scale?: number

@@ -2,7 +2,7 @@
 // between two SCREEN points (slide) or bounce-tap at a point. Lives above the
 // game (appended to the runtime root). Driven by gameHost from getHint().
 
-export type HandKind = 'slide' | 'tap' | 'scratch' | 'hold'
+export type HandKind = 'slide' | 'tap' | 'scratch' | 'hold' | 'drag'
 
 export interface Hand {
   show(from: { x: number; y: number }, to: { x: number; y: number }, kind: HandKind, fit?: number): void
@@ -56,6 +56,11 @@ const RIPPLE_TIMING: Partial<Record<HandKind, RippleTiming>> = {
   // holdPress is down from 0.1 to 0.75: spread the rings across the held stretch
   // so the point keeps pulsing for as long as the finger stays on it.
   hold: { start: 0.08, stagger: 0.2, life: 0.62 },
+  // A drag is moving, so it gets no rings while it travels — but the DROP AREA it
+  // travels to is invisible by design, and rings are the only thing that says
+  // "let go right here". drawRipple is already anchored on the gesture's target
+  // point, so timing them to the release window lands them on the drop area.
+  drag: { start: 0.74, stagger: 0.05, life: 0.2 },
 }
 
 const cubic = (t: number): number => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
@@ -81,6 +86,52 @@ export function holdPress(phase: number): number {
   if (phase < 0.75) return 1
   if (phase < 0.9) return cubic((0.9 - phase) / 0.15)
   return 0
+}
+
+// ---- drag-and-drop gesture -------------------------------------------------
+// A plain 'slide' presses for the whole trip, which reads as "wipe across this".
+// Dragging an object somewhere is four beats, and the hand has to show all four or
+// the player doesn't learn that the thing is pickup-able:
+//   GRAB   settle onto the object and take hold of it
+//   LIFT   swell slightly — the echo of the option growing under the finger
+//   CARRY  travel to the target, still held
+//   DROP   release, ringing the target, then fade before the cycle snaps back
+// Exported (like tapPress/holdPress) so the curve is testable on its own.
+const DRAG_GRAB_END = 0.14
+const DRAG_LIFT_END = 0.22
+const DRAG_CARRY_END = 0.74
+const DRAG_DROP_END = 0.86
+const DRAG_FADE_IN = 0.06
+const DRAG_FADE_OUT = 0.08
+
+export interface DragGesture {
+  /** 0..1 progress from the object toward the target. */
+  travel: number
+  /** 0..1 contact with the surface. */
+  press: number
+  /** 0..1 how much of the "holding something" swell is applied. */
+  carry: number
+  /** 0..1 hand opacity. Fades out after the drop so the loop's jump back to the
+   * object is never seen — a hand teleporting mid-air reads as a glitch. */
+  alpha: number
+}
+
+/** One frame of the drag gesture, as a fraction of the cycle. */
+export function dragGesture(phase: number): DragGesture {
+  const p = Math.max(0, Math.min(1, phase))
+
+  const travel = p <= DRAG_LIFT_END ? 0 : p >= DRAG_CARRY_END ? 1 : cubic((p - DRAG_LIFT_END) / (DRAG_CARRY_END - DRAG_LIFT_END))
+
+  // Down over the grab, held through the carry, eased off across the drop.
+  const release = cubic((DRAG_DROP_END - p) / (DRAG_DROP_END - DRAG_CARRY_END))
+  const press = p < DRAG_GRAB_END ? cubic(p / DRAG_GRAB_END) : p <= DRAG_CARRY_END ? 1 : p < DRAG_DROP_END ? release : 0
+
+  // The swell trails the grab: the finger lands first, THEN the object comes up.
+  const carry = p < DRAG_GRAB_END ? 0 : p < DRAG_LIFT_END ? cubic((p - DRAG_GRAB_END) / (DRAG_LIFT_END - DRAG_GRAB_END)) : p <= DRAG_CARRY_END ? 1 : p < DRAG_DROP_END ? release : 0
+
+  const alpha = p < DRAG_FADE_IN ? p / DRAG_FADE_IN : p > DRAG_DROP_END ? Math.max(0, 1 - (p - DRAG_DROP_END) / DRAG_FADE_OUT) : 1
+
+  return { travel, press, carry, alpha }
 }
 
 /** `imgSrc` swaps the built-in white hand for a custom image (contain-fit in the
@@ -145,7 +196,7 @@ export function createHand(root: HTMLElement, imgSrc?: string): Hand {
   }
 
   const loop = (from: PointSource, to: PointSource, kind: HandKind, t0: number, fit: number): void => {
-    const period = kind === 'slide' ? 1500 : kind === 'scratch' ? 600 : kind === 'hold' ? 2000 : 900
+    const period = kind === 'slide' ? 1500 : kind === 'drag' ? 1900 : kind === 'scratch' ? 600 : kind === 'hold' ? 2000 : 900
     const resolve = (source: PointSource): HandPoint | null => (typeof source === 'function' ? source() : source)
     const frame = (now: number): void => {
       if (!active) return
@@ -162,7 +213,17 @@ export function createHand(root: HTMLElement, imgSrc?: string): Hand {
       let x = fromPoint.x
       let y = fromPoint.y
       let press = 0
-      if (kind === 'slide') {
+      // Only the drag gesture swells and fades; every other kind stays fully opaque
+      // at its natural size, exactly as before.
+      let carry = 0
+      if (kind === 'drag') {
+        const g = dragGesture(phase)
+        x = fromPoint.x + (toPoint.x - fromPoint.x) * g.travel
+        y = fromPoint.y + (toPoint.y - fromPoint.y) * g.travel
+        press = g.press
+        carry = g.carry
+        el.style.opacity = g.alpha.toFixed(3)
+      } else if (kind === 'slide') {
         // travel 0.15..0.8 of the cycle, pause at ends
         const p = phase < 0.15 ? 0 : phase > 0.85 ? 1 : cubic((phase - 0.15) / 0.7)
         x = fromPoint.x + (toPoint.x - fromPoint.x) * p
@@ -194,7 +255,9 @@ export function createHand(root: HTMLElement, imgSrc?: string): Hand {
         press = dip
       }
       drawRipple(toPoint, phase, fit, RIPPLE_TIMING[kind])
-      const scale = (1 - press * 0.18) * fit
+      // Contact shrinks the hand a touch; carrying something swells it. A drag does
+      // both, so its press dip is softened to leave room for the swell to show.
+      const scale = (kind === 'drag' ? 1 - press * 0.1 + carry * 0.14 : 1 - press * 0.18) * fit
       if (kind === 'scratch') {
         // Anchor by the hand's CENTER (transform-origin set to center in show()) so the
         // hand sits centered on the cell both axes. The default top-left anchor makes it

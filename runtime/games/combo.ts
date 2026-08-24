@@ -493,7 +493,7 @@ export function createCombo(): GameModule {
       if (done || busy) return null
       const item = optionsFor(current + 1).find((o) => !o.el.classList.contains(OFF_CLASS))
       if (!item) return null
-      return { from: center(item.el), to: center(target), kind: 'slide' }
+      return { from: center(item.el), to: center(target), kind: 'drag' }
     },
     onComplete(cb) {
       completeCb = cb
