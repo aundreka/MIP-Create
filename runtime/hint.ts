@@ -171,13 +171,23 @@ export interface TapRipple {
   destroy(): void
 }
 
+export interface RippleColors {
+  /** The ring outline (and the glow it throws). Default: the built-in violet. */
+  stroke?: string
+  /** The wash inside the ring. Default: the stroke's own hue, so a ping reads as
+   * one color unless it is deliberately given two. */
+  fill?: string
+}
+
 /** The radial ping on its own layer, so both the coded hand (below) and the
  * editable handguide element's 'radialtap' mode (stage.ts) ping identically.
- * `color` is any hex or rgb() string (default: the built-in violet); the ring's
- * size is set per-frame by draw()'s `fit`. */
-export function createRipple(host: HTMLElement, color?: string): TapRipple {
-  const rgb = rippleRgb(color)
-  const tone = (alpha: number): string => `rgba(${rgb},${alpha})`
+ * Colors are any hex or rgb() string; the ring's size is set per-frame by draw()'s
+ * `fit`. */
+export function createRipple(host: HTMLElement, colors?: RippleColors): TapRipple {
+  const strokeRgb = rippleRgb(colors?.stroke)
+  const fillRgb = colors?.fill ? rippleRgb(colors.fill) : strokeRgb
+  const stroke = (alpha: number): string => `rgba(${strokeRgb},${alpha})`
+  const fill = (alpha: number): string => `rgba(${fillRgb},${alpha})`
   const ripple = document.createElement('div')
   ripple.dataset.paRipple = '1' // marker: the ping layer, for tests and debugging
   ripple.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;pointer-events:none;z-index:199999;display:none;'
@@ -190,9 +200,11 @@ export function createRipple(host: HTMLElement, color?: string): TapRipple {
       `position:absolute;left:${-RIPPLE_MAX}px;top:${-RIPPLE_MAX}px;width:${RIPPLE_MAX * 2}px;height:${RIPPLE_MAX * 2}px;` +
       // A stroke alone all but disappears over busy art: the wash inside it is what
       // makes the pulse read at a glance, and the glow keeps the edge off dark art.
-      `box-sizing:border-box;border-radius:50%;border:4px solid ${tone(0.95)};` +
-      `background:radial-gradient(circle,${tone(0.22)} 0%,${tone(0.1)} 55%,${tone(0)} 100%);` +
-      `box-shadow:0 0 18px ${tone(0.5)},inset 0 0 22px ${tone(0.3)};` +
+      // Outer glow belongs to the stroke, the inset one to the wash, so the two
+      // colors each bleed from their own edge instead of one tinting the other.
+      `box-sizing:border-box;border-radius:50%;border:4px solid ${stroke(0.95)};` +
+      `background:radial-gradient(circle,${fill(0.22)} 0%,${fill(0.1)} 55%,${fill(0)} 100%);` +
+      `box-shadow:0 0 18px ${stroke(0.5)},inset 0 0 22px ${fill(0.3)};` +
       'opacity:0;will-change:transform,opacity;'
     ripple.appendChild(ring)
     rings.push(ring)

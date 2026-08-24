@@ -101,12 +101,22 @@ describe('handguide: radial tap mode', () => {
     expect(ripple()?.style.display).toBe('none')
   })
 
-  it('pings in an authored color', () => {
+  it('pings in an authored color, wash included', () => {
     mount('radialtap', { rippleColor: '#ff8a3d' })
     ringsAt(0.2 * PERIOD)
     const ring = ripple()?.firstElementChild as HTMLElement
     expect(ring.style.borderColor.replace(/\s/g, '')).toContain('255,138,61')
-    expect(ring.style.backgroundImage.replace(/\s/g, '')).toContain('255,138,61')
+    expect(ring.style.backgroundImage.replace(/\s/g, '')).toContain('255,138,61') // fill follows the stroke
+  })
+
+  it('takes a separate fill color without touching the stroke', () => {
+    mount('radialtap', { rippleColor: '#ff8a3d', rippleFillColor: '#2244ff' })
+    ringsAt(0.2 * PERIOD)
+    const ring = ripple()?.firstElementChild as HTMLElement
+    const bg = ring.style.backgroundImage.replace(/\s/g, '')
+    expect(ring.style.borderColor.replace(/\s/g, '')).toContain('255,138,61')
+    expect(bg).toContain('34,68,255')
+    expect(bg).not.toContain('255,138,61')
   })
 
   it('spreads to an authored radius instead of sizing off the hand', () => {

@@ -431,9 +431,12 @@ export interface HandguideConfig {
   toY?: number
   nodes?: HandguideNode[]
   periodMs?: number
-  // 'radialtap' only. Ring color as hex or rgb() — the ping is drawn as this one
-  // hue at several alphas (stroke, wash, glow). Absent = the built-in violet.
+  // 'radialtap' only. The ring OUTLINE (and the glow it throws), as hex or rgb().
+  // Absent = the built-in violet.
   rippleColor?: string
+  // The wash INSIDE the ring. Absent = the stroke's own hue, so a ping reads as one
+  // color until it is deliberately given two.
+  rippleFillColor?: string
   // How far the rings spread, in DESIGN px (like every other authored size), so the
   // ping keeps its proportions on any screen. Absent = sized off the hand itself.
   rippleRadius?: number

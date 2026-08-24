@@ -3514,10 +3514,17 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               {hg.mode === 'radialtap' && (
                 <>
                   <ColorField
-                    label="Ring color"
+                    label="Ring stroke"
                     value={hg.rippleColor ?? RIPPLE_DEFAULT_COLOR}
                     allowNone
                     onChange={(c) => setHg({ rippleColor: c ?? undefined })}
+                  />
+                  <ColorField
+                    label="Ring fill"
+                    // Cleared = follow the stroke, which is what a one-color ping is.
+                    value={hg.rippleFillColor ?? hg.rippleColor ?? RIPPLE_DEFAULT_COLOR}
+                    allowNone
+                    onChange={(c) => setHg({ rippleFillColor: c ?? undefined })}
                   />
                   <NumField
                     label="Ring radius"
