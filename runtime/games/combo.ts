@@ -81,6 +81,7 @@ export function createCombo(): GameModule {
   let snapBorderPct = 6
   let advanceDelayMs = 600
   let flyMs = 520
+  let crossFadeMs = 300
   let dismissMs = 260
   let zonePct: Zone = { x: 18, y: 60, w: 64, h: 32 }
 
@@ -123,6 +124,7 @@ export function createCombo(): GameModule {
     item.el.style.transition = ''
     item.el.style.translate = ''
     item.el.style.scale = ''
+    item.el.style.opacity = ''
     item.el.style.zIndex = item.homeZ
     item.el.style.cursor = ''
     item.dx = 0
@@ -165,6 +167,32 @@ export function createCombo(): GameModule {
    * author left visible on the canvas while positioning them. */
   const hideAllLayers = (): void => {
     for (const l of layers) hide(l.el)
+  }
+
+  /** Bring a layer up from transparent over `ms`, so it arrives as the option on top
+   * of it fades away and the two read as one object rather than a swap.
+   *
+   * The resting inline opacity is captured and put back afterwards: layoutRec owns
+   * that property (it writes the element's authored opacity on every layout pass), so
+   * clearing it outright would silently promote a half-transparent layer to solid. */
+  const fadeInLayer = (el: HTMLElement, ms: number): void => {
+    if (ms <= 0) {
+      show(el)
+      return
+    }
+    const resting = el.style.opacity
+    el.style.transition = `opacity ${ms}ms linear`
+    el.style.opacity = '0'
+    show(el)
+    // Flush the 0 so the browser has a start value to animate FROM; without this the
+    // class removal and the 0 -> 1 change collapse into one style recalc and no
+    // transition runs at all.
+    void el.offsetWidth
+    el.style.opacity = '1'
+    after(ms, () => {
+      el.style.transition = ''
+      el.style.opacity = resting
+    })
   }
 
   // ---- question flow -------------------------------------------------------
@@ -222,6 +250,7 @@ export function createCombo(): GameModule {
     for (const other of optionsFor(q + 1)) {
       if (other === item) continue
       other.el.style.transition = `opacity ${dismissMs}ms ease, scale ${dismissMs}ms ease`
+      other.el.style.opacity = '0'
       other.el.style.scale = '0.7'
       after(dismissMs, () => hide(other.el))
     }
@@ -235,16 +264,33 @@ export function createCombo(): GameModule {
       return
     }
 
-    // Fly the option onto its layer's own box, so the hand-off is seamless: by the
-    // time the layer appears, the option is sitting exactly on top of it.
+    // Fly the option to the CENTRE of its layer's box and match its size, so the two
+    // are superimposed by the time they trade places. Both elements scale about their
+    // own centre, so aligning centres is what makes the swap invisible.
+    //
+    // Size is matched contain-style — the smaller of the two ratios — rather than by
+    // width alone: when the option art and the placed art have different aspects,
+    // matching width alone leaves the option spilling out past the layer it is
+    // supposed to be turning into, which is exactly when the seam shows.
     const to = destination.getBoundingClientRect()
     const rect = item.el.getBoundingClientRect()
-    const scale = rect.width > 0 && to.width > 0 ? to.width / rect.width : 1
+    const fit =
+      rect.width > 0 && rect.height > 0 && to.width > 0 && to.height > 0 ? Math.min(to.width / rect.width, to.height / rect.height) : 1
     // The element's resting centre — its live centre minus the drag offset it carries.
     const home = { x: rect.left + rect.width / 2 - item.dx, y: rect.top + rect.height / 2 - item.dy }
-    item.el.style.transition = `translate ${flyMs}ms cubic-bezier(.4,0,.2,1), scale ${flyMs}ms cubic-bezier(.4,0,.2,1)`
+    // The cross-fade occupies the TAIL of the flight, so the option is still moving
+    // while it dissolves instead of landing and then blinking out.
+    const cross = Math.min(crossFadeMs, flyMs)
+    const ease = 'cubic-bezier(.4,0,.2,1)'
+    item.el.style.transition = `translate ${flyMs}ms ${ease}, scale ${flyMs}ms ${ease}, opacity ${cross}ms linear ${flyMs - cross}ms`
     item.el.style.translate = `${to.left + to.width / 2 - home.x}px ${to.top + to.height / 2 - home.y}px`
-    item.el.style.scale = String(Math.max(0.05, scale))
+    item.el.style.scale = String(Math.max(0.05, fit))
+    if (cross > 0) item.el.style.opacity = '0'
+
+    // Start the layer's fade-in at the same moment the option starts fading out. A
+    // linear pair keeps the combined opacity roughly constant across the swap; eased
+    // curves dip in the middle and read as a flicker.
+    if (layer) after(flyMs - cross, () => fadeInLayer(layer.el, cross))
 
     after(flyMs, () => {
       if (layer) show(layer.el)
@@ -350,6 +396,7 @@ export function createCombo(): GameModule {
       snapBorderPct = Math.max(0, Math.min(25, num(params.snapBorderPct, 6)))
       advanceDelayMs = Math.max(0, Math.min(5000, num(params.advanceDelayMs, 600)))
       flyMs = Math.max(0, Math.min(3000, num(params.flyMs, 520)))
+      crossFadeMs = Math.max(0, Math.min(3000, num(params.crossFadeMs, 300)))
       dismissMs = Math.max(0, Math.min(2000, num(params.dismissMs, 260)))
       const x = Math.min(98, clampPct(params.zoneX, 18))
       const y = Math.min(98, clampPct(params.zoneY, 60))
@@ -449,6 +496,7 @@ export const COMBO_TEMPLATE: GameTemplate = {
     { key: 'pickupScale', label: 'Drag grow scale', type: 'number', min: 1, max: 2, step: 0.05 },
     { key: 'snapBorderPct', label: 'Snap border (%)', type: 'number', min: 0, max: 25, step: 1 },
     { key: 'flyMs', label: 'Fly-to-layer (ms)', type: 'number', min: 0, max: 3000, step: 20 },
+    { key: 'crossFadeMs', label: 'Cross-fade into the layer (ms)', type: 'number', min: 0, max: 3000, step: 20 },
     { key: 'advanceDelayMs', label: 'Delay before next question (ms)', type: 'number', min: 0, max: 5000, step: 50 },
     { key: 'dismissMs', label: 'Unpicked option exit (ms)', type: 'number', min: 0, max: 2000, step: 20 },
   ],
@@ -457,6 +505,7 @@ export const COMBO_TEMPLATE: GameTemplate = {
     pickupScale: 1.25,
     snapBorderPct: 6,
     flyMs: 520,
+    crossFadeMs: 300,
     advanceDelayMs: 600,
     dismissMs: 260,
     zoneX: 18,

@@ -299,6 +299,111 @@ describe('combo builder', () => {
     stage.destroy()
   })
 
+  describe('hand-off to the placed layer', () => {
+    /** Drop option `a1` with the given geometry and return the live nodes. */
+    function dropOnto(
+      params: Record<string, unknown>,
+      optRect: [number, number, number, number],
+      layerRect: [number, number, number, number],
+      layerEl = layer('l-a1', 1, 1, 'layerA'),
+    ): { opt: HTMLElement; lay: HTMLElement; loser: HTMLElement; stage: ReturnType<typeof buildScene> } {
+      const game = { ...GAME, game: { ...GAME.game!, params: { ...(GAME.game!.params as object), ...params } } } as SceneElement
+      const stage = build([game, ANCHOR, option('a1', 1, 1, 'optA'), option('a2', 1, 2, 'optB'), layerEl])
+      stage.layoutAll()
+      stage.startGames(true)
+      const opt = stage.root.querySelector<HTMLElement>('[data-id="a1"]')!
+      const loser = stage.root.querySelector<HTMLElement>('[data-id="a2"]')!
+      const lay = stage.root.querySelector<HTMLElement>('[data-id="l-a1"]')!
+      const target = stage.root.querySelector<HTMLElement>('[data-combo-target="1"]')!
+      stubRect(target, 0, 0, 1000, 1000)
+      stubRect(opt, ...optRect)
+      stubRect(lay, ...layerRect)
+      opt.dispatchEvent(pointer('pointerdown', optRect[0] + 5, optRect[1] + 5))
+      opt.dispatchEvent(pointer('pointerup', optRect[0] + 5, optRect[1] + 5))
+      return { opt, lay, loser, stage }
+    }
+
+    it('flies the option to the centre of the placed layer', () => {
+      // Option centred at (250,250); layer centred at (700,400). The option must
+      // travel exactly the difference so the two centres coincide.
+      const { opt, stage } = dropOnto({ flyMs: 400, crossFadeMs: 200 }, [200, 200, 100, 100], [600, 300, 200, 200])
+      expect(opt.style.translate).toBe('450px 150px')
+      stage.destroy()
+    })
+
+    it('matches the layer’s size contain-style so it never spills past it', () => {
+      // 100x100 option into a 400x200 layer: width ratio 4, height ratio 2. Taking the
+      // width ratio would make it 400x400 — 100px of overhang top and bottom right as
+      // the two are supposed to be indistinguishable.
+      const { opt, stage } = dropOnto({ flyMs: 400, crossFadeMs: 200 }, [0, 0, 100, 100], [0, 0, 400, 200])
+      expect(opt.style.scale).toBe('2')
+      stage.destroy()
+    })
+
+    it('fades the option out over the tail of the flight, while it is still moving', () => {
+      const { opt, stage } = dropOnto({ flyMs: 500, crossFadeMs: 200 }, [200, 200, 100, 100], [600, 300, 100, 100])
+      expect(opt.style.opacity).toBe('0')
+      // 200ms fade starting 300ms in: it dissolves during the last 40% of the travel
+      // rather than landing and then blinking out.
+      expect(opt.style.transition).toContain('opacity 200ms linear 300ms')
+      expect(opt.style.transition).toContain('translate 500ms')
+      stage.destroy()
+    })
+
+    it('brings the layer up from transparent at the same moment', () => {
+      const { lay, stage } = dropOnto({ flyMs: 500, crossFadeMs: 200 }, [200, 200, 100, 100], [600, 300, 100, 100])
+      // Still hidden through the opaque part of the flight.
+      vi.advanceTimersByTime(290)
+      expect(lay.classList.contains('pa-combo-off')).toBe(true)
+
+      // Fade window opens: visible, transitioning, and driven to full.
+      vi.advanceTimersByTime(20)
+      expect(lay.classList.contains('pa-combo-off')).toBe(false)
+      expect(lay.style.transition).toContain('opacity 200ms linear')
+      expect(lay.style.opacity).toBe('1')
+      stage.destroy()
+    })
+
+    it('restores the layer’s authored opacity instead of promoting it to solid', () => {
+      // layoutRec writes the authored opacity inline on every layout pass, so the
+      // fade has to hand that exact value back rather than clearing the property.
+      const translucent = { ...layer('l-a1', 1, 1, 'layerA'), opacity: 0.4 } as SceneElement
+      const { lay, stage } = dropOnto({ flyMs: 200, crossFadeMs: 100 }, [0, 0, 100, 100], [0, 0, 100, 100], translucent)
+      vi.advanceTimersByTime(150)
+      expect(lay.style.opacity).toBe('1')
+      vi.advanceTimersByTime(100)
+      expect(lay.style.opacity).toBe('0.4')
+      stage.destroy()
+    })
+
+    it('clamps the cross-fade to the flight so it can never outlast it', () => {
+      const { opt, lay, stage } = dropOnto({ flyMs: 120, crossFadeMs: 900 }, [0, 0, 100, 100], [0, 0, 100, 100])
+      // Whole flight becomes the fade, with no negative delay — so the layer's
+      // fade-in is queued at 0ms and opens on the very next tick.
+      expect(opt.style.transition).toContain('opacity 120ms linear 0ms')
+      vi.advanceTimersByTime(1)
+      expect(lay.classList.contains('pa-combo-off')).toBe(false)
+      stage.destroy()
+    })
+
+    it('swaps instantly when there is no flight to fade across', () => {
+      const { opt, lay, stage } = dropOnto({ flyMs: 0, crossFadeMs: 300 }, [0, 0, 100, 100], [0, 0, 100, 100])
+      expect(opt.style.opacity).toBe('')
+      vi.advanceTimersByTime(10)
+      expect(lay.classList.contains('pa-combo-off')).toBe(false)
+      expect(lay.style.opacity).toBe('')
+      stage.destroy()
+    })
+
+    it('fades the unpicked option out rather than only shrinking it', () => {
+      const { loser, stage } = dropOnto({ flyMs: 400, crossFadeMs: 200, dismissMs: 150 }, [0, 0, 100, 100], [0, 0, 100, 100])
+      expect(loser.style.opacity).toBe('0')
+      expect(loser.style.scale).toBe('0.7')
+      expect(loser.style.transition).toContain('opacity 150ms')
+      stage.destroy()
+    })
+  })
+
   it('springs an option back home when it is released outside the drop area', () => {
     const stage = build([GAME, ANCHOR, option('a1', 1, 1, 'optA'), option('a2', 1, 2, 'optB'), layer('l-a1', 1, 1, 'layerA')])
     stage.layoutAll()
