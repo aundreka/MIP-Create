@@ -7,19 +7,22 @@
 //
 //   option  a draggable answer belonging to question N. Only the live question's
 //           options are visible and interactive. Dragging one grows it; releasing
-//           it inside the drop area picks it, and it flies from the drop area into
-//           every anchor, where it lands as question N's LAYER.
+//           it inside the drop area picks it.
+//   layer   what a pick leaves behind — one element per option, sitting exactly
+//           where the author placed it. Hidden until its option is picked, at which
+//           point the option flies to it and hands over. Position, size, crop and
+//           animation are the element's own, so the composed result is arranged by
+//           eye on the canvas rather than by numbers in a panel.
 //   title   the question headline. Shown while its question is live and swapped on
 //           advance. It never reacts to WHICH option was picked — only to which
 //           question is up.
-//   anchor  the image the picked layers stack onto. The anchor's own art is the
-//           base; each answered question adds one layer above it, at that
-//           question's authored rect. Any number of anchors may exist and each
-//           mirrors the same stack, so a hero and a small preview stay in sync.
+//   anchor  the base art the layers build on top of. Purely the backdrop; it is
+//           only consulted as the fly-to target for an option whose question has
+//           no layer element assigned yet.
 //
-// Because a question owns a LAYER (not a whole flat image), the art needed is
-// options x questions rather than options^questions, and a combination is
-// customised by moving that question's layer rect — no combination table.
+// Because each question contributes its own layer rather than a whole flat image,
+// the art needed is options x questions rather than options^questions, and a
+// combination is composed by dragging layers around the canvas — no lookup table.
 //
 // Three gameplay beats are broadcast through the SFX channel, which stage.ts fans
 // out to every scene element as both an animation phase and a sound binding:
@@ -29,34 +32,23 @@
 import type { GameContext, GameModule, GameTemplate, HintMove, Pt } from './types'
 import { num } from './types'
 
-interface LayerRect {
-  /** Centre X of the layer, % of the anchor's box. */
-  x: number
-  /** Centre Y of the layer, % of the anchor's box. */
-  y: number
-  /** Layer width, % of the anchor's box. Height follows the art's own aspect. */
-  w: number
-  /** Rotation in degrees. */
-  rot: number
-}
-
 interface OptionEl {
   el: HTMLElement
   question: number
   choice: number
-  layerId: string
   homeZ: string
   dx: number
   dy: number
   dragging: boolean
 }
 
-interface AnchorEl {
+interface LayerEl {
   el: HTMLElement
-  /** The injected overlay that holds this anchor's layer stack. */
-  stack: HTMLDivElement
-  /** Layer node per question index (0-based); absent until that question is answered. */
-  layers: (HTMLImageElement | undefined)[]
+  question: number
+  choice: number
+  /** Whether the author left it visible on the editor canvas, so destroy() can put
+   * the canvas back exactly as it found it. */
+  canvasShown: boolean
 }
 
 interface Zone {
@@ -67,10 +59,10 @@ interface Zone {
 }
 
 /** Hidden without touching inline display/opacity — layoutRec rewrites both on every
- * layout pass, so an inline hide would be dropped by the next resize. */
-const OFF_CLASS = 'pa-combo-off'
-
-const DEFAULT_LAYER: LayerRect = { x: 50, y: 50, w: 100, rot: 0 }
+ * layout pass, so an inline hide would be dropped by the next resize. Exported so
+ * stage.ts can start layer elements hidden at build time, before play begins. */
+export const COMBO_OFF_CLASS = 'pa-combo-off'
+const OFF_CLASS = COMBO_OFF_CLASS
 
 function center(el: HTMLElement): Pt {
   const r = el.getBoundingClientRect()
@@ -79,23 +71,6 @@ function center(el: HTMLElement): Pt {
 
 function clampPct(value: unknown, fallback: number): number {
   return Math.max(0, Math.min(100, num(value, fallback)))
-}
-
-/** Per-question layer rects, read from the `layers` param and padded with defaults so a
- * question the author has not positioned yet still lands somewhere sensible. */
-function readLayers(raw: unknown, questions: number): LayerRect[] {
-  const list = Array.isArray(raw) ? raw : []
-  const out: LayerRect[] = []
-  for (let i = 0; i < questions; i++) {
-    const entry = (list[i] ?? {}) as Record<string, unknown>
-    out.push({
-      x: clampPct(entry.x, DEFAULT_LAYER.x),
-      y: clampPct(entry.y, DEFAULT_LAYER.y),
-      w: Math.max(1, Math.min(400, num(entry.w, DEFAULT_LAYER.w))),
-      rot: Math.max(-180, Math.min(180, num(entry.rot, DEFAULT_LAYER.rot))),
-    })
-  }
-  return out
 }
 
 export function createCombo(): GameModule {
@@ -110,7 +85,8 @@ export function createCombo(): GameModule {
   let zonePct: Zone = { x: 18, y: 60, w: 64, h: 32 }
 
   const options: OptionEl[] = []
-  const anchors: AnchorEl[] = []
+  const layers: LayerEl[] = []
+  const anchors: HTMLElement[] = []
   const titles: { el: HTMLElement; question: number }[] = []
   /** Chosen option index per question (0-based question), -1 = unanswered. */
   const answers: number[] = []
@@ -133,9 +109,6 @@ export function createCombo(): GameModule {
 
   const show = (el: HTMLElement): void => el.classList.remove(OFF_CLASS)
   const hide = (el: HTMLElement): void => el.classList.add(OFF_CLASS)
-
-  let layerParam: unknown = []
-  const layerRects = (): LayerRect[] => readLayers(layerParam, questions)
 
   const optionsFor = (question: number): OptionEl[] => options.filter((o) => o.question === question)
 
@@ -180,76 +153,18 @@ export function createCombo(): GameModule {
     return x >= r.left - border && x <= r.right + border && y >= r.top - border && y <= r.bottom + border
   }
 
-  // ---- anchor layers -------------------------------------------------------
-  /** Screen rect of question `q`'s layer slot inside a given anchor. */
-  const layerSlot = (anchor: AnchorEl, q: number): { cx: number; cy: number; w: number; rot: number } => {
-    const rect = anchor.el.getBoundingClientRect()
-    const spec = layerRects()[q] ?? DEFAULT_LAYER
-    return {
-      cx: rect.left + (spec.x / 100) * rect.width,
-      cy: rect.top + (spec.y / 100) * rect.height,
-      w: (spec.w / 100) * rect.width,
-      rot: spec.rot,
-    }
-  }
+  // ---- layers --------------------------------------------------------------
+  /** The layer element paired with an option — same question, same choice. */
+  const layerFor = (option: OptionEl): LayerEl | undefined => layers.find((l) => l.question === option.question && l.choice === option.choice)
 
-  /** Paint question `q`'s layer into every anchor using the chosen option's art. */
-  const applyLayer = (q: number, option: OptionEl): void => {
-    const src = ctx.assets.src(option.layerId)
-    const spec = layerRects()[q] ?? DEFAULT_LAYER
-    for (const anchor of anchors) {
-      let img = anchor.layers[q]
-      if (!img) {
-        img = document.createElement('img')
-        img.className = 'pa-combo-layer'
-        img.alt = ''
-        // zIndex by question so a later answer always stacks above an earlier one,
-        // independent of the order the nodes happen to be appended in.
-        img.style.zIndex = String(q + 1)
-        anchor.stack.appendChild(img)
-        anchor.layers[q] = img
-      }
-      img.dataset.comboLayer = String(q + 1)
-      img.style.left = spec.x + '%'
-      img.style.top = spec.y + '%'
-      img.style.width = spec.w + '%'
-      img.style.transform = `translate(-50%,-50%) rotate(${spec.rot}deg)`
-      if (src) img.src = src
-      img.style.display = src ? '' : 'none'
-    }
-  }
+  /** Where a picked option should fly to: onto its own layer if it has one, else onto
+   * the anchor art, else nowhere (it just fades where it was dropped). */
+  const flyTarget = (option: OptionEl): HTMLElement | null => layerFor(option)?.el ?? anchors[0] ?? null
 
-  /** Editor canvas only (start() is never called there): paint every question's layer
-   * using its first option's art, so the layer rect fields in the inspector are
-   * WYSIWYG instead of blind numbers. Cleared the moment real play begins. */
-  const previewLayers = (): void => {
-    for (let q = 0; q < questions; q++) {
-      const first = optionsFor(q + 1)[0]
-      if (first) applyLayer(q, first)
-    }
-  }
-
-  const clearLayers = (): void => {
-    for (const anchor of anchors) {
-      anchor.stack.innerHTML = ''
-      anchor.layers.length = 0
-    }
-  }
-
-  /** Re-place every already-painted layer — the rects are %, so this only matters when
-   * the author edits them live in the editor. */
-  const relayoutLayers = (): void => {
-    const rects = layerRects()
-    for (const anchor of anchors) {
-      anchor.layers.forEach((img, q) => {
-        if (!img) return
-        const spec = rects[q] ?? DEFAULT_LAYER
-        img.style.left = spec.x + '%'
-        img.style.top = spec.y + '%'
-        img.style.width = spec.w + '%'
-        img.style.transform = `translate(-50%,-50%) rotate(${spec.rot}deg)`
-      })
-    }
+  /** Hide every layer. Real play always starts from a clean anchor, whatever the
+   * author left visible on the canvas while positioning them. */
+  const hideAllLayers = (): void => {
+    for (const l of layers) hide(l.el)
   }
 
   // ---- question flow -------------------------------------------------------
@@ -297,7 +212,7 @@ export function createCombo(): GameModule {
   }
 
   /** Pick `item` for the current question: dismiss its siblings, fly it into the
-   * anchors as this question's layer, then move on after the authored delay. */
+   * layer element, hands over to it, then moves on after the authored delay. */
   const choose = (item: OptionEl): void => {
     const q = current
     answers[q] = item.choice
@@ -311,26 +226,28 @@ export function createCombo(): GameModule {
       after(dismissMs, () => hide(other.el))
     }
 
-    const anchor = anchors[0]
-    if (!anchor) {
-      // No anchor authored yet — still a valid pick, just nothing to fly into.
+    const layer = layerFor(item)
+    const destination = flyTarget(item)
+    if (!destination) {
+      // Nothing to fly into — still a valid pick, the option just leaves.
       hide(item.el)
       after(advanceDelayMs, advance)
       return
     }
 
-    const slot = layerSlot(anchor, q)
+    // Fly the option onto its layer's own box, so the hand-off is seamless: by the
+    // time the layer appears, the option is sitting exactly on top of it.
+    const to = destination.getBoundingClientRect()
     const rect = item.el.getBoundingClientRect()
-    const scale = rect.width > 0 ? slot.w / rect.width : 1
+    const scale = rect.width > 0 && to.width > 0 ? to.width / rect.width : 1
     // The element's resting centre — its live centre minus the drag offset it carries.
     const home = { x: rect.left + rect.width / 2 - item.dx, y: rect.top + rect.height / 2 - item.dy }
-    item.el.style.transition = `translate ${flyMs}ms cubic-bezier(.4,0,.2,1), scale ${flyMs}ms cubic-bezier(.4,0,.2,1), rotate ${flyMs}ms ease`
-    item.el.style.translate = `${slot.cx - home.x}px ${slot.cy - home.y}px`
+    item.el.style.transition = `translate ${flyMs}ms cubic-bezier(.4,0,.2,1), scale ${flyMs}ms cubic-bezier(.4,0,.2,1)`
+    item.el.style.translate = `${to.left + to.width / 2 - home.x}px ${to.top + to.height / 2 - home.y}px`
     item.el.style.scale = String(Math.max(0.05, scale))
-    if (slot.rot) item.el.style.rotate = `${slot.rot}deg`
 
     after(flyMs, () => {
-      applyLayer(q, item)
+      if (layer) show(layer.el)
       hide(item.el)
       after(advanceDelayMs, advance)
     })
@@ -412,26 +329,15 @@ export function createCombo(): GameModule {
       el.dataset.comboClaimedBy = ctx.elementId ?? 'combo'
       const role = el.dataset.comboRole
       const question = Math.max(1, Math.round(Number(el.dataset.comboQuestion) || 1))
+      const choice = Math.max(1, Math.round(Number(el.dataset.comboChoice) || 1))
       if (role === 'option') {
-        options.push({
-          el,
-          question,
-          choice: Math.max(1, Math.round(Number(el.dataset.comboChoice) || 1)),
-          layerId: el.dataset.comboLayerAsset ?? '',
-          homeZ: el.style.zIndex,
-          dx: 0,
-          dy: 0,
-          dragging: false,
-        })
+        options.push({ el, question, choice, homeZ: el.style.zIndex, dx: 0, dy: 0, dragging: false })
+      } else if (role === 'layer') {
+        layers.push({ el, question, choice, canvasShown: el.dataset.comboCanvasShow === '1' })
       } else if (role === 'title') {
         titles.push({ el, question })
       } else if (role === 'anchor') {
-        const host = el.querySelector<HTMLElement>('.pa-el-anim') ?? el
-        const stack = document.createElement('div')
-        stack.className = 'pa-combo-stack'
-        stack.dataset.comboStack = '1'
-        host.appendChild(stack)
-        anchors.push({ el, stack, layers: [] })
+        anchors.push(el)
       }
     }
   }
@@ -445,7 +351,6 @@ export function createCombo(): GameModule {
       advanceDelayMs = Math.max(0, Math.min(5000, num(params.advanceDelayMs, 600)))
       flyMs = Math.max(0, Math.min(3000, num(params.flyMs, 520)))
       dismissMs = Math.max(0, Math.min(2000, num(params.dismissMs, 260)))
-      layerParam = params.layers
       const x = Math.min(98, clampPct(params.zoneX, 18))
       const y = Math.min(98, clampPct(params.zoneY, 60))
       zonePct = {
@@ -465,15 +370,16 @@ export function createCombo(): GameModule {
 
       collect()
       layoutZone()
-      // Nothing is hidden here on purpose: mount() also runs on the static editor
-      // canvas, where every question's options and titles must stay visible and
-      // selectable. start() (interactive only) is what collapses to question 1.
-      previewLayers()
+      // Nothing is hidden or revealed here on purpose: mount() also runs on the
+      // static editor canvas, where options and titles must stay visible and
+      // selectable, and each layer keeps whatever canvas visibility the author chose
+      // for it. start() (interactive only) is what collapses to question 1.
     },
     start() {
       if (started) return
       started = true
-      clearLayers()
+      // Whatever the author left visible while positioning, play starts clean.
+      hideAllLayers()
       current = nextPlayable(0)
       if (current >= questions) {
         // Nothing is wired up at all — win immediately rather than stranding the player.
@@ -486,7 +392,6 @@ export function createCombo(): GameModule {
     },
     relayout() {
       layoutZone()
-      relayoutLayers()
       for (const item of options) if (!item.dragging && answers[item.question - 1] < 0) setOffset(item, 0, 0, false)
     },
     getHint(): HintMove | null {
@@ -515,11 +420,16 @@ export function createCombo(): GameModule {
         t.el.classList.remove(OFF_CLASS)
         delete t.el.dataset.comboClaimedBy
       }
-      for (const anchor of anchors) {
-        anchor.stack.remove()
-        delete anchor.el.dataset.comboClaimedBy
+      for (const l of layers) {
+        // Put the canvas back exactly as it was found: a layer the author had shown
+        // stays shown, one they had hidden stays hidden.
+        if (l.canvasShown) l.el.classList.remove(OFF_CLASS)
+        else l.el.classList.add(OFF_CLASS)
+        delete l.el.dataset.comboClaimedBy
       }
+      for (const anchor of anchors) delete anchor.dataset.comboClaimedBy
       options.length = 0
+      layers.length = 0
       titles.length = 0
       anchors.length = 0
       answers.length = 0
@@ -538,7 +448,7 @@ export const COMBO_TEMPLATE: GameTemplate = {
     { key: 'questions', label: 'Questions', type: 'number', min: 1, max: 8, step: 1 },
     { key: 'pickupScale', label: 'Drag grow scale', type: 'number', min: 1, max: 2, step: 0.05 },
     { key: 'snapBorderPct', label: 'Snap border (%)', type: 'number', min: 0, max: 25, step: 1 },
-    { key: 'flyMs', label: 'Fly-to-anchor (ms)', type: 'number', min: 0, max: 3000, step: 20 },
+    { key: 'flyMs', label: 'Fly-to-layer (ms)', type: 'number', min: 0, max: 3000, step: 20 },
     { key: 'advanceDelayMs', label: 'Delay before next question (ms)', type: 'number', min: 0, max: 5000, step: 50 },
     { key: 'dismissMs', label: 'Unpicked option exit (ms)', type: 'number', min: 0, max: 2000, step: 20 },
   ],
@@ -553,7 +463,6 @@ export const COMBO_TEMPLATE: GameTemplate = {
     zoneY: 60,
     zoneW: 64,
     zoneH: 32,
-    layers: [],
   },
   defaultHintIdleMs: 3000,
   create: createCombo,

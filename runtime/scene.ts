@@ -497,25 +497,33 @@ export interface BasketItemConfig {
 }
 
 // ---- combo builder ---------------------------------------------------------
-// Enlists an ordinary scene element into a Combo builder game, so the author lays
-// the whole thing out on the canvas instead of inside the game box:
+// Enlists an ordinary scene element into a Combo builder game. Every part of the
+// board is a real scene element the author places on the canvas, so position, size,
+// crop and animation all come from the ordinary element tools:
 //   'option'  one of a question's draggable answers. Only the live question's
-//             options are visible/interactive; dropping one in the game's drop
-//             area picks it and flies it into every anchor as that question's layer.
+//             options are visible/interactive; releasing one in the game's drop
+//             area picks it.
+//   'layer'   the art a pick leaves behind — one per option. It sits exactly where
+//             the author put it, so the composed result is arranged by eye instead
+//             of by numbers. Hidden until its option is picked; the picked option
+//             flies to it and hands over.
 //   'title'   the question headline. Shown while its question is live and swapped
 //             on advance — it never reacts to WHICH option was picked.
-//   'anchor'  the image the picked layers stack onto. Any number of anchors may
-//             exist; each mirrors the same stack, so a hero and a small preview
-//             stay in sync. The layer rect is per question (see the game's params).
+//   'anchor'  the base art the layers build on top of. Purely the backdrop: it is
+//             where an option flies when its question has no layer element yet.
 export interface ComboRoleConfig {
   gameId?: string
-  role: 'option' | 'title' | 'anchor'
-  /** 'option' / 'title': which question this belongs to (1-based). */
+  role: 'option' | 'layer' | 'title' | 'anchor'
+  /** 'option' / 'layer' / 'title': which question this belongs to (1-based). */
   question?: number
-  /** 'option': which of the question's two choices (1 or 2). */
+  /** 'option' / 'layer': which of the question's two choices (1 or 2). A layer pairs
+   * with the option that has the same question + choice. */
   choice?: number
-  /** 'option': art stacked onto the anchors when picked. Defaults to the option's own image. */
-  layerAssetId?: string
+  /** 'layer' only, authoring-only: keep this layer visible on the editor canvas while
+   * it is being positioned. Layers are always hidden when real play starts, so this
+   * never leaks into the playable — it exists so the author can see one layer at a
+   * time instead of the whole stack at once. */
+  showOnCanvas?: boolean
 }
 export interface SlotConfig {
   group?: string

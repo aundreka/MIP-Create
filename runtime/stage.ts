@@ -44,6 +44,7 @@ import { createConfetti, createConfettiContent, type ConfettiController } from '
 import { computeDeadline, formatCountdown, formatTickerIntervalMs, needsTicker } from './elements/countdown'
 import { createGameHost, type GameHost } from './gameHost'
 import { mulberry32 } from './games/types'
+import { COMBO_OFF_CLASS } from './games/combo'
 import { attachScratchCover } from './reveal'
 import { emit, on } from './emitter'
 
@@ -662,15 +663,11 @@ html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;overscroll-b
 .pa-el--t-off{opacity:0 !important;visibility:hidden !important;pointer-events:none !important;}
 .pa-root:not(.has-interacted) .pa-show-after-interaction{opacity:0 !important;pointer-events:none !important;}
 .pa-root.has-interacted .pa-hide-after-basket-interaction{opacity:0 !important;pointer-events:none !important;}
-/* Combo builder. Off-question options/titles hide by CLASS for the same reason as
-   .pa-el--t-off: layoutRec rewrites inline display and opacity on every layout pass,
-   so an inline hide would be dropped by the next resize. visibility keeps the box
-   measurable, which the fly-to-anchor maths needs. */
+/* Combo builder. Off-question options/titles and unrevealed layers hide by CLASS for
+   the same reason as .pa-el--t-off: layoutRec rewrites inline display and opacity on
+   every layout pass, so an inline hide would be dropped by the next resize.
+   visibility keeps the box measurable, which the fly-to-layer maths needs. */
 .pa-combo-off{opacity:0 !important;visibility:hidden !important;pointer-events:none !important;}
-/* The anchor's layer stack. Absolutely positioned against the .pa-el (its .pa-el-anim
-   parent is static), so it inherits the anchor's animations while filling its box. */
-.pa-combo-stack{position:absolute;inset:0;pointer-events:none;}
-.pa-combo-layer{position:absolute;height:auto;pointer-events:none;user-select:none;-webkit-user-drag:none;}
 `.trim()
   document.head.appendChild(style)
 }
@@ -1131,10 +1128,13 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       if (el.comboRole.gameId) outer.dataset.comboGameId = el.comboRole.gameId
       if (el.comboRole.question) outer.dataset.comboQuestion = String(el.comboRole.question)
       if (el.comboRole.choice) outer.dataset.comboChoice = String(el.comboRole.choice)
-      // The asset ID, not the resolved src — a base64 data URL in a DOM attribute
-      // would bloat every export. The game resolves it through its own asset map.
-      const layerId = el.comboRole.layerAssetId || el.assetId || ''
-      if (layerId) outer.dataset.comboLayerAsset = layerId
+      // A layer starts hidden — the game reveals it when its option is picked. The
+      // author can keep one visible on the editor canvas while positioning it; play
+      // hides every layer regardless, so this never reaches the player.
+      if (el.comboRole.role === 'layer') {
+        if (el.comboRole.showOnCanvas) outer.dataset.comboCanvasShow = '1'
+        else outer.classList.add(COMBO_OFF_CLASS)
+      }
     }
 
     const anim = document.createElement('div')

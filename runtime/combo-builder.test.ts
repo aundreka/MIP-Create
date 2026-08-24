@@ -47,7 +47,7 @@ const ANCHOR: SceneElement = {
   comboRole: { gameId: 'combo-game', role: 'anchor' },
 } as SceneElement
 
-function option(id: string, question: number, choice: number, assetId: string, layerAssetId?: string): SceneElement {
+function option(id: string, question: number, choice: number, assetId: string): SceneElement {
   return {
     id,
     type: 'image',
@@ -60,7 +60,25 @@ function option(id: string, question: number, choice: number, assetId: string, l
     anchor: 'center',
     zIndex: 5,
     mode: 'fit',
-    comboRole: { gameId: 'combo-game', role: 'option', question, choice, layerAssetId },
+    comboRole: { gameId: 'combo-game', role: 'option', question, choice },
+  } as SceneElement
+}
+
+/** A layer is a normal element the author placed where the pick should land. */
+function layer(id: string, question: number, choice: number, assetId: string, showOnCanvas?: boolean): SceneElement {
+  return {
+    id,
+    type: 'image',
+    name: id,
+    assetId,
+    x: 540,
+    y: 500,
+    w: 300,
+    h: 300,
+    anchor: 'center',
+    zIndex: 6,
+    mode: 'fit',
+    comboRole: { gameId: 'combo-game', role: 'layer', question, choice, showOnCanvas },
   } as SceneElement
 }
 
@@ -127,39 +145,47 @@ describe('combo builder', () => {
     expect(opt.dataset.comboGameId).toBe('combo-game')
     expect(opt.dataset.comboQuestion).toBe('1')
     expect(opt.dataset.comboChoice).toBe('1')
-    // Falls back to the option's own image when no explicit layer art is set.
-    expect(opt.dataset.comboLayerAsset).toBe('optA')
     // Options must receive pointer events; the generic non-interactive rule would
     // otherwise switch them off because an image is decorative by default.
     expect(opt.style.pointerEvents).not.toBe('none')
     stage.destroy()
   })
 
-  it('uses explicit layer art over the option image when set', () => {
-    const stage = build([GAME, ANCHOR, option('a1', 1, 1, 'optA', 'layerA')])
-    stage.layoutAll()
-    stage.startGames(false)
-    expect(stage.root.querySelector<HTMLElement>('[data-id="a1"]')!.dataset.comboLayerAsset).toBe('layerA')
-    stage.destroy()
-  })
+  it('starts a layer hidden, and honours showOnCanvas only while editing', () => {
+    const els = [GAME, ANCHOR, option('a1', 1, 1, 'optA'), layer('l1', 1, 1, 'layerA', true), layer('l2', 1, 2, 'layerA')]
 
-  it('previews every question layer on the editor canvas and clears it for real play', () => {
-    const els = [GAME, ANCHOR, option('a1', 1, 1, 'optA'), option('a2', 1, 2, 'optB'), option('b1', 2, 1, 'layerA')]
-
+    // Editor canvas: the layer the author is positioning stays visible, the other
+    // one stays out of the way. start() is never called here.
     const editor = build(els)
     editor.layoutAll()
     editor.startGames(false)
-    // Static canvas: both questions' layers are painted so the inspector's layer
-    // rect fields are WYSIWYG.
-    expect(editor.root.querySelectorAll('.pa-combo-layer').length).toBe(2)
+    expect(editor.root.querySelector<HTMLElement>('[data-id="l1"]')!.classList.contains('pa-combo-off')).toBe(false)
+    expect(editor.root.querySelector<HTMLElement>('[data-id="l2"]')!.classList.contains('pa-combo-off')).toBe(true)
     editor.destroy()
 
+    // Real play: every layer starts hidden regardless, so an authoring convenience
+    // can never leak into the playable.
     document.body.innerHTML = ''
     const play = build(els)
     play.layoutAll()
     play.startGames(true)
-    expect(play.root.querySelectorAll('.pa-combo-layer').length).toBe(0)
+    expect(play.root.querySelector<HTMLElement>('[data-id="l1"]')!.classList.contains('pa-combo-off')).toBe(true)
+    expect(play.root.querySelector<HTMLElement>('[data-id="l2"]')!.classList.contains('pa-combo-off')).toBe(true)
     play.destroy()
+  })
+
+  it('restores each layer’s canvas visibility on destroy', () => {
+    const stage = build([GAME, ANCHOR, option('a1', 1, 1, 'optA'), layer('l1', 1, 1, 'layerA', true), layer('l2', 1, 2, 'layerA')])
+    stage.layoutAll()
+    stage.startGames(true)
+    const shown = stage.root.querySelector<HTMLElement>('[data-id="l1"]')!
+    const stayHidden = stage.root.querySelector<HTMLElement>('[data-id="l2"]')!
+    expect(shown.classList.contains('pa-combo-off')).toBe(true) // play hid it
+    stage.destroy()
+    // The shown one comes back, the hidden one stays hidden — the canvas is left
+    // exactly as it was found.
+    expect(shown.classList.contains('pa-combo-off')).toBe(false)
+    expect(stayHidden.classList.contains('pa-combo-off')).toBe(true)
   })
 
   it('shows only the live question and hides the rest once play starts', () => {
@@ -175,7 +201,7 @@ describe('combo builder', () => {
     stage.destroy()
   })
 
-  it('drops an option, stacks it on the anchor, advances, and wins after the last question', () => {
+  it('drops an option, reveals its layer element, advances, and wins after the last question', () => {
     const responder: SceneElement = {
       id: 'responder',
       type: 'text',
@@ -198,7 +224,19 @@ describe('combo builder', () => {
       ],
     } as SceneElement
 
-    const stage = build([GAME, ANCHOR, responder, title('t1', 1), title('t2', 2), option('a1', 1, 1, 'optA'), option('a2', 1, 2, 'optB'), option('b1', 2, 1, 'layerA')])
+    const stage = build([
+      GAME,
+      ANCHOR,
+      responder,
+      title('t1', 1),
+      title('t2', 2),
+      option('a1', 1, 1, 'optA'),
+      option('a2', 1, 2, 'optB'),
+      layer('l-a1', 1, 1, 'layerA'),
+      layer('l-a2', 1, 2, 'optB'),
+      option('b1', 2, 1, 'optA'),
+      layer('l-b1', 2, 1, 'layerA'),
+    ])
     const heard: string[] = []
     off = on('sfx-asset', (id: unknown) => heard.push(String(id)))
     let won = false
@@ -229,11 +267,12 @@ describe('combo builder', () => {
     expect(heard).toContain('dropSfx')
     expect(anim.style.animation).toContain('pa-shake')
 
-    // The unpicked sibling leaves, the picked one flies in and lands as a layer.
+    // The unpicked sibling leaves, the picked one flies in and hands over to ITS
+    // layer element — and only that one; the loser's layer stays hidden.
     vi.advanceTimersByTime(150)
     expect(loser.classList.contains('pa-combo-off')).toBe(true)
-    const layer = stage.root.querySelector<HTMLImageElement>('[data-id="anchor"] .pa-combo-layer')!
-    expect(layer.getAttribute('src')).toBe('a.png')
+    expect(stage.root.querySelector<HTMLElement>('[data-id="l-a1"]')!.classList.contains('pa-combo-off')).toBe(false)
+    expect(stage.root.querySelector<HTMLElement>('[data-id="l-a2"]')!.classList.contains('pa-combo-off')).toBe(true)
     expect(opt.classList.contains('pa-combo-off')).toBe(true)
 
     // ...then question 2 comes up.
@@ -250,7 +289,10 @@ describe('combo builder', () => {
     last.dispatchEvent(pointer('pointerdown', 250, 250))
     last.dispatchEvent(pointer('pointerup', 250, 250))
     vi.advanceTimersByTime(400)
-    expect(stage.root.querySelectorAll('[data-id="anchor"] .pa-combo-layer').length).toBe(2)
+    // Both picked layers are now showing; the unpicked one never appears.
+    const revealed = ['l-a1', 'l-b1'].map((id) => stage.root.querySelector<HTMLElement>(`[data-id="${id}"]`)!)
+    expect(revealed.every((n) => !n.classList.contains('pa-combo-off'))).toBe(true)
+    expect(stage.root.querySelector<HTMLElement>('[data-id="l-a2"]')!.classList.contains('pa-combo-off')).toBe(true)
     expect(won).toBe(true)
 
     offWin()
@@ -258,7 +300,7 @@ describe('combo builder', () => {
   })
 
   it('springs an option back home when it is released outside the drop area', () => {
-    const stage = build([GAME, ANCHOR, option('a1', 1, 1, 'optA'), option('a2', 1, 2, 'optB')])
+    const stage = build([GAME, ANCHOR, option('a1', 1, 1, 'optA'), option('a2', 1, 2, 'optB'), layer('l-a1', 1, 1, 'layerA')])
     stage.layoutAll()
     stage.startGames(true)
 
@@ -272,7 +314,8 @@ describe('combo builder', () => {
     expect(opt.style.translate).toBe('0px 0px')
     expect(opt.style.scale).toBe('1')
     expect(opt.classList.contains('pa-combo-off')).toBe(false)
-    expect(stage.root.querySelectorAll('.pa-combo-layer').length).toBe(0)
+    // Nothing was picked, so no layer was revealed.
+    expect(stage.root.querySelector<HTMLElement>('[data-id="l-a1"]')!.classList.contains('pa-combo-off')).toBe(true)
     stage.destroy()
   })
 
