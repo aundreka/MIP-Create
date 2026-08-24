@@ -1208,7 +1208,6 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
         if (el.comboRole.showOnCanvas) outer.dataset.comboCanvasShow = '1'
         else outer.classList.add(COMBO_OFF_CLASS)
       }
-      if (el.comboRole.role === 'dragArt' && el.comboRole.follow) outer.dataset.comboFollow = '1'
     }
 
     const anim = document.createElement('div')

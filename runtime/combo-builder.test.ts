@@ -74,8 +74,8 @@ function option(id: string, question: number, choice: number, assetId: string): 
   } as SceneElement
 }
 
-/** Optional per-option cue, shown only while THAT option is held. */
-function dragArt(id: string, question: number, choice: number, follow?: boolean, showOnCanvas?: boolean): SceneElement {
+/** Optional per-option drag proxy: what that option looks like while carried. */
+function dragArt(id: string, question: number, choice: number, showOnCanvas?: boolean): SceneElement {
   return {
     id,
     type: 'image',
@@ -88,7 +88,7 @@ function dragArt(id: string, question: number, choice: number, follow?: boolean,
     anchor: 'center',
     zIndex: 8,
     mode: 'fit',
-    comboRole: { gameId: 'combo-game', role: 'dragArt', question, choice, follow, showOnCanvas },
+    comboRole: { gameId: 'combo-game', role: 'dragArt', question, choice, showOnCanvas },
   } as SceneElement
 }
 
@@ -526,7 +526,7 @@ describe('combo builder', () => {
       return { art: node, opt, stage }
     }
 
-    it('shows only the held option’s own cue, not the sibling’s', () => {
+    it('shows only the held option’s own proxy, not the sibling’s', () => {
       const stage = build([
         GAME,
         ANCHOR,
@@ -549,6 +549,7 @@ describe('combo builder', () => {
       expect(q('cue2').classList.contains('pa-combo-off')).toBe(true)
       expect(q('cue-q2').classList.contains('pa-combo-off')).toBe(true)
       q('a1').dispatchEvent(pointer('pointerup', 450, 450))
+      vi.advanceTimersByTime(200)
 
       // The other option brings up its own cue instead.
       q('a2').dispatchEvent(pointer('pointerdown', 750, 450))
@@ -557,7 +558,7 @@ describe('combo builder', () => {
       stage.destroy()
     })
 
-    it('leaves an option with no cue of its own showing nothing', () => {
+    it('leaves an option with no proxy dragging its own picture', () => {
       const stage = build([GAME, ANCHOR, option('a1', 1, 1, 'optA'), option('a2', 1, 2, 'optB'), dragArt('cue1', 1, 1)])
       stage.layoutAll()
       stage.startGames(true)
@@ -568,61 +569,87 @@ describe('combo builder', () => {
 
       q('a2').dispatchEvent(pointer('pointerdown', 750, 450))
       expect(q('cue1').classList.contains('pa-combo-off')).toBe(true)
+      // No proxy for this one, so the option keeps its own art and gets the enlargement.
+      expect(q('a2').querySelector<HTMLElement>('.pa-el-anim')!.style.opacity).not.toBe('0')
+      expect(scaleOf(q('a2'))).toBe('1.25')
       stage.destroy()
     })
 
-    it('stays hidden until an option is picked up, then hides again on release', () => {
+    it('replaces the option’s own picture while it is held, and gives it back on release', () => {
       const { art, opt, stage } = held(dragArt('cue', 1, 1))
+      const optArt = opt.querySelector<HTMLElement>('.pa-el-anim')!
       expect(art.classList.contains('pa-combo-off')).toBe(true)
 
       opt.dispatchEvent(pointer('pointerdown', 450, 450))
+      // The proxy is what the player now sees; the option's own art switches off but
+      // the element stays interactive, because it is the thing holding the pointer.
       expect(art.classList.contains('pa-combo-off')).toBe(false)
+      expect(optArt.style.opacity).toBe('0')
+      expect(opt.style.pointerEvents).not.toBe('none')
 
-      // Released outside the drop area — the cue goes with the grab, not the pick.
+      // Released outside the drop area: the proxy fades out, the option comes back.
       opt.dispatchEvent(pointer('pointerup', 450, 450))
+      expect(optArt.style.opacity).toBe('1')
+      vi.advanceTimersByTime(200)
       expect(art.classList.contains('pa-combo-off')).toBe(true)
+      expect(art.style.translate).toBe('')
       stage.destroy()
     })
 
-    it('rides along with the option when set to follow', () => {
-      const { art, opt, stage } = held(dragArt('cue', 1, 1, true))
+    it('enlarges the proxy rather than the option', () => {
+      const { art, opt, stage } = held(dragArt('cue', 1, 1))
       opt.dispatchEvent(pointer('pointerdown', 450, 450))
-      // Resting centre (300,960) sampled at grab; option centre is (450,450).
+      expect(scaleOf(art)).toBe('1.25')
+      // The option must stay at natural size: it is only the invisible handle now.
+      expect(scaleOf(opt)).toBe('')
+      stage.destroy()
+    })
+
+    it('rides under the finger, wherever it was placed on the canvas', () => {
+      const { art, opt, stage } = held(dragArt('cue', 1, 1))
+      opt.dispatchEvent(pointer('pointerdown', 450, 450))
+      // Resting centre (300,960) sampled at pick-up; option centre is (450,450).
       expect(art.style.translate).toBe('150px -510px')
 
       stubRect(opt, 600, 300, 100, 100)
       opt.dispatchEvent(pointer('pointermove', 650, 350))
       expect(art.style.translate).toBe('350px -610px')
-
-      opt.dispatchEvent(pointer('pointerup', 650, 350))
-      expect(art.style.translate).toBe('')
       stage.destroy()
     })
 
-    it('stays put when follow is off', () => {
-      const { art, opt, stage } = held(dragArt('cue', 1, 1, false))
-      opt.dispatchEvent(pointer('pointerdown', 450, 450))
-      expect(art.style.translate).toBe('')
-      stage.destroy()
-    })
-
-    it('is optional — the game plays fine with none', () => {
-      const stage = build([GAME, ANCHOR, option('a1', 1, 1, 'optA')])
+    it('is the thing that flies onto the layer, not the option', () => {
+      const stage = build([GAME, ANCHOR, option('a1', 1, 1, 'optA'), dragArt('cue', 1, 1), layer('l-a1', 1, 1, 'layerA')])
       stage.layoutAll()
       stage.startGames(true)
-      const opt = stage.root.querySelector<HTMLElement>('[data-id="a1"]')!
+      const q = (id: string): HTMLElement => stage.root.querySelector<HTMLElement>(`[data-id="${id}"]`)!
       const target = stage.root.querySelector<HTMLElement>('[data-combo-target="1"]')!
-      stubRect(target, 0, 0, 500, 500)
-      stubRect(opt, 100, 100, 100, 100)
-      expect(() => {
-        opt.dispatchEvent(pointer('pointerdown', 150, 150))
-        opt.dispatchEvent(pointer('pointerup', 150, 150))
-      }).not.toThrow()
+      stubRect(target, 0, 0, 1000, 1000)
+      stubRect(q('a1'), 200, 200, 100, 100)
+      stubRect(q('cue'), 100, 900, 400, 120)
+      stubRect(q('l-a1'), 600, 600, 200, 60)
+
+      q('a1').dispatchEvent(pointer('pointerdown', 250, 250))
+      q('a1').dispatchEvent(pointer('pointerup', 250, 250))
+
+      // The proxy travels from its own resting centre (300,960) to the layer's (700,630)...
+      expect(q('cue').style.translate).toBe('400px -330px')
+      // ...shrinking contain-style onto it (400x120 -> 200x60 is 0.5) x landScale.
+      expect(Number(scaleOf(q('cue')))).toBeCloseTo(0.5 * 0.92, 5)
+      // ...and the option, already invisible, leaves at once rather than trailing along:
+      // it keeps the resting 0,0 offset relayout gave it and never takes the flight.
+      expect(q('a1').classList.contains('pa-combo-off')).toBe(true)
+      expect(q('a1').style.translate).toBe('0px 0px')
+      expect(scaleOf(q('a1'))).toBe('')
+
+      vi.advanceTimersByTime(600)
+      expect(q('l-a1').classList.contains('pa-combo-off')).toBe(false)
+      // The proxy is parked once the hand-off is done.
+      expect(q('cue').classList.contains('pa-combo-off')).toBe(true)
       stage.destroy()
     })
 
     it('honours showOnCanvas while editing but never during play', () => {
-      const els = [GAME, ANCHOR, option('a1', 1, 1, 'optA'), dragArt('cue', 1, 1, false, true)]
+      const els = [GAME, ANCHOR, option('a1', 1, 1, 'optA'), dragArt('cue', 1, 1, true)]
       const editor = build(els)
       editor.layoutAll()
       editor.startGames(false)

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SceneElement } from '../runtime/scene'
-import { assignComboSlot, comboCandidates, comboLayers, comboMembers, comboOptionLabel, comboSlotSummary, setCanvasVisible, setDragArtFollow } from './comboSlots'
+import { assignComboSlot, comboCandidates, comboLayers, comboMembers, comboOptionLabel, comboSlotSummary, setCanvasVisible } from './comboSlots'
 
 function el(id: string, extra: Partial<SceneElement> = {}): SceneElement {
   return { id, type: 'image', name: id, x: 0, y: 0, anchor: 'center', zIndex: 1, mode: 'fit', ...extra } as SceneElement
@@ -81,22 +81,14 @@ describe('combo layer visibility', () => {
 })
 
 describe('combo drag art', () => {
-  it('keeps the follow flag across a move, and never puts it on another role', () => {
-    const a = el('cue', { comboRole: { gameId: GAME, role: 'dragArt', question: 1, choice: 1, follow: true, showOnCanvas: true } })
+  it('re-keys which option it belongs to when moved, keeping its canvas visibility', () => {
+    const a = el('cue', { comboRole: { gameId: GAME, role: 'dragArt', question: 1, choice: 1, showOnCanvas: true } })
     const moved = assignComboSlot({ nextId: 'cue', current: undefined, role: 'dragArt', gameId: GAME, question: 2, choice: 2, elements: [a] })
-    // Moving it to another option keeps how it behaves, but re-keys which option it belongs to.
-    expect(moved[0].patch.comboRole).toMatchObject({ follow: true, showOnCanvas: true, question: 2, choice: 2 })
+    expect(moved[0].patch.comboRole).toMatchObject({ showOnCanvas: true, question: 2, choice: 2 })
 
+    // Canvas visibility is shared by both hidden-by-default kinds, so it carries over.
     const asLayer = assignComboSlot({ nextId: 'cue', current: undefined, role: 'layer', gameId: GAME, question: 1, choice: 1, elements: [a] })
-    expect(asLayer[0].patch.comboRole?.follow).toBeUndefined()
-    // Canvas visibility is shared by the two hidden kinds, so it does carry over.
     expect(asLayer[0].patch.comboRole?.showOnCanvas).toBe(true)
-  })
-
-  it('stores follow as absent when off', () => {
-    const a = el('cue', { comboRole: { gameId: GAME, role: 'dragArt', follow: true } })
-    expect(setDragArtFollow(a, false).patch.comboRole?.follow).toBeUndefined()
-    expect(setDragArtFollow(a, true).patch.comboRole?.follow).toBe(true)
   })
 })
 
@@ -145,6 +137,6 @@ describe('combo labels', () => {
     expect(comboSlotSummary({ role: 'title', question: 2 })).toBe("question 2's title")
     expect(comboSlotSummary({ role: 'layer', question: 1, choice: 2 })).toBe("question 1's layer for option 2")
     expect(comboSlotSummary({ role: 'option', question: 4, choice: 1 })).toBe('question 4, option 1')
-    expect(comboSlotSummary({ role: 'dragArt', question: 3, choice: 2 })).toBe("question 3's drag art for option 2")
+    expect(comboSlotSummary({ role: 'dragArt', question: 3, choice: 2 })).toBe("what question 3's option 2 looks like while dragged")
   })
 })

@@ -521,10 +521,11 @@ export interface BasketItemConfig {
 //             on advance — it never reacts to WHICH option was picked.
 //   'anchor'  the base art the layers build on top of. Purely the backdrop: it is
 //             where an option flies when its question has no layer element yet.
-//   'dragArt' optional, one per option. Hidden until the player picks THAT option up,
-//             shown for as long as they hold it — a "drop it here" cue, a glow, a
-//             preview of what they are choosing. It can sit where it was placed or
-//             ride along with the option.
+//   'dragArt' optional, one per option: the DRAG PROXY. While that option is held,
+//             its own art switches off and this rides under the finger in its place,
+//             enlarged, and is what flies onto the layer at the end. Lets the tray
+//             picture and the in-hand picture differ — a flat swatch in the tray, a
+//             big render in the hand.
 export interface ComboRoleConfig {
   gameId?: string
   role: 'option' | 'layer' | 'title' | 'anchor' | 'dragArt'
@@ -538,9 +539,6 @@ export interface ComboRoleConfig {
    * starts, so this never leaks into the playable — it exists so the author can see
    * one at a time instead of the whole stack at once. */
   showOnCanvas?: boolean
-  /** 'dragArt' only: ride along with the option being dragged instead of staying
-   * where it was placed. */
-  follow?: boolean
 }
 export interface SlotConfig {
   group?: string

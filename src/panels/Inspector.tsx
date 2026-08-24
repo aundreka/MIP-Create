@@ -106,7 +106,6 @@ import {
   comboOptionLabel,
   comboSlotSummary,
   setCanvasVisible,
-  setDragArtFollow,
   type ComboSlotEdit,
 } from '../comboSlots'
 import { DATE_LOCALE_OPTIONS } from '../dateLocales'
@@ -1214,19 +1213,21 @@ function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps):
           </>
         )}
         {opt && !layer && <div className="hint pad">This option leaves nothing behind — it will just fly to the anchor and vanish.</div>}
-        <Row label="Drag art (optional)">
+        <Row label="Looks like, while dragged">
           <Select value={art?.id ?? ''} onChange={(v) => assign(v, art, 'dragArt', q + 1, choice)} options={choices(art)} />
         </Row>
-        {art && (
+        {art ? (
           <>
-            <Toggle label="Follow the dragged option" checked={!!art.comboRole?.follow} onChange={(v) => apply([setDragArtFollow(art, v)])} />
             <Toggle label="Show it on the canvas" checked={!!art.comboRole?.showOnCanvas} onChange={(v) => setLayersVisible([art], v)} />
-            {jump(art, `Position “${art.name || art.id}” on canvas`)}
+            {jump(art, `Size “${art.name || art.id}” on canvas`)}
             <div className="hint pad">
-              Shown the moment THIS option is picked up and gone again when it is released, whether the drop landed or sprang back. Off by default it stays where you placed it —
-              a &ldquo;drop it here&rdquo; callout. Turn on following and it rides along under the enlarged option instead, as a glow or a bigger preview.
+              Optional. While this option is held, its own picture switches off and THIS one rides under the finger in its place, enlarged — and it is what flies onto the layer
+              at the end. Use it when the tray picture and the in-hand picture should differ: a flat swatch in the tray, a big render in the hand. Only its size matters; it is
+              moved to the finger.
             </div>
           </>
+        ) : (
+          <div className="hint pad">Optional. Leave empty and the option&apos;s own picture is what gets dragged.</div>
         )}
       </div>
     )

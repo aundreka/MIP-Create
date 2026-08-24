@@ -47,11 +47,11 @@ interface DragArtEl {
   /** Which option this belongs to — drag art is per-option, like a layer. */
   question: number
   choice: number
-  /** Ride along with the dragged option instead of staying where it was placed. */
-  follow: boolean
   canvasShown: boolean
-  /** Resting centre, sampled once when a drag begins, so following is a pure offset. */
+  /** Resting centre, sampled when a drag begins, so riding along is a pure offset. */
   home: Pt
+  /** Inline opacity layoutRec left on it, to be handed back after a fade. */
+  restOpacity: string
 }
 
 interface LayerEl {
@@ -168,9 +168,9 @@ export function createCombo(): GameModule {
     item.el.style.translate = `${dx}px ${dy}px`
   }
 
-  /** Scale the option about its visible centre, optionally eased. */
-  const setScale = (item: OptionEl, value: number, ms: number, easing = 'ease'): void => {
-    const node = scaleNode(item.el)
+  /** Scale an element about its visible centre, optionally eased. */
+  const setScale = (el: HTMLElement, value: number, ms: number, easing = 'ease'): void => {
+    const node = scaleNode(el)
     node.style.transition = ms > 0 ? `scale ${ms}ms ${easing}` : ''
     node.style.scale = String(value)
   }
@@ -228,40 +228,81 @@ export function createCombo(): GameModule {
   }
 
   // ---- drag art ------------------------------------------------------------
-  // Optional per-option cue that exists only while the player is holding THAT option:
-  // a "drop it here" callout, a glow, a blown-up preview of what they are about to
-  // choose. Keyed by question + choice exactly like a layer, so each option can show
-  // something of its own. Placed on the canvas like everything else, so its look and
-  // position are the author's.
-  const dragArtFor = (option: OptionEl): DragArtEl[] => dragArt.filter((a) => a.question === option.question && a.choice === option.choice)
+  // Optional per-option DRAG PROXY: the thing the player actually carries. While an
+  // option with drag art is held, the option's own art is switched off and this rides
+  // under the finger in its place — enlarged, and then flown onto the layer at the
+  // end. It lets the tray art and the in-hand art be different pictures: a flat
+  // swatch in the tray, a big three-quarter render in the hand.
+  //
+  // The option element itself never moves aside: it stays put as the invisible drag
+  // handle, which is what keeps pointer capture, hit-testing against the drop area
+  // and the hint marker all working exactly as they do without drag art.
+  const dragArtFor = (option: OptionEl): DragArtEl | undefined =>
+    dragArt.find((a) => a.question === option.question && a.choice === option.choice)
+
+  /** The element the player sees themselves dragging: the proxy if there is one, else
+   * the option itself. Everything downstream — the enlargement, the flight, the
+   * cross-fade into the layer — acts on whichever this returns. */
+  const proxyFor = (item: OptionEl): HTMLElement => dragArtFor(item)?.el ?? item.el
 
   const showDragArt = (item: OptionEl): void => {
-    for (const art of dragArtFor(item)) {
-      // Sample the resting centre BEFORE showing it: the class only toggles opacity
-      // and visibility, so the box is measurable either way, and a fresh sample keeps
-      // following correct across resizes.
-      art.home = center(art.el)
-      art.el.style.transition = ''
-      art.el.style.translate = ''
-      show(art.el)
-    }
+    const art = dragArtFor(item)
+    if (!art) return
+    // Sample the resting centre BEFORE moving it: the off class only touches opacity
+    // and visibility, so the box is measurable either way, and a fresh sample keeps
+    // it correct across resizes.
+    art.el.style.transition = ''
+    art.el.style.translate = ''
+    art.restOpacity = art.el.style.opacity
+    art.home = center(art.el)
+    show(art.el)
+    // The option hands over its appearance for the duration. Opacity rather than the
+    // off class, so the element keeps receiving the pointer events it is capturing.
+    const node = scaleNode(item.el)
+    node.style.transition = ''
+    node.style.opacity = '0'
     followDragArt(item)
   }
 
   const followDragArt = (item: OptionEl): void => {
-    const riders = dragArtFor(item).filter((a) => a.follow)
-    if (!riders.length) return
+    const art = dragArtFor(item)
+    if (!art) return
     const p = center(item.el)
-    for (const art of riders) art.el.style.translate = `${p.x - art.home.x}px ${p.y - art.home.y}px`
+    art.el.style.translate = `${p.x - art.home.x}px ${p.y - art.home.y}px`
   }
 
-  /** Hide ALL of it, not just this option's — cheap, and it can't leave a stale cue
-   * up if a drag is interrupted between questions. */
-  const hideDragArt = (): void => {
+  /** Give the option back its own appearance — a rejected drop, or teardown. */
+  const restoreOptionArt = (item: OptionEl, ms = 0): void => {
+    const node = scaleNode(item.el)
+    node.style.transition = ms > 0 ? `opacity ${ms}ms ease` : ''
+    node.style.opacity = ms > 0 ? '1' : ''
+    if (ms > 0) after(ms, () => (node.style.opacity = ''))
+  }
+
+  /** Put ALL of it away, not just this option's — cheap, and it can't leave a stale
+   * proxy on screen if a drag is interrupted between questions. */
+  const hideDragArt = (fadeMs = 0): void => {
     for (const art of dragArt) {
-      hide(art.el)
-      art.el.style.translate = ''
+      const visible = !art.el.classList.contains(OFF_CLASS)
+      if (fadeMs > 0 && visible) {
+        art.el.style.transition = `opacity ${fadeMs}ms ease`
+        art.el.style.opacity = '0'
+        after(fadeMs, () => parkDragArt(art))
+      } else {
+        parkDragArt(art)
+      }
     }
+  }
+
+  const parkDragArt = (art: DragArtEl): void => {
+    hide(art.el)
+    art.el.style.transition = ''
+    art.el.style.translate = ''
+    // layoutRec owns this property; hand back exactly what it had written.
+    art.el.style.opacity = art.restOpacity
+    const node = scaleNode(art.el)
+    node.style.transition = ''
+    node.style.scale = ''
   }
 
   /** Bring a layer up from transparent over `ms`, so it arrives as the option on top
@@ -349,7 +390,7 @@ export function createCombo(): GameModule {
       if (other === item) continue
       other.el.style.transition = `opacity ${dismissMs}ms ease`
       other.el.style.opacity = '0'
-      setScale(other, 0.7, dismissMs)
+      setScale(other.el, 0.7, dismissMs)
       after(dismissMs, () => hide(other.el))
     }
 
@@ -375,23 +416,32 @@ export function createCombo(): GameModule {
     // width alone: when the option art and the placed art have different aspects,
     // matching width alone leaves the option spilling out past the thing it is
     // supposed to be turning into, which is exactly when the seam shows.
+    // Whatever the player was carrying is what flies — the proxy when there is drag
+    // art, otherwise the option itself.
+    const art = dragArtFor(item)
+    const flyer = art?.el ?? item.el
     const to = destination.getBoundingClientRect()
-    const rect = item.el.getBoundingClientRect()
+    const rect = flyer.getBoundingClientRect()
     const fit =
       rect.width > 0 && rect.height > 0 && to.width > 0 && to.height > 0 ? Math.min(to.width / rect.width, to.height / rect.height) : 1
-    const home = { x: rect.left + rect.width / 2 - item.dx, y: rect.top + rect.height / 2 - item.dy }
-    // The cross-fade occupies the TAIL of the flight, so the option is still moving
-    // while it dissolves instead of landing and then blinking out.
+    // The flyer's resting centre. A proxy already knows its own (sampled at pick-up);
+    // an option's is its live centre minus the drag offset it is carrying.
+    const home = art ? art.home : { x: rect.left + rect.width / 2 - item.dx, y: rect.top + rect.height / 2 - item.dy }
+    // The cross-fade occupies the TAIL of the flight, so it is still moving while it
+    // dissolves instead of landing and then blinking out.
     const cross = Math.min(crossFadeMs, flyMs)
     const ease = 'cubic-bezier(.4,0,.2,1)'
-    item.el.style.transition = `translate ${flyMs}ms ${ease}, opacity ${cross}ms linear ${flyMs - cross}ms`
-    item.el.style.translate = `${to.left + to.width / 2 - home.x}px ${to.top + to.height / 2 - home.y}px`
+    flyer.style.transition = `translate ${flyMs}ms ${ease}, opacity ${cross}ms linear ${flyMs - cross}ms`
+    flyer.style.translate = `${to.left + to.width / 2 - home.x}px ${to.top + to.height / 2 - home.y}px`
     // Settling a touch UNDER the placed art's size reads as the pick being absorbed
     // into it; landScale 1 lands on an exact size match instead.
-    setScale(item, Math.max(0.05, fit * landScale), flyMs, ease)
-    if (cross > 0) item.el.style.opacity = '0'
+    setScale(flyer, Math.max(0.05, fit * landScale), flyMs, ease)
+    if (cross > 0) flyer.style.opacity = '0'
+    // The option was only ever the drag handle once a proxy took over its look, so it
+    // can leave immediately rather than trailing along invisibly.
+    if (art) hide(item.el)
 
-    // Start the layer's fade-in at the same moment the option starts fading out. A
+    // Start the layer's fade-in at the same moment the flyer starts fading out. A
     // linear pair keeps the combined opacity roughly constant across the swap; eased
     // curves dip in the middle and read as a flicker.
     if (layer) after(flyMs - cross, () => fadeInLayer(layer.el, cross))
@@ -399,6 +449,7 @@ export function createCombo(): GameModule {
     after(flyMs, () => {
       if (layer) show(layer.el)
       hide(item.el)
+      if (art) parkDragArt(art)
       after(advanceDelayMs, advance)
     })
   }
@@ -422,8 +473,10 @@ export function createCombo(): GameModule {
       const base = { x: item.dx, y: item.dy }
       item.el.style.zIndex = '99999'
       item.el.style.cursor = 'grabbing'
-      setScale(item, pickupScale, 140)
+      // Swap in the proxy FIRST, so the enlargement lands on whichever element the
+      // player is about to be carrying.
       showDragArt(item)
+      setScale(proxyFor(item), pickupScale, 140)
       ctx.sfx.play('comboPick')
 
       const move = (moveEvent: PointerEvent): void => {
@@ -439,9 +492,6 @@ export function createCombo(): GameModule {
         item.el.removeEventListener('pointercancel', cancel)
         item.dragging = false
         target.dataset.comboNear = '0'
-        // The cue exists only for as long as the option is held — whether the drop
-        // lands or springs back.
-        hideDragArt()
         const p = center(item.el)
         const dropped = !cancelled && insideTarget(p.x, p.y)
         if (dropped) {
@@ -451,7 +501,9 @@ export function createCombo(): GameModule {
         } else {
           item.el.style.zIndex = item.homeZ
           item.el.style.cursor = 'grab'
-          setScale(item, 1, 140)
+          hideDragArt(140)
+          restoreOptionArt(item, 140)
+          setScale(item.el, 1, 140)
           setOffset(item, 0, 0, true)
         }
         if (typeof item.el.releasePointerCapture === 'function' && item.el.hasPointerCapture?.(eventToRelease.pointerId)) {
@@ -494,9 +546,9 @@ export function createCombo(): GameModule {
           el,
           question,
           choice,
-          follow: el.dataset.comboFollow === '1',
           canvasShown: el.dataset.comboCanvasShow === '1',
           home: { x: 0, y: 0 },
+          restOpacity: '',
         })
       } else if (role === 'title') {
         titles.push({ el, question })
@@ -577,6 +629,7 @@ export function createCombo(): GameModule {
       clearTimers()
       ctx.root.innerHTML = ''
       for (const item of options) {
+        restoreOptionArt(item)
         resetOption(item)
         item.el.classList.remove(OFF_CLASS)
         item.el.style.pointerEvents = ''
