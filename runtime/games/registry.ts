@@ -32,6 +32,7 @@ import { COUNTDOWN_TEMPLATE } from './countdown'
 import { HOLDGAUGE_TEMPLATE } from './holdgauge'
 import { EMBED_TEMPLATE } from './embed'
 import { BASKET_TEMPLATE } from './basket'
+import { COMBO_TEMPLATE } from './combo'
 
 export const GAME_TEMPLATES: GameTemplate[] = [
   FLIPBOOK_TEMPLATE,
@@ -48,6 +49,7 @@ export const GAME_TEMPLATES: GameTemplate[] = [
   PICK_TEMPLATE,
   VENDING_TEMPLATE,
   BASKET_TEMPLATE,
+  COMBO_TEMPLATE,
   DRAG_TEMPLATE,
   CATCH_TEMPLATE,
   BUBBLES_TEMPLATE,

@@ -18,6 +18,7 @@ import {
   composeElementAnim,
   composeGameWinAnim,
   composeTapAnim,
+  composeComboEventAnim,
   composeThoughtEventAnim,
   entranceLeadDelayMs,
   entranceTriggers,
@@ -661,6 +662,15 @@ html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;overscroll-b
 .pa-el--t-off{opacity:0 !important;visibility:hidden !important;pointer-events:none !important;}
 .pa-root:not(.has-interacted) .pa-show-after-interaction{opacity:0 !important;pointer-events:none !important;}
 .pa-root.has-interacted .pa-hide-after-basket-interaction{opacity:0 !important;pointer-events:none !important;}
+/* Combo builder. Off-question options/titles hide by CLASS for the same reason as
+   .pa-el--t-off: layoutRec rewrites inline display and opacity on every layout pass,
+   so an inline hide would be dropped by the next resize. visibility keeps the box
+   measurable, which the fly-to-anchor maths needs. */
+.pa-combo-off{opacity:0 !important;visibility:hidden !important;pointer-events:none !important;}
+/* The anchor's layer stack. Absolutely positioned against the .pa-el (its .pa-el-anim
+   parent is static), so it inherits the anchor's animations while filling its box. */
+.pa-combo-stack{position:absolute;inset:0;pointer-events:none;}
+.pa-combo-layer{position:absolute;height:auto;pointer-events:none;user-select:none;-webkit-user-drag:none;}
 `.trim()
   document.head.appendChild(style)
 }
@@ -767,6 +777,11 @@ function runTap(rec: Rec): void {
 
 function runThoughtEvent(rec: Rec, event: 'thoughtSpawn' | 'thoughtWhack'): void {
   const css = composeThoughtEventAnim(rec.el, event)
+  if (css !== 'none') restartAnim(rec.anim, css)
+}
+
+function runComboEvent(rec: Rec, event: 'comboPick' | 'comboDrop' | 'comboNext'): void {
+  const css = composeComboEventAnim(rec.el, event)
   if (css !== 'none') restartAnim(rec.anim, css)
 }
 
@@ -1111,6 +1126,16 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       outer.dataset.basketSceneItem = '1'
       if (el.basketItem.gameId) outer.dataset.basketGameId = el.basketItem.gameId
     }
+    if (el.comboRole) {
+      outer.dataset.comboRole = el.comboRole.role
+      if (el.comboRole.gameId) outer.dataset.comboGameId = el.comboRole.gameId
+      if (el.comboRole.question) outer.dataset.comboQuestion = String(el.comboRole.question)
+      if (el.comboRole.choice) outer.dataset.comboChoice = String(el.comboRole.choice)
+      // The asset ID, not the resolved src — a base64 data URL in a DOM attribute
+      // would bloat every export. The game resolves it through its own asset map.
+      const layerId = el.comboRole.layerAssetId || el.assetId || ''
+      if (layerId) outer.dataset.comboLayerAsset = layerId
+    }
 
     const anim = document.createElement('div')
     anim.className = 'pa-el-anim'
@@ -1141,6 +1166,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       !el.reveal &&
       !el.button &&
       !el.basketItem &&
+      el.comboRole?.role !== 'option' &&
       !hasTapAnim(el)
     if (nonInteractive) {
       outer.style.pointerEvents = 'none'
@@ -1240,11 +1266,23 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
   // the matching authored animation and sound on EVERY visible scene element, so
   // supporting copy/art/CTAs can react without being children of the game mount.
   const fireThoughtEvent = (event: 'thoughtSpawn' | 'thoughtWhack'): void => {
+    broadcastGameEvent(event, (target) => runThoughtEvent(target, event))
+  }
+
+  // The Combo builder broadcasts the same way, so the question title, the anchor
+  // art and any supporting copy can animate on pick / drop / next-question.
+  const fireComboEvent = (event: 'comboPick' | 'comboDrop' | 'comboNext'): void => {
+    broadcastGameEvent(event, (target) => runComboEvent(target, event))
+  }
+
+  function broadcastGameEvent(
+    event: 'thoughtSpawn' | 'thoughtWhack' | 'comboPick' | 'comboDrop' | 'comboNext',
+    run: (target: Rec) => void,
+  ): void {
     for (const target of recs) {
       if (target.el.hidden) continue
-      const phase = event
-      if (target.el.animations?.[phase] || target.el.animations?.[`${phase}Extra`]?.length) runThoughtEvent(target, event)
-      const delay = phaseLeadDelayMs(target.el, phase)
+      if (target.el.animations?.[event] || target.el.animations?.[`${event}Extra`]?.length) run(target)
+      const delay = phaseLeadDelayMs(target.el, event)
       for (const binding of target.el.sfx ?? []) {
         if (binding.event !== event || !binding.assetId) continue
         if (delay > 0) enterSfxTimers.push(window.setTimeout(() => emitBoundSfx(binding), delay))
@@ -1608,6 +1646,10 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
               if (event === 'gameWin') return
               if (event === 'thoughtSpawn' || event === 'thoughtWhack') {
                 fireThoughtEvent(event)
+                return
+              }
+              if (event === 'comboPick' || event === 'comboDrop' || event === 'comboNext') {
+                fireComboEvent(event)
                 return
               }
               const bind = (rec.el.sfx ?? []).find((b) => b.event === event && b.assetId)

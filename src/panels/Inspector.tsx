@@ -12,6 +12,7 @@ import type {
   BoxStyle,
   ButtonConfig,
   ButtonTapEffect,
+  ComboRoleConfig,
   ConfettiConfig,
   CountdownConfig,
   CtaPulsePreset,
@@ -63,6 +64,7 @@ import {
   refreshScene,
   removeSelected,
   seedLandscapeLayout,
+  selectOnly,
   setOrientation,
   setLocaleAsset,
   setSceneBg,
@@ -292,6 +294,8 @@ function ElementSound(props: { el: SceneElement }): JSX.Element {
   // labels — "When the dial reaches NEUTRAL" beats "stage 2".
   const isHoldGauge = el.game?.templateId === 'holdgauge'
   const hasThoughtWhacker = scene.elements.some((candidate) => candidate.game?.templateId === 'thoughtwhack')
+  const isCombo = el.game?.templateId === 'combo'
+  const hasCombo = scene.elements.some((candidate) => candidate.game?.templateId === 'combo')
   const gaugeStages = ((): { value: string; label: string }[] => {
     if (!isHoldGauge) return []
     const p = el.game?.params ?? {}
@@ -338,6 +342,14 @@ function ElementSound(props: { el: SceneElement }): JSX.Element {
           { value: 'thoughtWhack', label: 'When a thought is whacked' },
         ]
       : []),
+    ...(hasCombo
+      ? [
+          { value: 'comboPick', label: 'When an option is picked up' },
+          { value: 'comboDrop', label: 'When an option is dropped' },
+          { value: 'comboNext', label: 'When the next question comes up' },
+        ]
+      : []),
+    ...(isCombo ? [{ value: 'onReveal', label: 'When the game is won' }] : []),
     ...gaugeStages,
     ...(isScratching ? [{ value: 'whileScratching', label: 'While scratching (loop)' }] : []),
     ...(isScratching || el.reveal ? [{ value: 'onReveal', label: 'When revealed / win' }] : []),
@@ -1105,6 +1117,119 @@ function BrushControls(props: {
   )
 }
 
+// ---- Combo builder: per-question setup -------------------------------------
+// The whole board lives on the canvas as tagged elements (Drag & drop -> Combo
+// builder role), so this panel is a ROSTER plus the one thing that can't be shown
+// by position: where each question's layer lands on the anchor art. Picking a
+// question chip shows its tagged title/options and lets the author jump to any of
+// them, so wiring a question never means hunting through the layers tree.
+interface ComboLayerRect {
+  x: number
+  y: number
+  w: number
+  rot: number
+}
+const COMBO_LAYER_DEFAULT: ComboLayerRect = { x: 50, y: 50, w: 100, rot: 0 }
+
+function comboLayers(params: Record<string, unknown>, questions: number): ComboLayerRect[] {
+  const list = Array.isArray(params.layers) ? (params.layers as Partial<ComboLayerRect>[]) : []
+  return Array.from({ length: questions }, (_, i) => ({ ...COMBO_LAYER_DEFAULT, ...(list[i] ?? {}) }))
+}
+
+interface ComboSetupProps {
+  params: Record<string, unknown>
+  setParam: (k: string, v: unknown) => void
+  elementId: string
+  siblings: SceneElement[]
+}
+function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps): JSX.Element {
+  const [active, setActive] = useState(0)
+  const questions = Math.max(1, Math.min(8, Number(params.questions ?? 3)))
+  const q = Math.min(active, questions - 1)
+  const layers = comboLayers(params, questions)
+  const layer = layers[q] ?? COMBO_LAYER_DEFAULT
+
+  const setLayer = (patch: Partial<ComboLayerRect>): void => {
+    setParam(
+      'layers',
+      layers.map((l, i) => (i === q ? { ...l, ...patch } : l)),
+    )
+  }
+
+  // Ours = tagged for this game, or tagged with no game named (single-game scenes).
+  const mine = siblings.filter((e) => e.comboRole && (!e.comboRole.gameId || e.comboRole.gameId === elementId))
+  const anchors = mine.filter((e) => e.comboRole?.role === 'anchor')
+  const titleFor = (n: number): SceneElement | undefined => mine.find((e) => e.comboRole?.role === 'title' && (e.comboRole.question ?? 1) === n)
+  const optionsFor = (n: number): SceneElement[] =>
+    mine.filter((e) => e.comboRole?.role === 'option' && (e.comboRole.question ?? 1) === n).sort((a, b) => (a.comboRole?.choice ?? 1) - (b.comboRole?.choice ?? 1))
+
+  const jump = (el: SceneElement): JSX.Element => (
+    <button key={el.id} className="btn" style={{ width: '100%', marginTop: 4, textAlign: 'left' }} onClick={() => selectOnly(el.id)}>
+      {el.name || el.id}
+    </button>
+  )
+
+  const opts = optionsFor(q + 1)
+  const title = titleFor(q + 1)
+
+  return (
+    <>
+      <div className="group-title2">Questions</div>
+      <Chips
+        items={Array.from({ length: questions }, (_, i) => ({
+          key: String(i),
+          label: `Q${i + 1}${optionsFor(i + 1).length ? '' : ' !'}`,
+          active: i === q,
+          onClick: () => setActive(i),
+        }))}
+      />
+      <div className="group-title2">Question {q + 1}</div>
+      <div className="hint pad">Title</div>
+      {title ? jump(title) : <div className="hint pad">No title tagged. Add a text or image element and set Drag &amp; drop → Combo role to <b>Question title</b> for question {q + 1}.</div>}
+      <div className="hint pad">Options ({opts.length})</div>
+      {opts.length ? (
+        opts.map(jump)
+      ) : (
+        <div className="hint pad">
+          No options tagged. Select two elements and set Drag &amp; drop → Combo role to <b>Option</b> for question {q + 1}.
+        </div>
+      )}
+
+      <div className="group-title2">Question {q + 1}&apos;s layer on the anchor</div>
+      <NumField label="Centre X (%)" value={layer.x} step={1} min={0} max={100} onChange={(n) => setLayer({ x: n })} />
+      <NumField label="Centre Y (%)" value={layer.y} step={1} min={0} max={100} onChange={(n) => setLayer({ y: n })} />
+      <NumField label="Width (%)" value={layer.w} step={1} min={1} max={400} onChange={(n) => setLayer({ w: n })} />
+      <NumField label="Rotation (°)" value={layer.rot} step={1} min={-180} max={180} onChange={(n) => setLayer({ rot: n })} />
+      <div className="hint pad">
+        Percentages of the anchor image&apos;s own box, so the layer scales with it on every device. Height follows the layer art&apos;s aspect. Later questions stack above earlier
+        ones.
+      </div>
+
+      <div className="group-title2">Drop area</div>
+      <button className="btn" style={{ width: '100%', marginTop: 6 }} onClick={() => window.dispatchEvent(new CustomEvent('pa:zone-edit', { detail: { elementId } }))}>
+        Set drop area on canvas
+      </button>
+      <div className="hint pad">
+        Draw the invisible area an option must be released into. There is exactly one drop area for the whole game — drag the box to move it, corner handles to resize, Esc to
+        finish.
+      </div>
+
+      <div className="group-title2">Anchors ({anchors.length})</div>
+      {anchors.length ? (
+        anchors.map(jump)
+      ) : (
+        <div className="hint pad">
+          No anchor tagged. Select the image the picks should build onto and set Drag &amp; drop → Combo role to <b>Anchor image</b>. Every anchor shows the same stack.
+        </div>
+      )}
+      <div className="hint pad">
+        Any scene element can use <b>On option picked up</b> / <b>On option dropped</b> / <b>On next question</b> in its Animation panel and the matching triggers in its Sounds
+        panel.
+      </div>
+    </>
+  )
+}
+
 interface ScratchGridCellsProps {
   params: Record<string, unknown>
   setParam: (k: string, v: unknown) => void
@@ -1808,7 +1933,11 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
     // first selected element's spec; any change writes that same spec to every
     // selected element, so identical timing makes them animate in sync as a group.
     const first = state.scene.elements.find((e) => e.id === state.selectedIds[0]) ?? state.scene.elements.find((e) => state.selectedIds.includes(e.id))
-    const patchAllPhase = (phase: 'entrance' | 'loop' | 'exit' | 'gameWin' | 'tap' | 'thoughtSpawn' | 'thoughtWhack', primary: AnimSpec | undefined, extra: AnimSpec[]): void => {
+    const patchAllPhase = (
+      phase: 'entrance' | 'loop' | 'exit' | 'gameWin' | 'tap' | 'thoughtSpawn' | 'thoughtWhack' | 'comboPick' | 'comboDrop' | 'comboNext',
+      primary: AnimSpec | undefined,
+      extra: AnimSpec[],
+    ): void => {
       beginTransaction()
       for (const id of state.selectedIds) {
         const e = state.scene.elements.find((x) => x.id === id)
@@ -1873,6 +2002,40 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
             defaultExtraSpec={{ preset: 'shine', durationMs: 900, delayMs: 0, easing: 'ease-in-out' }}
             onChange={(primary, ex) => patchAllPhase('tap', primary, ex)}
           />
+          {state.scene.elements.some((e) => e.game?.templateId === 'combo') && (
+            <>
+              <AnimPhase
+                title="On option picked up"
+                primary={first?.animations?.comboPick}
+                extra={first?.animations?.comboPickExtra}
+                presets={NODE_PRESETS}
+                extraPresets={NODE_PRESETS}
+                defaultSpec={{ preset: 'pop', durationMs: 260, delayMs: 0, easing: 'ease-out' }}
+                defaultExtraSpec={{ preset: 'glow', durationMs: 600, delayMs: 0, easing: 'ease-in-out' }}
+                onChange={(primary, ex) => patchAllPhase('comboPick', primary, ex)}
+              />
+              <AnimPhase
+                title="On option dropped"
+                primary={first?.animations?.comboDrop}
+                extra={first?.animations?.comboDropExtra}
+                presets={NODE_PRESETS}
+                extraPresets={NODE_PRESETS}
+                defaultSpec={{ preset: 'pop', durationMs: 320, delayMs: 0, easing: 'ease-out' }}
+                defaultExtraSpec={{ preset: 'shine', durationMs: 700, delayMs: 0, easing: 'ease-in-out' }}
+                onChange={(primary, ex) => patchAllPhase('comboDrop', primary, ex)}
+              />
+              <AnimPhase
+                title="On next question"
+                primary={first?.animations?.comboNext}
+                extra={first?.animations?.comboNextExtra}
+                presets={NODE_PRESETS}
+                extraPresets={NODE_PRESETS}
+                defaultSpec={{ preset: 'pop', durationMs: 380, delayMs: 0, easing: 'ease-out' }}
+                defaultExtraSpec={{ preset: 'shine', durationMs: 800, delayMs: 0, easing: 'ease-in-out' }}
+                onChange={(primary, ex) => patchAllPhase('comboNext', primary, ex)}
+              />
+            </>
+          )}
           {state.scene.elements.some((e) => e.game?.templateId === 'thoughtwhack') && (
             <>
               <AnimPhase
@@ -2799,6 +2962,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                       <div className="hint pad">The animated hint hand follows a currently visible, unwhacked thought and retargets after every whack.</div>
                     </>
                   )}
+                  {tpl.id === 'combo' && <ComboSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
                   {tpl.id === 'basket' && (
                     <>
                       <button
@@ -3009,6 +3173,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                       patchElement(id, {
                         basketItem: v ? { gameId: basketGames[0]?.id } : undefined,
                         drag: v ? undefined : el.drag,
+                        comboRole: v ? undefined : el.comboRole,
                       })
                     }
                   />
@@ -3031,10 +3196,86 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 </>
               )
             })()}
+            {(() => {
+              const comboGames = activeSceneDef(state)?.elements.filter((candidate) => candidate.type === 'game-mount' && candidate.game?.templateId === 'combo') ?? []
+              const role = el.comboRole
+              const patchRole = (p: Partial<ComboRoleConfig>): void => patchElement(id, { comboRole: { ...(role ?? { role: 'option' }), ...p } })
+              return (
+                <>
+                  <Row label="Combo role">
+                    <Select
+                      value={role?.role ?? 'none'}
+                      onChange={(v) =>
+                        patchElement(id, {
+                          comboRole:
+                            v === 'none'
+                              ? undefined
+                              : { gameId: role?.gameId ?? comboGames[0]?.id, role: v as ComboRoleConfig['role'], question: role?.question ?? 1, choice: role?.choice ?? 1 },
+                          // An element can't be a basket item and a combo option at once.
+                          basketItem: v === 'none' ? el.basketItem : undefined,
+                          drag: v === 'none' ? el.drag : undefined,
+                        })
+                      }
+                      options={[
+                        { value: 'none', label: 'Not in a Combo builder' },
+                        { value: 'option', label: 'Option (draggable answer)' },
+                        { value: 'title', label: 'Question title' },
+                        { value: 'anchor', label: 'Anchor image' },
+                      ]}
+                    />
+                  </Row>
+                  {role && comboGames.length > 1 && (
+                    <Row label="Combo game">
+                      <Select
+                        value={role.gameId ?? ''}
+                        onChange={(gameId) => patchRole({ gameId: gameId || undefined })}
+                        options={comboGames.map((game) => ({ value: game.id, label: game.name || game.id }))}
+                      />
+                    </Row>
+                  )}
+                  {role && role.role !== 'anchor' && (
+                    <NumField label="Question" value={role.question ?? 1} step={1} min={1} max={8} onChange={(n) => patchRole({ question: Math.round(n) })} />
+                  )}
+                  {role?.role === 'option' && (
+                    <>
+                      <NumField label="Choice (1 or 2)" value={role.choice ?? 1} step={1} min={1} max={4} onChange={(n) => patchRole({ choice: Math.round(n) })} />
+                      <AssetPicker
+                        label="Layer art on the anchor"
+                        value={role.layerAssetId || undefined}
+                        allowNone
+                        onChange={(aid) => patchRole({ layerAssetId: aid ?? undefined })}
+                      />
+                      <div className="hint pad">
+                        Leave the layer art empty to stack this option&apos;s own image onto the anchor. Set it when the option should read as a small swatch or icon but paint
+                        something else — the full garment, the finished topping — onto the anchor.
+                      </div>
+                      <div className="hint pad">
+                        Only the live question&apos;s options are shown and draggable. Release one in the game&apos;s drop area to pick it; it flies into every anchor as this
+                        question&apos;s layer.
+                      </div>
+                    </>
+                  )}
+                  {role?.role === 'title' && <div className="hint pad">Shown while its question is up and swapped when the next one comes — it never reacts to which option was picked.</div>}
+                  {role?.role === 'anchor' && (
+                    <div className="hint pad">
+                      This image is the base the picks build onto. Position each question&apos;s layer from the Combo builder game&apos;s panel. Tag more than one anchor and they
+                      all mirror the same stack.
+                    </div>
+                  )}
+                  {role && comboGames.length === 0 && <div className="hint pad">Add a Combo builder game to this scene so this element has somewhere to report to.</div>}
+                </>
+              )
+            })()}
             <Toggle
               label="Draggable item"
               checked={!!el.drag}
-              onChange={(v) => patchElement(id, { drag: v ? { group: el.slot?.group ?? 'a' } : undefined, basketItem: v ? undefined : el.basketItem })}
+              onChange={(v) =>
+                patchElement(id, {
+                  drag: v ? { group: el.slot?.group ?? 'a' } : undefined,
+                  basketItem: v ? undefined : el.basketItem,
+                  comboRole: v ? undefined : el.comboRole,
+                })
+              }
             />
             {el.drag && (
               <div className="grid2">
@@ -4139,6 +4380,43 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
           defaultExtraSpec={{ preset: 'shine', durationMs: 900, delayMs: 0, easing: 'ease-in-out' }}
           onChange={(primary, ex) => patchElement(id, { animations: { ...(el.animations ?? {}), tap: primary, tapExtra: ex.length ? ex : undefined } })}
         />
+        {state.scene.elements.some((e) => e.game?.templateId === 'combo') && (
+          <>
+            <AnimPhase
+              title="On option picked up"
+              primary={el.animations?.comboPick}
+              extra={el.animations?.comboPickExtra}
+              presets={NODE_PRESETS}
+              extraPresets={NODE_PRESETS}
+              defaultSpec={{ preset: 'pop', durationMs: 260, delayMs: 0, easing: 'ease-out' }}
+              defaultExtraSpec={{ preset: 'glow', durationMs: 600, delayMs: 0, easing: 'ease-in-out' }}
+              onChange={(primary, ex) => patchElement(id, { animations: { ...(el.animations ?? {}), comboPick: primary, comboPickExtra: ex.length ? ex : undefined } })}
+            />
+            <AnimPhase
+              title="On option dropped"
+              primary={el.animations?.comboDrop}
+              extra={el.animations?.comboDropExtra}
+              presets={NODE_PRESETS}
+              extraPresets={NODE_PRESETS}
+              defaultSpec={{ preset: 'pop', durationMs: 320, delayMs: 0, easing: 'ease-out' }}
+              defaultExtraSpec={{ preset: 'shine', durationMs: 700, delayMs: 0, easing: 'ease-in-out' }}
+              onChange={(primary, ex) => patchElement(id, { animations: { ...(el.animations ?? {}), comboDrop: primary, comboDropExtra: ex.length ? ex : undefined } })}
+            />
+            <AnimPhase
+              title="On next question"
+              primary={el.animations?.comboNext}
+              extra={el.animations?.comboNextExtra}
+              presets={NODE_PRESETS}
+              extraPresets={NODE_PRESETS}
+              defaultSpec={{ preset: 'pop', durationMs: 380, delayMs: 0, easing: 'ease-out' }}
+              defaultExtraSpec={{ preset: 'shine', durationMs: 800, delayMs: 0, easing: 'ease-in-out' }}
+              onChange={(primary, ex) => patchElement(id, { animations: { ...(el.animations ?? {}), comboNext: primary, comboNextExtra: ex.length ? ex : undefined } })}
+            />
+            <div className="hint pad">
+              The next-question phase fires once the incoming title and options are on screen, so a pop here animates them in. Tag them under Drag &amp; drop &rarr; Combo role.
+            </div>
+          </>
+        )}
         {state.scene.elements.some((e) => e.game?.templateId === 'thoughtwhack') && (
           <>
             <AnimPhase

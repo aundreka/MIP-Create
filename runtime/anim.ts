@@ -222,7 +222,7 @@ export function ctaPulseAnimation(cta: import('./scene').CtaConfig | undefined):
 
 // A phase can hold MULTIPLE stacked specs: the primary (`entrance`/`loop`/`exit`/`gameWin`) plus any
 // `…Extra[]` played together with it (e.g. entrance = pop + shine). Collect them in order.
-type Phase = 'entrance' | 'loop' | 'exit' | 'gameWin' | 'tap' | 'thoughtSpawn' | 'thoughtWhack'
+type Phase = 'entrance' | 'loop' | 'exit' | 'gameWin' | 'tap' | 'thoughtSpawn' | 'thoughtWhack' | 'comboPick' | 'comboDrop' | 'comboNext'
 export function phaseSpecs(el: SceneElement, phase: Phase): AnimSpec[] {
   const a = el.animations
   if (!a) return []
@@ -237,7 +237,19 @@ export function phaseSpecs(el: SceneElement, phase: Phase): AnimSpec[] {
       ? a.entrance?.trigger === 'onGameWin'
         ? undefined
         : a.entranceExtra
-      : (a[(phase + 'Extra') as 'entranceExtra' | 'loopExtra' | 'exitExtra' | 'gameWinExtra' | 'tapExtra' | 'thoughtSpawnExtra' | 'thoughtWhackExtra'] ?? legacyExtra)
+      : (a[
+          (phase + 'Extra') as
+            | 'entranceExtra'
+            | 'loopExtra'
+            | 'exitExtra'
+            | 'gameWinExtra'
+            | 'tapExtra'
+            | 'thoughtSpawnExtra'
+            | 'thoughtWhackExtra'
+            | 'comboPickExtra'
+            | 'comboDropExtra'
+            | 'comboNextExtra'
+        ] ?? legacyExtra)
   if (Array.isArray(extra)) for (const s of extra) if (s) out.push(s)
   return out
 }
@@ -245,7 +257,9 @@ export function phaseSpecs(el: SceneElement, phase: Phase): AnimSpec[] {
 /** The lightray spec from ANY phase (entrance/loop/exit/gameWin/tap) — drives the .pa-lightray pseudo sweep.
  * The reflection is an ambient class-driven effect, so it can be added in any phase, not just loop. */
 export function lightraySpec(el: SceneElement): AnimSpec | undefined {
-  return (['entrance', 'loop', 'exit', 'gameWin', 'tap', 'thoughtSpawn', 'thoughtWhack'] as const).flatMap((p) => phaseSpecs(el, p)).find((s) => s.preset === 'lightray')
+  return (['entrance', 'loop', 'exit', 'gameWin', 'tap', 'thoughtSpawn', 'thoughtWhack', 'comboPick', 'comboDrop', 'comboNext'] as const)
+    .flatMap((p) => phaseSpecs(el, p))
+    .find((s) => s.preset === 'lightray')
 }
 
 /** Total wall time a phase occupies (the latest `delay + duration` across its stacked
@@ -371,13 +385,18 @@ export function composeThoughtEventAnim(el: SceneElement, event: 'thoughtSpawn' 
   return composeOneShotAnim(el, event)
 }
 
+/** Combo-builder event animation — same deal, for pick / drop / next-question. */
+export function composeComboEventAnim(el: SceneElement, event: 'comboPick' | 'comboDrop' | 'comboNext'): string {
+  return composeOneShotAnim(el, event)
+}
+
 /**
  * A one-shot phase (game win / tap) followed by the element's ordinary loop, held
  * back until the phase has finished so the two never fight over transform. Falls
  * back to the CTA pulse when the element has no authored loop, exactly as the loop
  * path does, so a CTA keeps pulsing after the phase instead of going still.
  */
-function composeOneShotAnim(el: SceneElement, phase: 'gameWin' | 'tap' | 'thoughtSpawn' | 'thoughtWhack'): string {
+function composeOneShotAnim(el: SceneElement, phase: 'gameWin' | 'tap' | 'thoughtSpawn' | 'thoughtWhack' | 'comboPick' | 'comboDrop' | 'comboNext'): string {
   const parts: string[] = []
   let loopDelay = 0
   for (const e of phaseSpecs(el, phase)) {

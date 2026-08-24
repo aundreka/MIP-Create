@@ -1674,11 +1674,12 @@ export function EditorCanvas(props: Props): JSX.Element {
   const zoneRect = zoneEdit ? (rects.find((r) => r.id === zoneEdit) ?? null) : null
   const zoneParams: Record<string, unknown> = zoneEl?.game?.params ?? {}
   const basketZone = zoneEl?.game?.templateId === 'basket'
+  const comboZone = zoneEl?.game?.templateId === 'combo'
   const curZone = zoneLive ?? {
-    x: typeof zoneParams.zoneX === 'number' ? zoneParams.zoneX : basketZone ? 12 : 0,
-    y: typeof zoneParams.zoneY === 'number' ? zoneParams.zoneY : basketZone ? 34 : 0,
-    w: typeof zoneParams.zoneW === 'number' ? zoneParams.zoneW : basketZone ? 76 : 100,
-    h: typeof zoneParams.zoneH === 'number' ? zoneParams.zoneH : basketZone ? 43 : 100,
+    x: typeof zoneParams.zoneX === 'number' ? zoneParams.zoneX : basketZone ? 12 : comboZone ? 18 : 0,
+    y: typeof zoneParams.zoneY === 'number' ? zoneParams.zoneY : basketZone ? 34 : comboZone ? 60 : 0,
+    w: typeof zoneParams.zoneW === 'number' ? zoneParams.zoneW : basketZone ? 76 : comboZone ? 64 : 100,
+    h: typeof zoneParams.zoneH === 'number' ? zoneParams.zoneH : basketZone ? 43 : comboZone ? 32 : 100,
   }
   curZoneRef.current = curZone
   // Cell rects (overlay space, pre-zoom — like `rects`) for a scratch_grid game-mount.

@@ -30,6 +30,34 @@ const HAND_SVG =
 const HAND_W = 46
 const HAND_H = 56
 
+// Radial tap ping: concentric rings that spread from the fingertip on contact,
+// the way a touch ripples out of the point it lands on. Drawn in its own layer
+// under the hand and driven by the same cycle phase, so the first ring is born
+// on the dip rather than free-running against it.
+const RIPPLE_COUNT = 3
+/** Ring radius in px at fit=1 when fully spread. */
+const RIPPLE_MAX = 54
+const RIPPLE_COLOR = 'rgba(150,130,235,'
+
+interface RippleTiming {
+  /** Cycle phase at which the first ring is emitted. */
+  start: number
+  /** Phase gap between consecutive rings. */
+  stagger: number
+  /** Phase span each ring takes to spread out and fade away. */
+  life: number
+}
+
+// Only the stationary gestures ping; a slide/scratch hand is already moving, and
+// rings trailing behind it read as smear rather than as touch.
+const RIPPLE_TIMING: Partial<Record<HandKind, RippleTiming>> = {
+  // tapPress dips from 0 and bottoms out at 0.275 — emit just as it lands.
+  tap: { start: 0.16, stagger: 0.13, life: 0.5 },
+  // holdPress is down from 0.1 to 0.75: spread the rings across the held stretch
+  // so the point keeps pulsing for as long as the finger stays on it.
+  hold: { start: 0.08, stagger: 0.2, life: 0.62 },
+}
+
 const cubic = (t: number): number => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
 
 /** Screen-space point at which the hand's fingertip should land on an element. */
@@ -58,6 +86,23 @@ export function holdPress(phase: number): number {
 /** `imgSrc` swaps the built-in white hand for a custom image (contain-fit in the
  * same box, so show()'s fit/scale math is unchanged). */
 export function createHand(root: HTMLElement, imgSrc?: string): Hand {
+  const ripple = document.createElement('div')
+  ripple.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;pointer-events:none;z-index:199999;display:none;'
+  const rings: HTMLElement[] = []
+  for (let i = 0; i < RIPPLE_COUNT; i++) {
+    const ring = document.createElement('div')
+    // box-sizing keeps the ring centred on the fingertip while its border thins
+    // out; with the default content-box the growing stroke would drift the circle.
+    ring.style.cssText =
+      `position:absolute;left:${-RIPPLE_MAX}px;top:${-RIPPLE_MAX}px;width:${RIPPLE_MAX * 2}px;height:${RIPPLE_MAX * 2}px;` +
+      `box-sizing:border-box;border-radius:50%;border:3px solid ${RIPPLE_COLOR}.9);` +
+      `box-shadow:0 0 12px ${RIPPLE_COLOR}.35),inset 0 0 12px ${RIPPLE_COLOR}.25);` +
+      'opacity:0;will-change:transform,opacity;'
+    ripple.appendChild(ring)
+    rings.push(ring)
+  }
+  root.appendChild(ripple)
+
   const el = document.createElement('div')
   el.style.cssText =
     `position:absolute;left:0;top:0;width:${HAND_W}px;height:${HAND_H}px;pointer-events:none;z-index:200000;` +
@@ -74,6 +119,31 @@ export function createHand(root: HTMLElement, imgSrc?: string): Hand {
     raf = 0
   }
 
+  const hideRipple = (): void => {
+    ripple.style.display = 'none'
+  }
+
+  /** Paint one frame of the radial ping centred on the fingertip's target. */
+  const drawRipple = (point: HandPoint, phase: number, fit: number, timing?: RippleTiming): void => {
+    if (!timing) return hideRipple()
+    ripple.style.display = 'block'
+    ripple.style.transform = `translate(${Math.round(point.x)}px,${Math.round(point.y)}px)`
+    for (let i = 0; i < rings.length; i++) {
+      const ring = rings[i]
+      const p = (phase - timing.start - i * timing.stagger) / timing.life
+      if (p < 0 || p > 1) {
+        ring.style.opacity = '0'
+        continue
+      }
+      // Ease-out radius: a real ring loses speed as it widens. Opacity and stroke
+      // both thin with it so the ring dissolves instead of blinking off.
+      const spread = 1 - (1 - p) * (1 - p)
+      ring.style.transform = `scale(${((0.15 + 0.85 * spread) * fit).toFixed(3)})`
+      ring.style.opacity = ((1 - p) * 0.7).toFixed(3)
+      ring.style.borderWidth = `${(3 - 2 * spread).toFixed(2)}px`
+    }
+  }
+
   const loop = (from: PointSource, to: PointSource, kind: HandKind, t0: number, fit: number): void => {
     const period = kind === 'slide' ? 1500 : kind === 'scratch' ? 600 : kind === 'hold' ? 2000 : 900
     const resolve = (source: PointSource): HandPoint | null => (typeof source === 'function' ? source() : source)
@@ -83,6 +153,7 @@ export function createHand(root: HTMLElement, imgSrc?: string): Hand {
       const toPoint = from === to ? fromPoint : resolve(to)
       if (!fromPoint || !toPoint) {
         el.style.opacity = '0'
+        hideRipple()
         raf = requestAnimationFrame(frame)
         return
       }
@@ -122,6 +193,7 @@ export function createHand(root: HTMLElement, imgSrc?: string): Hand {
         y = toPoint.y - 16 * fit * (1 - dip)
         press = dip
       }
+      drawRipple(toPoint, phase, fit, RIPPLE_TIMING[kind])
       const scale = (1 - press * 0.18) * fit
       if (kind === 'scratch') {
         // Anchor by the hand's CENTER (transform-origin set to center in show()) so the
@@ -167,11 +239,13 @@ export function createHand(root: HTMLElement, imgSrc?: string): Hand {
       active = false
       stop()
       el.style.display = 'none'
+      hideRipple()
     },
     destroy() {
       active = false
       stop()
       el.remove()
+      ripple.remove()
     },
   }
 }

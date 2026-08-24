@@ -106,6 +106,14 @@ export interface ElementAnimations {
   // game mount, so copy/images/CTAs can react to each spawn and successful hit.
   thoughtSpawn?: AnimSpec
   thoughtWhack?: AnimSpec
+  // Replayed when a Combo builder game in the same scene emits its three gameplay
+  // events: an option is picked up, an option is dropped in the drop area, and the
+  // next question comes up. Authorable on ANY scene element, so the title, the
+  // anchor art and supporting copy can each react without being children of the
+  // game mount.
+  comboPick?: AnimSpec
+  comboDrop?: AnimSpec
+  comboNext?: AnimSpec
   // Additional specs stacked ON TOP of the primary one in each phase, played together with it
   // (e.g. entrance = pop + shine). Empty/absent = just the primary. The primary must exist for
   // extras to apply; extras share the primary entrance's trigger.
@@ -116,6 +124,9 @@ export interface ElementAnimations {
   tapExtra?: AnimSpec[]
   thoughtSpawnExtra?: AnimSpec[]
   thoughtWhackExtra?: AnimSpec[]
+  comboPickExtra?: AnimSpec[]
+  comboDropExtra?: AnimSpec[]
+  comboNextExtra?: AnimSpec[]
 }
 
 /**
@@ -484,6 +495,28 @@ export interface DragConfig {
 export interface BasketItemConfig {
   gameId?: string
 }
+
+// ---- combo builder ---------------------------------------------------------
+// Enlists an ordinary scene element into a Combo builder game, so the author lays
+// the whole thing out on the canvas instead of inside the game box:
+//   'option'  one of a question's draggable answers. Only the live question's
+//             options are visible/interactive; dropping one in the game's drop
+//             area picks it and flies it into every anchor as that question's layer.
+//   'title'   the question headline. Shown while its question is live and swapped
+//             on advance — it never reacts to WHICH option was picked.
+//   'anchor'  the image the picked layers stack onto. Any number of anchors may
+//             exist; each mirrors the same stack, so a hero and a small preview
+//             stay in sync. The layer rect is per question (see the game's params).
+export interface ComboRoleConfig {
+  gameId?: string
+  role: 'option' | 'title' | 'anchor'
+  /** 'option' / 'title': which question this belongs to (1-based). */
+  question?: number
+  /** 'option': which of the question's two choices (1 or 2). */
+  choice?: number
+  /** 'option': art stacked onto the anchors when picked. Defaults to the option's own image. */
+  layerAssetId?: string
+}
 export interface SlotConfig {
   group?: string
   key?: string
@@ -783,6 +816,7 @@ export interface SceneElement {
   crop?: ImageCropConfig // crop/pan/zoom an ordinary image within its box
   drag?: DragConfig
   basketItem?: BasketItemConfig
+  comboRole?: ComboRoleConfig
   slot?: SlotConfig
   pick?: PickConfig
   fill?: FillConfig
