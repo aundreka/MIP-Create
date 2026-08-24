@@ -293,6 +293,14 @@ async function ensureDataUrl(src: string): Promise<string> {
   return (await remoteToDataUrl(src)) ?? src
 }
 
+// The bridge belongs in the top-level document, exactly once (see MRAID_HEAD). An
+// endscene card authored as its own playable carries a copy, which then rides into the
+// srcdoc iframe — a second declaration inside generated markup, which is the shape
+// network validators flag. It cannot load there in any case: a relative src on an
+// about:srcdoc document has no base URL to resolve against. The card's clickout still
+// reaches the container, through the endscene postMessage shim.
+const INNER_MRAID_BRIDGE_RE = /[ \t]*<script\b[^>]*\bsrc\s*=\s*["']mraid\.js["'][^>]*>\s*<\/script>[ \t]*\n?/gi
+
 export interface AssetReport {
   id: string
   w: number
@@ -348,13 +356,15 @@ export async function processAssets(
           optimized = true
         }
       }
-    } else if (optimize && a.kind === 'html' && src.startsWith('data:text/html;base64,')) {
+    } else if (a.kind === 'html' && src.startsWith('data:text/html;base64,')) {
       try {
         const b64 = src.slice(src.indexOf(',') + 1)
         const binStr = atob(b64)
         const bytes = new Uint8Array(binStr.length)
         for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i)
         let inner = new TextDecoder().decode(bytes)
+        // Runs whether or not `optimize` is set: a duplicate bridge blocks delivery.
+        inner = inner.replace(INNER_MRAID_BRIDGE_RE, '')
         // Strip base64-embedded @font-face blocks — but ONLY when the font isn't
         // referenced by any element. A used custom font can carry layout-critical
         // glyph metrics (e.g. an end-card countdown whose digit groups are spaced
@@ -362,15 +372,15 @@ export async function processAssets(
         // fallback and breaks the layout. Truly-unused embedded fonts are dead
         // weight and still get stripped.
         const FONT_FACE_RE = /@font-face\s*\{[^}]*url\s*\(\s*['"]data:[^'"]+['"]\s*\)[^}]*\}/gs
-        const withoutFonts = inner.replace(FONT_FACE_RE, '')
-        inner = inner.replace(FONT_FACE_RE, (block) => {
+        const withoutFonts = optimize ? inner.replace(FONT_FACE_RE, '') : ''
+        if (optimize) inner = inner.replace(FONT_FACE_RE, (block) => {
           const fam = /font-family\s*:\s*(['"]?)([^;'"}]+)\1/i.exec(block)?.[2]?.trim()
           return fam && withoutFonts.includes(fam) ? block : ''
         })
         // Hoist portrait and landscape videos out of the inner HTML into outer PA_ASSETS.
         // The srcdoc iframe is same-origin, so window.parent.PA_ASSETS is accessible at runtime.
         // This eliminates the double-base64 encoding and saves ~33% of combined video size.
-        for (const [varName, suffix] of [['srcPortrait', '__p'], ['srcLandscape', '__l']]) {
+        for (const [varName, suffix] of optimize ? [['srcPortrait', '__p'], ['srcLandscape', '__l']] : []) {
           const re = new RegExp(`(const\\s+${varName}\\s*=\\s*)"(data:video/mp4;base64,[^"]+)"`)
           const m = inner.match(re)
           if (!m) continue
@@ -706,6 +716,17 @@ export const MRAID_BOOT = `<script>
   })();
 </script>`
 
+// Same JSON, one asset per line. Serialised flat, the asset map is a single line holding
+// every data URI in the creative — several megabytes of it — and validators that read the
+// file line by line (or scan it with a line-bounded buffer) give up and report the HTML as
+// unreadable. Newlines between object members cost ~1 byte per asset and cap the longest
+// line at the largest single asset.
+function serializeAssets(assets: AssetMap): string {
+  const entries = Object.entries(assets)
+  if (!entries.length) return '{}'
+  return `{\n${entries.map(([k, v]) => `${JSON.stringify(k)}:${JSON.stringify(v)}`).join(',\n')}\n}`
+}
+
 export function buildBaseHtml(project: Project, assets: AssetMap, runtimeSrc = staticRuntimeSrc): string {
   // Set background color statically so the html canvas background is correct
   // before JS runs — prevents white flash / edge bleed in Chromium/AppLovin WebViews.
@@ -722,7 +743,7 @@ export function buildBaseHtml(project: Project, assets: AssetMap, runtimeSrc = s
     `<style>html,body{margin:0;padding:0;background:${bg}!important;` +
     `user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;}</style>` +
     `</head><body>` +
-    `<script>window.PA_PROJECT=${esc(JSON.stringify(project))};window.PA_ASSETS=${esc(JSON.stringify(assets))};</script>` +
+    `<script>window.PA_PROJECT=${esc(JSON.stringify(project))};\nwindow.PA_ASSETS=${esc(serializeAssets(assets))};\n</script>\n` +
     `<script>${stripSourceMap(runtimeSrc)}</script>` +
     MRAID_BOOT +
     `</body></html>`

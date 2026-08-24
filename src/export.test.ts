@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { blurWarnings, buildBaseHtml, NETWORKS, pruneAssets, stripSourceMap, transformForNetwork } from './export'
+import { blurWarnings, buildBaseHtml, NETWORKS, processAssets, pruneAssets, stripSourceMap, transformForNetwork } from './export'
 import type { Project } from '../runtime/scene'
 import type { AssetMap } from '../runtime/types'
 
@@ -145,6 +145,46 @@ describe('source map stripping', () => {
     const html = buildBaseHtml(proj, {}, 'x')
     expect(html).toContain('user-select:none')
     expect(html).toContain('-webkit-tap-highlight-color:transparent')
+  })
+
+  it('breaks the asset payload across lines so no line is a multi-MB blob', async () => {
+    const big = 'A'.repeat(300_000)
+    const assets: AssetMap = {
+      one: { src: `data:image/webp;base64,${big}`, w: 1, h: 1 },
+      two: { src: `data:image/webp;base64,${big}`, w: 1, h: 1 },
+      three: { src: `data:image/webp;base64,${big}`, w: 1, h: 1 },
+    }
+    const html = buildBaseHtml(proj, assets, 'x')
+    const longest = Math.max(...html.split('\n').map((l) => l.length))
+    // A validator reading line by line sees one asset at a time, not the whole map.
+    expect(longest).toBeLessThan(400_000)
+    // Same data, still one JS object.
+    expect(html).toContain('window.PA_ASSETS={\n')
+    const payload = html.slice(html.indexOf('window.PA_ASSETS=') + 'window.PA_ASSETS='.length)
+    const parsed = JSON.parse(payload.slice(0, payload.indexOf('\n}') + 2))
+    expect(Object.keys(parsed)).toEqual(['one', 'two', 'three'])
+  })
+})
+
+describe('embedded HTML endscene assets', () => {
+  const b64 = (s: string): string => Buffer.from(s, 'utf8').toString('base64')
+
+  it('strips the card’s own mraid.js bridge — the top-level document owns the only one', async () => {
+    const card = '<!doctype html><html><head><script src="mraid.js"></script>\n<title>card</title></head><body></body></html>'
+    const assets: AssetMap = { card: { src: `data:text/html;base64,${b64(card)}`, w: 0, h: 0, kind: 'html' } }
+    for (const optimize of [true, false]) {
+      const { assets: out } = await processAssets(assets, optimize, 0.8)
+      const inner = Buffer.from(out.card.src.split(',')[1], 'base64').toString('utf8')
+      expect(inner).not.toMatch(/src=["']mraid\.js["']/)
+      expect(inner).toContain('<title>card</title>')
+    }
+  })
+
+  it('leaves a card without a bridge untouched', async () => {
+    const card = '<!doctype html><html><head><title>card</title></head><body></body></html>'
+    const assets: AssetMap = { card: { src: `data:text/html;base64,${b64(card)}`, w: 0, h: 0, kind: 'html' } }
+    const { assets: out } = await processAssets(assets, false, 0.8)
+    expect(Buffer.from(out.card.src.split(',')[1], 'base64').toString('utf8')).toBe(card)
   })
 })
 

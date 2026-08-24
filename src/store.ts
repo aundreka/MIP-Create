@@ -57,14 +57,13 @@ function starterMeta(): ProjectMeta {
   return {
     schemaVersion: 1,
     name: 'untitled',
-    clickUrl: {
-      ios: 'https://apps.apple.com/app/id000000000',
-      android: 'https://play.google.com/store/apps/details?id=com.example.app',
-    },
+    clickUrlMode: 'single',
+    clickUrl: { ios: 'about:blank', android: 'about:blank' },
     baseW: 1080,
     baseH: 1920,
     defaultLocale: 'en',
-    bgMatchColor: '#101a33',
+    bgMatchColor: '#000000',
+    vAlign: 'center',
   }
 }
 function starterProject(): Project {
