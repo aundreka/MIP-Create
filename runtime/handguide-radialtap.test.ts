@@ -139,6 +139,17 @@ describe('handguide: radial tap mode', () => {
     expect(bright).toBeCloseTo(dim * 2, 2) // and it is a straight multiplier
   })
 
+  it("paints under the hand, inside the hand's own stacking context", () => {
+    mount('radialtap')
+    ringsAt(0.2 * PERIOD)
+    const layer = ripple() as HTMLElement
+    const outer = document.querySelector('.pa-el[data-id="hg"]') as HTMLElement
+    // .pa-root is isolation:isolate, so a layer parented anywhere else paints over the
+    // whole scene and NO z-index on the hand can bring it back on top.
+    expect(layer.parentElement).toBe(outer.parentElement)
+    expect(Number(layer.style.zIndex)).toBeLessThan(Number(outer.style.zIndex))
+  })
+
   it('gives a plain tap no rings at all', () => {
     mount('tap')
     expect(ripple()).toBeNull()

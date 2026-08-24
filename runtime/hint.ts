@@ -184,6 +184,10 @@ export interface RippleColors {
    * are one mark and pulling them apart makes an outline float over a stray cloud.
    * Each ring still fades to nothing from here across its own life. */
   opacity?: number
+  /** Stacking order of the ping's layer. It has to be set against whatever the HAND
+   * sits at in the same stacking context — the hand belongs on top of its own ping.
+   * Default: just under the coded hand's own layer. */
+  zIndex?: number
 }
 
 /** The radial ping on its own layer, so both the coded hand (below) and the
@@ -198,7 +202,8 @@ export function createRipple(host: HTMLElement, colors?: RippleColors): TapRippl
   const fill = (alpha: number): string => `rgba(${fillRgb},${alpha})`
   const ripple = document.createElement('div')
   ripple.dataset.paRipple = '1' // marker: the ping layer, for tests and debugging
-  ripple.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;pointer-events:none;z-index:199999;display:none;'
+  ripple.style.cssText =
+    `position:absolute;left:0;top:0;width:0;height:0;pointer-events:none;z-index:${colors?.zIndex ?? 199999};display:none;`
   const rings: HTMLElement[] = []
   for (let i = 0; i < RIPPLE_COUNT; i++) {
     const ring = document.createElement('div')

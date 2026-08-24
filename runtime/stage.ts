@@ -257,11 +257,22 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
       brushHostEl.appendChild(content)
     }
   }
-  // 'radialtap' adds the radial ping (hint.ts) under the hand. It lives on the stage
-  // layer rather than inside the handguide element, whose box is only as big as the
-  // hand — rings spread well past it and would be clipped by any frame/radius on it.
-  const rippleHost = kind === 'radialtap' ? ((rec.outer.closest('.pa-stage') as HTMLElement | null) ?? root) : null
-  const ripple = rippleHost ? createRipple(rippleHost, { stroke: cfg.rippleColor, fill: cfg.rippleFillColor, opacity: cfg.rippleOpacity }) : null
+  // 'radialtap' adds the radial ping (hint.ts) UNDER the hand. It goes in the hand's
+  // own parent, not inside the handguide element — that box is only as big as the
+  // hand, and the rings spread well past it. It has to share the hand's stacking
+  // context too: .pa-root is isolation:isolate at z-index 1, so a layer parented to
+  // .pa-stage paints over the whole scene and no z-index on the hand can beat it.
+  const rippleHost = kind === 'radialtap' ? (rec.outer.parentElement ?? (rec.outer.closest('.pa-stage') as HTMLElement | null) ?? root) : null
+  const ripple = rippleHost
+    ? createRipple(rippleHost, {
+        stroke: cfg.rippleColor,
+        fill: cfg.rippleFillColor,
+        opacity: cfg.rippleOpacity,
+        // Sits directly beneath the hand's own forced z (99999) and still above every
+        // ordinary scene element, so the ping never covers the hand it belongs to.
+        zIndex: 99998,
+      })
+    : null
   // Ring size relative to the hand, measured once from the untransformed hand so the
   // press dip doesn't make the rings breathe with it.
   let rippleFit = 0
