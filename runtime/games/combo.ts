@@ -64,6 +64,9 @@ interface OptionEl {
   el: HTMLElement
   question: number
   choice: number
+  /** Already dropped into place. A question ends on the first pick unless the board
+   * is a collect-them-all, so this is per OPTION rather than per question. */
+  placed: boolean
   homeZ: string
   dx: number
   dy: number
@@ -197,6 +200,11 @@ export function createCombo(): GameModule {
   let holdUntilPick = false
   /** Picks needed to win; 0 = every question the board has. */
   let winPicks = 0
+  /** A question stays up until every one of its options has been placed, instead of
+   * ending on the first pick — a jigsaw rather than a either/or. */
+  let multiPick = false
+  /** Each option is dropped onto its own placeholder rather than into the one zone. */
+  let dropPerOption = false
   let zonePct: Zone = { x: 18, y: 60, w: 64, h: 32 }
 
   const options: OptionEl[] = []
@@ -207,8 +215,7 @@ export function createCombo(): GameModule {
   const outlines: OutlineEl[] = []
   const anchors: HTMLElement[] = []
   const titles: { el: HTMLElement; question: number }[] = []
-  /** Chosen option index per question (0-based question), -1 = unanswered. */
-  const answers: number[] = []
+
   const timers: number[] = []
 
   /** The mount's own outer .pa-el, and the inline pointer-events both it and the
@@ -249,6 +256,14 @@ export function createCombo(): GameModule {
       if (o === live) o.el.dataset.comboHint = '1'
       else delete o.el.dataset.comboHint
     }
+    // Where that option has to go, for the placed handguide: on a board with one
+    // shared zone there is nothing to publish — the hand finds [data-combo-target]
+    // by itself — but a per-option board has to say WHICH placeholder is the target
+    // right now, or the hand mimes dropping into the middle of the shared zone.
+    const drop = live ? dropElFor(live) : null
+    for (const o of outlines) if (o.el !== drop) delete o.el.dataset.comboDrop
+    for (const l of layers) if (l.el !== drop) delete l.el.dataset.comboDrop
+    if (drop) drop.dataset.comboDrop = '1'
   }
 
   const setOffset = (item: OptionEl, dx: number, dy: number, ease: boolean): void => {
@@ -278,6 +293,7 @@ export function createCombo(): GameModule {
     item.dx = 0
     item.dy = 0
     item.dragging = false
+    item.placed = false
   }
 
   // ---- the drop zone -------------------------------------------------------
@@ -299,12 +315,33 @@ export function createCombo(): GameModule {
   /** `pad` is a FLOOR on the forgiveness border, in px, not an addition to it: an
    * author who dialled snapBorderPct up already has more room than a fingertip
    * needs, and doubling it there would start catching drops nobody aimed. */
-  const insideTarget = (x: number, y: number, pad = 0): boolean => {
-    const r = target.getBoundingClientRect()
+  const insideRect = (r: DOMRect, x: number, y: number, pad = 0): boolean => {
     const root = ctx.root.getBoundingClientRect()
     const border = Math.max((Math.min(root.width || 300, root.height || 400) * snapBorderPct) / 100, pad)
     return x >= r.left - border && x <= r.right + border && y >= r.top - border && y <= r.bottom + border
   }
+
+  /**
+   * The element ONE option has to be released onto, when the board gives every option
+   * its own drop area rather than sharing the one zone.
+   *
+   * Nothing new to place: it is the piece's own placeholder — its outline, or its
+   * layer when it has no outline — both of which already sit exactly where that piece
+   * belongs. So a jigsaw is authored by dragging the pieces' destinations around the
+   * canvas, the same way the rest of the board is, and the drop area follows. An
+   * option with neither falls back to the shared zone rather than becoming impossible
+   * to place.
+   *
+   * A hidden layer still measures: the off class hides by opacity and visibility, both
+   * of which keep the element in layout.
+   */
+  const dropElFor = (item: OptionEl): HTMLElement | null => {
+    if (!dropPerOption) return null
+    const outline = outlines.find((o) => o.question === item.question && o.choice === item.choice)
+    return outline?.el ?? layerFor(item)?.el ?? null
+  }
+
+  const dropRectFor = (item: OptionEl): DOMRect => (dropElFor(item) ?? target).getBoundingClientRect()
 
   // ---- layers --------------------------------------------------------------
   /** The layer element paired with an option — same question, same choice. */
@@ -501,9 +538,12 @@ export function createCombo(): GameModule {
   /** Take question `question`'s outlines down over `fadeMs`. Called with the layer's
    * cross-fade so the placeholder dissolves as the real thing arrives in its place;
    * a linear pair keeps the combined opacity steady across the swap. */
-  const hideOutlines = (question: number, fadeMs = 0): void => {
+  const hideOutlines = (question: number, fadeMs = 0, choice?: number): void => {
     for (const o of outlines) {
       if (question > 0 && o.question !== question) continue
+      // A collect-them-all board takes down only the placeholder of the piece that
+      // just landed; the rest are still holding a space for pieces yet to come.
+      if (choice != null && o.choice !== choice) continue
       const visible = !o.el.classList.contains(OFF_CLASS)
       if (fadeMs > 0 && visible) {
         const seq = o.seq
@@ -552,12 +592,12 @@ export function createCombo(): GameModule {
       else hide(t.el)
     }
     for (const o of options) {
-      if (o.question === q + 1 && answers[q] < 0) show(o.el)
+      if (o.question === q + 1 && !o.placed) show(o.el)
       else hide(o.el)
     }
     // A placeholder is up exactly as long as the question it is holding a space for.
     for (const o of outlines) {
-      if (o.question === q + 1 && answers[q] < 0) showOutline(o)
+      if (o.question === q + 1 && !isPlaced(o.question, o.choice)) showOutline(o)
       else parkOutline(o)
     }
   }
@@ -581,8 +621,12 @@ export function createCombo(): GameModule {
     return q
   }
 
-  /** How many questions have been answered so far. */
-  const picksMade = (): number => answers.reduce((n, a) => (a >= 0 ? n + 1 : n), 0)
+  /** How many options have been placed so far — one per question on an either/or
+   * board, several on a collect-them-all. */
+  const picksMade = (): number => options.reduce((n, o) => (o.placed ? n + 1 : n), 0)
+
+  /** Whether the option a placeholder is holding a space for has already landed. */
+  const isPlaced = (question: number, choice: number): boolean => options.some((o) => o.question === question && o.choice === choice && o.placed)
 
   const advance = (): void => {
     // A pick target ends the game the moment it is met, whatever is still wired up
@@ -604,11 +648,24 @@ export function createCombo(): GameModule {
     ctx.sfx.play('comboNext')
   }
 
+  /** What follows a pick once it has landed: on a collect-them-all board the same
+   * question simply comes back for the next piece, so nothing is dismissed and no
+   * 'comboNext' fires — otherwise the board moves on to the next question. A met win
+   * target beats both and is handled by advance(). */
+  const afterPick = (): void => {
+    if (multiPick && !(winPicks > 0 && picksMade() >= winPicks) && optionsFor(current + 1).some((o) => !o.placed)) {
+      busy = false
+      markHint()
+      return
+    }
+    advance()
+  }
+
   /** Pick `item` for the current question: dismiss its siblings, fly it into the
    * layer element, hands over to it, then moves on after the authored delay. */
   const choose = (item: OptionEl): void => {
     const q = current
-    answers[q] = item.choice
+    item.placed = true
     busy = true
     markHint()
     ctx.sfx.play('comboDrop')
@@ -620,12 +677,16 @@ export function createCombo(): GameModule {
     hideCaptions(dismissMs)
     setHoldEffect(false)
 
-    for (const other of optionsFor(q + 1)) {
-      if (other === item) continue
-      other.el.style.transition = `opacity ${dismissMs}ms ease`
-      other.el.style.opacity = '0'
-      setScale(other.el, 0.7, dismissMs)
-      after(dismissMs, () => hide(other.el))
+    // The losing options leave — but only where there IS a loser. On a collect-them-all
+    // board every sibling is still to be placed, so they stay exactly where they are.
+    if (!multiPick) {
+      for (const other of optionsFor(q + 1)) {
+        if (other === item) continue
+        other.el.style.transition = `opacity ${dismissMs}ms ease`
+        other.el.style.opacity = '0'
+        setScale(other.el, 0.7, dismissMs)
+        after(dismissMs, () => hide(other.el))
+      }
     }
 
     const layer = layerFor(item)
@@ -634,8 +695,8 @@ export function createCombo(): GameModule {
       // Nothing to fly into — still a valid pick, the option just leaves, and the
       // placeholder goes with it rather than outliving the question it belonged to.
       hide(item.el)
-      hideOutlines(q + 1, dismissMs)
-      after(advanceDelayMs, advance)
+      hideOutlines(q + 1, dismissMs, multiPick ? item.choice : undefined)
+      after(advanceDelayMs, afterPick)
       return
     }
 
@@ -682,14 +743,14 @@ export function createCombo(): GameModule {
     // same beat, so what the player sees is the outline BECOMING the finished piece.
     after(flyMs - cross, () => {
       if (layer) fadeInLayer(layer.el, cross)
-      hideOutlines(q + 1, cross)
+      hideOutlines(q + 1, cross, multiPick ? item.choice : undefined)
     })
 
     after(flyMs, () => {
       if (layer) show(layer.el)
       hide(item.el)
       if (art) parkDragArt(art)
-      after(advanceDelayMs, advance)
+      after(advanceDelayMs, afterPick)
     })
   }
 
@@ -723,9 +784,10 @@ export function createCombo(): GameModule {
    * tell. Any of the three landing inside counts.
    */
   const overTarget = (x: number, y: number, item: OptionEl, pad: number): boolean => {
-    if (insideTarget(x, y, pad)) return true
+    const r = dropRectFor(item)
+    if (insideRect(r, x, y, pad)) return true
     const c = center(item.el)
-    if (insideTarget(c.x, c.y, pad)) return true
+    if (insideRect(r, c.x, c.y, pad)) return true
     const art = dragArtFor(item)
     if (!art || art.el.classList.contains(OFF_CLASS)) return false
     // A degenerate box is not a position: an element that has never been laid out
@@ -733,7 +795,7 @@ export function createCombo(): GameModule {
     // area placed anywhere near the top-left corner.
     const a = art.el.getBoundingClientRect()
     if (a.width <= 0 || a.height <= 0) return false
-    return insideTarget(a.left + a.width / 2, a.top + a.height / 2, pad)
+    return insideRect(r, a.left + a.width / 2, a.top + a.height / 2, pad)
   }
 
   const attachDrag = (item: OptionEl): void => {
@@ -747,7 +809,7 @@ export function createCombo(): GameModule {
     item.el.style.setProperty('-webkit-touch-callout', 'none')
     item.el.style.setProperty('-webkit-tap-highlight-color', 'transparent')
     item.el.addEventListener('pointerdown', (event) => {
-      if (done || busy || held || item.question !== current + 1 || answers[current] >= 0) return
+      if (done || busy || held || item.question !== current + 1 || item.placed) return
       event.preventDefault()
       const pid = event.pointerId
       held = item
@@ -886,7 +948,7 @@ export function createCombo(): GameModule {
       const question = Math.max(1, Math.round(Number(el.dataset.comboQuestion) || 1))
       const choice = Math.max(1, Math.round(Number(el.dataset.comboChoice) || 1))
       if (role === 'option') {
-        options.push({ el, question, choice, homeZ: el.style.zIndex, dx: 0, dy: 0, dragging: false })
+        options.push({ el, question, choice, placed: false, homeZ: el.style.zIndex, dx: 0, dy: 0, dragging: false })
       } else if (role === 'layer') {
         layers.push({ el, question, choice, canvasShown: el.dataset.comboCanvasShow === '1' })
       } else if (role === 'dragArt') {
@@ -938,6 +1000,8 @@ export function createCombo(): GameModule {
       holdEffectMs = Math.max(0, Math.min(2000, num(params.holdEffectMs, 180)))
       holdUntilPick = String(params.holdEffectWhen ?? 'hold') === 'untilPick'
       winPicks = Math.max(0, Math.round(num(params.winPicks, 0)))
+      multiPick = params.multiPick === true || params.multiPick === 'true'
+      dropPerOption = String(params.dropTarget ?? 'zone') === 'slot'
       holdFilter = holdFilterCss(
         Math.max(0, Math.min(3, num(params.holdBrightness, 1))),
         Math.max(0, Math.min(3, num(params.holdContrast, 1))),
@@ -952,7 +1016,6 @@ export function createCombo(): GameModule {
         w: Math.max(2, Math.min(100 - x, clampPct(params.zoneW, 64))),
         h: Math.max(2, Math.min(100 - y, clampPct(params.zoneH, 32))),
       }
-      for (let i = 0; i < questions; i++) answers.push(-1)
 
       ctx.root.style.touchAction = 'none'
       target = document.createElement('div')
@@ -1018,12 +1081,12 @@ export function createCombo(): GameModule {
     },
     relayout() {
       layoutZone()
-      for (const item of options) if (!item.dragging && answers[item.question - 1] < 0) setOffset(item, 0, 0, false)
+      for (const item of options) if (!item.dragging && !item.placed) setOffset(item, 0, 0, false)
     },
     getHint(): HintMove | null {
       const item = liveOption()
       if (!item) return null
-      return { from: center(item.el), to: center(target), kind: 'drag' }
+      return { from: center(item.el), to: center(dropElFor(item) ?? target), kind: 'drag' }
     },
     onComplete(cb) {
       completeCb = cb
@@ -1060,6 +1123,7 @@ export function createCombo(): GameModule {
         // stays shown, one they had hidden stays hidden.
         if (l.canvasShown) l.el.classList.remove(OFF_CLASS)
         else l.el.classList.add(OFF_CLASS)
+        delete l.el.dataset.comboDrop
         delete l.el.dataset.comboClaimedBy
       }
       for (const art of dragArt) {
@@ -1082,6 +1146,7 @@ export function createCombo(): GameModule {
         o.el.classList.remove(OFF_CLASS)
         o.el.style.transition = ''
         o.el.style.opacity = o.restOpacity
+        delete o.el.dataset.comboDrop
         delete o.el.dataset.comboClaimedBy
       }
       for (const fx of effects) {
@@ -1097,7 +1162,6 @@ export function createCombo(): GameModule {
       outlines.length = 0
       titles.length = 0
       anchors.length = 0
-      answers.length = 0
       current = 0
       held = null
       heldPointer = undefined
@@ -1130,6 +1194,12 @@ export const COMBO_TEMPLATE: GameTemplate = {
     // 0 = won when the board runs out of questions. Any other number wins on that
     // many picks, however many questions are wired up behind them.
     winPicks: 0,
+    // A question ends on the first pick ('false'), or stays up until every one of its
+    // options has been placed ('true') — the jigsaw shape.
+    multiPick: false,
+    // 'zone' = one shared drop area for the whole game; 'slot' = each option is
+    // dropped onto its own placeholder (its outline, else its layer).
+    dropTarget: 'zone',
     // Editor-only: how many option slots the setup panel offers per question. The
     // game itself counts whatever elements are tagged, so raising it costs nothing
     // until slots are filled.

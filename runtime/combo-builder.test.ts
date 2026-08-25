@@ -1017,6 +1017,100 @@ describe('combo builder', () => {
     stage.destroy()
   })
 
+  describe('jigsaw board', () => {
+    /** Every option of the question must be placed, each onto its own placeholder. */
+    const JIGSAW = {
+      ...GAME,
+      game: { ...GAME.game!, params: { ...GAME.game!.params, questions: 1, multiPick: true, dropTarget: 'slot', winPicks: 3 } },
+    } as SceneElement
+
+    function board(): { q: (id: string) => HTMLElement; stage: ReturnType<typeof buildScene>; drop: (id: string, x: number, y: number) => void } {
+      const stage = build([
+        JIGSAW,
+        ANCHOR,
+        option('p1', 1, 1, 'optA'),
+        option('p2', 1, 2, 'optB'),
+        option('p3', 1, 3, 'optA'),
+        outline('o1', 1, 1),
+        outline('o2', 1, 2),
+        outline('o3', 1, 3),
+      ])
+      stage.layoutAll()
+      stage.startGames(true)
+      const q = (id: string): HTMLElement => stage.root.querySelector<HTMLElement>(`[data-id="${id}"]`)!
+      // The shared zone sits far away from every placeholder, so a drop that lands is
+      // one that landed on the piece's OWN area.
+      stubRect(stage.root.querySelector<HTMLElement>('[data-combo-target="1"]')!, 0, 0, 1, 1)
+      stubRect(q('o1'), 100, 100, 60, 60)
+      stubRect(q('o2'), 400, 100, 60, 60)
+      stubRect(q('o3'), 700, 100, 60, 60)
+      for (const id of ['p1', 'p2', 'p3']) stubRect(q(id), 100, 900, 50, 50)
+      const drop = (id: string, x: number, y: number): void => {
+        q(id).dispatchEvent(pointer('pointerdown', 120, 920))
+        stubRect(q(id), x - 25, y - 25, 50, 50)
+        window.dispatchEvent(pointer('pointermove', x, y))
+        window.dispatchEvent(pointer('pointerup', x, y))
+        vi.advanceTimersByTime(400)
+      }
+      return { q, stage, drop }
+    }
+
+    it('keeps the siblings on the board and stays on the question until all are placed', () => {
+      const { q, stage, drop } = board()
+      let won = 0
+      off = on('game-complete', () => {
+        won++
+      })
+
+      drop('p1', 130, 130)
+      // The piece is gone, its placeholder with it — and the other two are untouched.
+      expect(q('p1').classList.contains('pa-combo-off')).toBe(true)
+      expect(q('o1').classList.contains('pa-combo-off')).toBe(true)
+      expect(q('p2').classList.contains('pa-combo-off')).toBe(false)
+      expect(q('p3').classList.contains('pa-combo-off')).toBe(false)
+      expect(q('o2').classList.contains('pa-combo-off')).toBe(false)
+      expect(won).toBe(0)
+
+      drop('p2', 430, 130)
+      expect(q('p2').classList.contains('pa-combo-off')).toBe(true)
+      expect(won).toBe(0)
+
+      drop('p3', 730, 130)
+      expect(won).toBe(1)
+      stage.destroy()
+    })
+
+    it('rejects a piece dropped on another piece’s area', () => {
+      const { q, stage, drop } = board()
+      drop('p1', 730, 130) // p3's placeholder, not p1's
+      expect(q('p1').classList.contains('pa-combo-off')).toBe(false)
+      expect(q('o1').classList.contains('pa-combo-off')).toBe(false)
+      stage.destroy()
+    })
+
+    it('falls back to the shared area for a piece with no placeholder of its own', () => {
+      const stage = build([JIGSAW, ANCHOR, option('p1', 1, 1, 'optA')]) // no outline, no layer
+      stage.layoutAll()
+      stage.startGames(true)
+      const q = (id: string): HTMLElement => stage.root.querySelector<HTMLElement>(`[data-id="${id}"]`)!
+      stubRect(stage.root.querySelector<HTMLElement>('[data-combo-target="1"]')!, 0, 0, 1000, 1000)
+      stubRect(q('p1'), 400, 400, 100, 100)
+      q('p1').dispatchEvent(pointer('pointerdown', 450, 450))
+      window.dispatchEvent(pointer('pointerup', 450, 450))
+      vi.advanceTimersByTime(400)
+      // Placed rather than stranded: an unwired piece is still droppable.
+      expect(q('p1').classList.contains('pa-combo-off')).toBe(true)
+      stage.destroy()
+    })
+
+    it('points the hint hand at the live piece’s own placeholder', () => {
+      const { q, stage } = board()
+      expect(q('o1').dataset.comboDrop).toBe('1')
+      expect(q('o2').dataset.comboDrop).toBeUndefined()
+      stage.destroy()
+    })
+  })
+
   it('skips a question with no options tagged rather than stranding the player', () => {
     // questions: 2, but only question 2 is wired up.
     const stage = build([GAME, ANCHOR, title('t2', 2), option('b1', 2, 1, 'optA')])

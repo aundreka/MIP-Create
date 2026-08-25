@@ -1510,7 +1510,25 @@ function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps):
         min={0}
         onChange={(n) => setParam('winPicks', Math.max(0, Math.round(n)))}
       />
-      <div className="hint pad">Picks to win: 0 wins when the questions run out. Any other number wins on that many picks — a jigsaw of 12 pieces, won on the 12th.</div>
+      <Toggle label="Place every option (jigsaw)" checked={params.multiPick === true} onChange={(v) => setParam('multiPick', v)} />
+      <div className="combo-slot">
+        <span title="Where an option has to be released. Per option uses that option's own placeholder — its outline, or its layer when it has none — so the drop area is wherever you put the piece's destination on the canvas.">
+          Drop area
+        </span>
+        <Select
+          value={String(params.dropTarget ?? 'zone')}
+          onChange={(v) => setParam('dropTarget', v)}
+          options={[
+            { value: 'zone', label: 'One shared area' },
+            { value: 'slot', label: 'Each option’s own placeholder' },
+          ]}
+        />
+        <span className="combo-slot-actions" />
+      </div>
+      <div className="hint pad">
+        Picks to win: 0 wins when the questions run out — so with one question, one pick wins. Jigsaw keeps a question up until all of its options are placed, which is what makes a
+        picks-to-win number above 1 mean anything within a single question.
+      </div>
       <Chips
         items={Array.from({ length: questions }, (_, i) => ({
           key: String(i),

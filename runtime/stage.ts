@@ -442,7 +442,9 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
       // element. Uses the shared drag curve, so the placed hand and the coded one
       // perform the identical grab / carry / release gesture.
       const optionEl = root.querySelector<HTMLElement>('[data-combo-hint]')
-      const zoneEl = root.querySelector<HTMLElement>('[data-combo-target]')
+      // A board that gives every option its own drop area publishes the live one as
+      // data-combo-drop; otherwise there is the single shared zone.
+      const zoneEl = root.querySelector<HTMLElement>('[data-combo-drop]') ?? root.querySelector<HTMLElement>('[data-combo-target]')
       if (!optionEl || !zoneEl) {
         content.style.opacity = '0'
         raf = requestAnimationFrame(frame)
