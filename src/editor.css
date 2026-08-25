@@ -176,8 +176,12 @@ button {
   background: var(--panel-2);
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
-  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease),
-              color var(--t-fast) var(--ease), transform 80ms, opacity var(--t-fast) var(--ease);
+  transition:
+    background var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease),
+    transform 80ms,
+    opacity var(--t-fast) var(--ease);
   padding: 5px 10px;
   cursor: pointer;
   display: inline-flex;
@@ -269,8 +273,12 @@ button,
 .proj-card,
 .tpl-card,
 .asset-cell {
-  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease),
-    color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+  transition:
+    background var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease),
+    transform var(--t-fast) var(--ease);
 }
 button:active:not(:disabled),
 .tool:active,
@@ -359,7 +367,7 @@ button:active:not(:disabled),
   gap: 8px;
 }
 .share-code {
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   font-size: 26px;
   font-weight: 700;
   letter-spacing: 3px;
@@ -727,7 +735,9 @@ button.icon {
   color: var(--muted);
   font-size: 11px;
   opacity: 0;
-  transition: opacity var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+  transition:
+    opacity var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease);
 }
 .scene-chip:hover .scene-mini,
 .scene-chip:focus-within .scene-mini {
@@ -1131,7 +1141,9 @@ button.icon {
   background: transparent;
   border: 0;
   opacity: 0;
-  transition: opacity var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+  transition:
+    opacity var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease);
 }
 .layer-row:hover .layer-btn,
 .layer-row:focus-within .layer-btn {
@@ -1196,11 +1208,15 @@ button.icon {
   box-shadow: var(--sh-2);
 }
 .frame.active {
-  box-shadow: var(--sh-3), 0 0 0 1.5px var(--accent);
+  box-shadow:
+    var(--sh-3),
+    0 0 0 1.5px var(--accent);
 }
 /* Cross-scene drag drop target: a frame the cursor is hovering during a move-drag. */
 .frame.drop-target {
-  box-shadow: var(--sh-3), 0 0 0 2.5px var(--accent);
+  box-shadow:
+    var(--sh-3),
+    0 0 0 2.5px var(--accent);
 }
 .frame.drop-target::after {
   content: '';
@@ -1321,6 +1337,13 @@ button.frame-chip:hover {
   font-weight: 700;
   line-height: 16px;
   cursor: default;
+}
+/* Morph badge — a different accent from the orientation letters so the two read apart
+   at a glance in a busy layer list. */
+.layer-orient.layer-morph {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  color: var(--accent);
+  font-size: 12px;
 }
 .frame-activate {
   position: absolute;
@@ -1674,6 +1697,18 @@ button.frame-chip:hover {
 .hint.pad {
   padding: 12px 10px;
 }
+/* A hint that is telling you something is wrong (a deleted morph target, a setting
+   that cancels the one above it) rather than just explaining the control. */
+.hint.warn {
+  color: var(--text);
+  background: rgba(180, 84, 10, 0.18);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: var(--r-sm);
+  margin: 6px 10px;
+}
+.hint.pad.warn {
+  padding: 8px 10px;
+}
 
 /* ---- new inspector controls ---- */
 .scrub {
@@ -1721,7 +1756,9 @@ button.frame-chip:hover {
   border: 0;
   position: relative;
   padding: 0;
-  transition: background var(--t-fast) var(--ease), transform 80ms;
+  transition:
+    background var(--t-fast) var(--ease),
+    transform 80ms;
 }
 .toggle:active {
   transform: scale(0.93);
@@ -1763,8 +1800,11 @@ button.frame-chip:hover {
   padding: 4px 9px;
   font-size: 12px;
   text-transform: capitalize;
-  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease),
-              color var(--t-fast) var(--ease), transform 80ms;
+  transition:
+    background var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease),
+    transform 80ms;
 }
 .chip:active {
   transform: scale(0.93);
@@ -1841,7 +1881,10 @@ button.frame-chip:hover {
   padding: 0;
   cursor: pointer;
   flex: 0 0 auto;
-  transition: transform 80ms, outline var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+  transition:
+    transform 80ms,
+    outline var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease);
 }
 .swatch-dot:hover {
   transform: scale(1.1);
@@ -1875,7 +1918,9 @@ button.frame-chip:hover {
   cursor: pointer;
   padding: 2px 4px;
   border-radius: var(--r-sm);
-  transition: color var(--t-fast) var(--ease), transform 80ms;
+  transition:
+    color var(--t-fast) var(--ease),
+    transform 80ms;
 }
 .swatch-drop:hover {
   color: var(--ink);
@@ -1896,8 +1941,14 @@ button.frame-chip:hover {
   animation: swatch-popup-in 120ms var(--ease);
 }
 @keyframes swatch-popup-in {
-  from { opacity: 0; transform: scale(0.92) translateY(-4px); }
-  to   { opacity: 1; transform: none; }
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 /* ---- date-header popover (Topbar) ---- */
@@ -1939,7 +1990,9 @@ button.frame-chip:hover {
   -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 8px));
   border: 1px solid var(--glass-border);
   border-radius: var(--r-lg);
-  box-shadow: var(--sh-3), inset 0 1px 0 var(--glass-hi);
+  box-shadow:
+    var(--sh-3),
+    inset 0 1px 0 var(--glass-hi);
   overflow: hidden;
   animation: modal-pop var(--t-mid) var(--ease);
 }
@@ -2106,7 +2159,9 @@ button.frame-chip:hover {
   -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 8px));
   border: 1px solid var(--glass-border);
   border-radius: var(--r-lg);
-  box-shadow: var(--sh-3), inset 0 1px 0 var(--glass-hi);
+  box-shadow:
+    var(--sh-3),
+    inset 0 1px 0 var(--glass-hi);
   display: flex;
   flex-direction: column;
   max-height: 92vh;
@@ -2244,7 +2299,9 @@ svg {
   background: var(--input-bg);
   color: transparent;
   flex: 0 0 auto;
-  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+  transition:
+    background var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease);
 }
 .checkbox input:checked + .checkbox-box {
   background: var(--accent);
@@ -2334,7 +2391,9 @@ svg {
   border: 1px solid var(--glass-border);
   border-radius: var(--r-md);
   padding: 8px;
-  box-shadow: var(--sh-3), inset 0 1px 0 var(--glass-hi);
+  box-shadow:
+    var(--sh-3),
+    inset 0 1px 0 var(--glass-hi);
 }
 .asset-grid {
   display: grid;
@@ -2375,7 +2434,9 @@ svg {
   border-radius: var(--r-md);
   padding: 4px;
   min-width: 160px;
-  box-shadow: var(--sh-3), inset 0 1px 0 var(--glass-hi);
+  box-shadow:
+    var(--sh-3),
+    inset 0 1px 0 var(--glass-hi);
 }
 .ctx-item {
   display: block;
@@ -2431,7 +2492,9 @@ svg {
   border-radius: var(--r-lg);
   width: min(1100px, 94vw);
   height: min(780px, 92vh);
-  box-shadow: var(--sh-3), inset 0 1px 0 var(--glass-hi);
+  box-shadow:
+    var(--sh-3),
+    inset 0 1px 0 var(--glass-hi);
   animation: modal-pop var(--t-mid) var(--ease);
   display: flex;
   flex-direction: column;
@@ -2533,7 +2596,9 @@ svg {
 .device-bezel {
   position: relative;
   background: #06070b;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6), inset 0 0 0 2px #2a2f3a;
+  box-shadow:
+    0 10px 40px rgba(0, 0, 0, 0.6),
+    inset 0 0 0 2px #2a2f3a;
 }
 .device-bezel.portrait {
   padding: 16px 10px;
@@ -3045,7 +3110,9 @@ svg {
   color: var(--muted);
   font-size: 13px;
   cursor: pointer;
-  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+  transition:
+    background var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease);
 }
 .home-tabs button.on {
   background: var(--accent);
@@ -3851,10 +3918,18 @@ svg {
   border-top: 1px solid var(--line);
 }
 @media (max-width: 680px) {
-  .asset-flip-fields { grid-template-columns: 1fr; }
-  .asset-flip-row { grid-template-columns: 38px minmax(100px, 1fr) 16px minmax(120px, 1fr); }
-  .asset-flip-match { grid-column: 4; }
-  .asset-flip-section-head > .hint { display: none; }
+  .asset-flip-fields {
+    grid-template-columns: 1fr;
+  }
+  .asset-flip-row {
+    grid-template-columns: 38px minmax(100px, 1fr) 16px minmax(120px, 1fr);
+  }
+  .asset-flip-match {
+    grid-column: 4;
+  }
+  .asset-flip-section-head > .hint {
+    display: none;
+  }
 }
 
 /* scene rename input + preview scope hint */
@@ -4092,7 +4167,7 @@ svg {
   border-radius: var(--r-sm);
   background: var(--input-bg);
   color: var(--ink);
-  font-family: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+  font-family: ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, monospace;
   font-size: 12.5px;
   line-height: 1.5;
 }
@@ -4909,11 +4984,7 @@ svg {
   align-items: center;
   padding-left: 8px;
   border-radius: var(--r-sm);
-  background: repeating-linear-gradient(
-    -45deg,
-    color-mix(in srgb, var(--line) 55%, transparent) 0 6px,
-    transparent 6px 12px
-  );
+  background: repeating-linear-gradient(-45deg, color-mix(in srgb, var(--line) 55%, transparent) 0 6px, transparent 6px 12px);
   font-size: 9px;
   color: var(--muted);
 }

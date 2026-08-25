@@ -22,6 +22,9 @@ import type {
   HeaderOrientationOverride,
   KeyframeStep,
   LayoutMode,
+  MorphConfig,
+  MorphEffect,
+  MorphScaleMode,
   ObjectFit,
   SceneDef,
   SceneElement,
@@ -35,6 +38,7 @@ import type {
   UnboxingConfig,
 } from '../../runtime/scene'
 import { headerAllowedFor } from '../../runtime/scene'
+import { MORPH_DEFAULT_EASING, MORPH_DEFAULT_MS } from '../../runtime/morph'
 import { ownsSlot, patchSlot, projectLayoutPatch, resolvedLayout, seedSlot, withOwnSlot, withoutSlot, type Orient } from '../headerLayout'
 import { TAP_FADE_DEFAULT_MS } from '../../runtime/elements/button'
 import { RIPPLE_DEFAULT_COLOR, RIPPLE_DEFAULT_OPACITY, RIPPLE_HAND_REF_W, RIPPLE_MAX_R } from '../../runtime/hint'
@@ -98,16 +102,7 @@ import {
   X,
 } from '../icons'
 import { AssetPicker } from './AssetPicker'
-import {
-  assignComboSlot,
-  comboCandidates,
-  comboLayers,
-  comboMembers,
-  comboOptionLabel,
-  comboSlotSummary,
-  setCanvasVisible,
-  type ComboSlotEdit,
-} from '../comboSlots'
+import { assignComboSlot, comboCandidates, comboLayers, comboMembers, comboOptionLabel, comboSlotSummary, setCanvasVisible, type ComboSlotEdit } from '../comboSlots'
 import { DATE_LOCALE_OPTIONS } from '../dateLocales'
 
 // Tap feedback options, shared by the button element and images marked as buttons.
@@ -164,11 +159,147 @@ function LinkedButtons(props: { cfg: ButtonConfig; selfId: string; siblings: Sce
         <Toggle key={lid} label={`${lid} (missing)`} checked onChange={() => set(linked.filter((x) => x !== lid))} />
       ))}
       <div className="hint pad">
-        Tapping any ticked button also presses this element — same tap effect and on-tap animation as a direct tap on it. A linked press never changes screen: the button that
-        was tapped keeps its own <b>Go to screen</b>, so it wins whenever the two point at different places. If this element should only react to those buttons and do nothing
-        when tapped itself, set its <b>Go to screen</b> to “stay on this screen”.
+        Tapping any ticked button also presses this element — same tap effect and on-tap animation as a direct tap on it. A linked press never changes screen: the button that was
+        tapped keeps its own <b>Go to screen</b>, so it wins whenever the two point at different places. If this element should only react to those buttons and do nothing when
+        tapped itself, set its <b>Go to screen</b> to “stay on this screen”.
       </div>
     </>
+  )
+}
+
+// Where this screen goes when it advances — the morph's default destination, since
+// "turns into something on the next screen" is what an author reaches for first.
+function nextSceneIdOf(scenes: SceneDef[], sd: SceneDef | undefined): string | null {
+  if (!sd) return null
+  if (sd.advance?.to) return sd.advance.to
+  const i = scenes.findIndex((s) => s.id === sd.id)
+  return scenes[i + 1]?.id ?? null
+}
+
+const MORPH_EFFECTS: { value: MorphEffect; label: string }[] = [
+  { value: 'cross-fade', label: 'cross-fade (dissolve into it)' },
+  { value: 'move', label: 'move (same picture)' },
+  { value: 'fade-through', label: 'fade through (out, then in)' },
+]
+const MORPH_SCALES: { value: MorphScaleMode; label: string }[] = [
+  { value: 'fit', label: 'match size (keep aspect)' },
+  { value: 'stretch', label: 'match the box exactly (stretch)' },
+  { value: 'none', label: 'don’t resize (move only)' },
+]
+
+// "Turn into…" — connect this element to one on ANOTHER screen. The screen change then
+// flies a copy of this element onto that one — position and size — instead of cutting
+// between the two, so it reads as the same object moving rather than two elements
+// swapping. See MorphConfig in runtime/scene.ts and the flight in runtime/morph.ts.
+//
+// Geometry is deliberately not authored here: where it lands IS where the target element
+// sits on its own canvas, so dragging either end re-authors the move. Only the effect,
+// the duration, the hold and the speed curve are knobs.
+function MorphSection(props: { el: SceneElement; scenes: SceneDef[]; sceneId: string; nextSceneId: string | null }): JSX.Element {
+  const { el, scenes, sceneId } = props
+  const id = el.id
+  const cfg = el.morph
+  const others = scenes.filter((s) => s.id !== sceneId)
+  const target = scenes.find((s) => s.id === cfg?.toSceneId)
+  // Carry-over elements are excluded at BOTH ends: they are built once above every scene
+  // and never rebuilt by a screen change, so there is no hand-over to animate.
+  const candidates = (target?.elements ?? []).filter((e) => !e.persist)
+  const targetEl = candidates.find((e) => e.id === cfg?.toElementId)
+  const set = (patch: Partial<MorphConfig>): void => {
+    if (cfg) patchElement(id, { morph: { ...cfg, ...patch } })
+  }
+
+  // Picking a screen almost always means "the same thing over there", so pre-select the
+  // element sharing this one's artwork — failing that its name, then its type. One click
+  // instead of two, and still overridable.
+  const guess = (s: SceneDef | undefined): string => {
+    const pool = (s?.elements ?? []).filter((e) => !e.persist && !e.hidden)
+    const byAsset = el.assetId ? pool.find((e) => e.assetId === el.assetId) : undefined
+    const byName = el.name ? pool.find((e) => e.name === el.name) : undefined
+    return (byAsset ?? byName ?? pool.find((e) => e.type === el.type) ?? pool[0])?.id ?? ''
+  }
+  const enable = (on: boolean): void => {
+    if (!on) return patchElement(id, { morph: undefined })
+    const s = others.find((x) => x.id === props.nextSceneId) ?? others[0]
+    if (s) patchElement(id, { morph: { toSceneId: s.id, toElementId: guess(s) } })
+  }
+
+  return (
+    <Accordion id="inspector.morph" title="Turn into an element on another screen" defaultOpen={false}>
+      {!others.length ? (
+        <div className="hint pad">Only one screen in this MIP — add another and this element can morph into something on it.</div>
+      ) : (
+        <>
+          <Toggle label="Morph into another screen" checked={!!cfg} onChange={enable} />
+          {!cfg ? (
+            <div className="hint pad">
+              Off: this element simply leaves with the screen. On: a copy of it flies onto an element you pick on another screen — matching its position and size — so the two read
+              as one object moving instead of two elements swapping.
+            </div>
+          ) : (
+            <>
+              <Row label="Screen">
+                <Select
+                  value={cfg.toSceneId}
+                  onChange={(v) => set({ toSceneId: v, toElementId: guess(scenes.find((x) => x.id === v)) })}
+                  options={others.map((s) => ({ value: s.id, label: s.name || s.id }))}
+                />
+              </Row>
+              {!target ? (
+                <div className="hint pad warn">That screen has been deleted — pick another one, or switch the morph off.</div>
+              ) : !candidates.length ? (
+                <div className="hint pad warn">“{target.name || target.id}” has no elements to land on yet.</div>
+              ) : (
+                <Row label="Turns into">
+                  <Select
+                    value={targetEl ? targetEl.id : ''}
+                    onChange={(v) => set({ toElementId: v })}
+                    options={[
+                      ...(targetEl ? [] : [{ value: '', label: cfg.toElementId ? '(deleted element)' : '(pick one)' }]),
+                      ...candidates.map((e) => ({ value: e.id, label: `${e.name || e.id} (${e.type})` })),
+                    ]}
+                  />
+                </Row>
+              )}
+              <Row label="Effect">
+                <Select value={cfg.effect ?? 'cross-fade'} onChange={(v) => set({ effect: v as MorphEffect })} options={MORPH_EFFECTS} />
+              </Row>
+              <Slider label="Duration" value={cfg.durationMs ?? MORPH_DEFAULT_MS} min={0} max={3000} step={20} suffix="ms" onChange={(n) => set({ durationMs: n })} />
+              <Slider label="Hold before" value={cfg.delayMs ?? 0} min={0} max={2000} step={20} suffix="ms" onChange={(n) => set({ delayMs: n })} />
+              <Row label="Speed curve">
+                <Select value={cfg.easing ?? MORPH_DEFAULT_EASING} onChange={(v) => set({ easing: v })} options={EASINGS} />
+              </Row>
+              <Row label="Size">
+                <Select value={cfg.scaleMode ?? 'fit'} onChange={(v) => set({ scaleMode: v as MorphScaleMode })} options={MORPH_SCALES} />
+              </Row>
+              {(cfg.scaleMode ?? 'fit') !== 'none' && (
+                <Slider
+                  label="Lands at"
+                  value={Math.round((cfg.endScale ?? 1) * 100)}
+                  min={50}
+                  max={150}
+                  step={1}
+                  suffix="%"
+                  onChange={(n) => set({ endScale: n === 100 ? undefined : n / 100 })}
+                />
+              )}
+              {el.persist && (
+                <div className="hint pad warn">
+                  This element is set to <b>carry across scenes</b>, so a screen change never rebuilds it and there is nothing to hand over — the morph will not play. Untick the
+                  carry-over to use it.
+                </div>
+              )}
+              {targetEl?.hidden && <div className="hint pad warn">“{targetEl.name || targetEl.id}” is hidden on that screen, so there is nothing to land on.</div>}
+              <div className="hint pad">
+                Where it lands is wherever <b>{targetEl?.name || 'the target'}</b> sits on “{target?.name || '…'}” — drag either element on its own canvas to re-aim the move.
+                <b> Lands at</b> lets the flight settle over or under the target's size before it hands over; the target itself always ends at its authored size. Preview the flow
+                to watch it — the editor canvas shows one screen at a time.
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </Accordion>
   )
 }
 
@@ -1204,11 +1335,7 @@ function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps):
         </Row>
         {layer && (
           <>
-            <Toggle
-              label="Show this layer on the canvas"
-              checked={!!layer.comboRole?.showOnCanvas}
-              onChange={(v) => setLayersVisible([layer], v)}
-            />
+            <Toggle label="Show this layer on the canvas" checked={!!layer.comboRole?.showOnCanvas} onChange={(v) => setLayersVisible([layer], v)} />
             {jump(layer, `Position “${layer.name || layer.id}” on canvas`)}
           </>
         )}
@@ -1221,9 +1348,9 @@ function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps):
             <Toggle label="Show it on the canvas" checked={!!art.comboRole?.showOnCanvas} onChange={(v) => setLayersVisible([art], v)} />
             {jump(art, `Size “${art.name || art.id}” on canvas`)}
             <div className="hint pad">
-              Optional. While this option is held, its own picture switches off and THIS one rides under the finger in its place, enlarged — and it is what flies onto the layer
-              at the end. Use it when the tray picture and the in-hand picture should differ: a flat swatch in the tray, a big render in the hand. Only its size matters; it is
-              moved to the finger.
+              Optional. While this option is held, its own picture switches off and THIS one rides under the finger in its place, enlarged — and it is what flies onto the layer at
+              the end. Use it when the tray picture and the in-hand picture should differ: a flat swatch in the tray, a big render in the hand. Only its size matters; it is moved
+              to the finger.
             </div>
           </>
         ) : (
@@ -1262,9 +1389,7 @@ function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps):
       </div>
 
       <div className="group-title2">Layers on the canvas ({allLayers.length})</div>
-      <div className="hint pad">
-        Play always starts with every layer hidden and reveals them as picks land, so these toggles only affect what you see while editing.
-      </div>
+      <div className="hint pad">Play always starts with every layer hidden and reveals them as picks land, so these toggles only affect what you see while editing.</div>
       {allLayers.length > 0 && (
         <div className="grid2">
           <button className="btn" onClick={() => setLayersVisible(allLayers, true)}>
@@ -1306,7 +1431,10 @@ function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps):
         <Select
           value=""
           onChange={(v) => assign(v, undefined, 'anchor')}
-          options={[{ value: '', label: '— pick an element —' }, ...candidates.filter((e) => e.comboRole?.role !== 'anchor').map((e) => ({ value: e.id, label: comboOptionLabel(e) }))]}
+          options={[
+            { value: '', label: '— pick an element —' },
+            ...candidates.filter((e) => e.comboRole?.role !== 'anchor').map((e) => ({ value: e.id, label: comboOptionLabel(e) })),
+          ]}
         />
       </Row>
       <div className="hint pad">
@@ -2253,81 +2381,83 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
             {state.scene.meta.header && actsAsEndscene && (
               <>
                 <Toggle label="Show date header on this end card" checked={!!sd.showHeader} onChange={(v) => patchSceneDef(sd.id, { showHeader: v || undefined })} />
-                <div className="hint pad">End cards hide the pinned date/countdown header by default. Turn this on to band it across the end card too — it stays tap-through, so the whole card still clicks out.</div>
+                <div className="hint pad">
+                  End cards hide the pinned date/countdown header by default. Turn this on to band it across the end card too — it stays tap-through, so the whole card still clicks
+                  out.
+                </div>
               </>
             )}
             {/* Per-scene header LAYOUT — two independent switches, one per orientation.
                 Each owns a complete snapshot of the layout, so an opted-in scene/orientation
                 can never be moved by the project header or by another scene. Everything
                 goes through src/headerLayout.ts. */}
-            {state.scene.meta.header && headerAllowedFor(sd) && (() => {
-              const projectHeader = state.scene.meta.header!
-              const orient: Orient = landscape ? 'landscape' : 'portrait'
-              const other: Orient = landscape ? 'portrait' : 'landscape'
-              const owns = ownsSlot(sd.header, orient)
-              const eff = resolvedLayout(projectHeader, sd.header, orient)
-              // Any field edit lands in THIS scene's THIS-orientation slot (seeded on first
-              // touch so it is a full snapshot, never a half-inherited override).
-              const setHeaderLayout = (patch: HeaderOrientationOverride): void =>
-                patchSceneDef(sd.id, { header: patchSlot(projectHeader, sd.header, orient, patch) })
-              return (
-                <>
-                  <div className="group-title">Header in this scene ({orient})</div>
-                  <Toggle
-                    label={`Own header layout in ${orient}`}
-                    checked={owns}
-                    onChange={(v) =>
-                      patchSceneDef(sd.id, { header: v ? withOwnSlot(projectHeader, sd.header, orient) : withoutSlot(sd.header, orient) })
-                    }
-                  />
-                  {!owns && (
+            {state.scene.meta.header &&
+              headerAllowedFor(sd) &&
+              (() => {
+                const projectHeader = state.scene.meta.header!
+                const orient: Orient = landscape ? 'landscape' : 'portrait'
+                const other: Orient = landscape ? 'portrait' : 'landscape'
+                const owns = ownsSlot(sd.header, orient)
+                const eff = resolvedLayout(projectHeader, sd.header, orient)
+                // Any field edit lands in THIS scene's THIS-orientation slot (seeded on first
+                // touch so it is a full snapshot, never a half-inherited override).
+                const setHeaderLayout = (patch: HeaderOrientationOverride): void => patchSceneDef(sd.id, { header: patchSlot(projectHeader, sd.header, orient, patch) })
+                return (
+                  <>
+                    <div className="group-title">Header in this scene ({orient})</div>
+                    <Toggle
+                      label={`Own header layout in ${orient}`}
+                      checked={owns}
+                      onChange={(v) => patchSceneDef(sd.id, { header: v ? withOwnSlot(projectHeader, sd.header, orient) : withoutSlot(sd.header, orient) })}
+                    />
+                    {!owns && (
+                      <div className="hint pad">
+                        This scene follows the project header in {orient}. Turn this on — or just drag the band on the canvas — and it keeps a copy of what it shows now: from then
+                        on nothing you change in the Header popover, or in another scene, can move it here.
+                      </div>
+                    )}
+                    {owns && (
+                      <>
+                        <div className="grid2">
+                          <NumField label="Move X" value={eff.offsetXPx ?? 0} suffix="px" onChange={(n) => setHeaderLayout({ offsetXPx: n || undefined })} />
+                          <NumField label="Move Y" value={eff.offsetYPx ?? 0} suffix="px" onChange={(n) => setHeaderLayout({ offsetYPx: n || undefined })} />
+                        </div>
+                        <div className="grid2">
+                          <NumField label="Font size" value={eff.fontSizePx ?? 64} min={1} suffix="px" onChange={(n) => setHeaderLayout({ fontSizePx: n })} />
+                          <NumField label="Height" value={eff.heightPx ?? 120} min={0} suffix="px" onChange={(n) => setHeaderLayout({ heightPx: n })} />
+                        </div>
+                        <Row label="Alignment">
+                          <Select
+                            value={eff.align ?? 'center'}
+                            options={[
+                              { value: 'left', label: 'Left' },
+                              { value: 'center', label: 'Center' },
+                              { value: 'right', label: 'Right' },
+                            ]}
+                            onChange={(v) => setHeaderLayout({ align: v as HeaderOrientationOverride['align'] })}
+                          />
+                        </Row>
+                        <button
+                          className="wide"
+                          onClick={() => {
+                            patchHeader(projectLayoutPatch(projectHeader, orient, seedSlot(projectHeader, sd.header, orient)), editLocale)
+                            patchSceneDef(sd.id, { header: withoutSlot(sd.header, orient) })
+                          }}
+                        >
+                          Use this {orient} layout in every scene
+                        </button>
+                        <button className="wide" onClick={() => patchSceneDef(sd.id, { header: withoutSlot(sd.header, orient) })}>
+                          Follow the project header again in {orient}
+                        </button>
+                      </>
+                    )}
                     <div className="hint pad">
-                      This scene follows the project header in {orient}. Turn this on — or just drag the band on the canvas — and it keeps a copy of what it shows now: from then on
-                      nothing you change in the Header popover, or in another scene, can move it here.
+                      {other} is {ownsSlot(sd.header, other) ? <>this scene’s own too — switch the frame’s orientation chip to edit it</> : <>following the project header</>}. The
+                      two orientations are stored separately, so one never changes the other. Content, colours and animation always come from the project header.
                     </div>
-                  )}
-                  {owns && (
-                    <>
-                      <div className="grid2">
-                        <NumField label="Move X" value={eff.offsetXPx ?? 0} suffix="px" onChange={(n) => setHeaderLayout({ offsetXPx: n || undefined })} />
-                        <NumField label="Move Y" value={eff.offsetYPx ?? 0} suffix="px" onChange={(n) => setHeaderLayout({ offsetYPx: n || undefined })} />
-                      </div>
-                      <div className="grid2">
-                        <NumField label="Font size" value={eff.fontSizePx ?? 64} min={1} suffix="px" onChange={(n) => setHeaderLayout({ fontSizePx: n })} />
-                        <NumField label="Height" value={eff.heightPx ?? 120} min={0} suffix="px" onChange={(n) => setHeaderLayout({ heightPx: n })} />
-                      </div>
-                      <Row label="Alignment">
-                        <Select
-                          value={eff.align ?? 'center'}
-                          options={[
-                            { value: 'left', label: 'Left' },
-                            { value: 'center', label: 'Center' },
-                            { value: 'right', label: 'Right' },
-                          ]}
-                          onChange={(v) => setHeaderLayout({ align: v as HeaderOrientationOverride['align'] })}
-                        />
-                      </Row>
-                      <button
-                        className="wide"
-                        onClick={() => {
-                          patchHeader(projectLayoutPatch(projectHeader, orient, seedSlot(projectHeader, sd.header, orient)), editLocale)
-                          patchSceneDef(sd.id, { header: withoutSlot(sd.header, orient) })
-                        }}
-                      >
-                        Use this {orient} layout in every scene
-                      </button>
-                      <button className="wide" onClick={() => patchSceneDef(sd.id, { header: withoutSlot(sd.header, orient) })}>
-                        Follow the project header again in {orient}
-                      </button>
-                    </>
-                  )}
-                  <div className="hint pad">
-                    {other} is {ownsSlot(sd.header, other) ? <>this scene’s own too — switch the frame’s orientation chip to edit it</> : <>following the project header</>}. The two
-                    orientations are stored separately, so one never changes the other. Content, colours and animation always come from the project header.
-                  </div>
-                </>
-              )
-            })()}
+                  </>
+                )
+              })()}
             {sd.kind === 'endscene' && (
               <div className="hint pad">
                 Endscene = MRAID <b>end card</b>: in Preview/export the whole scene is tap-to-install and signals the network the ad ended. Add a <b>video endscene</b> element for
@@ -3076,8 +3206,8 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                         just inside the area. Every item must be placed to win.
                       </div>
                       <div className="hint pad">
-                        Prefer freeform items? Select any normal image and enable <b>Drag &amp; drop → Basket game item</b>. Marked scene images automatically replace the item slots
-                        below.
+                        Prefer freeform items? Select any normal image and enable <b>Drag &amp; drop → Basket game item</b>. Marked scene images automatically replace the item
+                        slots below.
                       </div>
                     </>
                   )}
@@ -3308,7 +3438,11 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                     <div className="hint pad">
                       Combo builder: this element is <b>{where}</b>.
                     </div>
-                    {game && <button className="btn" style={{ width: '100%', marginTop: 4 }} onClick={() => selectOnly(game.id)}>Edit in “{game.name || game.id}”</button>}
+                    {game && (
+                      <button className="btn" style={{ width: '100%', marginTop: 4 }} onClick={() => selectOnly(game.id)}>
+                        Edit in “{game.name || game.id}”
+                      </button>
+                    )}
                     <div className="hint pad">Assign and re-assign slots from the Combo builder game&apos;s panel.</div>
                   </>
                 )
@@ -3513,12 +3647,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               </Row>
               {hg.mode === 'radialtap' && (
                 <>
-                  <ColorField
-                    label="Ring stroke"
-                    value={hg.rippleColor ?? RIPPLE_DEFAULT_COLOR}
-                    allowNone
-                    onChange={(c) => setHg({ rippleColor: c ?? undefined })}
-                  />
+                  <ColorField label="Ring stroke" value={hg.rippleColor ?? RIPPLE_DEFAULT_COLOR} allowNone onChange={(c) => setHg({ rippleColor: c ?? undefined })} />
                   <ColorField
                     label="Ring fill"
                     // Cleared = follow the stroke, which is what a one-color ping is.
@@ -3825,25 +3954,20 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                     </Row>
                     {!el.attachToId && (
                       <Row label="Header scaling">
-                        <Toggle
-                          label="Scale like the date band"
-                          checked={!!el.headerScale}
-                          onChange={(v) => patchElement(id, { headerScale: v || undefined })}
-                        />
+                        <Toggle label="Scale like the date band" checked={!!el.headerScale} onChange={(v) => patchElement(id, { headerScale: v || undefined })} />
                       </Row>
                     )}
                     {!el.attachToId && el.headerScale && (
                       <div className="hint pad">
-                        Sizes this text with a single transform, the way the pinned date band does, instead of multiplying font size, spacing and padding by the layout scale
-                        one at a time. Nothing lands on a rounded pixel, so it holds its exact design position and size at every screen — use it when a label must stay put
-                        inside artwork.
+                        Sizes this text with a single transform, the way the pinned date band does, instead of multiplying font size, spacing and padding by the layout scale one at
+                        a time. Nothing lands on a rounded pixel, so it holds its exact design position and size at every screen — use it when a label must stay put inside artwork.
                       </div>
                     )}
                     {el.attachToId && (
                       <div className="hint pad">
-                        Locked to the target's rendered box: this text keeps the same offset and the same proportional size relative to that image at every screen size,
-                        orientation and zoom. Drag it where you want it — the offset sticks. Note a landscape override on this text (and not on the target) still shifts it in
-                        landscape; clear it under <b>Landscape layout</b> if you want them identical in both orientations.
+                        Locked to the target's rendered box: this text keeps the same offset and the same proportional size relative to that image at every screen size, orientation
+                        and zoom. Drag it where you want it — the offset sticks. Note a landscape override on this text (and not on the target) still shifts it in landscape; clear
+                        it under <b>Landscape layout</b> if you want them identical in both orientations.
                       </div>
                     )}
                   </>
@@ -4570,6 +4694,8 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
           onChange={(primary, ex) => patchElement(id, { animations: { ...(el.animations ?? {}), exit: primary, exitExtra: ex.length ? ex : undefined } })}
         />
       </Accordion>
+
+      <MorphSection el={el} scenes={state.project.scenes} sceneId={activeSceneDef(state).id} nextSceneId={nextSceneIdOf(state.project.scenes, activeSceneDef(state))} />
 
       {canScratch && (
         <Accordion id="inspector.scratch" title="Scratchable" defaultOpen={false}>

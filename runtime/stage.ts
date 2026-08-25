@@ -189,8 +189,7 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     kind = 'brush'
   }
   // A hold has to read as a HOLD, so its default cycle is longer than a tap's.
-  const travel =
-    cfg.periodMs && cfg.periodMs > 0 ? cfg.periodMs : kind === 'scratch' ? 600 : kind === 'slide' ? 1500 : kind === 'combo' ? 1900 : kind === 'hold' ? 2000 : 900
+  const travel = cfg.periodMs && cfg.periodMs > 0 ? cfg.periodMs : kind === 'scratch' ? 600 : kind === 'slide' ? 1500 : kind === 'combo' ? 1900 : kind === 'hold' ? 2000 : 900
   const cubic = (t: number): number => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
   const EASE: Record<string, (t: number) => number> = {
     linear: (t) => t,
@@ -505,12 +504,7 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
         // measured once, off the untransformed hand.
         if (cfg.rippleRadius && cfg.rippleRadius > 0) rippleFit = rippleFitForRadius(cfg.rippleRadius * s)
         else if (!rippleFit && cr.width > 1) rippleFit = cr.width / RIPPLE_HAND_REF_W
-        ripple.draw(
-          { x: cr.left + cr.width * 0.22 - hostRect.left, y: cr.top + cr.height * 0.12 - hostRect.top },
-          phase,
-          rippleFit || 1,
-          RIPPLE_TIMING.tap,
-        )
+        ripple.draw({ x: cr.left + cr.width * 0.22 - hostRect.left, y: cr.top + cr.height * 0.12 - hostRect.top }, phase, rippleFit || 1, RIPPLE_TIMING.tap)
       }
     } else {
       const phase = ((now - t0) % travel) / travel
@@ -751,6 +745,10 @@ html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;overscroll-b
    every layout pass, so an inline hide would be dropped by the next resize.
    visibility keeps the box measurable, which the fly-to-layer maths needs. */
 .pa-combo-off{opacity:0 !important;visibility:hidden !important;pointer-events:none !important;}
+/* One end of a cross-scene morph, hidden while its frozen copy is in flight (see morph.ts).
+   A CLASS for the same reason as .pa-el--t-off: layoutRec rewrites inline opacity from the
+   element on every layout pass, so an inline hide would be dropped by the next resize. */
+.pa-morph-off{opacity:0 !important;visibility:hidden !important;pointer-events:none !important;}
 `.trim()
   document.head.appendChild(style)
 }
@@ -1359,10 +1357,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     broadcastGameEvent(event, (target) => runComboEvent(target, event))
   }
 
-  function broadcastGameEvent(
-    event: 'thoughtSpawn' | 'thoughtWhack' | 'comboPick' | 'comboDrop' | 'comboNext',
-    run: (target: Rec) => void,
-  ): void {
+  function broadcastGameEvent(event: 'thoughtSpawn' | 'thoughtWhack' | 'comboPick' | 'comboDrop' | 'comboNext', run: (target: Rec) => void): void {
     for (const target of recs) {
       if (target.el.hidden) continue
       if (target.el.animations?.[event] || target.el.animations?.[`${event}Extra`]?.length) run(target)
@@ -1831,11 +1826,9 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
         // content for a button element, the .pa-el-anim wrapper for an image-as-button.
         const feedback = (rec: Rec): TapFeedback | undefined => (rec.content ? tapFeedbackByNode.get(rec.content) : undefined) ?? tapFeedbackByNode.get(rec.anim)
         for (const src of recs) {
-          const relay =
-            (fn: (t: Rec) => void) =>
-            (): void => {
-              for (const t of linkedTo(src.el.id)) fn(t)
-            }
+          const relay = (fn: (t: Rec) => void) => (): void => {
+            for (const t of linkedTo(src.el.id)) fn(t)
+          }
           const press = relay((t) => {
             if (hasTapAnim(t.el)) runTap(t)
             feedback(t)?.press()
@@ -3081,9 +3074,7 @@ function layoutText(rec: Rec, e: Effective): void {
   // A COUNTDOWN keeps the attach path's own endscene handling instead: legacy dynamic
   // dates were authored against the FIT frame in landscape and must stay there
   // (see attachedTextPos).
-  const attached =
-    attachedTextPos(rec, e) ??
-    (rec.el.type === 'text' && !rec.el.attachToId && !rec.el.headerScale ? endsceneMediaPos(rec, e) : null)
+  const attached = attachedTextPos(rec, e) ?? (rec.el.type === 'text' && !rec.el.attachToId && !rec.el.headerScale ? endsceneMediaPos(rec, e) : null)
   // Header-style scaling (see header.ts): instead of multiplying every interior value
   // by the layout scale — font size, letter spacing, stroke, box padding, each landing
   // on its own rounded pixel — leave the whole box in raw DESIGN px and let ONE CSS

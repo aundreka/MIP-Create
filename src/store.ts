@@ -72,8 +72,32 @@ function starterProject(): Project {
     name: 'Game',
     kind: 'game',
     elements: [
-      { id: 'title', type: 'text', name: 'Title', x: 540, y: 360, anchor: 'center', zIndex: 11, mode: 'fit', text: { value: 'Your Title', fontSizePx: 92, fontWeight: 800, color: '#ffffff', align: 'center' } },
-      { id: 'cta', type: 'cta', name: 'CTA button', x: 540, y: 1720, anchor: 'center', zIndex: 20, mode: 'fit', w: 560, h: 150, cta: { pulse: 'medium' }, text: { value: 'PLAY NOW', fontSizePx: 64, fontWeight: 800, color: '#ffffff' }, box: { bgColor: '#16a34a', radiusPx: 75 } },
+      {
+        id: 'title',
+        type: 'text',
+        name: 'Title',
+        x: 540,
+        y: 360,
+        anchor: 'center',
+        zIndex: 11,
+        mode: 'fit',
+        text: { value: 'Your Title', fontSizePx: 92, fontWeight: 800, color: '#ffffff', align: 'center' },
+      },
+      {
+        id: 'cta',
+        type: 'cta',
+        name: 'CTA button',
+        x: 540,
+        y: 1720,
+        anchor: 'center',
+        zIndex: 20,
+        mode: 'fit',
+        w: 560,
+        h: 150,
+        cta: { pulse: 'medium' },
+        text: { value: 'PLAY NOW', fontSizePx: 64, fontWeight: 800, color: '#ffffff' },
+        box: { bgColor: '#16a34a', radiusPx: 75 },
+      },
     ],
     advance: { on: 'gameWin' },
   }
@@ -232,19 +256,25 @@ export function activeSceneDef(s: EditorState = state): SceneDef {
 }
 function mapActiveScene(fn: (sd: SceneDef) => SceneDef): void {
   const locale = getEditLocale()
-  set({ dirty: true, project: { ...state.project, scenes: state.project.scenes.map((s) => {
-    if (s.id !== state.activeSceneId) return s
-    const localized = locale ? s.localeOverrides?.[locale]?.source : undefined
-    if (!locale || !localized) return fn(s)
-    const edited = fn(localized)
-    return {
-      ...s,
-      localeOverrides: {
-        ...s.localeOverrides,
-        [locale]: { source: { ...edited, id: s.id, advance: s.advance, transition: s.transition, localeOverrides: undefined } },
-      },
-    }
-  }) } })
+  set({
+    dirty: true,
+    project: {
+      ...state.project,
+      scenes: state.project.scenes.map((s) => {
+        if (s.id !== state.activeSceneId) return s
+        const localized = locale ? s.localeOverrides?.[locale]?.source : undefined
+        if (!locale || !localized) return fn(s)
+        const edited = fn(localized)
+        return {
+          ...s,
+          localeOverrides: {
+            ...s.localeOverrides,
+            [locale]: { source: { ...edited, id: s.id, advance: s.advance, transition: s.transition, localeOverrides: undefined } },
+          },
+        }
+      }),
+    },
+  })
 }
 function mapEl(id: string, fn: (e: SceneElement) => SceneElement): void {
   mapActiveScene((sd) => ({ ...sd, elements: sd.elements.map((e) => (e.id === id ? fn(e) : e)) }))
@@ -311,7 +341,10 @@ export function patchLandscape(id: string, patch: OrientationOverride): void {
   const el = activeSceneDef().elements.find((e) => e.id === id)
   if (el?.sync) {
     const key = el.sync.key
-    const scenes = state.project.scenes.map((sd) => ({ ...sd, elements: sd.elements.map((e) => (e.sync?.key === key ? { ...e, landscape: { ...(e.landscape ?? {}), ...patch } } : e)) }))
+    const scenes = state.project.scenes.map((sd) => ({
+      ...sd,
+      elements: sd.elements.map((e) => (e.sync?.key === key ? { ...e, landscape: { ...(e.landscape ?? {}), ...patch } } : e)),
+    }))
     set({ dirty: true, project: { ...state.project, scenes } })
     return pushSharedForKey(key)
   }
@@ -373,7 +406,11 @@ export function patchGeometry(id: string, patch: OrientationOverride): void {
   else patchElement(id, patch as Partial<SceneElement>)
 }
 export function addElement(el: SceneElement): void {
-  set({ dirty: true, selectedIds: [el.id], project: { ...state.project, scenes: state.project.scenes.map((s) => (s.id === state.activeSceneId ? { ...s, elements: [...s.elements, el] } : s)) } })
+  set({
+    dirty: true,
+    selectedIds: [el.id],
+    project: { ...state.project, scenes: state.project.scenes.map((s) => (s.id === state.activeSceneId ? { ...s, elements: [...s.elements, el] } : s)) },
+  })
 }
 // Built-in hand image (data-URI SVG) for auto-created hint handguides; shared by a
 // stable id so it's deduped and inlined once on export. Mirrors the runtime's hand.
@@ -414,12 +451,11 @@ export function addGameHint(gameId: string): void {
     zIndex: (game.zIndex ?? 0) + 1,
     mode: 'fit',
     assetId: HAND_ASSET_ID,
-    handguide:
-      tpl?.defaultHandguide?.mode // game-aware logic template (e.g. 'match' follows the game's next card)
-        ? { mode: tpl.defaultHandguide.mode, periodMs: tpl.defaultHandguide.periodMs ?? 900 }
-        : pts.length > 1
-          ? { mode: 'slide', nodes: pts.slice(1), periodMs: tpl?.defaultHandguide?.periodMs ?? 1800 }
-          : { mode: 'tap', periodMs: 900 },
+    handguide: tpl?.defaultHandguide?.mode // game-aware logic template (e.g. 'match' follows the game's next card)
+      ? { mode: tpl.defaultHandguide.mode, periodMs: tpl.defaultHandguide.periodMs ?? 900 }
+      : pts.length > 1
+        ? { mode: 'slide', nodes: pts.slice(1), periodMs: tpl?.defaultHandguide?.periodMs ?? 1800 }
+        : { mode: 'tap', periodMs: 900 },
   }
   addElement(hg)
 }
@@ -489,7 +525,11 @@ export function copyElementsFromScene(fromSceneId: string, elementIds: string[])
 }
 
 export function addElements(els: SceneElement[]): void {
-  set({ dirty: true, selectedIds: els.map((e) => e.id), project: { ...state.project, scenes: state.project.scenes.map((s) => (s.id === state.activeSceneId ? { ...s, elements: [...s.elements, ...els] } : s)) } })
+  set({
+    dirty: true,
+    selectedIds: els.map((e) => e.id),
+    project: { ...state.project, scenes: state.project.scenes.map((s) => (s.id === state.activeSceneId ? { ...s, elements: [...s.elements, ...els] } : s)) },
+  })
 }
 export function removeElement(id: string): void {
   set({ dirty: true, selectedIds: state.selectedIds.filter((x) => x !== id) })
@@ -527,7 +567,7 @@ export function duplicateSelected(): void {
 function elementAssetIds(el: SceneElement): string[] {
   const ids: (string | undefined)[] = [el.assetId, el.container?.imageId, el.generate?.resultId, el.button?.tapFadeAssetId]
   if (el.sfx) for (const b of el.sfx) ids.push(b.assetId)
-  if (el.game?.params) for (const v of Object.values(el.game.params)) (Array.isArray(v) ? ids.push(...(v as string[])) : ids.push(v as string))
+  if (el.game?.params) for (const v of Object.values(el.game.params)) Array.isArray(v) ? ids.push(...(v as string[])) : ids.push(v as string)
   if (el.endscene) ids.push(el.endscene.portraitVideoId, el.endscene.landscapeVideoId, el.endscene.portraitImageId, el.endscene.landscapeImageId)
   return ids.filter((x): x is string => typeof x === 'string')
 }
@@ -539,7 +579,9 @@ export function hasElementClip(): boolean {
 export function copySelected(): void {
   const ids = new Set(state.selectedIds)
   if (!ids.size) return
-  const els = activeSceneDef().elements.filter((e) => ids.has(e.id)).map((e) => structuredClone(e))
+  const els = activeSceneDef()
+    .elements.filter((e) => ids.has(e.id))
+    .map((e) => structuredClone(e))
   const assets: AssetMap = {}
   for (const e of els) for (const aid of elementAssetIds(e)) if (state.assets[aid]) assets[aid] = state.assets[aid]
   elClip = { els, assets }
@@ -588,7 +630,10 @@ export function moveSelectedToScene(sceneId: string, place?: Record<string, { x:
     // own override so the portrait layout is untouched, and vice-versa).
     if (p) {
       if (landscape) c.landscape = { ...c.landscape, x: Math.round(p.x), y: Math.round(p.y) }
-      else { c.x = Math.round(p.x); c.y = Math.round(p.y) }
+      else {
+        c.x = Math.round(p.x)
+        c.y = Math.round(p.y)
+      }
     }
     return c
   })
@@ -628,14 +673,22 @@ export function groupSelected(): void {
   mapActiveScene((sd) => ({ ...sd, elements: sd.elements.map((e) => (ids.has(e.id) ? { ...e, groupId: gid } : e)) }))
 }
 export function ungroupSelected(): void {
-  const groups = new Set(activeSceneDef().elements.filter((e) => state.selectedIds.includes(e.id) && e.groupId).map((e) => e.groupId))
+  const groups = new Set(
+    activeSceneDef()
+      .elements.filter((e) => state.selectedIds.includes(e.id) && e.groupId)
+      .map((e) => e.groupId),
+  )
   if (!groups.size) return
   mapActiveScene((sd) => ({ ...sd, elements: sd.elements.map((e) => (e.groupId && groups.has(e.groupId) ? { ...e, groupId: undefined } : e)) }))
 }
 export function selectWithGroups(id: string, additive: boolean): void {
   const el = activeSceneDef().elements.find((e) => e.id === id)
   if (!el) return
-  const ids = el.groupId ? activeSceneDef().elements.filter((e) => e.groupId === el.groupId).map((e) => e.id) : [id]
+  const ids = el.groupId
+    ? activeSceneDef()
+        .elements.filter((e) => e.groupId === el.groupId)
+        .map((e) => e.id)
+    : [id]
   if (additive) {
     const allIn = ids.every((i) => state.selectedIds.includes(i))
     set({ selectedIds: allIn ? state.selectedIds.filter((i) => !ids.includes(i)) : Array.from(new Set([...state.selectedIds, ...ids])) }, false)
@@ -646,9 +699,15 @@ export function selectWithGroups(id: string, additive: boolean): void {
 type H = 'left' | 'center' | 'right'
 type V = 'top' | 'center' | 'bottom'
 const A_DECOMP: Record<string, [H, V]> = {
-  center: ['center', 'center'], top: ['center', 'top'], bottom: ['center', 'bottom'],
-  left: ['left', 'center'], right: ['right', 'center'],
-  'top-left': ['left', 'top'], 'top-right': ['right', 'top'], 'bottom-left': ['left', 'bottom'], 'bottom-right': ['right', 'bottom'],
+  center: ['center', 'center'],
+  top: ['center', 'top'],
+  bottom: ['center', 'bottom'],
+  left: ['left', 'center'],
+  right: ['right', 'center'],
+  'top-left': ['left', 'top'],
+  'top-right': ['right', 'top'],
+  'bottom-left': ['left', 'bottom'],
+  'bottom-right': ['right', 'bottom'],
 }
 function recompose(h: H, v: V): SceneElement['anchor'] {
   if (h === 'center' && v === 'center') return 'center'
@@ -670,7 +729,7 @@ export function alignSelected(op: AlignOp): void {
     const e = state.scene.elements.find((x) => x.id === id)
     if (!e) continue
     const localized = localizeElement(e, getEditLocale())
-    const ov = landscape ? localized.landscape ?? {} : {}
+    const ov = landscape ? (localized.landscape ?? {}) : {}
     const [h, v] = A_DECOMP[ov.anchor ?? localized.anchor] ?? ['center', 'center']
     let x = ov.x ?? localized.x
     let y = ov.y ?? localized.y
@@ -859,7 +918,16 @@ export function convertElement(id: string, to: ConvertTo): void {
             ctaH = ctaH ?? Math.round(a.h * sc)
           }
         }
-        return { ...e, type: 'cta', mode: 'fit', cta: e.cta ?? { pulse: 'medium' }, w: ctaW ?? 560, h: ctaH ?? 150, text: e.assetId ? e.text : e.text ?? { value: 'PLAY NOW', fontSizePx: 64, fontWeight: 800, color: '#ffffff' }, box: e.assetId ? e.box : e.box ?? { bgColor: '#16a34a', radiusPx: 75 } }
+        return {
+          ...e,
+          type: 'cta',
+          mode: 'fit',
+          cta: e.cta ?? { pulse: 'medium' },
+          w: ctaW ?? 560,
+          h: ctaH ?? 150,
+          text: e.assetId ? e.text : (e.text ?? { value: 'PLAY NOW', fontSizePx: 64, fontWeight: 800, color: '#ffffff' }),
+          box: e.assetId ? e.box : (e.box ?? { bgColor: '#16a34a', radiusPx: 75 }),
+        }
       }
       case 'text':
         return { ...e, type: 'text', mode: 'fit', text: e.text ?? { value: 'Text', fontSizePx: 64, fontWeight: 700, color: '#ffffff', align: 'center' } }
@@ -999,10 +1067,14 @@ export function setSceneLocaleSource(id: string, locale: string, source: SceneDe
         locales,
         ...(header ? { headerI18n: { ...(state.project.meta.headerI18n ?? {}), [code]: header } } : {}),
       },
-      scenes: state.project.scenes.map((scene) => scene.id === id ? {
-        ...scene,
-        localeOverrides: { ...(scene.localeOverrides ?? {}), [code]: { source } },
-      } : scene),
+      scenes: state.project.scenes.map((scene) =>
+        scene.id === id
+          ? {
+              ...scene,
+              localeOverrides: { ...(scene.localeOverrides ?? {}), [code]: { source } },
+            }
+          : scene,
+      ),
     },
   })
 }
@@ -1037,7 +1109,11 @@ export function reorderScenes(ids: string[]): void {
 }
 export function removeScene(id: string): void {
   if (state.project.scenes.length <= 1) return
-  const scenes = state.project.scenes.filter((s) => s.id !== id)
+  // Morphs aimed at the deleted screen are dropped with it, so a later screen reusing
+  // the id can't inherit somebody else's flight (see MorphConfig).
+  const scenes = state.project.scenes
+    .filter((s) => s.id !== id)
+    .map((s) => (s.elements.some((e) => e.morph?.toSceneId === id) ? { ...s, elements: s.elements.map((e) => (e.morph?.toSceneId === id ? { ...e, morph: undefined } : e)) } : s))
   const startSceneId = state.project.startSceneId === id ? scenes[0].id : state.project.startSceneId
   const activeSceneId = state.activeSceneId === id ? scenes[0].id : state.activeSceneId
   set({ dirty: true, activeSceneId, selectedIds: [], project: { ...state.project, scenes, startSceneId } })
@@ -1052,14 +1128,62 @@ function templateElements(kind: SceneDef['kind']): SceneElement[] {
   const m = state.project.meta
   if (kind === 'overlay') {
     return [
-      { id: nextId('text'), type: 'text', name: 'Congrats', x: c.x, y: Math.round(m.baseH * 0.42), anchor: 'center', zIndex: 51, mode: 'fit', text: { value: 'You won!', fontSizePx: 130, fontWeight: 800, color: '#ffffff', align: 'center' }, sfx: [{ event: 'sceneEnter', assetId: 'sfx_f_correctBright' }] },
+      {
+        id: nextId('text'),
+        type: 'text',
+        name: 'Congrats',
+        x: c.x,
+        y: Math.round(m.baseH * 0.42),
+        anchor: 'center',
+        zIndex: 51,
+        mode: 'fit',
+        text: { value: 'You won!', fontSizePx: 130, fontWeight: 800, color: '#ffffff', align: 'center' },
+        sfx: [{ event: 'sceneEnter', assetId: 'sfx_f_correctBright' }],
+      },
     ]
   }
   if (kind === 'endscene') {
     return [
-      { id: nextId('end'), type: 'endscene', name: 'Endscene video', x: c.x, y: c.y, w: m.baseW, h: m.baseH, anchor: 'center', zIndex: 1, mode: 'extend', endscene: { objectFit: 'cover', bgColor: '#000000', loop: true, matchBgEdge: false, muteUntilInteraction: true }, sfx: [{ event: 'sceneEnter', assetId: 'sfx_f_winJingle' }] },
-      { id: nextId('text'), type: 'text', name: 'Endscene title', x: c.x, y: Math.round(m.baseH * 0.3), anchor: 'center', zIndex: 11, mode: 'fit', text: { value: 'Get the app!', fontSizePx: 120, fontWeight: 800, color: '#ffffff', align: 'center' } },
-      { id: nextId('cta'), type: 'cta', name: 'CTA button', x: c.x, y: Math.round(m.baseH * 0.6), anchor: 'center', zIndex: 20, mode: 'fit', w: 600, h: 160, cta: { pulse: 'medium' }, text: { value: 'PLAY NOW', fontSizePx: 66, fontWeight: 800, color: '#ffffff' }, box: { bgColor: '#16a34a', radiusPx: 80 } },
+      {
+        id: nextId('end'),
+        type: 'endscene',
+        name: 'Endscene video',
+        x: c.x,
+        y: c.y,
+        w: m.baseW,
+        h: m.baseH,
+        anchor: 'center',
+        zIndex: 1,
+        mode: 'extend',
+        endscene: { objectFit: 'cover', bgColor: '#000000', loop: true, matchBgEdge: false, muteUntilInteraction: true },
+        sfx: [{ event: 'sceneEnter', assetId: 'sfx_f_winJingle' }],
+      },
+      {
+        id: nextId('text'),
+        type: 'text',
+        name: 'Endscene title',
+        x: c.x,
+        y: Math.round(m.baseH * 0.3),
+        anchor: 'center',
+        zIndex: 11,
+        mode: 'fit',
+        text: { value: 'Get the app!', fontSizePx: 120, fontWeight: 800, color: '#ffffff', align: 'center' },
+      },
+      {
+        id: nextId('cta'),
+        type: 'cta',
+        name: 'CTA button',
+        x: c.x,
+        y: Math.round(m.baseH * 0.6),
+        anchor: 'center',
+        zIndex: 20,
+        mode: 'fit',
+        w: 600,
+        h: 160,
+        cta: { pulse: 'medium' },
+        text: { value: 'PLAY NOW', fontSizePx: 66, fontWeight: 800, color: '#ffffff' },
+        box: { bgColor: '#16a34a', radiusPx: 80 },
+      },
     ]
   }
   return []
@@ -1067,7 +1191,8 @@ function templateElements(kind: SceneDef['kind']): SceneElement[] {
 export function addScene(kind: SceneDef['kind'] = 'overlay'): void {
   const id = nextId('scene')
   const labels: Record<string, string> = { game: 'Game', overlay: 'Overlay', endscene: 'Endscene' }
-  const advance: SceneDef['advance'] = kind === 'game' ? { on: 'gameWin' } : kind === 'overlay' ? { on: 'timer', delayMs: 1500 } : kind === 'endscene' ? { on: 'manual' } : { on: 'tap' }
+  const advance: SceneDef['advance'] =
+    kind === 'game' ? { on: 'gameWin' } : kind === 'overlay' ? { on: 'timer', delayMs: 1500 } : kind === 'endscene' ? { on: 'manual' } : { on: 'tap' }
   const overlay = kind === 'overlay' ? { opacity: 0.72, color: '#0a1024' } : undefined
   const sd: SceneDef = {
     id,
@@ -1079,10 +1204,8 @@ export function addScene(kind: SceneDef['kind'] = 'overlay'): void {
     transition: { type: 'fade', durationMs: 350 },
   }
   const extraAssets: AssetMap = {}
-  if (kind === 'overlay' && !state.assets['sfx_f_correctBright'])
-    extraAssets['sfx_f_correctBright'] = { src: sfxPreviewUrl('f_correctBright'), w: 0, h: 0, kind: 'audio' }
-  if (kind === 'endscene' && !state.assets['sfx_f_winJingle'])
-    extraAssets['sfx_f_winJingle'] = { src: sfxPreviewUrl('f_winJingle'), w: 0, h: 0, kind: 'audio' }
+  if (kind === 'overlay' && !state.assets['sfx_f_correctBright']) extraAssets['sfx_f_correctBright'] = { src: sfxPreviewUrl('f_correctBright'), w: 0, h: 0, kind: 'audio' }
+  if (kind === 'endscene' && !state.assets['sfx_f_winJingle']) extraAssets['sfx_f_winJingle'] = { src: sfxPreviewUrl('f_winJingle'), w: 0, h: 0, kind: 'audio' }
   const assets = Object.keys(extraAssets).length ? { ...state.assets, ...extraAssets } : state.assets
   set({ dirty: true, activeSceneId: id, selectedIds: [], project: { ...state.project, scenes: [...state.project.scenes, sd] }, assets })
 }
@@ -1108,7 +1231,12 @@ export function addGameScene(templateId: string): void {
     zIndex: 10,
     mode: fullBleed ? 'extend' : 'fit',
     game: { templateId, params: {}, hintEnabled: true, hintIdleMs: tpl?.defaultHintIdleMs ?? 4000 },
-    sfx: isScratch ? [{ event: 'whileScratching', assetId: 'sfx_f_scratch' }, { event: 'onReveal', assetId: 'sfx_f_correctBright' }] : undefined,
+    sfx: isScratch
+      ? [
+          { event: 'whileScratching', assetId: 'sfx_f_scratch' },
+          { event: 'onReveal', assetId: 'sfx_f_correctBright' },
+        ]
+      : undefined,
   }
   const sd: SceneDef = {
     id,
@@ -1210,5 +1338,5 @@ export function selectedElements(s: EditorState): SceneElement[] {
   return s.scene.elements.filter((e) => ids.has(e.id))
 }
 export function singleSelected(s: EditorState): SceneElement | null {
-  return s.selectedIds.length === 1 ? s.scene.elements.find((e) => e.id === s.selectedIds[0]) ?? null : null
+  return s.selectedIds.length === 1 ? (s.scene.elements.find((e) => e.id === s.selectedIds[0]) ?? null) : null
 }

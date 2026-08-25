@@ -129,6 +129,53 @@ export interface ElementAnimations {
   comboNextExtra?: AnimSpec[]
 }
 
+// ---- cross-scene morph ("magic move") --------------------------------------
+// Connects THIS element to an element on ANOTHER scene. When the flow moves to that
+// scene the pair is not simply swapped: a frozen copy of the source is lifted above
+// both scene roots at its on-screen rect and flown — position AND size — onto the
+// target's rect, so the first element reads as *becoming* the second.
+//
+// Position and scale are never authored here: they are wherever the two elements sit
+// on their own canvases, so nudging either end re-authors the flight. `effect`,
+// `durationMs`, `delayMs` and `easing` (the speed curve) are the knobs.
+//
+// Plays on an ordinary screen change AND on a scene floated as an overlay. A
+// `persist` (carry-over) element is never morphed at either end — it already survives
+// the cut untouched, so there is nothing to hand over.
+export type MorphEffect =
+  // One flight: the SOURCE art travels and resizes, and the target takes over at the
+  // landing frame. Right when both ends are the same picture.
+  | 'move'
+  // Two flights down the same path: the source dissolves out as the target dissolves
+  // in. Right when the two look different but play the same role.
+  | 'cross-fade'
+  // Sequential hand-off — the source fades to nothing over the first part of the
+  // flight, the target fades up over the last. Right for a hard content change, where
+  // blending the two reads as a smear.
+  | 'fade-through'
+
+// How the flight resolves the SIZE difference between the two boxes.
+export type MorphScaleMode =
+  | 'fit' // uniform, contain-style: the smaller of the two axis ratios (default)
+  | 'stretch' // each axis matched on its own — distorts, but lands on the box exactly
+  | 'none' // don't resize at all; the flight is a pure move
+
+export interface MorphConfig {
+  /** Scene holding the target element. The morph plays only when entering THIS scene. */
+  toSceneId: string
+  /** Element on that scene this one turns into. */
+  toElementId: string
+  effect?: MorphEffect // default 'cross-fade'
+  scaleMode?: MorphScaleMode // default 'fit'
+  // Extra multiplier on the LANDING size, e.g. 1.1 settles 10% over the target before
+  // it hands over. Applies to the flying source only — the target always ends at its
+  // own authored size, which is what stays on screen. Default 1.
+  endScale?: number
+  durationMs?: number // default MORPH_DEFAULT_MS
+  delayMs?: number // hold on the source rect before the flight starts; default 0
+  easing?: string // the speed curve; default MORPH_DEFAULT_EASING
+}
+
 /**
  * Video-editor style lifetime for an element on its scene's local timeline.
  * The clock starts when the scene is entered (t = 0).
@@ -823,6 +870,7 @@ export interface SceneElement {
   timing?: TimingConfig // scene-timeline in/out window (see TimingConfig)
   typing?: TypingConfig // typewriter reveal for text / countdown elements
   animations?: ElementAnimations
+  morph?: MorphConfig // turn into an element on another scene as the flow enters it
   sfx?: SfxBinding[]
   idle?: IdleConfig
 

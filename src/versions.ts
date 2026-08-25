@@ -58,7 +58,10 @@ export function saveVersion(projectId: string, project: Project, label: string, 
 }
 
 export function deleteVersion(projectId: string, versionId: string): void {
-  write(projectId, read(projectId).filter((v) => v.id !== versionId))
+  write(
+    projectId,
+    read(projectId).filter((v) => v.id !== versionId),
+  )
 }
 
 // ---- diff ------------------------------------------------------------------
@@ -88,14 +91,20 @@ function elementChanges(a: SceneElement, b: SceneElement): string[] {
   if (J(a.drag) !== J(b.drag) || J(a.slot) !== J(b.slot)) ch.push('drag/slot')
   if (J(a.pick) !== J(b.pick) || J(a.fill) !== J(b.fill) || J(a.generate) !== J(b.generate)) ch.push('select/generate')
   if (J(a.sfx) !== J(b.sfx)) ch.push('sound')
-  if (J({ box: a.box, cta: a.cta, animations: a.animations, endscene: a.endscene, countdown: a.countdown, bar: a.bar }) !== J({ box: b.box, cta: b.cta, animations: b.animations, endscene: b.endscene, countdown: b.countdown, bar: b.bar })) ch.push('style')
+  if (J(a.morph) !== J(b.morph)) ch.push(b.morph ? 'morph' : 'morph removed')
+  if (
+    J({ box: a.box, cta: a.cta, animations: a.animations, endscene: a.endscene, countdown: a.countdown, bar: a.bar }) !==
+    J({ box: b.box, cta: b.cta, animations: b.animations, endscene: b.endscene, countdown: b.countdown, bar: b.bar })
+  )
+    ch.push('style')
   return ch
 }
 
 function sceneDiff(a: SceneDef, b: SceneDef, out: DiffLine[]): void {
   if (a.name !== b.name) out.push({ scope: 'scene', kind: 'change', text: `Scene renamed “${a.name}” → “${b.name}”` })
   if (a.advance?.on !== b.advance?.on) out.push({ scope: 'scene', kind: 'change', text: `“${b.name}” advance: ${a.advance?.on} → ${b.advance?.on}` })
-  if ((a.transition?.type ?? 'none') !== (b.transition?.type ?? 'none')) out.push({ scope: 'scene', kind: 'change', text: `“${b.name}” transition: ${a.transition?.type ?? 'none'} → ${b.transition?.type ?? 'none'}` })
+  if ((a.transition?.type ?? 'none') !== (b.transition?.type ?? 'none'))
+    out.push({ scope: 'scene', kind: 'change', text: `“${b.name}” transition: ${a.transition?.type ?? 'none'} → ${b.transition?.type ?? 'none'}` })
   const am = new Map(a.elements.map((e) => [e.id, e]))
   const bm = new Map(b.elements.map((e) => [e.id, e]))
   for (const e of a.elements) if (!bm.has(e.id)) out.push({ scope: 'element', kind: 'remove', text: `“${b.name}” · removed ${e.type} “${e.name}”` })
@@ -117,8 +126,10 @@ export function diffProjects(a: Project, b: Project): DiffLine[] {
   if (ma.baseW !== mb.baseW || ma.baseH !== mb.baseH) out.push({ scope: 'meta', kind: 'change', text: `Canvas: ${ma.baseW}×${ma.baseH} → ${mb.baseW}×${mb.baseH}` })
   if ((ma.client ?? '') !== (mb.client ?? '')) out.push({ scope: 'meta', kind: 'change', text: `Client: “${ma.client ?? '-'}” → “${mb.client ?? '-'}”` })
   if ((ma.mip ?? '') !== (mb.mip ?? '')) out.push({ scope: 'meta', kind: 'change', text: `MIP: “${ma.mip ?? '-'}” → “${mb.mip ?? '-'}”` })
-  if ((ma.locales ?? []).join(',') !== (mb.locales ?? []).join(',')) out.push({ scope: 'meta', kind: 'change', text: `Languages: [${(ma.locales ?? []).join(', ')}] → [${(mb.locales ?? []).join(', ')}]` })
-  if ((ma.variants?.length ?? 0) !== (mb.variants?.length ?? 0)) out.push({ scope: 'meta', kind: 'change', text: `Variants: ${ma.variants?.length ?? 0} → ${mb.variants?.length ?? 0}` })
+  if ((ma.locales ?? []).join(',') !== (mb.locales ?? []).join(','))
+    out.push({ scope: 'meta', kind: 'change', text: `Languages: [${(ma.locales ?? []).join(', ')}] → [${(mb.locales ?? []).join(', ')}]` })
+  if ((ma.variants?.length ?? 0) !== (mb.variants?.length ?? 0))
+    out.push({ scope: 'meta', kind: 'change', text: `Variants: ${ma.variants?.length ?? 0} → ${mb.variants?.length ?? 0}` })
   if (J(a.sfx) !== J(b.sfx) || J(a.bgm) !== J(b.bgm)) out.push({ scope: 'meta', kind: 'change', text: 'Sound (events / music) changed' })
 
   const am = new Map(a.scenes.map((s) => [s.id, s]))

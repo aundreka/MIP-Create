@@ -10,19 +10,30 @@ import { getGroupCollapsed, pruneGroupCollapsed, setGroupCollapsed } from '../ui
 import { ChevronRight, Eye, EyeOff, Folder, FolderOpen, GripVertical, Icon, LAYER_TYPE_ICON, LayoutGrid, Lock, LockOpen, X } from '../icons'
 
 export function LayersPanel(): JSX.Element {
-  const { scene, selectedIds, orientation } = useEditorState()
+  const { project, scene, selectedIds, orientation } = useEditorState()
   const ordered = [...scene.elements].sort((a, b) => b.zIndex - a.zIndex) // front first
   // Visibility as the CURRENT canvas orientation renders it (landscape override wins
   // in landscape) — so a landscape-only element isn't dimmed while editing landscape.
-  const effHidden = (el: SceneElement): boolean =>
-    orientation === 'landscape' ? !!(el.landscape?.hidden ?? el.hidden) : !!el.hidden
+  const effHidden = (el: SceneElement): boolean => (orientation === 'landscape' ? !!(el.landscape?.hidden ?? el.hidden) : !!el.hidden)
   const tree = buildLayerTree(ordered)
+  // Where a morphing element hands over to (see MorphConfig) — named, so the badge can
+  // say which screen without opening the Inspector.
+  const morphTarget = (el: SceneElement): string | null => {
+    if (!el.morph) return null
+    const s = project.scenes.find((x) => x.id === el.morph!.toSceneId)
+    const t = s?.elements.find((x) => x.id === el.morph!.toElementId)
+    if (!s) return 'a deleted screen'
+    return `“${t?.name || el.morph.toElementId}” on “${s.name || s.id}”`
+  }
   const [dragId, setDragId] = useState<string | null>(null)
   const [over, setOver] = useState<{ id: string; pos: 'before' | 'after' } | null>(null)
   const [, force] = useState(0)
 
   // drop stale group-collapse flags so a reused groupId can't inherit them
-  const groupKey = tree.filter((n) => n.kind === 'group').map((n) => (n as { groupId: string }).groupId).join(',')
+  const groupKey = tree
+    .filter((n) => n.kind === 'group')
+    .map((n) => (n as { groupId: string }).groupId)
+    .join(',')
   useEffect(() => {
     pruneGroupCollapsed(new Set(groupKey ? groupKey.split(',') : []))
   }, [groupKey])
@@ -79,10 +90,20 @@ export function LayersPanel(): JSX.Element {
       <span className="layer-name">{el.name || el.id}</span>
       {/* Orientation-limited elements (Inspector "Show in"): P = portrait only, L = landscape only. */}
       {!el.hidden && el.landscape?.hidden === true && (
-        <span className="layer-orient" title="Shows in portrait only (hidden in landscape)">P</span>
+        <span className="layer-orient" title="Shows in portrait only (hidden in landscape)">
+          P
+        </span>
       )}
       {el.hidden && el.landscape?.hidden === false && (
-        <span className="layer-orient" title="Shows in landscape only (hidden in portrait)">L</span>
+        <span className="layer-orient" title="Shows in landscape only (hidden in portrait)">
+          L
+        </span>
+      )}
+      {/* Morphs into an element on another screen — the screen change flies it there. */}
+      {!!el.morph && (
+        <span className="layer-orient layer-morph" title={`Turns into ${morphTarget(el)} on the way there`}>
+          ⤳
+        </span>
       )}
       <button
         className={'layer-btn' + (el.locked ? ' on' : '')}
