@@ -74,8 +74,13 @@ const KEYFRAMES = `
 @keyframes pa-bounce{0%,100%{transform:translateY(0)}30%{transform:translateY(calc(-18px * var(--pa-s,1)))}55%{transform:translateY(0)}75%{transform:translateY(calc(-7px * var(--pa-s,1)))}}
 @keyframes pa-shake{0%,100%{transform:translateX(0)}20%{transform:translateX(calc(-6px * var(--pa-s,1)))}40%{transform:translateX(calc(6px * var(--pa-s,1)))}60%{transform:translateX(calc(-4px * var(--pa-s,1)))}80%{transform:translateX(calc(4px * var(--pa-s,1)))}}
 @keyframes pa-wave{0%,100%{transform:rotate(-4deg)}50%{transform:rotate(4deg)}}
-@keyframes pa-shine{0%,100%{filter:brightness(1)}50%{filter:brightness(1.45)}}
-@keyframes pa-glow{0%,100%{filter:drop-shadow(0 0 0 rgba(255,255,255,0))}50%{filter:drop-shadow(0 0 14px rgba(255,255,255,.85))}}
+/* Both of these ANIMATE the filter property, which replaces it wholesale for the animation's
+   length — so they lead with --pa-filter, the element's own chain (layer blur + colour
+   adjustment, published by layoutRec). Without it a shining element would snap back to
+   unblurred, unadjusted pixels the moment its loop started. The empty fallback covers
+   nodes outside the stage that borrow these keyframes (a game's own art). */
+@keyframes pa-shine{0%,100%{filter:var(--pa-filter,) brightness(1)}50%{filter:var(--pa-filter,) brightness(1.45)}}
+@keyframes pa-glow{0%,100%{filter:var(--pa-filter,) drop-shadow(0 0 0 rgba(255,255,255,0))}50%{filter:var(--pa-filter,) drop-shadow(0 0 14px rgba(255,255,255,.85))}}
 /* light-ray reflection sweep: a glossy highlight slides across the asset, clipped to its box
    (overflow:hidden). TWO layers sweep together on the SAME box (so they stay in sync): ::before is
    a wide soft halo/glow and ::after is a narrow bright core — together they read as a real specular
@@ -147,7 +152,9 @@ function ensureCustomKeyframes(steps: KeyframeStep[]): string {
       const props: string[] = []
       if (s.transform) props.push(`transform:${s.transform}`)
       if (s.opacity != null) props.push(`opacity:${s.opacity}`)
-      if (s.filter) props.push(`filter:${s.filter}`)
+      // Same deal as pa-shine / pa-glow: lead with the element's own chain so a custom
+      // step that touches `filter` layers onto the blur/adjustment instead of erasing it.
+      if (s.filter) props.push(`filter:var(--pa-filter,) ${s.filter}`)
       return `${s.at}%{${props.join(';')}}`
     })
     .join('')
@@ -196,13 +203,20 @@ export function followLoopCss(el: SceneElement, includeEntranceDelay: boolean): 
   // Same delay composeElementAnim gives the element's own loop during playback: after the
   // last node entrance ends (pseudo/JS-driven entrance presets don't hold it back).
   const loopDelay = includeEntranceDelay
-    ? Math.max(0, ...phaseSpecs(el, 'entrance')
-        .filter((e) => e.preset !== 'lightray' && e.preset !== 'typewriter')
-        .map((e) => (e.delayMs || 0) + e.durationMs), 0)
+    ? Math.max(
+        0,
+        ...phaseSpecs(el, 'entrance')
+          .filter((e) => e.preset !== 'lightray' && e.preset !== 'typewriter')
+          .map((e) => (e.delayMs || 0) + e.durationMs),
+        0,
+      )
     : 0
   const loops = phaseSpecs(el, 'loop').filter((s) => s.preset !== 'lightray') // pseudo-driven sweep
   if (phaseSpecs(el, 'loop').length) {
-    return loops.map((l) => animationCss(l, true, loopDelay)).filter(Boolean).join(', ')
+    return loops
+      .map((l) => animationCss(l, true, loopDelay))
+      .filter(Boolean)
+      .join(', ')
   }
   return ctaPulseCss(el, loopDelay)
 }

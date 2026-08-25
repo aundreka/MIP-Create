@@ -11,6 +11,7 @@
 //   content       the <img> / text / button.
 
 import type { Anchor, AnimSpec, Scene, SceneElement, SceneOverlay, SfxBinding } from './scene'
+import { adjustFilterCss } from './scene'
 import type { AssetEntry, AssetMap, RuntimeCtx } from './types'
 import { cssFontFamily } from './font'
 import { designH, designW as baseDesignW, isLandscape, scale, sx, sy, viewH, viewW } from './responsive'
@@ -2447,8 +2448,19 @@ function layoutRec(rec: Rec): void {
   // right/bottom values from a previous layout pass.
   outer.style.right = 'auto'
   outer.style.bottom = 'auto'
-  // Uniform layer blur (scaled with the FIT scale so it looks the same at any size).
-  rec.anim.style.filter = rec.el.blur ? `blur(${(rec.el.blur * scale()).toFixed(2)}px)` : ''
+  // The element's own filter chain: the uniform layer blur (scaled with the FIT scale so
+  // it looks the same at any size) followed by any colour adjustment.
+  //
+  // It is PUBLISHED as --pa-filter as well as applied, because a keyframe that animates
+  // `filter` — shine, glow, a custom step — replaces the whole property for the length of
+  // the animation. Those keyframes prepend the variable (see anim.ts), so they compose
+  // with the chain instead of wiping it.
+  const filterChain = [rec.el.blur ? `blur(${(rec.el.blur * scale()).toFixed(2)}px)` : '', adjustFilterCss(rec.el.adjust)].filter(Boolean).join(' ')
+  rec.anim.style.filter = filterChain
+  // Always set, never removed: a nested .pa-el — a game's own art inside a game mount —
+  // would otherwise INHERIT this element's chain and apply it a second time. A lone space
+  // is an empty token stream, so `filter: var(--pa-filter) brightness(1.45)` stays valid.
+  rec.anim.style.setProperty('--pa-filter', filterChain || ' ')
   // clip-path: inset(0) clips the blur to the element boundary AFTER filter rendering —
   // more reliable than parent overflow:hidden in old Chromium WebViews (AppLovin).
   rec.anim.style.clipPath = rec.el.blur ? 'inset(0)' : ''

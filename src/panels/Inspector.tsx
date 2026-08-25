@@ -4,6 +4,7 @@
 import { useState, useEffect, useRef, useMemo, type PointerEvent as ReactPointerEvent } from 'react'
 import type {
   Anchor,
+  AdjustConfig,
   AdvanceOn,
   AnimPresetId,
   AnimSpec,
@@ -174,6 +175,52 @@ function nextSceneIdOf(scenes: SceneDef[], sd: SceneDef | undefined): string | n
   if (sd.advance?.to) return sd.advance.to
   const i = scenes.findIndex((s) => s.id === sd.id)
   return scenes[i + 1]?.id ?? null
+}
+
+// Brightness / contrast / saturation — the adjustment trio every image editor has.
+// Stored as multipliers (1 = untouched, see AdjustConfig) but shown as percentages,
+// which is how the panels people are used to label them.
+//
+// Applies to any element's own pixels, not just images: dimming a bar or draining the
+// colour out of a CTA is the same operation, and gating it to `image` would only mean
+// authors reach for a second exported asset to get it.
+const ADJUST_FIELDS: { key: keyof AdjustConfig; label: string; hint: string }[] = [
+  { key: 'brightness', label: 'Brightness', hint: '0% black · 100% untouched · 200% twice as bright' },
+  { key: 'contrast', label: 'Contrast', hint: '0% flat grey · 100% untouched' },
+  { key: 'saturation', label: 'Saturation', hint: '0% greyscale · 100% untouched · 200% twice as vivid' },
+]
+
+function AdjustFields(props: { el: SceneElement; onPatch?: (adjust: AdjustConfig | undefined) => void }): JSX.Element {
+  const { el } = props
+  const adj = el.adjust
+  const pct = (k: keyof AdjustConfig): number => Math.round((adj?.[k] ?? 1) * 100)
+  // The rows show ONE element's values (the selection's first, in the multi panel) and a
+  // change writes the whole block — so a batch edit lands identically on every element
+  // rather than nudging each from wherever it happened to be.
+  const write = (adjust: AdjustConfig | undefined): void => (props.onPatch ? props.onPatch(adjust) : patchElement(el.id, { adjust }))
+  const set = (k: keyof AdjustConfig, n: number): void => {
+    // 100% is the identity, so store nothing for it — and drop the whole block once all
+    // three are back at 100, keeping untouched elements out of the saved project.
+    const next: AdjustConfig = { ...(adj ?? {}), [k]: n === 100 ? undefined : n / 100 }
+    write(ADJUST_FIELDS.some((f) => next[f.key] != null) ? next : undefined)
+  }
+  return (
+    <>
+      <div className="group-title2">Adjust</div>
+      {ADJUST_FIELDS.map((f) => (
+        <Slider key={f.key} label={f.label} value={pct(f.key)} min={0} max={200} step={1} suffix="%" onChange={(n) => set(f.key, n)} />
+      ))}
+      <div className="hint pad">
+        {ADJUST_FIELDS.map((f) => f.hint).join(' · ')}. Corrects the element’s own pixels, so one picture can be bright on one screen and dimmed on another without a second copy in
+        the bundle.
+      </div>
+      {!!adj && (
+        <button className="wide" onClick={() => write(undefined)}>
+          Reset adjustments
+        </button>
+      )}
+    </>
+  )
 }
 
 const MORPH_EFFECTS: { value: MorphEffect; label: string }[] = [
@@ -2152,6 +2199,13 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
     // first selected element's spec; any change writes that same spec to every
     // selected element, so identical timing makes them animate in sync as a group.
     const first = state.scene.elements.find((e) => e.id === state.selectedIds[0]) ?? state.scene.elements.find((e) => state.selectedIds.includes(e.id))
+    // One adjustment written to every selected element, the same way the animation rows
+    // write one spec to all of them.
+    const patchAllAdjust = (adjust: AdjustConfig | undefined): void => {
+      beginTransaction()
+      for (const sid of state.selectedIds) patchElement(sid, { adjust })
+      endTransaction()
+    }
     const patchAllPhase = (
       phase: 'entrance' | 'loop' | 'exit' | 'gameWin' | 'tap' | 'thoughtSpawn' | 'thoughtWhack' | 'comboPick' | 'comboDrop' | 'comboNext',
       primary: AnimSpec | undefined,
@@ -2187,6 +2241,10 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
         <div className="panel-title">{state.selectedIds.length} selected</div>
         <div className="group-title">Align to canvas</div>
         <AlignRow />
+        <Accordion id="inspector.multiAdjust" title="Adjust (all selected)" defaultOpen={false}>
+          <div className="hint pad">Sets the same brightness / contrast / saturation on every selected element — the usual way a batch of art is matched to one another.</div>
+          {first && <AdjustFields el={first} onPatch={(adjust) => patchAllAdjust(adjust)} />}
+        </Accordion>
         <Accordion id="inspector.multiAnimation" title="Animation (all selected)" defaultOpen={false}>
           <div className="hint pad">
             Applies the same animation(s) to every selected element — stack multiple per phase with “+ Add another”, and they animate together as a group.
@@ -4399,6 +4457,8 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
       )}
 
       <Accordion id="inspector.effects" title="Effects" defaultOpen={false}>
+        <AdjustFields el={el} />
+        <div className="group-title2">Blur</div>
         <Slider label="Layer blur" value={el.blur ?? 0} min={0} max={80} suffix="px" onChange={(n) => patchElement(id, { blur: n || undefined })} />
         <Slider label="Background blur" value={el.backdropBlur ?? 0} min={0} max={80} suffix="px" onChange={(n) => patchElement(id, { backdropBlur: n || undefined })} />
         {el.backdropBlur ? (

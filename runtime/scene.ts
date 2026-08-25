@@ -129,6 +129,39 @@ export interface ElementAnimations {
   comboNextExtra?: AnimSpec[]
 }
 
+// ---- colour adjustment -----------------------------------------------------
+// Photo-style corrections applied to the element's own pixels — the Brightness /
+// Contrast / Saturation sliders every image editor has. 1 is the identity for all
+// three, so an absent block and an all-1 block render identically.
+//
+// They live on the ELEMENT, not the asset, so the same picture can be bright in one
+// scene and dimmed in another without a second copy of it in the bundle — which is
+// what the 5 MB budget actually cares about.
+export interface AdjustConfig {
+  brightness?: number // 0 = black, 1 = untouched, 2 = twice as bright
+  contrast?: number // 0 = flat grey, 1 = untouched
+  saturation?: number // 0 = greyscale, 1 = untouched, 2 = twice as vivid
+}
+
+/**
+ * The CSS filter functions for an adjustment, or '' when it is a no-op.
+ *
+ * Order matters and is fixed: brightness → contrast → saturate, the order an image
+ * editor's panel lists them, so the same three numbers always produce the same pixels.
+ */
+export function adjustFilterCss(a: AdjustConfig | undefined): string {
+  if (!a) return ''
+  const out: string[] = []
+  const add = (fn: string, v: number | undefined): void => {
+    if (v == null || !Number.isFinite(v) || v === 1) return // 1 is the identity — nothing to emit
+    out.push(`${fn}(${Math.round(Math.max(0, v) * 1000) / 1000})`)
+  }
+  add('brightness', a.brightness)
+  add('contrast', a.contrast)
+  add('saturate', a.saturation)
+  return out.join(' ')
+}
+
 // ---- cross-scene morph ("magic move") --------------------------------------
 // Connects THIS element to an element on ANOTHER scene. When the flow moves to that
 // scene the pair is not simply swapped: a frozen copy of the source is lifted above
@@ -848,6 +881,7 @@ export interface SceneElement {
   rotation?: number
   opacity?: number
   blur?: number // uniform layer blur radius in design px (CSS filter: blur)
+  adjust?: AdjustConfig // brightness / contrast / saturation, applied to the element's own pixels
   // Background (backdrop) blur — blurs the SCENE CONTENT BEHIND this element's box,
   // like Figma's "Background blur" effect (as opposed to `blur`, which blurs the
   // element's OWN content). Radius is in design px, scaled with the fit.
