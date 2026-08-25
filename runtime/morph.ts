@@ -156,7 +156,7 @@ function freezeClone(el: HTMLElement): HTMLElement {
   for (const node of [copy, ...Array.from(copy.querySelectorAll<HTMLElement>('*'))]) {
     node.style.animation = 'none'
     node.style.transition = 'none'
-    node.classList.remove('pa-lightray')
+    node.classList.remove('pa-lightray', 'pa-lightray--run')
   }
   copy.style.pointerEvents = 'none'
   return copy

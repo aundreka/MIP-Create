@@ -86,15 +86,25 @@ const KEYFRAMES = `
    a wide soft halo/glow and ::after is a narrow bright core — together they read as a real specular
    reflection instead of a flat white line. 'screen' blend keeps it additive (lightens only). The
    band is rotated by --pa-lightray-ang and translated along its own x-axis, so ONE angle sets the
-   direction: 0=left→right, 90=top→bottom, 180=right→left, 45=corner→corner, etc. Driven by the
-   .pa-lightray class; duration/delay/easing/angle come from CSS vars set in applyMountAnim(). */
+   direction: 0=left→right, 90=top→bottom, 180=right→left, 45=corner→corner, etc.
+   TWO classes, because the sweep is not always ambient: .pa-lightray sets the box up (clipping +
+   the two parked bands) for the element's whole life, and .pa-lightray--run is what actually
+   animates them. A lightray authored as a LOOP runs from mount; one authored in a one-shot phase
+   (entrance / exit / tap / game win / a game event) stays parked until that phase fires and then
+   sweeps its authored iteration count — applyLightray() in stage.ts adds and restarts the --run class.
+   Duration/delay/easing/angle/iterations/keyframes all come from CSS vars set there. */
 .pa-lightray{position:relative;overflow:hidden}
-.pa-lightray::before,.pa-lightray::after{content:'';position:absolute;top:50%;left:50%;width:70%;height:320%;margin:-160% 0 0 -35%;pointer-events:none;z-index:2;mix-blend-mode:screen;transform:rotate(var(--pa-lightray-ang,20deg)) translateX(var(--pa-lightray-from,-340%));animation:pa-lightray-kf var(--pa-lightray-dur,2400ms) var(--pa-lightray-ease,ease-in-out) var(--pa-lightray-delay,0ms) infinite;will-change:transform}
+.pa-lightray::before,.pa-lightray::after{content:'';position:absolute;top:50%;left:50%;width:70%;height:320%;margin:-160% 0 0 -35%;pointer-events:none;z-index:2;mix-blend-mode:screen;transform:rotate(var(--pa-lightray-ang,20deg)) translateX(var(--pa-lightray-from,-340%));will-change:transform}
+.pa-lightray--run::before,.pa-lightray--run::after{animation-name:var(--pa-lightray-name,pa-lightray-kf);animation-duration:var(--pa-lightray-dur,2400ms);animation-timing-function:var(--pa-lightray-ease,ease-in-out);animation-delay:var(--pa-lightray-delay,0ms);animation-iteration-count:var(--pa-lightray-iter,infinite);animation-fill-mode:var(--pa-lightray-fill,none)}
 /* wide soft halo (the glow around the glint) */
 .pa-lightray::before{background:linear-gradient(90deg,rgba(255,255,255,0) 30%,rgba(255,255,255,0.07) 42%,rgba(255,255,255,0.20) 50%,rgba(255,255,255,0.07) 58%,rgba(255,255,255,0) 70%)}
 /* narrow bright core with soft shoulders (the specular streak itself) */
 .pa-lightray::after{background:linear-gradient(90deg,rgba(255,255,255,0) 41%,rgba(255,255,255,0.28) 46%,rgba(255,255,255,0.85) 49.5%,rgba(255,255,255,0.98) 50%,rgba(255,255,255,0.85) 50.5%,rgba(255,255,255,0.28) 54%,rgba(255,255,255,0) 59%)}
 @keyframes pa-lightray-kf{0%{transform:rotate(var(--pa-lightray-ang,20deg)) translateX(var(--pa-lightray-from,-340%))}55%,100%{transform:rotate(var(--pa-lightray-ang,20deg)) translateX(var(--pa-lightray-to,340%))}}
+/* The looping sweep parks at the far side for the last 45% of its duration so consecutive passes
+   have a gap between them. A ONE-SHOT sweep has nothing to gap against, so it gets its own
+   keyframes that spend the whole authored duration crossing the box. */
+@keyframes pa-lightray-once{0%{transform:rotate(var(--pa-lightray-ang,20deg)) translateX(var(--pa-lightray-from,-340%))}100%{transform:rotate(var(--pa-lightray-ang,20deg)) translateX(var(--pa-lightray-to,340%))}}
 @keyframes pa-spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
 @keyframes pa-float{0%,100%{transform:translateY(0)}50%{transform:translateY(calc(-10px * var(--pa-s,1)))}}
 @keyframes pa-subtle-float{0%,100%{transform:translateY(0)}50%{transform:translateY(calc(-3px * var(--pa-s,1)))}}
@@ -236,7 +246,7 @@ export function ctaPulseAnimation(cta: import('./scene').CtaConfig | undefined):
 
 // A phase can hold MULTIPLE stacked specs: the primary (`entrance`/`loop`/`exit`/`gameWin`) plus any
 // `…Extra[]` played together with it (e.g. entrance = pop + shine). Collect them in order.
-type Phase = 'entrance' | 'loop' | 'exit' | 'gameWin' | 'tap' | 'thoughtSpawn' | 'thoughtWhack' | 'comboPick' | 'comboDrop' | 'comboNext'
+export type Phase = 'entrance' | 'loop' | 'exit' | 'gameWin' | 'tap' | 'thoughtSpawn' | 'thoughtWhack' | 'comboPick' | 'comboDrop' | 'comboNext'
 export function phaseSpecs(el: SceneElement, phase: Phase): AnimSpec[] {
   const a = el.animations
   if (!a) return []
@@ -268,12 +278,25 @@ export function phaseSpecs(el: SceneElement, phase: Phase): AnimSpec[] {
   return out
 }
 
-/** The lightray spec from ANY phase (entrance/loop/exit/gameWin/tap) — drives the .pa-lightray pseudo sweep.
- * The reflection is an ambient class-driven effect, so it can be added in any phase, not just loop. */
+// Phase search order for the reflection sweep. `loop` FIRST: an element that carries both an
+// ambient loop sweep and a one-shot one can only run one of them (a single pair of pseudo-elements),
+// and the ambient one is the safer pick — it is visible for the element's whole life either way.
+const LIGHTRAY_PHASES: Phase[] = ['loop', 'entrance', 'exit', 'gameWin', 'tap', 'thoughtSpawn', 'thoughtWhack', 'comboPick', 'comboDrop', 'comboNext']
+
+/** The lightray spec from ANY phase, WITH the phase that authored it — drives the .pa-lightray
+ * pseudo sweep. The reflection is a class-driven effect, so it can be added in any phase, not just
+ * loop; the phase decides whether it sweeps forever (loop) or once when that phase fires. */
+export function lightrayHit(el: SceneElement): { spec: AnimSpec; phase: Phase } | undefined {
+  for (const phase of LIGHTRAY_PHASES) {
+    const spec = phaseSpecs(el, phase).find((s) => s.preset === 'lightray')
+    if (spec) return { spec, phase }
+  }
+  return undefined
+}
+
+/** Just the spec, for callers that don't care which phase authored it. */
 export function lightraySpec(el: SceneElement): AnimSpec | undefined {
-  return (['entrance', 'loop', 'exit', 'gameWin', 'tap', 'thoughtSpawn', 'thoughtWhack', 'comboPick', 'comboDrop', 'comboNext'] as const)
-    .flatMap((p) => phaseSpecs(el, p))
-    .find((s) => s.preset === 'lightray')
+  return lightrayHit(el)?.spec
 }
 
 /** Total wall time a phase occupies (the latest `delay + duration` across its stacked

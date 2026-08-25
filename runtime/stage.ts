@@ -25,11 +25,12 @@ import {
   entranceTriggers,
   exitCss,
   injectAnimStyles,
-  lightraySpec,
+  lightrayHit,
   phaseFrameCss,
   phaseLeadDelayMs,
   phaseTotalMs,
 } from './anim'
+import type { Phase } from './anim'
 import { applyImageCrop, createContainerContent, createImageContent, styleContainer } from './elements/image'
 import { applyBarFill, createBarContent } from './elements/bar'
 import { createTextContent } from './elements/text'
@@ -799,25 +800,51 @@ function applyMountAnim(rec: Rec): void {
   const css = composeElementAnim(rec.el, false)
   rec.anim.style.animation = css === 'none' ? '' : css
   setAnimHints(rec.anim, css !== 'none')
-  applyLightray(rec)
+  applyLightray(rec) // no active phase: only an ambient (loop) sweep runs
 }
-// The 'lightray' loop preset is a pseudo-element glare sweep (see anim.ts). Toggle the
-// driving class + feed its timing via CSS vars whenever the element's loop is re-applied.
-function applyLightray(rec: Rec): void {
-  const ray = lightraySpec(rec.el) // a lightray in ANY phase (entrance / loop / exit), primary or extra
-  if (ray) {
-    rec.anim.classList.add('pa-lightray')
-    rec.anim.style.setProperty('--pa-lightray-dur', (ray.durationMs ?? 2400) + 'ms')
-    rec.anim.style.setProperty('--pa-lightray-delay', (ray.delayMs ?? 0) + 'ms')
-    rec.anim.style.setProperty('--pa-lightray-ease', ray.easing ?? 'ease-in-out')
-    rec.anim.style.setProperty('--pa-lightray-ang', (ray.angleDeg ?? 20) + 'deg') // sweep direction
-  } else {
-    rec.anim.classList.remove('pa-lightray')
-    rec.anim.style.removeProperty('--pa-lightray-dur')
-    rec.anim.style.removeProperty('--pa-lightray-delay')
-    rec.anim.style.removeProperty('--pa-lightray-ease')
-    rec.anim.style.removeProperty('--pa-lightray-ang')
+// The 'lightray' preset is a pseudo-element glare sweep (see anim.ts). Feed its timing via CSS
+// vars and toggle the two driving classes: .pa-lightray sets the box up for the element's whole
+// life (so its clipping never changes underfoot), .pa-lightray--run is what actually sweeps.
+//
+// WHICH PHASE authored it decides when that happens. A `loop` lightray is ambient: it runs from
+// mount, forever, everywhere (including the static editor canvas), exactly as it always has. A
+// lightray authored in a ONE-SHOT phase — entrance, exit, tap, game win, a game event — is an
+// event like the node-driven presets beside it: it stays parked until `activePhase` says its
+// phase has fired, then sweeps `iterations` times (once by default) and stops. Without that it
+// swept continuously from mount, so an "entrance" reflection was already running before the
+// element had entered and never stopped afterwards.
+function applyLightray(rec: Rec, activePhase?: Phase): void {
+  const hit = lightrayHit(rec.el) // a lightray in ANY phase, primary or extra
+  if (!hit) {
+    rec.anim.classList.remove('pa-lightray', 'pa-lightray--run')
+    for (const v of ['dur', 'delay', 'ease', 'ang', 'iter', 'name', 'fill']) rec.anim.style.removeProperty('--pa-lightray-' + v)
+    return
   }
+  const { spec: ray, phase } = hit
+  const ambient = phase === 'loop'
+  rec.anim.classList.add('pa-lightray')
+  rec.anim.style.setProperty('--pa-lightray-dur', (ray.durationMs ?? 2400) + 'ms')
+  rec.anim.style.setProperty('--pa-lightray-delay', (ray.delayMs ?? 0) + 'ms')
+  rec.anim.style.setProperty('--pa-lightray-ease', ray.easing ?? 'ease-in-out')
+  rec.anim.style.setProperty('--pa-lightray-ang', (ray.angleDeg ?? 20) + 'deg') // sweep direction
+  rec.anim.style.setProperty('--pa-lightray-iter', String(ray.iterations ?? (ambient ? 'infinite' : 1)))
+  // The looping keyframes park at the far side for the last 45% of each pass to space repeats
+  // out; a one-shot has nothing to space against and should cross over its full authored time.
+  rec.anim.style.setProperty('--pa-lightray-name', ambient ? 'pa-lightray-kf' : 'pa-lightray-once')
+  rec.anim.style.setProperty('--pa-lightray-fill', ambient ? 'none' : 'both')
+  if (ambient) {
+    rec.anim.classList.add('pa-lightray--run') // idempotent: a relayout must not rewind the sweep
+    return
+  }
+  if (activePhase !== phase) {
+    rec.anim.classList.remove('pa-lightray--run')
+    return
+  }
+  // Its phase just fired — restart the sweep from the top, the same way restartAnim() rewinds a
+  // still-running node animation so an impatient repeat tap re-triggers instead of being swallowed.
+  rec.anim.classList.remove('pa-lightray--run')
+  void rec.anim.offsetWidth
+  rec.anim.classList.add('pa-lightray--run')
 }
 function restartAnim(node: HTMLElement, css: string): void {
   node.style.animation = 'none'
@@ -834,12 +861,14 @@ function runEntrance(rec: Rec): void {
   const css = composeElementAnim(rec.el, true)
   if (css !== 'none') restartAnim(rec.anim, css)
   else clearNodeAnim(rec.anim)
+  applyLightray(rec, 'entrance')
   const cfg = phaseTypingConfig(rec.el, 'entrance') ?? rec.el.typing
   if (cfg) startTyping(rec, 0, cfg) // the typewriter shares the entrance's origin
 }
 function runGameWin(rec: Rec): void {
   const css = composeGameWinAnim(rec.el)
   if (css !== 'none') restartAnim(rec.anim, css)
+  applyLightray(rec, 'gameWin')
   const cfg = phaseTypingConfig(rec.el, 'gameWin')
   if (cfg) startTyping(rec, 0, cfg)
 }
@@ -852,16 +881,19 @@ function hasTapAnim(el: SceneElement): boolean {
 function runTap(rec: Rec): void {
   const css = composeTapAnim(rec.el)
   if (css !== 'none') restartAnim(rec.anim, css)
+  applyLightray(rec, 'tap')
 }
 
 function runThoughtEvent(rec: Rec, event: 'thoughtSpawn' | 'thoughtWhack'): void {
   const css = composeThoughtEventAnim(rec.el, event)
   if (css !== 'none') restartAnim(rec.anim, css)
+  applyLightray(rec, event)
 }
 
 function runComboEvent(rec: Rec, event: 'comboPick' | 'comboDrop' | 'comboNext'): void {
   const css = composeComboEventAnim(rec.el, event)
   if (css !== 'none') restartAnim(rec.anim, css)
+  applyLightray(rec, event)
 }
 
 // ---------------------------------------------------------------------------
@@ -2165,6 +2197,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       for (const rec of recs) {
         const css = exitCss(rec.el)
         if (css) restartAnim(rec.anim, css)
+        applyLightray(rec, 'exit')
       }
     },
     setHidden(id, hidden) {
