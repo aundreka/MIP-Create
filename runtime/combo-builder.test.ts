@@ -952,6 +952,29 @@ describe('combo builder', () => {
     })
   })
 
+  it('takes the game mount out of hit-testing, so its box can’t eat an option', () => {
+    // The mount is an invisible author-sized rectangle — routinely most of the
+    // screen, and a combo tray is normally arranged around the drop area inside it.
+    // Interactive by default, it swallows the touches over whatever part of an
+    // option it happens to sit above in the layer order, and the art then looks
+    // whole while only the part hanging outside it can be picked up. Nothing in
+    // there is ever touched, so the whole subtree steps aside.
+    const stage = build([GAME, ANCHOR, option('a1', 1, 1, 'optA')])
+    stage.layoutAll()
+    stage.startGames(true)
+    const mount = stage.root.querySelector<HTMLElement>('[data-id="combo-game"]')!
+    const slot = mount.querySelector<HTMLElement>('.pa-game')!
+    expect(mount.style.pointerEvents).toBe('none')
+    expect(slot.style.pointerEvents).toBe('none')
+    // The option itself must stay interactive — it is the one thing that is touched.
+    expect(stage.root.querySelector<HTMLElement>('[data-id="a1"]')!.style.pointerEvents).toBe('auto')
+
+    stage.destroy()
+    // Handed back as found, so a re-mount doesn't inherit a stale override.
+    expect(mount.style.pointerEvents).toBe('')
+    expect(slot.style.pointerEvents).toBe('')
+  })
+
   it('restores every enlisted element on destroy', () => {
     const stage = build([GAME, ANCHOR, title('t1', 1), option('a1', 1, 1, 'optA'), option('b1', 2, 1, 'optB')])
     stage.layoutAll()

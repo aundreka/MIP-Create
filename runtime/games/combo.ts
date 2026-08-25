@@ -144,6 +144,12 @@ export function createCombo(): GameModule {
   const answers: number[] = []
   const timers: number[] = []
 
+  /** The mount's own outer .pa-el, and the inline pointer-events both it and the
+   * inner slot were built with, to be handed back on destroy. */
+  let shell: HTMLElement | null = null
+  let shellPointerEvents = ''
+  let rootPointerEvents = ''
+
   let current = 0
   let started = false
   let busy = false
@@ -760,6 +766,25 @@ export function createCombo(): GameModule {
       target.style.cssText = 'position:absolute;box-sizing:border-box;pointer-events:none;opacity:0;background-color:transparent;outline:none;'
       ctx.root.appendChild(target)
 
+      // Then step the whole mount OUT of hit-testing.
+      //
+      // Nothing inside it is ever touched: the drop area above is pointer-events
+      // none, and every interactive piece of a combo board — the options — is a
+      // tagged scene element sitting OUTSIDE this box entirely. What the mount does
+      // have is a box, an author-sized rectangle that is routinely most of the
+      // screen, invisible but hit-testable by default like any other game mount.
+      // Wherever it lands above an option in the layer order it silently swallows
+      // the touches over the overlapping part, and since a combo tray is normally
+      // arranged around the drop area that part is usually most of the option: the
+      // art looks whole, and only the sliver hanging outside the mount can be picked
+      // up. Other games need an interactive mount because the mount IS their play
+      // surface. This one doesn't, so the layer order stops mattering.
+      shell = ctx.root.closest<HTMLElement>('.pa-el')
+      shellPointerEvents = shell?.style.pointerEvents ?? ''
+      rootPointerEvents = ctx.root.style.pointerEvents
+      if (shell) shell.style.pointerEvents = 'none'
+      ctx.root.style.pointerEvents = 'none'
+
       collect()
       layoutZone()
       // Nothing is hidden or revealed here on purpose: mount() also runs on the
@@ -805,6 +830,9 @@ export function createCombo(): GameModule {
       // is cleared with the rest rather than firing against a torn-down board.
       endDrag?.()
       clearTimers()
+      if (shell) shell.style.pointerEvents = shellPointerEvents
+      shell = null
+      ctx.root.style.pointerEvents = rootPointerEvents
       ctx.root.innerHTML = ''
       for (const item of options) {
         restoreOptionArt(item)
