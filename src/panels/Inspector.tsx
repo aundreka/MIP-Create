@@ -404,8 +404,22 @@ import { getTimeline, setTimeline } from '../timeline'
 import { KeyframeEditor } from './KeyframeEditor'
 import { SceneTranslationModal } from './SceneTranslationModal'
 import { RemoveBgModal } from './RemoveBgModal'
+import { trimCropShapeBox } from '../cropTrim'
 
 const ANCHORS: Anchor[] = ['center', 'top', 'bottom', 'left', 'right', 'top-left', 'top-right', 'bottom-left', 'bottom-right']
+// Where an anchor sits inside the element box, as a fraction of its width/height —
+// needed whenever a box has to be re-originated to its top-left corner.
+const ANCHOR_FRACTION: Record<Anchor, [number, number]> = {
+  center: [0.5, 0.5],
+  top: [0.5, 0],
+  bottom: [0.5, 1],
+  left: [0, 0.5],
+  right: [1, 0.5],
+  'top-left': [0, 0],
+  'top-right': [1, 0],
+  'bottom-left': [0, 1],
+  'bottom-right': [1, 1],
+}
 
 // Reuse another scene's elements (background, images, text, …) in the current scene.
 // Copies are independent per scene — same asset underneath (packed once on export),
@@ -2823,6 +2837,21 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
   const editCropShape = (mode: 'draw' | 'edit', preset?: CropShapePreset): void => {
     window.dispatchEvent(new CustomEvent('pa:crop-shape-edit', { detail: { elementId: id, mode, preset } }))
   }
+  // Shrink the element onto its outline. The geometry lives in cropTrim.ts; this only
+  // resolves the current box (an image sized by `scale` has no explicit w/h) and
+  // re-origins it to its top-left, the same way entering the rectangular crop does.
+  const trimBoxToCropShape = (): void => {
+    const a = state.assets[localizedEl.assetId ?? '']
+    const w0 = g.w ?? Math.max(1, Math.round((a?.w ?? 300) * (g.scale || 1)))
+    const h0 = g.h ?? Math.max(1, Math.round((a?.h ?? 300) * (g.scale || 1)))
+    const trim = trimCropShapeBox(el.cropShape?.points ?? [], w0, h0, el.crop)
+    if (!trim) return
+    const [ax, ay] = ANCHOR_FRACTION[g.anchor]
+    beginTransaction()
+    patchGeometry(id, { x: Math.round(g.x - ax * w0) + trim.dx, y: Math.round(g.y - ay * h0) + trim.dy, w: trim.w, h: trim.h, anchor: 'top-left' })
+    patchElement(id, { cropShape: { points: trim.points }, ...(trim.crop ? { crop: trim.crop } : {}) })
+    endTransaction()
+  }
   // A cut-out remembers the image it was cut from, so "restore the original" is only
   // offered while that original is actually still in the library.
   const originId = el.assetId ? state.assets[el.assetId]?.origin : undefined
@@ -3447,23 +3476,26 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
           {!el.container && el.assetId && (
             <>
               <Accordion id="inspector.crop" title="Crop">
-                <Toggle label="Crop this image" checked={!!el.crop} onChange={(v) => (v ? enableCrop() : patchElement(id, { crop: undefined }))} />
-                {el.crop && (
-                  <>
-                    <button className="wide" onClick={() => window.dispatchEvent(new CustomEvent('pa:crop-edit', { detail: { elementId: id } }))}>
-                      Adjust crop on canvas
-                    </button>
-                    <button className="wide" onClick={() => setCrop({ scale: undefined, x: undefined, y: undefined })}>
-                      Reset crop
-                    </button>
-                    <div className="hint pad">
-                      <b>Double-click the image</b> on the canvas to crop it — drag the <b>edges/corners</b> to change what shows, drag the <b>middle</b> to move the picture, and{' '}
-                      <b>scroll</b> to zoom. Press <b>Enter</b> or click away when done.
-                    </div>
-                  </>
-                )}
-              </Accordion>
-              <Accordion id="inspector.cropshape" title="Crop area (free-form)" defaultOpen={false}>
+                {/* One panel, two shapes of crop. They were separate accordions and the
+                    free-form one lost — the rectangle is what "Crop" means to everyone,
+                    so the alternative has to be offered in the same breath, not below
+                    the fold. Both can be on at once: the rectangle places the picture,
+                    the area decides which part of it survives. */}
+                <Row label="Crop shape">
+                  <Select
+                    value={el.cropShape && el.cropShape.points.length >= 3 ? 'area' : el.crop ? 'rect' : 'none'}
+                    onChange={(v) => {
+                      if (v === 'none') patchElement(id, { crop: undefined, cropShape: undefined })
+                      else if (v === 'rect') enableCrop()
+                      else editCropShape('draw')
+                    }}
+                    options={[
+                      { value: 'none', label: 'No crop (whole image)' },
+                      { value: 'rect', label: 'Rectangle (drag the edges)' },
+                      { value: 'area', label: 'Free-form area (any shape)' },
+                    ]}
+                  />
+                </Row>
                 {el.cropShape && el.cropShape.points.length >= 3 ? (
                   <>
                     <button className="wide" onClick={() => editCropShape('edit')}>
@@ -3472,25 +3504,31 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                     <button className="wide" onClick={() => editCropShape('draw')}>
                       Draw a new area
                     </button>
+                    <button className="wide" onClick={() => trimBoxToCropShape()}>
+                      Trim box to the area
+                    </button>
                     <button className="wide" onClick={() => patchElement(id, { cropShape: undefined })}>
                       Remove crop area
                     </button>
                     <div className="hint pad">
                       Cropping to {el.cropShape.points.length} corners. On the canvas: <b>drag a corner</b> to reshape, <b>drag a small dot</b> on an edge to add one,{' '}
-                      <b>Alt-click</b> a corner to remove it. The area is stored relative to the box, so resizing the element crops with it.
+                      <b>Alt-click</b> a corner to remove it. <b>Trim box</b> shrinks the element onto the outline, so it stops taking up the whole rectangle it was cut from.
                     </div>
+                    {el.crop && (
+                      <div className="hint pad">
+                        The rectangular crop below is <b>also</b> on — it positions the picture, then the area cuts it. Set <b>Crop shape</b> to <b>Rectangle</b> if you only want
+                        that one.
+                      </div>
+                    )}
                   </>
                 ) : (
                   <>
-                    <button className="wide" onClick={() => editCropShape('draw')}>
-                      Draw crop area on canvas
-                    </button>
-                    <Row label="Or start from">
+                    <Row label="Start an area from">
                       <Select
                         value=""
                         onChange={(v) => v && editCropShape('edit', v as CropShapePreset)}
                         options={[
-                          { value: '', label: 'Pick a shape…' },
+                          { value: '', label: 'Draw it yourself…' },
                           { value: 'ellipse', label: 'Ellipse / circle' },
                           { value: 'triangle', label: 'Triangle' },
                           { value: 'diamond', label: 'Diamond' },
@@ -3501,8 +3539,22 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                       />
                     </Row>
                     <div className="hint pad">
-                      Crop to any shape, not just a rectangle: <b>click</b> to drop corners or <b>drag</b> to trace freehand, then click the first corner (or press <b>Enter</b>) to
-                      close it. Everything outside the outline is cut away, in Preview and in the export.
+                      A free-form area crops to <b>any</b> shape: <b>click</b> to drop corners or <b>drag</b> to trace freehand, then click the first corner (or press <b>Enter</b>)
+                      to close it. Everything outside the outline is cut away, in Preview and in the export.
+                    </div>
+                  </>
+                )}
+                {el.crop && (
+                  <>
+                    <button className="wide" onClick={() => window.dispatchEvent(new CustomEvent('pa:crop-edit', { detail: { elementId: id } }))}>
+                      Adjust rectangular crop on canvas
+                    </button>
+                    <button className="wide" onClick={() => setCrop({ scale: undefined, x: undefined, y: undefined })}>
+                      Reset rectangular crop
+                    </button>
+                    <div className="hint pad">
+                      Drag the <b>edges/corners</b> to change what shows, drag the <b>middle</b> to move the picture, and <b>scroll</b> to zoom. Press <b>Enter</b> or click away
+                      when done. <b>Double-clicking the image</b> on the canvas opens whichever crop it has — the area editor once one is drawn.
                     </div>
                   </>
                 )}

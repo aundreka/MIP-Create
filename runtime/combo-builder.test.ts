@@ -19,8 +19,11 @@ function transitionOf(el: HTMLElement): string {
   return (el.querySelector<HTMLElement>('.pa-el-anim') ?? el).style.transition
 }
 
-function pointer(type: string, x: number, y: number): PointerEvent {
-  return new MouseEvent(type, { clientX: x, clientY: y, bubbles: true }) as unknown as PointerEvent
+function pointer(type: string, x: number, y: number, init: { pointerId?: number; pointerType?: string } = {}): PointerEvent {
+  const ev = new MouseEvent(type, { clientX: x, clientY: y, bubbles: true }) as unknown as PointerEvent
+  // jsdom's MouseEvent ignores unknown init keys, so pin them on afterwards.
+  for (const [key, value] of Object.entries(init)) Object.defineProperty(ev, key, { value, configurable: true })
+  return ev
 }
 
 const GAME: SceneElement = {
@@ -822,6 +825,131 @@ describe('combo builder', () => {
     vi.advanceTimersByTime(400)
     expect(won).toBe(true)
     stage.destroy()
+  })
+
+  describe('touch drags', () => {
+    /** One option, one layer, and a 10x10 drop area at the origin. */
+    function board(params: Record<string, unknown> = {}): { opt: HTMLElement; lay: HTMLElement; picked: () => boolean; stage: ReturnType<typeof buildScene> } {
+      const game = { ...GAME, game: { ...GAME.game!, params: { ...(GAME.game!.params as object), ...params } } } as SceneElement
+      const stage = build([game, ANCHOR, option('a1', 1, 1, 'optA'), layer('l-a1', 1, 1, 'layerA')])
+      stage.layoutAll()
+      stage.startGames(true)
+      const opt = stage.root.querySelector<HTMLElement>('[data-id="a1"]')!
+      const lay = stage.root.querySelector<HTMLElement>('[data-id="l-a1"]')!
+      stubRect(stage.root.querySelector<HTMLElement>('[data-combo-target="1"]')!, 0, 0, 10, 10)
+      stubRect(lay, 0, 0, 100, 100)
+      // The pick lands on its layer, so a revealed layer is the pick having counted.
+      const picked = (): boolean => {
+        vi.advanceTimersByTime(400)
+        return !lay.classList.contains('pa-combo-off')
+      }
+      return { opt, lay, picked, stage }
+    }
+
+    it('keeps following the finger after it leaves the option’s box', () => {
+      // The move listeners sit on window, not on the option: pointer capture is
+      // best-effort inside an ad container, and without it every move past the
+      // element's own bounds — which is the whole of a drag — would be lost.
+      const { opt, stage } = board()
+      stubRect(opt, 400, 400, 100, 100)
+      opt.dispatchEvent(pointer('pointerdown', 450, 450))
+      document.body.dispatchEvent(pointer('pointermove', 700, 620))
+      expect(opt.style.translate).toBe('250px 170px')
+      stage.destroy()
+    })
+
+    it('treats a pointercancel over the drop area as a pick, not a change of mind', () => {
+      // iOS Safari raises pointercancel on its own — a second finger landing, a
+      // system edge swipe, its own scroll heuristic firing late — with the option
+      // sitting right where the player dragged it. Binning that is the most
+      // infuriating way for a pick to fail.
+      const { opt, picked, stage } = board()
+      stubRect(opt, 0, 0, 10, 10)
+      opt.dispatchEvent(pointer('pointerdown', 5, 5))
+      opt.dispatchEvent(pointer('pointercancel', 5, 5))
+      expect(picked()).toBe(true)
+      stage.destroy()
+    })
+
+    it('still springs home when the cancel comes in short of the area', () => {
+      const { opt, picked, stage } = board()
+      stubRect(opt, 800, 800, 100, 100)
+      opt.dispatchEvent(pointer('pointerdown', 850, 850))
+      opt.dispatchEvent(pointer('pointermove', 860, 860))
+      opt.dispatchEvent(pointer('pointercancel', 860, 860))
+      expect(opt.style.translate).toBe('0px 0px')
+      expect(picked()).toBe(false)
+      stage.destroy()
+    })
+
+    it('gives a finger extra room at the edge that a mouse doesn’t get', () => {
+      // snapBorderPct 0, so the only forgiveness is the fingertip floor. A release
+      // 10px past a 10px-wide area is a miss with a cursor and a hit with a thumb.
+      const mouse = board({ snapBorderPct: 0 })
+      stubRect(mouse.opt, 500, 500, 100, 100)
+      mouse.opt.dispatchEvent(pointer('pointerdown', 550, 550, { pointerType: 'mouse' }))
+      mouse.opt.dispatchEvent(pointer('pointerup', 20, 5, { pointerType: 'mouse' }))
+      expect(mouse.picked()).toBe(false)
+      mouse.stage.destroy()
+
+      document.body.innerHTML = ''
+      const touch = board({ snapBorderPct: 0 })
+      stubRect(touch.opt, 500, 500, 100, 100)
+      touch.opt.dispatchEvent(pointer('pointerdown', 550, 550, { pointerType: 'touch' }))
+      touch.opt.dispatchEvent(pointer('pointerup', 20, 5, { pointerType: 'touch' }))
+      expect(touch.picked()).toBe(true)
+      touch.stage.destroy()
+    })
+
+    it('accepts a drop the finger is over even when the option’s centre isn’t', () => {
+      // What the player aims with is the fingertip; the option element can be an
+      // invisible handle sitting well off to one side of the art being carried.
+      const { opt, picked, stage } = board({ zoneW: 100, zoneH: 100 })
+      stubRect(stage.root.querySelector<HTMLElement>('[data-combo-target="1"]')!, 0, 0, 200, 200)
+      stubRect(opt, 400, 400, 100, 100)
+      opt.dispatchEvent(pointer('pointerdown', 450, 450))
+      opt.dispatchEvent(pointer('pointerup', 100, 100))
+      expect(picked()).toBe(true)
+      stage.destroy()
+    })
+
+    it('ignores a second finger while one option is already being dragged', () => {
+      // A hand steadying the phone, or a thumb brushing a sibling option, would
+      // otherwise open a rival drag fighting the first one over the drop area.
+      const stage = build([GAME, ANCHOR, option('a1', 1, 1, 'optA'), option('a2', 1, 2, 'optB')])
+      stage.layoutAll()
+      stage.startGames(true)
+      const q = (id: string): HTMLElement => stage.root.querySelector<HTMLElement>(`[data-id="${id}"]`)!
+      stubRect(stage.root.querySelector<HTMLElement>('[data-combo-target="1"]')!, 0, 0, 10, 10)
+      stubRect(q('a1'), 400, 400, 100, 100)
+      stubRect(q('a2'), 700, 400, 100, 100)
+
+      q('a1').dispatchEvent(pointer('pointerdown', 450, 450, { pointerId: 1, pointerType: 'touch' }))
+      q('a2').dispatchEvent(pointer('pointerdown', 750, 450, { pointerId: 2, pointerType: 'touch' }))
+      expect(scaleOf(q('a2'))).toBe('') // never picked up
+
+      // ...and that second finger's moves don't drive the option the first one holds.
+      document.body.dispatchEvent(pointer('pointermove', 900, 900, { pointerId: 2, pointerType: 'touch' }))
+      expect(q('a1').style.translate).toBe('0px 0px') // the resting offset relayout wrote
+      document.body.dispatchEvent(pointer('pointermove', 500, 500, { pointerId: 1, pointerType: 'touch' }))
+      expect(q('a1').style.translate).toBe('50px 50px')
+
+      // The first finger lifting hands the board back: the sibling can be grabbed now.
+      document.body.dispatchEvent(pointer('pointerup', 500, 500, { pointerId: 1, pointerType: 'touch' }))
+      q('a2').dispatchEvent(pointer('pointerdown', 750, 450, { pointerId: 3, pointerType: 'touch' }))
+      expect(scaleOf(q('a2'))).toBe('1.25')
+      stage.destroy()
+    })
+
+    it('drops a drag that is still live when the board is torn down', () => {
+      const { opt, stage } = board()
+      stubRect(opt, 400, 400, 100, 100)
+      opt.dispatchEvent(pointer('pointerdown', 450, 450))
+      stage.destroy()
+      // No listeners left on window, and nothing to receive them if there were.
+      document.body.dispatchEvent(pointer('pointermove', 900, 900))
+      expect(opt.style.translate).toBe('')
+    })
   })
 
   it('restores every enlisted element on destroy', () => {

@@ -1331,10 +1331,14 @@ export function EditorCanvas(props: Props): JSX.Element {
       setEditing(hit.id)
       return
     }
-    // Double-click a plain image → enter Canva-style crop mode.
+    // Double-click a plain image → crop it. Which editor opens follows the crop the
+    // element ALREADY has: dropping someone who cut a free-form area into the
+    // rectangular tool reads as the area having been ignored, and the rectangular
+    // tool then re-boxes the element under them.
     const el = liveRef.current.scene.elements.find((x) => x.id === hit.id)
     if (el && el.type === 'image' && el.assetId && !el.container) {
-      enterCrop(el.id)
+      if ((el.cropShape?.points?.length ?? 0) >= 3) enterShapeCrop(el.id, 'edit')
+      else enterCrop(el.id)
       return
     }
     // Double-click a memory match → edit its tracker symbols on the canvas.

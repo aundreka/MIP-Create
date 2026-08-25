@@ -223,10 +223,13 @@ export function createCombo(): GameModule {
     target.style.height = zone.h + 'px'
   }
 
-  const insideTarget = (x: number, y: number): boolean => {
+  /** `pad` is a FLOOR on the forgiveness border, in px, not an addition to it: an
+   * author who dialled snapBorderPct up already has more room than a fingertip
+   * needs, and doubling it there would start catching drops nobody aimed. */
+  const insideTarget = (x: number, y: number, pad = 0): boolean => {
     const r = target.getBoundingClientRect()
     const root = ctx.root.getBoundingClientRect()
-    const border = (Math.min(root.width || 300, root.height || 400) * snapBorderPct) / 100
+    const border = Math.max((Math.min(root.width || 300, root.height || 400) * snapBorderPct) / 100, pad)
     return x >= r.left - border && x <= r.right + border && y >= r.top - border && y <= r.bottom + border
   }
 
@@ -527,22 +530,81 @@ export function createCombo(): GameModule {
   }
 
   // ---- dragging ------------------------------------------------------------
+  // One drag at a time, and it belongs to one pointer. A phone supplies stray extra
+  // pointers constantly — the hand steadying the device, a thumb brushing a sibling
+  // option, a palm on the bezel — and without this a second finger starts a second
+  // drag that fights the first one over the same drop area.
+  let held: OptionEl | null = null
+  let heldPointer: number | undefined
+  /** Tears the live drag down, so destroy() can't strand its window listeners. */
+  let endDrag: (() => void) | null = null
+
+  /** Fingertip forgiveness at the drop area, in px, for touch drags only.
+   *
+   * snapBorderPct is a share of the board, so on a phone it can work out to a
+   * handful of pixels — far under the ~44px a fingertip actually covers. That gap
+   * is exactly what makes a release the player saw as dead on target come back as
+   * a miss. A mouse needs none of it: the cursor is one pixel and it is visible. */
+  const TOUCH_PAD_PX = 22
+
+  /**
+   * Is this drag over the drop area?
+   *
+   * Three chances, because on a touchscreen they genuinely disagree. The finger is
+   * what the player AIMS with. The carried art is what they can SEE — and with a
+   * drag proxy that is a different element, often much larger than and offset from
+   * the option underneath it. The option itself is only the handle, invisible for
+   * the whole drag once a proxy has taken over its look, so judging the drop on its
+   * centre alone rejects releases that landed on the mark as far as anyone could
+   * tell. Any of the three landing inside counts.
+   */
+  const overTarget = (x: number, y: number, item: OptionEl, pad: number): boolean => {
+    if (insideTarget(x, y, pad)) return true
+    const c = center(item.el)
+    if (insideTarget(c.x, c.y, pad)) return true
+    const art = dragArtFor(item)
+    if (!art || art.el.classList.contains(OFF_CLASS)) return false
+    // A degenerate box is not a position: an element that has never been laid out
+    // measures 0x0 at the document origin, which would read as sitting on a drop
+    // area placed anywhere near the top-left corner.
+    const a = art.el.getBoundingClientRect()
+    if (a.width <= 0 || a.height <= 0) return false
+    return insideTarget(a.left + a.width / 2, a.top + a.height / 2, pad)
+  }
+
   const attachDrag = (item: OptionEl): void => {
     item.el.style.cursor = 'grab'
     item.el.style.touchAction = 'none'
     item.el.style.pointerEvents = 'auto'
+    // iOS raises its own press-and-hold sheet over an image — "Save Image", the
+    // selection magnifier — and it steals the gesture mid-drag, several hundred ms
+    // after the drag has already begun. There is no event to cancel it from once it
+    // decides to open, so it has to be switched off up front.
+    item.el.style.setProperty('-webkit-touch-callout', 'none')
+    item.el.style.setProperty('-webkit-tap-highlight-color', 'transparent')
     item.el.addEventListener('pointerdown', (event) => {
-      if (done || busy || item.question !== current + 1 || answers[current] >= 0) return
+      if (done || busy || held || item.question !== current + 1 || answers[current] >= 0) return
       event.preventDefault()
+      const pid = event.pointerId
+      held = item
+      heldPointer = pid
+      const pad = event.pointerType === 'touch' ? TOUCH_PAD_PX : 0
       try {
         item.el.setPointerCapture?.(event.pointerId)
       } catch {
         // Some playable containers expose the API but reject capture for their
-        // synthesized pointer stream. Direct listeners still keep the drag usable.
+        // synthesized pointer stream. The listeners below sit on window rather than
+        // on the element precisely so capture is a nicety, not a requirement.
       }
       item.dragging = true
       const start = { x: event.clientX, y: event.clientY }
       const base = { x: item.dx, y: item.dy }
+      // Where the pointer was last seen. A pointercancel can arrive with stale or
+      // meaningless coordinates, and that is the one case where the position still
+      // has to be judged (see `cancel`), so it is tracked rather than read off the
+      // ending event.
+      let lastX = event.clientX
+      let lastY = event.clientY
       item.el.style.zIndex = '99999'
       item.el.style.cursor = 'grabbing'
       // Swap in the proxy FIRST, so the enlargement lands on whichever element the
@@ -552,22 +614,39 @@ export function createCombo(): GameModule {
       setScale(proxyFor(item), pickupScale, 140)
       ctx.sfx.play('comboPick')
 
+      /** Events from any other finger belong to somebody else's gesture. */
+      const mine = (ev: PointerEvent): boolean => ev.pointerId === heldPointer
+
       const move = (moveEvent: PointerEvent): void => {
-        setOffset(item, base.x + moveEvent.clientX - start.x, base.y + moveEvent.clientY - start.y, false)
-        const p = center(item.el)
+        if (!mine(moveEvent)) return
+        lastX = moveEvent.clientX
+        lastY = moveEvent.clientY
+        setOffset(item, base.x + lastX - start.x, base.y + lastY - start.y, false)
         followDragArt(item)
-        target.dataset.comboNear = insideTarget(p.x, p.y) ? '1' : '0'
+        target.dataset.comboNear = overTarget(lastX, lastY, item, pad) ? '1' : '0'
       }
 
-      const stop = (eventToRelease: PointerEvent, cancelled: boolean): void => {
-        item.el.removeEventListener('pointermove', move)
-        item.el.removeEventListener('pointerup', release)
-        item.el.removeEventListener('pointercancel', cancel)
+      /** `commit` false is teardown — the drag is abandoned without being judged. */
+      const stop = (commit: boolean): void => {
+        window.removeEventListener('pointermove', move)
+        window.removeEventListener('pointerup', release)
+        window.removeEventListener('pointercancel', cancel)
+        endDrag = null
+        held = null
+        heldPointer = undefined
         item.dragging = false
         target.dataset.comboNear = '0'
-        const p = center(item.el)
-        const dropped = !cancelled && insideTarget(p.x, p.y)
-        if (dropped) {
+        // Released before the pick is judged: choose() hides this element, and a
+        // capture still outstanding on a hidden node is the sort of thing embedded
+        // WebViews handle badly.
+        if (typeof item.el.releasePointerCapture === 'function' && item.el.hasPointerCapture?.(pid)) {
+          try {
+            item.el.releasePointerCapture(pid)
+          } catch {
+            /* capture was already released by the host */
+          }
+        }
+        if (commit && overTarget(lastX, lastY, item, pad)) {
           item.el.style.pointerEvents = 'none'
           item.el.style.cursor = 'default'
           choose(item)
@@ -580,20 +659,36 @@ export function createCombo(): GameModule {
           setScale(item.el, 1, 140)
           setOffset(item, 0, 0, true)
         }
-        if (typeof item.el.releasePointerCapture === 'function' && item.el.hasPointerCapture?.(eventToRelease.pointerId)) {
-          try {
-            item.el.releasePointerCapture(eventToRelease.pointerId)
-          } catch {
-            /* capture was already released by the host */
-          }
-        }
       }
-      const release = (upEvent: PointerEvent): void => stop(upEvent, false)
-      const cancel = (cancelEvent: PointerEvent): void => stop(cancelEvent, true)
 
-      item.el.addEventListener('pointermove', move)
-      item.el.addEventListener('pointerup', release)
-      item.el.addEventListener('pointercancel', cancel)
+      const release = (upEvent: PointerEvent): void => {
+        if (!mine(upEvent)) return
+        lastX = upEvent.clientX
+        lastY = upEvent.clientY
+        stop(true)
+      }
+
+      // A pointercancel is not a change of mind. iOS Safari raises one on its own
+      // whenever it decides the gesture is the browser's — a second finger landing,
+      // a system edge swipe, its own scroll heuristic firing a beat late — and the
+      // option is left sitting wherever the player had dragged it to. Binning a drag
+      // that is ON the drop area at that moment is the most infuriating way for a
+      // pick to fail, so a cancel is judged on position exactly like a release: over
+      // the area it counts, short of it it springs home.
+      const cancel = (cancelEvent: PointerEvent): void => {
+        if (!mine(cancelEvent)) return
+        stop(true)
+      }
+
+      endDrag = () => stop(false)
+      // On window, not on the element: pointer capture is best-effort here (some ad
+      // containers refuse it), and without capture a move that leaves the option's
+      // box — which is the whole point of dragging — would never be delivered.
+      // Capture, when it is granted, retargets the events to the element, from where
+      // they still bubble to window, so one pair of listeners covers both.
+      window.addEventListener('pointermove', move)
+      window.addEventListener('pointerup', release)
+      window.addEventListener('pointercancel', cancel)
     })
   }
 
@@ -706,6 +801,9 @@ export function createCombo(): GameModule {
       winCb = cb
     },
     destroy() {
+      // Before clearTimers, so anything the abandoned drag schedules on its way out
+      // is cleared with the rest rather than firing against a torn-down board.
+      endDrag?.()
       clearTimers()
       ctx.root.innerHTML = ''
       for (const item of options) {
@@ -714,6 +812,8 @@ export function createCombo(): GameModule {
         item.el.classList.remove(OFF_CLASS)
         item.el.style.pointerEvents = ''
         item.el.style.rotate = ''
+        item.el.style.removeProperty('-webkit-touch-callout')
+        item.el.style.removeProperty('-webkit-tap-highlight-color')
         delete item.el.dataset.comboHint
         delete item.el.dataset.comboClaimedBy
       }
@@ -751,6 +851,8 @@ export function createCombo(): GameModule {
       anchors.length = 0
       answers.length = 0
       current = 0
+      held = null
+      heldPointer = undefined
       busy = false
       done = false
       started = false
