@@ -1253,6 +1253,8 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       if (el.comboRole.gameId) outer.dataset.comboGameId = el.comboRole.gameId
       if (el.comboRole.question) outer.dataset.comboQuestion = String(el.comboRole.question)
       if (el.comboRole.choice) outer.dataset.comboChoice = String(el.comboRole.choice)
+      // A shared caption belongs to no one option: it comes up while any of them is held.
+      if (el.comboRole.shared) outer.dataset.comboShared = '1'
       // A layer starts hidden — the game reveals it when its option is picked — and so
       // do drag art and a caption, which only appear while an option is being held.
       // The author can keep one visible on the editor canvas while positioning it;

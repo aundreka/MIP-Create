@@ -4,6 +4,9 @@
 // separate from the React tree:
 //
 //   * a slot holds at most one element — putting a new element in frees the old one
+//   * captions are the exception: they are a LIST, so several can sit on one option
+//     (and a shared one on none of them). Assignment is per element either way — the
+//     panel passes the caption being changed as `current`, not the group.
 //   * an element holds at most one slot — assigning one that already sits somewhere
 //     MOVES it rather than cloning the role
 //   * a layer, drag art or caption keeps its canvas-visibility flag when it moves
@@ -28,12 +31,14 @@ export interface AssignArgs {
   question?: number
   /** 1-based; only for options. */
   choice?: number
+  /** Captions only: belongs to no single option — it shows while any one is held. */
+  shared?: boolean
   elements: SceneElement[]
 }
 
 /** The element patches that move `nextId` into the slot. Empty when nothing changes. */
 export function assignComboSlot(args: AssignArgs): ComboSlotEdit[] {
-  const { nextId, current, role, gameId, question, choice, elements } = args
+  const { nextId, current, role, gameId, question, choice, shared, elements } = args
   if (current?.id === nextId) return []
   const edits: ComboSlotEdit[] = []
   if (current) edits.push({ id: current.id, patch: { comboRole: undefined } })
@@ -45,8 +50,12 @@ export function assignComboSlot(args: AssignArgs): ComboSlotEdit[] {
       comboRole: {
         gameId,
         role,
-        question,
-        choice,
+        // A shared caption is not addressed to a question or a choice; storing them
+        // anyway would leave stale numbers behind when it is moved back to an option.
+        question: shared ? undefined : question,
+        choice: shared ? undefined : choice,
+        // Absent rather than false, to keep saved projects lean.
+        shared: shared || undefined,
         // Whether one of the hidden kinds is shown on the canvas is a property of
         // that element's authoring state, not of the slot, so it survives a move.
         showOnCanvas: role === 'layer' || role === 'dragArt' || role === 'caption' ? existing?.comboRole?.showOnCanvas : undefined,
@@ -79,7 +88,7 @@ export function comboOptionLabel(el: SceneElement): string {
   if (r.role === 'anchor') return `${base} — anchor`
   if (r.role === 'title') return `${base} — Q${r.question ?? 1} title`
   if (r.role === 'dragArt') return `${base} — Q${r.question ?? 1} drag art ${r.choice ?? 1}`
-  if (r.role === 'caption') return `${base} — Q${r.question ?? 1} name plate ${r.choice ?? 1}`
+  if (r.role === 'caption') return r.shared ? `${base} — name plate (any option)` : `${base} — Q${r.question ?? 1} name plate ${r.choice ?? 1}`
   if (r.role === 'layer') return `${base} — Q${r.question ?? 1} layer ${r.choice ?? 1}`
   if (r.role === 'outline') return `${base} — Q${r.question ?? 1} outline ${r.choice ?? 1}`
   return `${base} — Q${r.question ?? 1} option ${r.choice ?? 1}`
@@ -90,7 +99,8 @@ export function comboSlotSummary(role: ComboRoleConfig): string {
   if (role.role === 'anchor') return 'the anchor image'
   if (role.role === 'title') return `question ${role.question ?? 1}'s title`
   if (role.role === 'dragArt') return `what question ${role.question ?? 1}'s option ${role.choice ?? 1} looks like while dragged`
-  if (role.role === 'caption') return `the name plate shown while question ${role.question ?? 1}'s option ${role.choice ?? 1} is held`
+  if (role.role === 'caption')
+    return role.shared ? 'a name plate shown while any option is held' : `a name plate shown while question ${role.question ?? 1}'s option ${role.choice ?? 1} is held`
   if (role.role === 'layer') return `question ${role.question ?? 1}'s layer for option ${role.choice ?? 1}`
   if (role.role === 'outline') return `the placeholder standing where question ${role.question ?? 1}'s pick lands`
   return `question ${role.question ?? 1}, option ${role.choice ?? 1}`
@@ -102,6 +112,19 @@ export function comboSlotSummary(role: ComboRoleConfig): string {
  * projects lean. */
 export function setCanvasVisible(el: SceneElement, visible: boolean): ComboSlotEdit {
   return { id: el.id, patch: { comboRole: { ...(el.comboRole ?? { role: 'layer' }), showOnCanvas: visible || undefined } } }
+}
+
+/** The captions on one option — a list, in scene order, since an option can carry
+ * several separately placed name plates. Shared ones are not part of it. */
+export function comboCaptions(elements: SceneElement[], gameId: string, question: number, choice: number): SceneElement[] {
+  return comboMembers(elements, gameId).filter(
+    (e) => e.comboRole?.role === 'caption' && !e.comboRole.shared && (e.comboRole.question ?? 1) === question && (e.comboRole.choice ?? 1) === choice,
+  )
+}
+
+/** The captions that come up for ANY option — they belong to the drag, not to a pick. */
+export function comboSharedCaptions(elements: SceneElement[], gameId: string): SceneElement[] {
+  return comboMembers(elements, gameId).filter((e) => e.comboRole?.role === 'caption' && e.comboRole.shared)
 }
 
 /** Every layer of this game, so the panel can offer a show-all / hide-all pair. */

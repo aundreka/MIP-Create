@@ -107,7 +107,18 @@ import {
   X,
 } from '../icons'
 import { AssetPicker } from './AssetPicker'
-import { assignComboSlot, comboCandidates, comboLayers, comboMembers, comboOptionLabel, comboSlotSummary, setCanvasVisible, type ComboSlotEdit } from '../comboSlots'
+import {
+  assignComboSlot,
+  comboCandidates,
+  comboCaptions,
+  comboLayers,
+  comboMembers,
+  comboOptionLabel,
+  comboSharedCaptions,
+  comboSlotSummary,
+  setCanvasVisible,
+  type ComboSlotEdit,
+} from '../comboSlots'
 import { DATE_LOCALE_OPTIONS } from '../dateLocales'
 
 // Tap feedback options, shared by the button element and images marked as buttons.
@@ -1338,6 +1349,15 @@ function BrushControls(props: {
 // Every slot is the same shape on screen (label, dropdown, actions), because the
 // panel is dozens of them in a row: anything spelled out per slot is paid for dozens
 // of times over. What a slot means lives in the tooltips and in this comment.
+//
+// The hold effect at the bottom is the one thing here that is NOT a role: its targets
+// are stored as ids in the game's own params, so an element already playing a part —
+// the anchor, a layer, the backdrop — can take the effect as well.
+//
+// Name plates are the one LIST here rather than a single slot: an option can carry
+// as many as the author wants (name, price, blurb — each placed and animated on its
+// own), and a shared one at the bottom comes up for whichever option is held. Each
+// row ends with an 'Add' row that attaches one more.
 interface ComboSetupProps {
   params: Record<string, unknown>
   setParam: (k: string, v: unknown) => void
@@ -1374,18 +1394,44 @@ function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps):
     endTransaction()
   }
 
-  const assign = (nextId: string, current: SceneElement | undefined, role: ComboRoleConfig['role'], question?: number, choice?: number): void =>
-    apply(assignComboSlot({ nextId, current, role, gameId: elementId, question, choice, elements: siblings }))
+  const assign = (nextId: string, current: SceneElement | undefined, role: ComboRoleConfig['role'], question?: number, choice?: number, shared?: boolean): void =>
+    apply(assignComboSlot({ nextId, current, role, gameId: elementId, question, choice, shared, elements: siblings }))
 
   const setLayersVisible = (els: SceneElement[], visible: boolean): void => apply(els.map((e) => setCanvasVisible(e, visible)))
+
+  // ---- hold effect: ids in params, not roles, so a target can already be a layer --
+  const fxIds = String(params.holdEffectIds ?? '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean)
+  const fxTargets = fxIds.map((id) => siblings.find((e) => e.id === id)).filter((e): e is SceneElement => !!e)
+  /** Replace `at` with `nextId`, or drop it when nextId is ''. `at` past the end adds. */
+  const setFxTarget = (at: number, nextId: string): void => {
+    const ids = fxTargets.map((e) => e.id)
+    if (nextId) ids[at] = nextId
+    else ids.splice(at, 1)
+    setParam('holdEffectIds', Array.from(new Set(ids.filter(Boolean))).join(','))
+  }
+  const fxChoices = (current: SceneElement | undefined): { value: string; label: string }[] => [
+    { value: '', label: current ? '— remove —' : '— pick an element —' },
+    ...siblings.filter((e) => e.id !== elementId).map((e) => ({ value: e.id, label: comboOptionLabel(e) + (current && e.id === current.id ? ' ✓' : '') })),
+  ]
+  const fxNum = (label: string, key: string, fallback: number, min: number, max: number, step: number): JSX.Element => (
+    <NumField label={label} value={Number(params[key] ?? fallback)} min={min} max={max} step={step} onChange={(n) => setParam(key, n)} />
+  )
 
   /** One assignment. `hint` is the tooltip — what this slot is for lives there rather
    * than in a paragraph under every one of them. `hides` marks the kinds play keeps
    * hidden, which get the eye that holds them on the canvas while being positioned. */
-  const slot = (label: string, hint: string, current: SceneElement | undefined, role: ComboRoleConfig['role'], choice?: number, hides = false): JSX.Element => (
-    <div className="combo-slot">
+  const slot = (label: string, hint: string, current: SceneElement | undefined, role: ComboRoleConfig['role'], choice?: number, hides = false, shared = false): JSX.Element => (
+    <div className="combo-slot" key={`${role}${shared ? 's' : (choice ?? '')}-${current?.id ?? 'add'}`}>
       <span title={hint}>{label}</span>
-      <Select value={current?.id ?? ''} onChange={(v) => assign(v, current, role, q + 1, choice)} options={choices(current)} title={hint} />
+      <Select
+        value={current?.id ?? ''}
+        onChange={(v) => assign(v, current, role, shared ? undefined : q + 1, shared ? undefined : choice, shared)}
+        options={choices(current)}
+        title={hint}
+      />
       <span className="combo-slot-actions">
         {current && hides && (
           <button
@@ -1438,13 +1484,15 @@ function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps):
           choice,
           true,
         )}
-        {slot(
-          'Name',
-          'Optional name plate — an item name, a price, a line of copy. It fades in while this option is held and leaves when the drag ends, staying exactly where you place it.',
-          slotFor('caption', q + 1, choice),
-          'caption',
-          choice,
-          true,
+        {[...comboCaptions(siblings, elementId, q + 1, choice), undefined].map((cap) =>
+          slot(
+            cap ? 'Name' : 'Add name',
+            'Optional name plates — an item name, a price, a line of copy. They fade in while this option is held and leave when the drag ends, each staying exactly where you place it. Add as many as you like.',
+            cap,
+            'caption',
+            choice,
+            true,
+          ),
         )}
       </div>
     )
@@ -1484,6 +1532,45 @@ function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps):
         Set drop area
       </button>
       <div className="hint pad">Drop area: drag to move, corners to resize, Esc to finish.</div>
+
+      <div className="group-title2">While dragging</div>
+      {[...comboSharedCaptions(siblings, elementId), undefined].map((cap) =>
+        slot(
+          cap ? 'Shown' : 'Add',
+          'Optional. Comes up while ANY option is held, whatever the question — a “drop it in the frame” line, a highlight behind the drop area. Same timing as a name plate, but it belongs to the dragging rather than to what is dragged.',
+          cap,
+          'caption',
+          undefined,
+          true,
+          true,
+        ),
+      )}
+
+      {[...fxTargets, undefined].map((el, i) => (
+        <div className="combo-slot" key={el?.id ?? 'fx-add'}>
+          <span title="This element dims / fades / drains colour for as long as an option is being carried, then comes back. It can already be a layer, the anchor or the backdrop — the effect is not a role.">
+            {el ? 'Affect' : 'Add affected'}
+          </span>
+          <Select value={el?.id ?? ''} onChange={(v) => setFxTarget(i, v)} options={fxChoices(el)} />
+          <span className="combo-slot-actions">
+            {el && (
+              <button className="icon-btn" title={`Select “${el.name || el.id}” on the canvas`} onClick={() => selectOnly(el.id)}>
+                <Icon icon={ScanSearch} size={13} />
+              </button>
+            )}
+          </span>
+        </div>
+      ))}
+      {fxTargets.length > 0 && (
+        <>
+          {fxNum('Brightness', 'holdBrightness', 1, 0, 3, 0.05)}
+          {fxNum('Contrast', 'holdContrast', 1, 0, 3, 0.05)}
+          {fxNum('Saturation', 'holdSaturation', 1, 0, 3, 0.05)}
+          {fxNum('Opacity', 'holdOpacity', 1, 0, 1, 0.05)}
+          {fxNum('Effect fade (ms)', 'holdEffectMs', 180, 0, 2000, 20)}
+          <div className="hint pad">1 = untouched. The effect rides on top of whatever the element already looks like.</div>
+        </>
+      )}
 
       <div className="group-title2">Anchor</div>
       {anchors.map((a) => (

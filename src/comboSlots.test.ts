@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SceneElement } from '../runtime/scene'
-import { assignComboSlot, comboCandidates, comboLayers, comboMembers, comboOptionLabel, comboSlotSummary, setCanvasVisible } from './comboSlots'
+import { assignComboSlot, comboCandidates, comboCaptions, comboLayers, comboMembers, comboOptionLabel, comboSharedCaptions, comboSlotSummary, setCanvasVisible } from './comboSlots'
 
 function el(id: string, extra: Partial<SceneElement> = {}): SceneElement {
   return { id, type: 'image', name: id, x: 0, y: 0, anchor: 'center', zIndex: 1, mode: 'fit', ...extra } as SceneElement
@@ -103,6 +103,32 @@ describe('combo drag art', () => {
   })
 })
 
+describe('combo captions', () => {
+  const elements = [
+    el('name', { comboRole: { gameId: GAME, role: 'caption', question: 1, choice: 1 } }),
+    el('price', { comboRole: { gameId: GAME, role: 'caption', question: 1, choice: 1 } }),
+    el('other', { comboRole: { gameId: GAME, role: 'caption', question: 1, choice: 2 } }),
+    el('any', { comboRole: { gameId: GAME, role: 'caption', shared: true } }),
+    el('theirs', { comboRole: { gameId: 'combo-2', role: 'caption', question: 1, choice: 1 } }),
+  ]
+
+  it('lists every plate on one option, and never a shared or foreign one', () => {
+    expect(comboCaptions(elements, GAME, 1, 1).map((e) => e.id)).toEqual(['name', 'price'])
+    expect(comboCaptions(elements, GAME, 1, 2).map((e) => e.id)).toEqual(['other'])
+  })
+
+  it('keeps the shared ones in their own list', () => {
+    expect(comboSharedCaptions(elements, GAME).map((e) => e.id)).toEqual(['any'])
+  })
+
+  it('drops the question and choice when a plate becomes shared', () => {
+    const a = el('name', { comboRole: { gameId: GAME, role: 'caption', question: 3, choice: 2, showOnCanvas: true } })
+    const [edit] = assignComboSlot({ nextId: 'name', current: undefined, role: 'caption', gameId: GAME, question: 3, choice: 2, shared: true, elements: [a] })
+    // Stale numbers would come back the moment it was moved onto an option again.
+    expect(edit.patch.comboRole).toEqual({ gameId: GAME, role: 'caption', question: undefined, choice: undefined, shared: true, showOnCanvas: true })
+  })
+})
+
 describe('combo rosters', () => {
   const elements = [
     el('game', { type: 'game-mount' }),
@@ -142,6 +168,7 @@ describe('combo labels', () => {
     expect(comboOptionLabel(el('Hat', { comboRole: { role: 'layer', question: 3, choice: 2 } }))).toBe('Hat — Q3 layer 2')
     expect(comboOptionLabel(el('Glow', { comboRole: { role: 'dragArt', question: 2, choice: 1 } }))).toBe('Glow — Q2 drag art 1')
     expect(comboOptionLabel(el('Name', { comboRole: { role: 'caption', question: 2, choice: 5 } }))).toBe('Name — Q2 name plate 5')
+    expect(comboOptionLabel(el('Drop it', { comboRole: { role: 'caption', shared: true } }))).toBe('Drop it — name plate (any option)')
     expect(comboOptionLabel(el('Ghost', { comboRole: { role: 'outline', question: 1, choice: 2 } }))).toBe('Ghost — Q1 outline 2')
   })
 
@@ -151,7 +178,8 @@ describe('combo labels', () => {
     expect(comboSlotSummary({ role: 'layer', question: 1, choice: 2 })).toBe("question 1's layer for option 2")
     expect(comboSlotSummary({ role: 'option', question: 4, choice: 1 })).toBe('question 4, option 1')
     expect(comboSlotSummary({ role: 'dragArt', question: 3, choice: 2 })).toBe("what question 3's option 2 looks like while dragged")
-    expect(comboSlotSummary({ role: 'caption', question: 3, choice: 4 })).toBe("the name plate shown while question 3's option 4 is held")
+    expect(comboSlotSummary({ role: 'caption', question: 3, choice: 4 })).toBe("a name plate shown while question 3's option 4 is held")
+    expect(comboSlotSummary({ role: 'caption', shared: true })).toBe('a name plate shown while any option is held')
     expect(comboSlotSummary({ role: 'outline', question: 2, choice: 1 })).toBe("the placeholder standing where question 2's pick lands")
   })
 })

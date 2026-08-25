@@ -676,10 +676,13 @@ export interface BasketItemConfig {
 //             enlarged, and is what flies onto the layer at the end. Lets the tray
 //             picture and the in-hand picture differ — a flat swatch in the tray, a
 //             big render in the hand.
-//   'caption' optional, one per option: what it is CALLED. An item name, a price, a
-//             line of copy that appears while that option is held and leaves when
-//             the drag ends. It never moves — unlike drag art it stays exactly
-//             where the author placed it.
+//   'caption' optional, ANY NUMBER per option: what it is CALLED. An item name, a
+//             price, a line of copy — each its own element, all of them up together
+//             while that option is held and gone when the drag ends. They never
+//             move; unlike drag art they stay exactly where the author placed them.
+//             A caption marked `shared` is not addressed to one option at all: it
+//             comes up while ANY option is held, for a label that belongs to the act
+//             of dragging rather than to the thing being dragged.
 export interface ComboRoleConfig {
   gameId?: string
   role: 'option' | 'layer' | 'title' | 'anchor' | 'dragArt' | 'caption' | 'outline'
@@ -691,8 +694,14 @@ export interface ComboRoleConfig {
    * drag art and a caption each pair with the option of the same question + choice.
    * An outline is addressed the same way but is not matched against the WINNER: a
    * question's outlines all leave together when any of its options is picked, so one
-   * outline can stand in for the whole question. */
+   * outline can stand in for the whole question.
+   *
+   * Captions are the one kind that is a LIST rather than a slot: several may share a
+   * question + choice, and they all come up together. */
   choice?: number
+  /** 'caption' only: show it while ANY option is held, whatever the question or the
+   * choice. `question` / `choice` are ignored for a shared caption. */
+  shared?: boolean
   /** 'layer' / 'dragArt' / 'caption', authoring-only: keep this element visible on
    * the editor canvas while it is being positioned. All three are always hidden when
    * real play starts, so this never leaks into the playable — it exists so the author

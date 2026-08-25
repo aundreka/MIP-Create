@@ -95,6 +95,11 @@ function dragArt(id: string, question: number, choice: number, showOnCanvas?: bo
 }
 
 /** Optional per-option name plate: shown where it sits while that option is held. */
+/** A name plate that belongs to no option: up while ANY of them is held. */
+function sharedCaption(id: string): SceneElement {
+  return { ...caption(id, 1, 1), comboRole: { gameId: 'combo-game', role: 'caption', shared: true } } as SceneElement
+}
+
 function caption(id: string, question: number, choice: number, showOnCanvas?: boolean): SceneElement {
   return {
     id,
@@ -567,6 +572,42 @@ describe('combo builder', () => {
       stage.destroy()
     })
 
+    it('brings up every plate on the held option, not just the first', () => {
+      const { q, stage } = board(caption('name', 1, 1), caption('price', 1, 1), caption('blurb', 1, 1), caption('other', 1, 2))
+      q('a1').dispatchEvent(pointer('pointerdown', 450, 450))
+      for (const id of ['name', 'price', 'blurb']) expect(q(id).classList.contains('pa-combo-off')).toBe(false)
+      expect(q('other').classList.contains('pa-combo-off')).toBe(true)
+
+      // ...and they all leave together.
+      q('a1').dispatchEvent(pointer('pointerup', 450, 450))
+      vi.advanceTimersByTime(200)
+      for (const id of ['name', 'price', 'blurb']) expect(q(id).classList.contains('pa-combo-off')).toBe(true)
+      stage.destroy()
+    })
+
+    it('brings up a shared plate for whichever option is held', () => {
+      const stage = build([GAME, ANCHOR, option('a1', 1, 1, 'optA'), option('a2', 1, 2, 'optB'), option('b1', 2, 1, 'optA'), sharedCaption('any')])
+      stage.layoutAll()
+      stage.startGames(true)
+      const q = (id: string): HTMLElement => stage.root.querySelector<HTMLElement>(`[data-id="${id}"]`)!
+      stubRect(stage.root.querySelector<HTMLElement>('[data-combo-target="1"]')!, 0, 0, 10, 10)
+      stubRect(q('a1'), 400, 400, 100, 100)
+      stubRect(q('a2'), 700, 400, 100, 100)
+      expect(q('any').classList.contains('pa-combo-off')).toBe(true)
+
+      // Question 1, first option...
+      q('a1').dispatchEvent(pointer('pointerdown', 450, 450))
+      expect(q('any').classList.contains('pa-combo-off')).toBe(false)
+      q('a1').dispatchEvent(pointer('pointerup', 450, 450))
+      vi.advanceTimersByTime(200)
+      expect(q('any').classList.contains('pa-combo-off')).toBe(true)
+
+      // ...and the sibling brings up the very same element.
+      q('a2').dispatchEvent(pointer('pointerdown', 750, 450))
+      expect(q('any').classList.contains('pa-combo-off')).toBe(false)
+      stage.destroy()
+    })
+
     it('leaves again when the option is dropped short, and gives its opacity back', () => {
       const { q, stage } = board(caption('name1', 1, 1))
       const plate = q('name1')
@@ -609,6 +650,81 @@ describe('combo builder', () => {
       expect(plate.classList.contains('pa-combo-off')).toBe(true)
       play.destroy()
       expect(plate.classList.contains('pa-combo-off')).toBe(false)
+    })
+  })
+
+  describe('hold effect', () => {
+    const FX_GAME = {
+      ...GAME,
+      game: {
+        ...GAME.game!,
+        params: {
+          ...GAME.game!.params,
+          holdEffectIds: 'anchor, l-a1',
+          holdBrightness: 0.6,
+          holdSaturation: 0.2,
+          holdOpacity: 0.5,
+          holdEffectMs: 100,
+        },
+      },
+    } as SceneElement
+
+    function board(): { q: (id: string) => HTMLElement; stage: ReturnType<typeof buildScene> } {
+      const stage = build([FX_GAME, ANCHOR, option('a1', 1, 1, 'optA'), layer('l-a1', 1, 1, 'layerA'), title('t1', 1)])
+      stage.layoutAll()
+      stage.startGames(true)
+      const q = (id: string): HTMLElement => stage.root.querySelector<HTMLElement>(`[data-id="${id}"]`)!
+      stubRect(stage.root.querySelector<HTMLElement>('[data-combo-target="1"]')!, 0, 0, 10, 10)
+      stubRect(q('a1'), 400, 400, 100, 100)
+      return { q, stage }
+    }
+
+    it('dims the named elements while an option is carried, and only those', () => {
+      const { q, stage } = board()
+      expect(q('anchor').style.filter).toBe('')
+
+      q('a1').dispatchEvent(pointer('pointerdown', 450, 450))
+      // 1 is the identity, so contrast is left out of the chain entirely.
+      expect(q('anchor').style.filter).toBe('brightness(0.6) saturate(0.2) opacity(0.5)')
+      expect(q('anchor').style.transition).toBe('filter 100ms ease')
+      // A target that is also a layer takes it too — the effect is a list of ids, not a role.
+      expect(q('l-a1').style.filter).toBe('brightness(0.6) saturate(0.2) opacity(0.5)')
+      // Anything not named is untouched.
+      expect(q('t1').style.filter).toBe('')
+
+      // Released short: the board comes straight back up.
+      q('a1').dispatchEvent(pointer('pointerup', 450, 450))
+      expect(q('anchor').style.filter).toBe('')
+      stage.destroy()
+    })
+
+    it('lifts the effect when a pick lands, and clears it on destroy', () => {
+      const { q, stage } = board()
+      stubRect(q('l-a1'), 600, 600, 200, 60)
+      stubRect(stage.root.querySelector<HTMLElement>('[data-combo-target="1"]')!, 0, 0, 1000, 1000)
+
+      q('a1').dispatchEvent(pointer('pointerdown', 450, 450))
+      expect(q('anchor').style.filter).not.toBe('')
+      q('a1').dispatchEvent(pointer('pointerup', 450, 450))
+      // The drop lifts it at once, with the name plates and the dismissed options.
+      expect(q('anchor').style.filter).toBe('')
+      vi.advanceTimersByTime(400)
+      const anchorEl = q('anchor')
+      stage.destroy()
+      expect(anchorEl.style.filter).toBe('')
+    })
+
+    it('does nothing at all when every knob is at rest', () => {
+      const stage = build([GAME, ANCHOR, option('a1', 1, 1, 'optA')]) // no hold params
+      stage.layoutAll()
+      stage.startGames(true)
+      const q = (id: string): HTMLElement => stage.root.querySelector<HTMLElement>(`[data-id="${id}"]`)!
+      stubRect(stage.root.querySelector<HTMLElement>('[data-combo-target="1"]')!, 0, 0, 10, 10)
+      stubRect(q('a1'), 400, 400, 100, 100)
+      q('a1').dispatchEvent(pointer('pointerdown', 450, 450))
+      expect(q('anchor').style.filter).toBe('')
+      expect(q('anchor').style.transition).toBe('')
+      stage.destroy()
     })
   })
 

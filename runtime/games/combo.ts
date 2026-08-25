@@ -16,10 +16,14 @@
 //   title   the question headline. Shown while its question is live and swapped on
 //           advance. It never reacts to WHICH option was picked — only to which
 //           question is up.
-//   caption what the option is CALLED — an item name, a price, a blurb. One element
+//   caption what the option is CALLED — an item name, a price, a blurb. ANY NUMBER
 //           per option, hidden until that option is held and gone again when the
-//           drag ends. Unlike drag art it never moves: it appears exactly where the
-//           author placed it, so a name plate can sit in a fixed spot on the board.
+//           drag ends. Unlike drag art they never move: each appears exactly where
+//           the author placed it, so a name plate can sit in a fixed spot on the
+//           board. A caption marked SHARED is addressed to no option in particular
+//           and comes up while any of them is held — a 'drop it in the frame' label,
+//           a tray highlight, anything that belongs to dragging rather than to the
+//           thing being dragged.
 //   outline a placeholder standing where a pick is about to land — a dashed
 //           silhouette, an empty frame, a "your sofa here" ghost. Visible for as
 //           long as its question is unanswered, then it dissolves on exactly the
@@ -30,6 +34,12 @@
 //   anchor  the base art the layers build on top of. Purely the backdrop; it is
 //           only consulted as the fly-to target for an option whose question has
 //           no layer element assigned yet.
+//
+// Separately from the roles, any elements at all — the anchor, a layer, the copy,
+// the background — can be named as HOLD EFFECT targets (holdEffectIds), which dims /
+// desaturates / fades them for as long as an option is being carried. That is a list
+// of ids rather than a role, so an element already playing a part on the board can
+// take the effect too.
 //
 // Because each question contributes its own layer rather than a whole flat image,
 // the art needed is options x questions rather than options^questions, and a
@@ -78,6 +88,8 @@ interface CaptionEl {
   el: HTMLElement
   question: number
   choice: number
+  /** Up while ANY option is held; question/choice are then meaningless. */
+  shared: boolean
   canvasShown: boolean
   /** Inline opacity layoutRec left on it, to be handed back after a fade. */
   restOpacity: string
@@ -97,11 +109,32 @@ interface OutlineEl {
   seq: number
 }
 
+/** An element that reacts to the drag itself by dimming, fading or draining colour.
+ * Named by id rather than tagged with a role, so it can already be a layer or the
+ * anchor — an element holds only one role, but any element can take this. */
+interface EffectEl {
+  el: HTMLElement
+  /** The inline filter it had before the drag, handed back when the drag ends. */
+  restFilter: string
+}
+
 interface Zone {
   x: number
   y: number
   w: number
   h: number
+}
+
+/** The CSS filter chain for the hold effect, or '' when every knob is at rest.
+ * Opacity rides in the chain as `opacity()` rather than the opacity PROPERTY, which
+ * layoutRec rewrites from the element's authored value on every layout pass. */
+function holdFilterCss(brightness: number, contrast: number, saturation: number, opacity: number): string {
+  const parts: string[] = []
+  if (brightness !== 1) parts.push(`brightness(${brightness})`)
+  if (contrast !== 1) parts.push(`contrast(${contrast})`)
+  if (saturation !== 1) parts.push(`saturate(${saturation})`)
+  if (opacity !== 1) parts.push(`opacity(${opacity})`)
+  return parts.join(' ')
 }
 
 /** Hidden without touching inline display/opacity — layoutRec rewrites both on every
@@ -150,12 +183,15 @@ export function createCombo(): GameModule {
   let crossFadeMs = 300
   let dismissMs = 260
   let captionFadeMs = 140
+  let holdFilter = ''
+  let holdEffectMs = 180
   let zonePct: Zone = { x: 18, y: 60, w: 64, h: 32 }
 
   const options: OptionEl[] = []
   const layers: LayerEl[] = []
   const dragArt: DragArtEl[] = []
   const captions: CaptionEl[] = []
+  const effects: EffectEl[] = []
   const outlines: OutlineEl[] = []
   const anchors: HTMLElement[] = []
   const titles: { el: HTMLElement; question: number }[] = []
@@ -350,31 +386,38 @@ export function createCombo(): GameModule {
   }
 
   // ---- captions ------------------------------------------------------------
-  // Optional per-option NAME PLATE: an ordinary element — the item's name, a price,
-  // a line of copy — that appears while its option is held and leaves when the drag
-  // ends. It stays exactly where the author placed it; the drag proxy is what rides
-  // the finger. Pick and caption are paired the same way a layer is: same question,
-  // same choice.
-  const captionFor = (option: OptionEl): CaptionEl | undefined => captions.find((c) => c.question === option.question && c.choice === option.choice)
+  // Optional NAME PLATES: ordinary elements — the item's name, a price, a line of
+  // copy — that appear while an option is held and leave when the drag ends. They
+  // stay exactly where the author placed them; the drag proxy is what rides the
+  // finger. Unlike a layer this is a LIST, not a slot: as many as the author tags
+  // for one option all come up together, so a name, a price and a blurb can be three
+  // separately placed and separately animated elements rather than one flattened
+  // picture.
+  //
+  // A SHARED caption is addressed to no option at all — it comes up while any of
+  // them is held. Right for whatever belongs to the act of dragging rather than to
+  // the thing being dragged: a 'drop it in the frame' line, a highlight behind the
+  // drop area, a dimmer over the rest of the board.
+  const captionsFor = (option: OptionEl): CaptionEl[] => captions.filter((c) => c.shared || (c.question === option.question && c.choice === option.choice))
 
-  const showCaption = (item: OptionEl): void => {
-    const cap = captionFor(item)
-    if (!cap) return
-    // Only sample the resting opacity when it is genuinely at rest: re-grabbing an
-    // option mid fade-out would otherwise record the 0 as its authored value.
-    if (cap.el.classList.contains(OFF_CLASS)) cap.restOpacity = cap.el.style.opacity
-    cap.seq++
-    if (captionFadeMs <= 0) {
+  const showCaptions = (item: OptionEl): void => {
+    for (const cap of captionsFor(item)) {
+      // Only sample the resting opacity when it is genuinely at rest: re-grabbing an
+      // option mid fade-out would otherwise record the 0 as its authored value.
+      if (cap.el.classList.contains(OFF_CLASS)) cap.restOpacity = cap.el.style.opacity
+      cap.seq++
+      if (captionFadeMs <= 0) {
+        show(cap.el)
+        continue
+      }
+      cap.el.style.transition = ''
+      cap.el.style.opacity = '0'
       show(cap.el)
-      return
+      // Flush the 0 so there is a value to animate from (see fadeInLayer).
+      void cap.el.offsetWidth
+      cap.el.style.transition = `opacity ${captionFadeMs}ms ease`
+      cap.el.style.opacity = '1'
     }
-    cap.el.style.transition = ''
-    cap.el.style.opacity = '0'
-    show(cap.el)
-    // Flush the 0 so there is a value to animate from (see fadeInLayer).
-    void cap.el.offsetWidth
-    cap.el.style.transition = `opacity ${captionFadeMs}ms ease`
-    cap.el.style.opacity = '1'
   }
 
   /** Put every caption away — cheap, and it can't strand one on screen if a drag is
@@ -392,6 +435,21 @@ export function createCombo(): GameModule {
       } else {
         parkCaption(cap)
       }
+    }
+  }
+
+  /** Turn the hold effect on or off across every target, over `holdEffectMs`.
+   *
+   * It rides on the OUTER node's inline filter, which nothing else writes: the inner
+   * .pa-el-anim's filter is rebuilt by layoutRec from the element's own blur/adjust on
+   * every layout pass, so anything written there is lost at the next resize. Applied
+   * outside, the effect composes with whatever the element already looks like instead
+   * of replacing it. */
+  const setHoldEffect = (on: boolean): void => {
+    if (!holdFilter) return
+    for (const fx of effects) {
+      fx.el.style.transition = holdEffectMs > 0 ? `filter ${holdEffectMs}ms ease` : ''
+      fx.el.style.filter = on ? [fx.restFilter, holdFilter].filter(Boolean).join(' ') : fx.restFilter
     }
   }
 
@@ -535,8 +593,10 @@ export function createCombo(): GameModule {
     ctx.sfx.play('comboDrop')
 
     // The name plate leaves with the options it was naming, rather than hanging over
-    // the composed art while the pick flies home.
+    // the composed art while the pick flies home, and the board comes back up out of
+    // the drag effect at the same moment.
     hideCaptions(dismissMs)
+    setHoldEffect(false)
 
     for (const other of optionsFor(q + 1)) {
       if (other === item) continue
@@ -692,7 +752,8 @@ export function createCombo(): GameModule {
       // Swap in the proxy FIRST, so the enlargement lands on whichever element the
       // player is about to be carrying.
       showDragArt(item)
-      showCaption(item)
+      showCaptions(item)
+      setHoldEffect(true)
       setScale(proxyFor(item), pickupScale, 140)
       ctx.sfx.play('comboPick')
 
@@ -736,6 +797,7 @@ export function createCombo(): GameModule {
           item.el.style.zIndex = item.homeZ
           item.el.style.cursor = 'grab'
           hideCaptions(captionFadeMs)
+          setHoldEffect(false)
           hideDragArt(140)
           restoreOptionArt(item, 140)
           setScale(item.el, 1, 140)
@@ -775,6 +837,19 @@ export function createCombo(): GameModule {
   }
 
   // ---- element discovery ---------------------------------------------------
+  /** Resolve the hold-effect targets, which are named by ELEMENT ID rather than tagged
+   * with a role — an element carries only one combo role, and the things worth dimming
+   * while a drag is under way (the anchor, the placed layers, the copy, the backdrop)
+   * are usually already playing a part. */
+  const collectEffects = (ids: string[]): void => {
+    const stageRoot = ctx.root.closest('.pa-root')
+    if (!stageRoot || !ids.length) return
+    const wanted = new Set(ids)
+    for (const el of Array.from(stageRoot.querySelectorAll<HTMLElement>('.pa-el[data-id]'))) {
+      if (wanted.has(el.dataset.id ?? '')) effects.push({ el, restFilter: el.style.filter })
+    }
+  }
+
   const collect = (): void => {
     const stageRoot = ctx.root.closest('.pa-root')
     if (!stageRoot) return
@@ -802,7 +877,15 @@ export function createCombo(): GameModule {
           restOpacity: '',
         })
       } else if (role === 'caption') {
-        captions.push({ el, question, choice, canvasShown: el.dataset.comboCanvasShow === '1', restOpacity: el.style.opacity, seq: 0 })
+        captions.push({
+          el,
+          question,
+          choice,
+          shared: el.dataset.comboShared === '1',
+          canvasShown: el.dataset.comboCanvasShow === '1',
+          restOpacity: el.style.opacity,
+          seq: 0,
+        })
       } else if (role === 'outline') {
         // No canvas-visibility flag: an outline is part of the board the author is
         // arranging, so it stays visible while editing the way an option or a title
@@ -830,6 +913,13 @@ export function createCombo(): GameModule {
       crossFadeMs = Math.max(0, Math.min(3000, num(params.crossFadeMs, 300)))
       dismissMs = Math.max(0, Math.min(2000, num(params.dismissMs, 260)))
       captionFadeMs = Math.max(0, Math.min(2000, num(params.captionFadeMs, 140)))
+      holdEffectMs = Math.max(0, Math.min(2000, num(params.holdEffectMs, 180)))
+      holdFilter = holdFilterCss(
+        Math.max(0, Math.min(3, num(params.holdBrightness, 1))),
+        Math.max(0, Math.min(3, num(params.holdContrast, 1))),
+        Math.max(0, Math.min(3, num(params.holdSaturation, 1))),
+        Math.max(0, Math.min(1, num(params.holdOpacity, 1))),
+      )
       const x = Math.min(98, clampPct(params.zoneX, 18))
       const y = Math.min(98, clampPct(params.zoneY, 60))
       zonePct = {
@@ -867,6 +957,12 @@ export function createCombo(): GameModule {
       ctx.root.style.pointerEvents = 'none'
 
       collect()
+      collectEffects(
+        String(params.holdEffectIds ?? '')
+          .split(',')
+          .map((id) => id.trim())
+          .filter(Boolean),
+      )
       layoutZone()
       // Nothing is hidden or revealed here on purpose: mount() also runs on the
       // static editor canvas, where options and titles must stay visible and
@@ -881,6 +977,7 @@ export function createCombo(): GameModule {
       hideDragArt()
       hideCaptions()
       hideOutlines(0)
+      setHoldEffect(false)
       current = nextPlayable(0)
       if (current >= questions) {
         // Nothing is wired up at all — win immediately rather than stranding the player.
@@ -960,11 +1057,16 @@ export function createCombo(): GameModule {
         o.el.style.opacity = o.restOpacity
         delete o.el.dataset.comboClaimedBy
       }
+      for (const fx of effects) {
+        fx.el.style.transition = ''
+        fx.el.style.filter = fx.restFilter
+      }
       for (const anchor of anchors) delete anchor.dataset.comboClaimedBy
       options.length = 0
       layers.length = 0
       dragArt.length = 0
       captions.length = 0
+      effects.length = 0
       outlines.length = 0
       titles.length = 0
       anchors.length = 0
@@ -1010,6 +1112,15 @@ export const COMBO_TEMPLATE: GameTemplate = {
     advanceDelayMs: 600,
     dismissMs: 260,
     captionFadeMs: 140,
+    // Hold effect: which elements react to a drag being under way (comma-separated
+    // element ids, chosen in the panel) and how. 1 is the identity for all three
+    // colour knobs and for opacity, so the default set does nothing at all.
+    holdEffectIds: '',
+    holdBrightness: 1,
+    holdContrast: 1,
+    holdSaturation: 1,
+    holdOpacity: 1,
+    holdEffectMs: 180,
     zoneX: 18,
     zoneY: 60,
     zoneW: 64,
