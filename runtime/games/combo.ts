@@ -37,13 +37,20 @@
 //
 // Separately from the roles, any elements at all — the anchor, a layer, the copy,
 // the background — can be named as HOLD EFFECT targets (holdEffectIds), which dims /
-// desaturates / fades them for as long as an option is being carried. That is a list
-// of ids rather than a role, so an element already playing a part on the board can
-// take the effect too.
+// desaturates / fades them. That is a list of ids rather than a role, so an element
+// already playing a part on the board can take the effect too. When it is on is a
+// choice (holdEffectWhen): 'hold' for as long as an option is being carried, or
+// 'untilPick' from the moment the scene opens until the FIRST pick lands — a board
+// that starts muted and comes to life once the player commits to something.
 //
 // Because each question contributes its own layer rather than a whole flat image,
 // the art needed is options x questions rather than options^questions, and a
 // combination is composed by dragging layers around the canvas — no lookup table.
+//
+// The game is won when the questions run out, or earlier: `winPicks` says how many
+// picks it takes, whatever is still wired up behind them. That is what turns the same
+// board into a jigsaw — twelve pieces to place, won on the twelfth — and it lets a
+// long board be cut short without deleting the questions past the finish.
 //
 // Three gameplay beats are broadcast through the SFX channel, which stage.ts fans
 // out to every scene element as both an animation phase and a sound binding:
@@ -185,6 +192,11 @@ export function createCombo(): GameModule {
   let captionFadeMs = 140
   let holdFilter = ''
   let holdEffectMs = 180
+  /** Effect on from scene enter and off for good at the first pick, rather than on
+   * only while something is being carried. */
+  let holdUntilPick = false
+  /** Picks needed to win; 0 = every question the board has. */
+  let winPicks = 0
   let zonePct: Zone = { x: 18, y: 60, w: 64, h: 32 }
 
   const options: OptionEl[] = []
@@ -445,10 +457,10 @@ export function createCombo(): GameModule {
    * every layout pass, so anything written there is lost at the next resize. Applied
    * outside, the effect composes with whatever the element already looks like instead
    * of replacing it. */
-  const setHoldEffect = (on: boolean): void => {
+  const setHoldEffect = (on: boolean, ms = holdEffectMs): void => {
     if (!holdFilter) return
     for (const fx of effects) {
-      fx.el.style.transition = holdEffectMs > 0 ? `filter ${holdEffectMs}ms ease` : ''
+      fx.el.style.transition = ms > 0 ? `filter ${ms}ms ease` : ''
       fx.el.style.filter = on ? [fx.restFilter, holdFilter].filter(Boolean).join(' ') : fx.restFilter
     }
   }
@@ -569,7 +581,16 @@ export function createCombo(): GameModule {
     return q
   }
 
+  /** How many questions have been answered so far. */
+  const picksMade = (): number => answers.reduce((n, a) => (a >= 0 ? n + 1 : n), 0)
+
   const advance = (): void => {
+    // A pick target ends the game the moment it is met, whatever is still wired up
+    // behind it — the questions past the finish stay in the project, unplayed.
+    if (winPicks > 0 && picksMade() >= winPicks) {
+      finish()
+      return
+    }
     current = nextPlayable(current + 1)
     if (current >= questions) {
       finish()
@@ -594,7 +615,8 @@ export function createCombo(): GameModule {
 
     // The name plate leaves with the options it was naming, rather than hanging over
     // the composed art while the pick flies home, and the board comes back up out of
-    // the drag effect at the same moment.
+    // the drag effect at the same moment. In 'untilPick' mode this is the one and
+    // only time the effect lifts: nothing turns it back on for the questions after.
     hideCaptions(dismissMs)
     setHoldEffect(false)
 
@@ -753,7 +775,7 @@ export function createCombo(): GameModule {
       // player is about to be carrying.
       showDragArt(item)
       showCaptions(item)
-      setHoldEffect(true)
+      if (!holdUntilPick) setHoldEffect(true)
       setScale(proxyFor(item), pickupScale, 140)
       ctx.sfx.play('comboPick')
 
@@ -797,7 +819,7 @@ export function createCombo(): GameModule {
           item.el.style.zIndex = item.homeZ
           item.el.style.cursor = 'grab'
           hideCaptions(captionFadeMs)
-          setHoldEffect(false)
+          if (!holdUntilPick) setHoldEffect(false)
           hideDragArt(140)
           restoreOptionArt(item, 140)
           setScale(item.el, 1, 140)
@@ -914,6 +936,8 @@ export function createCombo(): GameModule {
       dismissMs = Math.max(0, Math.min(2000, num(params.dismissMs, 260)))
       captionFadeMs = Math.max(0, Math.min(2000, num(params.captionFadeMs, 140)))
       holdEffectMs = Math.max(0, Math.min(2000, num(params.holdEffectMs, 180)))
+      holdUntilPick = String(params.holdEffectWhen ?? 'hold') === 'untilPick'
+      winPicks = Math.max(0, Math.round(num(params.winPicks, 0)))
       holdFilter = holdFilterCss(
         Math.max(0, Math.min(3, num(params.holdBrightness, 1))),
         Math.max(0, Math.min(3, num(params.holdContrast, 1))),
@@ -977,7 +1001,10 @@ export function createCombo(): GameModule {
       hideDragArt()
       hideCaptions()
       hideOutlines(0)
-      setHoldEffect(false)
+      // Instantly, not over holdEffectMs: this is the state the scene OPENS in, so a
+      // muted board should already be muted on the first painted frame rather than
+      // fading down in front of the player.
+      setHoldEffect(holdUntilPick, 0)
       current = nextPlayable(0)
       if (current >= questions) {
         // Nothing is wired up at all — win immediately rather than stranding the player.
@@ -1100,6 +1127,9 @@ export const COMBO_TEMPLATE: GameTemplate = {
   ],
   defaultParams: {
     questions: 1,
+    // 0 = won when the board runs out of questions. Any other number wins on that
+    // many picks, however many questions are wired up behind them.
+    winPicks: 0,
     // Editor-only: how many option slots the setup panel offers per question. The
     // game itself counts whatever elements are tagged, so raising it costs nothing
     // until slots are filled.
@@ -1116,6 +1146,9 @@ export const COMBO_TEMPLATE: GameTemplate = {
     // element ids, chosen in the panel) and how. 1 is the identity for all three
     // colour knobs and for opacity, so the default set does nothing at all.
     holdEffectIds: '',
+    // 'hold' = only while an option is carried; 'untilPick' = from scene enter until
+    // the first pick lands.
+    holdEffectWhen: 'hold',
     holdBrightness: 1,
     holdContrast: 1,
     holdSaturation: 1,

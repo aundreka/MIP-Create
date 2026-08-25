@@ -714,6 +714,52 @@ describe('combo builder', () => {
       expect(anchorEl.style.filter).toBe('')
     })
 
+    it('can start on instead, and lift for good at the first pick', () => {
+      const els = [
+        {
+          ...FX_GAME,
+          game: { ...FX_GAME.game!, params: { ...FX_GAME.game!.params, holdEffectWhen: 'untilPick' } },
+        } as SceneElement,
+        ANCHOR,
+        option('a1', 1, 1, 'optA'),
+        option('b1', 2, 1, 'optB'),
+        layer('l-a1', 1, 1, 'layerA'),
+      ]
+      const stage = build(els)
+      stage.layoutAll()
+      stage.startGames(true)
+      const q = (id: string): HTMLElement => stage.root.querySelector<HTMLElement>(`[data-id="${id}"]`)!
+      stubRect(stage.root.querySelector<HTMLElement>('[data-combo-target="1"]')!, 0, 0, 1000, 1000)
+      stubRect(q('a1'), 400, 400, 100, 100)
+      stubRect(q('l-a1'), 600, 600, 200, 60)
+
+      // On from the opening frame, and instantly rather than fading down in front of
+      // the player.
+      expect(q('anchor').style.filter).toBe('brightness(0.6) saturate(0.2) opacity(0.5)')
+      expect(q('anchor').style.transition).toBe('')
+
+      // A drag that comes to nothing leaves it exactly as it was: nothing was placed.
+      q('a1').dispatchEvent(pointer('pointerdown', 450, 450))
+      q('a1').dispatchEvent(pointer('pointermove', 450, 450))
+      expect(q('anchor').style.filter).not.toBe('')
+      stubRect(stage.root.querySelector<HTMLElement>('[data-combo-target="1"]')!, 0, 0, 1, 1)
+      q('a1').dispatchEvent(pointer('pointerup', 450, 450))
+      expect(q('anchor').style.filter).not.toBe('')
+
+      // The first pick lifts it...
+      stubRect(stage.root.querySelector<HTMLElement>('[data-combo-target="1"]')!, 0, 0, 1000, 1000)
+      q('a1').dispatchEvent(pointer('pointerdown', 450, 450))
+      q('a1').dispatchEvent(pointer('pointerup', 450, 450))
+      expect(q('anchor').style.filter).toBe('')
+      vi.advanceTimersByTime(400)
+
+      // ...and the next question never brings it back.
+      stubRect(q('b1'), 400, 400, 100, 100)
+      q('b1').dispatchEvent(pointer('pointerdown', 450, 450))
+      expect(q('anchor').style.filter).toBe('')
+      stage.destroy()
+    })
+
     it('does nothing at all when every knob is at rest', () => {
       const stage = build([GAME, ANCHOR, option('a1', 1, 1, 'optA')]) // no hold params
       stage.layoutAll()
@@ -933,6 +979,41 @@ describe('combo builder', () => {
     q('a4').dispatchEvent(pointer('pointerup', 250, 250))
     vi.advanceTimersByTime(400)
     for (const id of ['a1', 'a2', 'a3', 'a4']) expect(q(id).classList.contains('pa-combo-off')).toBe(true)
+    stage.destroy()
+  })
+
+  it('wins on the authored number of picks, leaving the questions behind it unplayed', () => {
+    const els: SceneElement[] = [
+      { ...GAME, game: { ...GAME.game!, params: { ...GAME.game!.params, questions: 4, winPicks: 2 } } } as SceneElement,
+      ANCHOR,
+      option('q1', 1, 1, 'optA'),
+      option('q2', 2, 1, 'optA'),
+      option('q3', 3, 1, 'optA'),
+      option('q4', 4, 1, 'optA'),
+    ]
+    const stage = build(els)
+    let won = 0
+    off = on('game-complete', () => {
+      won++
+    })
+    stage.layoutAll()
+    stage.startGames(true)
+    const q = (id: string): HTMLElement => stage.root.querySelector<HTMLElement>(`[data-id="${id}"]`)!
+    stubRect(stage.root.querySelector<HTMLElement>('[data-combo-target="1"]')!, 0, 0, 1000, 1000)
+
+    const place = (id: string): void => {
+      stubRect(q(id), 200, 200, 100, 100)
+      q(id).dispatchEvent(pointer('pointerdown', 250, 250))
+      q(id).dispatchEvent(pointer('pointerup', 250, 250))
+      vi.advanceTimersByTime(400)
+    }
+    place('q1')
+    expect(won).toBe(0)
+    place('q2')
+    expect(won).toBe(1)
+    // Question 3 was never brought up, and its option stays off the board.
+    expect(q('q3').classList.contains('pa-combo-off')).toBe(true)
+    expect(stage.root.querySelector<HTMLElement>('[data-combo-target="1"]')!.dataset.comboComplete).toBe('1')
     stage.destroy()
   })
 

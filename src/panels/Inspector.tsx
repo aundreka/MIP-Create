@@ -1503,6 +1503,14 @@ function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps):
       <div className="group-title2">Questions</div>
       <NumField label="How many questions" value={questions} step={1} min={1} onChange={(n) => setParam('questions', Math.max(1, Math.round(n)))} />
       <NumField label="Options per question" value={optionSlots} step={1} min={1} onChange={(n) => setParam('options', Math.max(1, Math.round(n)))} />
+      <NumField
+        label="Picks to win (0 = all)"
+        value={Math.max(0, Math.round(Number(params.winPicks ?? 0)))}
+        step={1}
+        min={0}
+        onChange={(n) => setParam('winPicks', Math.max(0, Math.round(n)))}
+      />
+      <div className="hint pad">Picks to win: 0 wins when the questions run out. Any other number wins on that many picks — a jigsaw of 12 pieces, won on the 12th.</div>
       <Chips
         items={Array.from({ length: questions }, (_, i) => ({
           key: String(i),
@@ -1563,6 +1571,18 @@ function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps):
       ))}
       {fxTargets.length > 0 && (
         <>
+          <div className="combo-slot">
+            <span title="When the effect is on: only while an option is being carried, or from the moment the scene opens until the player places their first pick.">On</span>
+            <Select
+              value={String(params.holdEffectWhen ?? 'hold')}
+              onChange={(v) => setParam('holdEffectWhen', v)}
+              options={[
+                { value: 'hold', label: 'While an option is held' },
+                { value: 'untilPick', label: 'From the start, until the first pick' },
+              ]}
+            />
+            <span className="combo-slot-actions" />
+          </div>
           {fxNum('Brightness', 'holdBrightness', 1, 0, 3, 0.05)}
           {fxNum('Contrast', 'holdContrast', 1, 0, 3, 0.05)}
           {fxNum('Saturation', 'holdSaturation', 1, 0, 3, 0.05)}
