@@ -6,8 +6,7 @@ import { buildScene } from './stage'
 
 // jsdom gives every element a zero-size rect, which the drop test needs to be real.
 function stubRect(el: HTMLElement, x: number, y: number, w: number, h: number): void {
-  el.getBoundingClientRect = () =>
-    ({ left: x, top: y, right: x + w, bottom: y + h, width: w, height: h, x, y, toJSON: () => ({}) }) as DOMRect
+  el.getBoundingClientRect = () => ({ left: x, top: y, right: x + w, bottom: y + h, width: w, height: h, x, y, toJSON: () => ({}) }) as DOMRect
 }
 
 /** The scale lives on the inner .pa-el-anim, which carries no positional transform —
@@ -89,6 +88,22 @@ function dragArt(id: string, question: number, choice: number, showOnCanvas?: bo
     zIndex: 8,
     mode: 'fit',
     comboRole: { gameId: 'combo-game', role: 'dragArt', question, choice, showOnCanvas },
+  } as SceneElement
+}
+
+/** Optional per-option name plate: shown where it sits while that option is held. */
+function caption(id: string, question: number, choice: number, showOnCanvas?: boolean): SceneElement {
+  return {
+    id,
+    type: 'text',
+    name: id,
+    x: 540,
+    y: 1000,
+    anchor: 'center',
+    zIndex: 7,
+    mode: 'fit',
+    text: { value: `Item ${choice}`, fontSizePx: 40, color: '#fff' },
+    comboRole: { gameId: 'combo-game', role: 'caption', question, choice, showOnCanvas },
   } as SceneElement
 }
 
@@ -451,14 +466,7 @@ describe('combo builder', () => {
   })
 
   it('publishes the live option as data-combo-hint and moves it on each pick', () => {
-    const stage = build([
-      GAME,
-      ANCHOR,
-      option('a1', 1, 1, 'optA'),
-      option('a2', 1, 2, 'optB'),
-      layer('l-a1', 1, 1, 'layerA'),
-      option('b1', 2, 1, 'optA'),
-    ])
+    const stage = build([GAME, ANCHOR, option('a1', 1, 1, 'optA'), option('a2', 1, 2, 'optB'), layer('l-a1', 1, 1, 'layerA'), option('b1', 2, 1, 'optA')])
     stage.layoutAll()
     stage.startGames(true)
 
@@ -512,6 +520,77 @@ describe('combo builder', () => {
     stage.destroy()
   })
 
+  describe('name plate', () => {
+    function board(...extra: SceneElement[]): { q: (id: string) => HTMLElement; stage: ReturnType<typeof buildScene> } {
+      const stage = build([GAME, ANCHOR, option('a1', 1, 1, 'optA'), option('a2', 1, 2, 'optB'), ...extra])
+      stage.layoutAll()
+      stage.startGames(true)
+      const q = (id: string): HTMLElement => stage.root.querySelector<HTMLElement>(`[data-id="${id}"]`)!
+      stubRect(stage.root.querySelector<HTMLElement>('[data-combo-target="1"]')!, 0, 0, 10, 10)
+      stubRect(q('a1'), 400, 400, 100, 100)
+      stubRect(q('a2'), 700, 400, 100, 100)
+      return { q, stage }
+    }
+
+    it('appears the moment its own option is held, and only its own', () => {
+      const { q, stage } = board(caption('name1', 1, 1), caption('name2', 1, 2), caption('name-q2', 2, 1))
+      expect(q('name1').classList.contains('pa-combo-off')).toBe(true)
+
+      q('a1').dispatchEvent(pointer('pointerdown', 450, 450))
+      expect(q('name1').classList.contains('pa-combo-off')).toBe(false)
+      expect(q('name1').style.opacity).toBe('1')
+      expect(q('name2').classList.contains('pa-combo-off')).toBe(true)
+      expect(q('name-q2').classList.contains('pa-combo-off')).toBe(true)
+      // It stays where the author put it — the drag proxy is what rides the finger.
+      expect(q('name1').style.translate).toBe('')
+      stage.destroy()
+    })
+
+    it('leaves again when the option is dropped short, and gives its opacity back', () => {
+      const { q, stage } = board(caption('name1', 1, 1))
+      const plate = q('name1')
+      plate.style.opacity = '0.8' // as layoutRec would write an authored opacity
+
+      q('a1').dispatchEvent(pointer('pointerdown', 450, 450))
+      q('a1').dispatchEvent(pointer('pointerup', 450, 450))
+      expect(plate.style.opacity).toBe('0')
+      vi.advanceTimersByTime(200)
+      expect(plate.classList.contains('pa-combo-off')).toBe(true)
+      expect(plate.style.opacity).toBe('0.8')
+      stage.destroy()
+    })
+
+    it('leaves with the options when a pick lands', () => {
+      const { q, stage } = board(caption('name1', 1, 1), layer('l-a1', 1, 1, 'layerA'))
+      stubRect(q('l-a1'), 600, 600, 200, 60)
+
+      q('a1').dispatchEvent(pointer('pointerdown', 450, 450))
+      q('a1').dispatchEvent(pointer('pointerup', 450, 450))
+      // dismissMs is 50 in this scene: gone by the time the flight finishes.
+      vi.advanceTimersByTime(400)
+      expect(q('name1').classList.contains('pa-combo-off')).toBe(true)
+      stage.destroy()
+    })
+
+    it('honours showOnCanvas while editing, never during play, and restores it', () => {
+      const els = [GAME, ANCHOR, option('a1', 1, 1, 'optA'), caption('name1', 1, 1, true)]
+      const editor = build(els)
+      editor.layoutAll()
+      editor.startGames(false)
+      expect(editor.root.querySelector<HTMLElement>('[data-id="name1"]')!.classList.contains('pa-combo-off')).toBe(false)
+      editor.destroy()
+
+      document.body.innerHTML = ''
+      const play = build(els)
+      play.layoutAll()
+      play.startGames(true)
+      const plate = play.root.querySelector<HTMLElement>('[data-id="name1"]')!
+      expect(plate.classList.contains('pa-combo-off')).toBe(true)
+      play.destroy()
+      expect(plate.classList.contains('pa-combo-off')).toBe(false)
+    })
+  })
+
   describe('drag art', () => {
     function held(art: SceneElement): { art: HTMLElement; opt: HTMLElement; stage: ReturnType<typeof buildScene> } {
       const stage = build([GAME, ANCHOR, option('a1', 1, 1, 'optA'), art])
@@ -527,15 +606,7 @@ describe('combo builder', () => {
     }
 
     it('shows only the held option’s own proxy, not the sibling’s', () => {
-      const stage = build([
-        GAME,
-        ANCHOR,
-        option('a1', 1, 1, 'optA'),
-        option('a2', 1, 2, 'optB'),
-        dragArt('cue1', 1, 1),
-        dragArt('cue2', 1, 2),
-        dragArt('cue-q2', 2, 1),
-      ])
+      const stage = build([GAME, ANCHOR, option('a1', 1, 1, 'optA'), option('a2', 1, 2, 'optB'), dragArt('cue1', 1, 1), dragArt('cue2', 1, 2), dragArt('cue-q2', 2, 1)])
       stage.layoutAll()
       stage.startGames(true)
       const q = (id: string): HTMLElement => stage.root.querySelector<HTMLElement>(`[data-id="${id}"]`)!
@@ -682,6 +753,49 @@ describe('combo builder', () => {
     expect(opt.classList.contains('pa-combo-off')).toBe(false)
     // Nothing was picked, so no layer was revealed.
     expect(stage.root.querySelector<HTMLElement>('[data-id="l-a1"]')!.classList.contains('pa-combo-off')).toBe(true)
+    stage.destroy()
+  })
+
+  it('runs more than a handful of questions — the count is open-ended', () => {
+    const els: SceneElement[] = [{ ...GAME, game: { ...GAME.game!, params: { ...GAME.game!.params, questions: 12 } } } as SceneElement, ANCHOR]
+    for (let n = 1; n <= 12; n++) els.push(option(`q${n}`, n, 1, 'optA'))
+    const stage = build(els)
+    let won = false
+    off = on('game-complete', () => {
+      won = true
+    })
+    stage.layoutAll()
+    stage.startGames(true)
+    const q = (id: string): HTMLElement => stage.root.querySelector<HTMLElement>(`[data-id="${id}"]`)!
+    stubRect(stage.root.querySelector<HTMLElement>('[data-combo-target="1"]')!, 0, 0, 1000, 1000)
+
+    for (let n = 1; n <= 12; n++) {
+      const opt = q(`q${n}`)
+      expect(opt.classList.contains('pa-combo-off')).toBe(false)
+      stubRect(opt, 200, 200, 100, 100)
+      opt.dispatchEvent(pointer('pointerdown', 250, 250))
+      opt.dispatchEvent(pointer('pointerup', 250, 250))
+      vi.advanceTimersByTime(400)
+    }
+    expect(won).toBe(true)
+    stage.destroy()
+  })
+
+  it('supports more than two options in one question', () => {
+    const els = [GAME, ANCHOR, option('a1', 1, 1, 'optA'), option('a2', 1, 2, 'optB'), option('a3', 1, 3, 'optA'), option('a4', 1, 4, 'optB')]
+    const stage = build(els)
+    stage.layoutAll()
+    stage.startGames(true)
+    const q = (id: string): HTMLElement => stage.root.querySelector<HTMLElement>(`[data-id="${id}"]`)!
+    stubRect(stage.root.querySelector<HTMLElement>('[data-combo-target="1"]')!, 0, 0, 1000, 1000)
+    for (const id of ['a1', 'a2', 'a3', 'a4']) expect(q(id).classList.contains('pa-combo-off')).toBe(false)
+
+    // Picking the fourth dismisses the other three, whatever their number.
+    stubRect(q('a4'), 200, 200, 100, 100)
+    q('a4').dispatchEvent(pointer('pointerdown', 250, 250))
+    q('a4').dispatchEvent(pointer('pointerup', 250, 250))
+    vi.advanceTimersByTime(400)
+    for (const id of ['a1', 'a2', 'a3', 'a4']) expect(q(id).classList.contains('pa-combo-off')).toBe(true)
     stage.destroy()
   })
 

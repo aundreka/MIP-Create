@@ -11,7 +11,7 @@
 //   content       the <img> / text / button.
 
 import type { Anchor, AnimSpec, Scene, SceneElement, SceneOverlay, SfxBinding } from './scene'
-import { adjustFilterCss } from './scene'
+import { adjustFilterCss, cropShapeCss } from './scene'
 import type { AssetEntry, AssetMap, RuntimeCtx } from './types'
 import { cssFontFamily } from './font'
 import { designH, designW as baseDesignW, isLandscape, scale, sx, sy, viewH, viewW } from './responsive'
@@ -73,6 +73,10 @@ interface Rec {
   // so a resize mid-type re-slices the live text instead of snapping to the full value.
   typeShown?: number | null
   typeTimer?: number
+  // Interactive playback (Preview / the exported ad) vs. the static editor canvas.
+  // Set by startGames; applyLightray reads it so a one-shot reflection previews
+  // ambiently on the canvas but stays an event during real playback.
+  interactive?: boolean
 }
 
 function startIdleBehavior(rec: Rec, root: HTMLElement): { stop(): void } {
@@ -821,13 +825,20 @@ function applyLightray(rec: Rec, activePhase?: Phase): void {
     return
   }
   const { spec: ray, phase } = hit
-  const ambient = phase === 'loop'
+  // The static editor canvas plays no entrance, so a one-shot reflection parked there would
+  // give the author NO feedback at all — unlike every other preset, a lightray's resting
+  // state is nothing to look at. Preview it ambiently on the canvas; real playback keeps it
+  // an event. Same exemption startGames already makes for scratch fades and the timeline.
+  const ambient = phase === 'loop' || !rec.interactive
   rec.anim.classList.add('pa-lightray')
   rec.anim.style.setProperty('--pa-lightray-dur', (ray.durationMs ?? 2400) + 'ms')
   rec.anim.style.setProperty('--pa-lightray-delay', (ray.delayMs ?? 0) + 'ms')
   rec.anim.style.setProperty('--pa-lightray-ease', ray.easing ?? 'ease-in-out')
   rec.anim.style.setProperty('--pa-lightray-ang', (ray.angleDeg ?? 20) + 'deg') // sweep direction
-  rec.anim.style.setProperty('--pa-lightray-iter', String(ray.iterations ?? (ambient ? 'infinite' : 1)))
+  // A canvas preview repeats forever so the author can watch it; during playback a one-shot
+  // sweeps its authored iteration count (once by default).
+  const repeats = ambient ? (phase === 'loop' ? (ray.iterations ?? 'infinite') : 'infinite') : (ray.iterations ?? 1)
+  rec.anim.style.setProperty('--pa-lightray-iter', String(repeats))
   // The looping keyframes park at the far side for the last 45% of each pass to space repeats
   // out; a one-shot has nothing to space against and should cross over its full authored time.
   rec.anim.style.setProperty('--pa-lightray-name', ambient ? 'pa-lightray-kf' : 'pa-lightray-once')
@@ -1243,10 +1254,10 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       if (el.comboRole.question) outer.dataset.comboQuestion = String(el.comboRole.question)
       if (el.comboRole.choice) outer.dataset.comboChoice = String(el.comboRole.choice)
       // A layer starts hidden — the game reveals it when its option is picked — and so
-      // does drag art, which only appears while an option is being held. The author
-      // can keep one visible on the editor canvas while positioning it; play hides
-      // both regardless, so this never reaches the player.
-      if (el.comboRole.role === 'layer' || el.comboRole.role === 'dragArt') {
+      // do drag art and a caption, which only appear while an option is being held.
+      // The author can keep one visible on the editor canvas while positioning it;
+      // play hides all three regardless, so this never reaches the player.
+      if (el.comboRole.role === 'layer' || el.comboRole.role === 'dragArt' || el.comboRole.role === 'caption') {
         if (el.comboRole.showOnCanvas) outer.dataset.comboCanvasShow = '1'
         else outer.classList.add(COMBO_OFF_CLASS)
       }
@@ -1736,6 +1747,13 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       // Editor canvas (interactive=false) leaves it unarmed — everything stays visible
       // and placeable unless the timeline panel is actively previewing.
       if (interactive && timedRecs().length) armTimeline(0)
+      // Record the mode before anything else reads it: a one-shot reflection previews
+      // ambiently on the canvas and parks for its phase in real playback (applyLightray).
+      for (const rec of recs) {
+        if (rec.interactive === interactive) continue
+        rec.interactive = interactive
+        applyLightray(rec)
+      }
       for (const rec of recs) {
         if (rec.el.type === 'game-mount' && !rec.host && rec.content) {
           rec.host = createGameHost({
@@ -2496,7 +2514,9 @@ function layoutRec(rec: Rec): void {
   rec.anim.style.setProperty('--pa-filter', filterChain || ' ')
   // clip-path: inset(0) clips the blur to the element boundary AFTER filter rendering —
   // more reliable than parent overflow:hidden in old Chromium WebViews (AppLovin).
-  rec.anim.style.clipPath = rec.el.blur ? 'inset(0)' : ''
+  // A free-form crop area takes the property over: only one clip-path can apply, and
+  // the outline already clips to (inside) the boundary, so it does the blur's job too.
+  rec.anim.style.clipPath = cropShapeCss(rec.el.cropShape) || (rec.el.blur ? 'inset(0)' : '')
   // Background (backdrop) blur — blurs the scene content behind this element's box.
   applyBackdropBlur(rec)
 

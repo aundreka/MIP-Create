@@ -25,6 +25,10 @@ export interface AssetEntry {
   kind?: 'image' | 'video' | 'audio' | 'html' | 'font'
   /** Optional per-asset compression override (video/audio only). */
   compress?: CompressProfile
+  /** The asset this one was derived from (background removal). Editor-only — the
+   * runtime never reads it; it exists so "restore the original" stays one click
+   * away instead of asking the author to re-upload the untouched art. */
+  origin?: string
 }
 
 export type AssetMap = Record<string, AssetEntry>

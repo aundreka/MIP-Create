@@ -568,6 +568,70 @@ export interface ImageCropConfig {
   y?: number // image top as a fraction of box height; default 0
 }
 
+// A FREE-FORM crop area for an image: the closed outline of the part to KEEP, as
+// points in the element box's own space — x/y are fractions of its width/height, so
+// one authored outline rides every viewport the responsive fit produces and resizing
+// the box crops with it instead of sliding the picture out from under the shape.
+// Everything outside the outline is cut away. This is the non-rectangular
+// counterpart to `crop` (a rectangular pan/zoom window); the two compose — crop
+// places the picture, the shape decides which part of it survives. Needs at least
+// 3 points; fewer (or absent) = no shape crop.
+export interface CropPoint {
+  x: number
+  y: number
+}
+export interface CropShapeConfig {
+  points: CropPoint[]
+}
+
+/** Preset outlines the editor seeds a shape crop from before the author edits it. */
+export type CropShapePreset = 'ellipse' | 'triangle' | 'diamond' | 'pentagon' | 'hexagon' | 'star'
+
+/**
+ * The CSS `clip-path` for a free-form crop area, or '' when there is nothing to clip
+ * (absent, or fewer than the 3 points a polygon needs).
+ *
+ * Percentages — never px — because the element is laid out at a different pixel size
+ * on every device; a px outline would drift off the artwork the moment the fit changed.
+ */
+export function cropShapeCss(shape: CropShapeConfig | undefined): string {
+  const pts = (shape?.points ?? []).filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y))
+  if (pts.length < 3) return ''
+  // Clamped to ±1000%: an outline may legitimately run outside the box (a corner
+  // pulled past the edge keeps that corner square) but a runaway value would only
+  // ever be a bug, and CSS has no cheap way to recover from one.
+  const pct = (v: number): string => String(Math.round(Math.max(-10, Math.min(10, v)) * 10000) / 100)
+  return `polygon(${pts.map((p) => `${pct(p.x)}% ${pct(p.y)}%`).join(', ')})`
+}
+
+/** The points of a preset outline, inscribed in the element box (0-1 space). */
+export function cropShapePoints(preset: CropShapePreset): CropPoint[] {
+  const round = (v: number): number => Math.round(v * 10000) / 10000
+  // Every preset is a ring about the box centre starting at 12 o'clock, so a
+  // triangle and a pentagon sit the same way up and swapping between them reads
+  // as the same shape with more sides rather than a rotation.
+  const ring = (n: number, radii: number[]): CropPoint[] =>
+    Array.from({ length: n }, (_, i) => {
+      const a = -Math.PI / 2 + (i * 2 * Math.PI) / n
+      const r = radii[i % radii.length]
+      return { x: round(0.5 + r * Math.cos(a)), y: round(0.5 + r * Math.sin(a)) }
+    })
+  switch (preset) {
+    case 'triangle':
+      return ring(3, [0.5])
+    case 'diamond':
+      return ring(4, [0.5])
+    case 'pentagon':
+      return ring(5, [0.5])
+    case 'hexagon':
+      return ring(6, [0.5])
+    case 'star':
+      return ring(10, [0.5, 0.21])
+    default:
+      return ring(48, [0.5]) // ellipse — enough segments that the curve reads as smooth
+  }
+}
+
 // Turn an asset into a container: its shape (alpha) masks an inner image, which
 // fills per `fit` with optional inner padding. Works for any shape (heart, star…).
 export interface ContainerConfig {
@@ -612,18 +676,24 @@ export interface BasketItemConfig {
 //             enlarged, and is what flies onto the layer at the end. Lets the tray
 //             picture and the in-hand picture differ — a flat swatch in the tray, a
 //             big render in the hand.
+//   'caption' optional, one per option: what it is CALLED. An item name, a price, a
+//             line of copy that appears while that option is held and leaves when
+//             the drag ends. It never moves — unlike drag art it stays exactly
+//             where the author placed it.
 export interface ComboRoleConfig {
   gameId?: string
-  role: 'option' | 'layer' | 'title' | 'anchor' | 'dragArt'
-  /** 'option' / 'layer' / 'dragArt' / 'title': which question this belongs to (1-based). */
+  role: 'option' | 'layer' | 'title' | 'anchor' | 'dragArt' | 'caption'
+  /** 'option' / 'layer' / 'dragArt' / 'caption' / 'title': which question this
+   * belongs to (1-based). */
   question?: number
-  /** 'option' / 'layer' / 'dragArt': which of the question's two choices (1 or 2).
-   * A layer and a drag art each pair with the option of the same question + choice. */
+  /** 'option' / 'layer' / 'dragArt' / 'caption': which of the question's choices
+   * (1-based; a question can have as many as the author wires up). A layer, a drag
+   * art and a caption each pair with the option of the same question + choice. */
   choice?: number
-  /** 'layer' / 'dragArt', authoring-only: keep this element visible on the editor
-   * canvas while it is being positioned. Both kinds are always hidden when real play
-   * starts, so this never leaks into the playable — it exists so the author can see
-   * one at a time instead of the whole stack at once. */
+  /** 'layer' / 'dragArt' / 'caption', authoring-only: keep this element visible on
+   * the editor canvas while it is being positioned. All three are always hidden when
+   * real play starts, so this never leaks into the playable — it exists so the author
+   * can see one at a time instead of the whole stack at once. */
   showOnCanvas?: boolean
 }
 export interface SlotConfig {
@@ -925,6 +995,7 @@ export interface SceneElement {
   handguide?: HandguideConfig
   container?: ContainerConfig
   crop?: ImageCropConfig // crop/pan/zoom an ordinary image within its box
+  cropShape?: CropShapeConfig // free-form (non-rectangular) crop area for an image
   drag?: DragConfig
   basketItem?: BasketItemConfig
   comboRole?: ComboRoleConfig

@@ -5070,3 +5070,76 @@ svg {
   border-radius: 0 0 var(--r-sm) var(--r-sm);
   background: var(--guide);
 }
+
+/* ---- Remove background modal ---- */
+.rmbg-modal .spacer,
+.rmbg-foot .spacer {
+  flex: 1;
+}
+.rmbg-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 14px;
+  align-items: start;
+}
+.rmbg-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
+  max-height: 58vh;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: repeating-conic-gradient(var(--checker-a) 0% 25%, var(--checker-b) 0% 50%) 50% / 16px 16px;
+}
+.rmbg-canvas {
+  max-width: 100%;
+  max-height: calc(58vh - 20px);
+  object-fit: contain;
+  cursor: crosshair;
+}
+.rmbg-side {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.rmbg-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 14px;
+  border-top: 1px solid var(--line);
+}
+@media (max-width: 680px) {
+  .rmbg-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---- free-form crop area editor (canvas overlay) ---- */
+.shape-crop-capture {
+  position: absolute;
+  inset: 0;
+  cursor: crosshair;
+  touch-action: none;
+}
+.shape-crop-svg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.handle.h-vertex {
+  border-radius: 50%;
+  cursor: move;
+}
+.handle.h-midpoint {
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
+  border-radius: 50%;
+  background: var(--accent);
+  border-color: #fff;
+  opacity: 0.75;
+  cursor: copy;
+}

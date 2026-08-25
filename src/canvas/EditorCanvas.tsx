@@ -6,8 +6,8 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { FrameMetrics, FrameRect, FrameToParent, ParentToFrame } from '../../runtime/frame-protocol'
-import { headerAllowedFor } from '../../runtime/scene'
-import type { Anchor, ProjectMeta, Scene, SceneDef, SceneElement } from '../../runtime/scene'
+import { cropShapePoints, headerAllowedFor } from '../../runtime/scene'
+import type { Anchor, CropPoint, CropShapePreset, ProjectMeta, Scene, SceneDef, SceneElement } from '../../runtime/scene'
 import type { AssetMap } from '../../runtime/types'
 import { ContextMenu, type MenuItem } from '../panels/ContextMenu'
 import { getFramePos, setFramePos } from '../canvasLayout'
@@ -377,6 +377,23 @@ export function EditorCanvas(props: Props): JSX.Element {
     | { mode: 'pan'; sx: number; sy: number; base: CropView }
     | null
   >(null)
+  // Free-form crop area: which image's outline is being authored and the live points
+  // (fractions of the element box, so nothing here touches the element's geometry).
+  // `drawing` means the outline is still being laid down — clicks drop corners and a
+  // drag traces freehand; once closed the same points become draggable handles.
+  const [shapeEdit, setShapeEdit] = useState<string | null>(null)
+  const [shapePts, setShapePts] = useState<CropPoint[]>([])
+  const [shapeDrawing, setShapeDrawing] = useState(false)
+  const [shapeCursor, setShapeCursor] = useState<CropPoint | null>(null)
+  const shapeEditRef = useRef<string | null>(null)
+  shapeEditRef.current = shapeEdit
+  const shapePtsRef = useRef<CropPoint[]>([])
+  shapePtsRef.current = shapePts
+  const shapeDrag = useRef<{ index: number } | null>(null)
+  const shapeTrace = useRef<{ traced: boolean } | null>(null)
+  // Reassigned every render so the mount-once key handler always calls the current
+  // closure; returns whether the crop-area editor consumed the key.
+  const shapeKeyRef = useRef<(e: KeyboardEvent) => boolean>(() => false)
   const [posTick, setPosTick] = useState(0)
   const [panning, setPanning] = useState(false)
   const pathDraw = usePathDraw()
@@ -716,6 +733,48 @@ export function EditorCanvas(props: Props): JSX.Element {
     return () => window.removeEventListener('keydown', onKey)
   }, [cropEdit, exitCrop])
 
+  // ---- free-form crop area ---------------------------------------------------
+  // The non-rectangular crop: the author traces the part of the picture to KEEP and
+  // the runtime clips to that outline. Unlike the rectangular crop above this never
+  // rewrites the element's box — the points are fractions of it, so resizing the
+  // element afterwards carries the outline along instead of sliding out from under it.
+  const enterShapeCrop = useCallback((rawId: string, mode: 'draw' | 'edit', preset?: CropShapePreset): void => {
+    const st = getState()
+    const el = st.scene.elements.find((x) => x.id === rawId)
+    if (!el || el.type !== 'image' || !el.assetId || el.container) return
+    const seeded = preset ? cropShapePoints(preset) : mode === 'edit' ? (el.cropShape?.points ?? []) : []
+    if (preset) patchElement(rawId, { cropShape: { points: seeded } })
+    else if (mode === 'draw') patchElement(rawId, { cropShape: undefined })
+    setCropEdit(null)
+    setCropView(null)
+    setRevealEdit(null)
+    setZoneEdit(null)
+    setShapePts(seeded)
+    setShapeDrawing(seeded.length < 3)
+    setShapeCursor(null)
+    setShapeEdit(rawId)
+    selectOnly(rawId)
+  }, [])
+  useEffect(() => {
+    const onEnter = (e: Event): void => {
+      const d = (e as CustomEvent<{ elementId: string; mode?: 'draw' | 'edit'; preset?: CropShapePreset }>).detail
+      if (d?.elementId) enterShapeCrop(d.elementId, d.mode ?? 'edit', d.preset)
+    }
+    window.addEventListener('pa:crop-shape-edit', onEnter)
+    return () => window.removeEventListener('pa:crop-shape-edit', onEnter)
+  }, [enterShapeCrop])
+  const exitShapeCrop = useCallback((): void => {
+    shapeDrag.current = null
+    shapeTrace.current = null
+    setShapeEdit(null)
+    setShapeDrawing(false)
+    setShapeCursor(null)
+    setShapePts([])
+  }, [])
+  useEffect(() => {
+    if (shapeEdit && !scene.elements.some((e) => e.id === shapeEdit)) exitShapeCrop()
+  }, [shapeEdit, scene, exitShapeCrop])
+
   const handleLayout = useCallback((id: string, r: FrameRect[], m: FrameMetrics, mediaMs?: number, headerR?: FrameRect): void => {
     metricsByScene.current[id] = m
     if (id === liveRef.current.activeSceneId) metricsRef.current = m
@@ -923,6 +982,12 @@ export function EditorCanvas(props: Props): JSX.Element {
     if (editing) return
     if (thoughtZoneEdit) {
       beginThoughtZoneDraw(e)
+      return
+    }
+    if (shapeEdit) {
+      // While an outline is being traced the capture layer takes every pointer, so a
+      // pointer reaching the overlay means a click away from the handles → done.
+      exitShapeCrop()
       return
     }
     if (cropEdit) {
@@ -1454,6 +1519,10 @@ export function EditorCanvas(props: Props): JSX.Element {
           return
         }
       }
+      if (shapeKeyRef.current(e)) {
+        e.preventDefault()
+        return
+      }
       if (e.code === 'Space') spaceRef.current = true
       const mod = e.ctrlKey || e.metaKey
       if (mod && e.key.toLowerCase() === 'z') return (e.preventDefault(), e.shiftKey ? redo() : undo())
@@ -1667,6 +1736,135 @@ export function EditorCanvas(props: Props): JSX.Element {
   const onCropUp = (e: React.PointerEvent): void => {
     e.stopPropagation()
     cropDrag.current = null
+  }
+
+  // ---- free-form crop area editor -------------------------------------------
+  const shapeRect = shapeEdit ? (rects.find((r) => r.id === shapeEdit) ?? null) : null
+  const HANDLE_HIT = 10 // overlay px — matches the drawn handle, so "click the dot" means it
+  // Overlay px ⇄ the element box's own 0-1 space (where the points are stored).
+  const toShapePoint = (clientX: number, clientY: number): CropPoint | null => {
+    if (!shapeRect || shapeRect.w <= 0 || shapeRect.h <= 0) return null
+    const p = toIntrinsic(clientX, clientY)
+    return { x: (p.px - shapeRect.x) / shapeRect.w, y: (p.py - shapeRect.y) / shapeRect.h }
+  }
+  const shapeToOverlay = (p: CropPoint): { x: number; y: number } => ({
+    x: (shapeRect?.x ?? 0) + p.x * (shapeRect?.w ?? 0),
+    y: (shapeRect?.y ?? 0) + p.y * (shapeRect?.h ?? 0),
+  })
+  const writeShape = (pts: CropPoint[]): void => {
+    setShapePts(pts)
+    shapePtsRef.current = pts
+    const id = shapeEditRef.current
+    if (!id) return
+    // Under three points there is no polygon yet, so the element keeps rendering whole
+    // instead of flickering through half-drawn clips while the outline is traced.
+    const rounded = pts.map((p) => ({ x: Math.round(p.x * 10000) / 10000, y: Math.round(p.y * 10000) / 10000 }))
+    patchElement(id, { cropShape: rounded.length >= 3 ? { points: rounded } : undefined })
+    sendToActiveFrame()
+  }
+  // Enter (and the closing click) finish the outline but stay in the editor, so the
+  // shape can be nudged straight away; a second Enter leaves.
+  const finishShape = (): void => {
+    if (shapeDrawing && shapePtsRef.current.length >= 3) {
+      setShapeDrawing(false)
+      setShapeCursor(null)
+      return
+    }
+    exitShapeCrop()
+  }
+  const onShapeDrawDown = (e: React.PointerEvent): void => {
+    e.stopPropagation()
+    const p = toShapePoint(e.clientX, e.clientY)
+    if (!p) return
+    const first = shapePtsRef.current[0]
+    if (first && shapePtsRef.current.length >= 3) {
+      const a = shapeToOverlay(first)
+      const b = shapeToOverlay(p)
+      // Clicking back on the first point closes the outline — the pen-tool gesture.
+      if (Math.hypot(a.x - b.x, a.y - b.y) <= HANDLE_HIT) {
+        finishShape()
+        return
+      }
+    }
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    shapeTrace.current = { traced: false }
+    writeShape([...shapePtsRef.current, p])
+  }
+  const onShapeDrawMove = (e: React.PointerEvent): void => {
+    const p = toShapePoint(e.clientX, e.clientY)
+    if (!p) return
+    const trace = shapeTrace.current
+    if (!trace) {
+      setShapeCursor(p)
+      return
+    }
+    // Holding the button and dragging traces freehand: a point is dropped only once
+    // the pointer has travelled far enough to be worth a corner, which keeps a lasso
+    // down to tens of points rather than one per mouse event.
+    const last = shapePtsRef.current[shapePtsRef.current.length - 1]
+    if (!last) return
+    const dx = (p.x - last.x) * (shapeRect?.w ?? 1)
+    const dy = (p.y - last.y) * (shapeRect?.h ?? 1)
+    if (Math.hypot(dx, dy) < 6) return
+    trace.traced = true
+    writeShape([...shapePtsRef.current, p])
+  }
+  const onShapeDrawUp = (e: React.PointerEvent): void => {
+    e.stopPropagation()
+    const traced = shapeTrace.current?.traced
+    shapeTrace.current = null
+    // A traced lasso is finished on release; a plain click just left a corner behind.
+    if (traced && shapePtsRef.current.length >= 3) finishShape()
+  }
+  const onShapeVertexDown = (e: React.PointerEvent, index: number): void => {
+    e.stopPropagation()
+    // Alt-click (or right-click) takes a corner back out, down to the three a polygon needs.
+    if (e.altKey || e.button === 2) {
+      if (shapePtsRef.current.length > 3) writeShape(shapePtsRef.current.filter((_, i) => i !== index))
+      return
+    }
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    shapeDrag.current = { index }
+  }
+  const onShapeMidDown = (e: React.PointerEvent, index: number): void => {
+    e.stopPropagation()
+    const p = toShapePoint(e.clientX, e.clientY)
+    if (!p) return
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    const pts = [...shapePtsRef.current]
+    pts.splice(index + 1, 0, p) // the new corner starts on the edge, then follows the drag
+    writeShape(pts)
+    shapeDrag.current = { index: index + 1 }
+  }
+  const onShapePointMove = (e: React.PointerEvent): void => {
+    const d = shapeDrag.current
+    if (!d) return
+    e.stopPropagation()
+    const p = toShapePoint(e.clientX, e.clientY)
+    if (!p) return
+    writeShape(shapePtsRef.current.map((q, i) => (i === d.index ? p : q)))
+  }
+  const onShapePointUp = (e: React.PointerEvent): void => {
+    e.stopPropagation()
+    shapeDrag.current = null
+  }
+  shapeKeyRef.current = (e: KeyboardEvent): boolean => {
+    if (!shapeEdit) return false
+    if (e.key === 'Escape') {
+      exitShapeCrop()
+      return true
+    }
+    if (e.key === 'Enter') {
+      finishShape()
+      return true
+    }
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      // While tracing, Delete takes back the last corner — it must not reach the
+      // canvas's own Delete, which would remove the element being cropped.
+      if (shapeDrawing && shapePtsRef.current.length) writeShape(shapePtsRef.current.slice(0, -1))
+      return true
+    }
+    return false
   }
 
   // ---- reveal-zone editor ---------------------------------------------------
@@ -2349,6 +2547,7 @@ export function EditorCanvas(props: Props): JSX.Element {
                 !zoneEdit &&
                 !thoughtZoneEdit &&
                 !cropEdit &&
+                !shapeEdit &&
                 !trackerEdit &&
                 !spineEdit && (
                   <div className="ls-banner" onPointerDown={(e) => e.stopPropagation()}>
@@ -2394,6 +2593,7 @@ export function EditorCanvas(props: Props): JSX.Element {
                     !zoneEdit &&
                     !thoughtZoneEdit &&
                     !cropEdit &&
+                    !shapeEdit &&
                     !trackerEdit &&
                     !spineEdit &&
                     !headerEdit &&
@@ -2424,6 +2624,7 @@ export function EditorCanvas(props: Props): JSX.Element {
                   {!revealEdit &&
                     !zoneEdit &&
                     !cropEdit &&
+                    !shapeEdit &&
                     !trackerEdit &&
                     !spineEdit &&
                     single &&
@@ -2436,7 +2637,7 @@ export function EditorCanvas(props: Props): JSX.Element {
                         onPointerDown={(e) => onHandlePointerDown(e, h, 'single')}
                       />
                     ))}
-                  {!revealEdit && !zoneEdit && !cropEdit && !trackerEdit && !spineEdit && single && singleRect && (
+                  {!revealEdit && !zoneEdit && !cropEdit && !shapeEdit && !trackerEdit && !spineEdit && single && singleRect && (
                     <div
                       className="dim-badge"
                       style={{ left: singleRect.x + singleRect.w / 2, top: singleRect.y + singleRect.h, transform: `translate(-50%, 6px) scale(${1 / zoom})` }}
@@ -2606,6 +2807,85 @@ export function EditorCanvas(props: Props): JSX.Element {
                           </div>
                           <div className="dim-badge" style={{ left: rx + rw / 2, top: ry + rh, transform: `translate(-50%, 6px) scale(${1 / zoom})`, whiteSpace: 'nowrap' }}>
                             drag edges to crop · drag middle to move · scroll to zoom · Enter when done
+                          </div>
+                        </>
+                      )
+                    })()}
+                  {shapeEdit &&
+                    shapeRect &&
+                    (() => {
+                      const poly = shapePts.map(shapeToOverlay)
+                      // While tracing, the outline runs to the cursor and stays open;
+                      // once closed it is drawn as the finished polygon.
+                      const live = shapeDrawing && shapeCursor ? [...poly, shapeToOverlay(shapeCursor)] : poly
+                      const trace = live.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ') + (shapeDrawing ? '' : ' Z')
+                      // Frame rect + the outline as one even-odd path: the fill lands
+                      // everywhere EXCEPT inside the shape, so the kept area reads bright.
+                      const dim = `M0 0H${box.w}V${box.h}H0Z ` + poly.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ') + ' Z'
+                      return (
+                        <>
+                          <svg className="shape-crop-svg" width={box.w} height={box.h}>
+                            {poly.length >= 3 && <path d={dim} fill="rgba(0,0,0,0.5)" fillRule="evenodd" />}
+                            <rect
+                              x={shapeRect.x}
+                              y={shapeRect.y}
+                              width={shapeRect.w}
+                              height={shapeRect.h}
+                              fill="none"
+                              stroke="var(--accent)"
+                              strokeOpacity={0.45}
+                              strokeDasharray="4 4"
+                            />
+                            {live.length >= 2 && <path d={trace} fill="none" stroke="var(--accent)" strokeWidth={1.5} />}
+                          </svg>
+                          {shapeDrawing && (
+                            <div
+                              className="shape-crop-capture"
+                              onPointerDown={onShapeDrawDown}
+                              onPointerMove={onShapeDrawMove}
+                              onPointerUp={onShapeDrawUp}
+                              onPointerCancel={onShapeDrawUp}
+                              onDoubleClick={(ev) => {
+                                ev.stopPropagation()
+                                finishShape()
+                              }}
+                            />
+                          )}
+                          {!shapeDrawing &&
+                            poly.map((p, i) => (
+                              <div
+                                key={'sv' + i}
+                                className="handle h-vertex"
+                                style={{ left: p.x, top: p.y }}
+                                onPointerDown={(ev) => onShapeVertexDown(ev, i)}
+                                onPointerMove={onShapePointMove}
+                                onPointerUp={onShapePointUp}
+                                onPointerCancel={onShapePointUp}
+                                onContextMenu={(ev) => ev.preventDefault()}
+                              />
+                            ))}
+                          {!shapeDrawing &&
+                            poly.map((p, i) => {
+                              const q = poly[(i + 1) % poly.length]
+                              return (
+                                <div
+                                  key={'sm' + i}
+                                  className="handle h-midpoint"
+                                  style={{ left: (p.x + q.x) / 2, top: (p.y + q.y) / 2 }}
+                                  onPointerDown={(ev) => onShapeMidDown(ev, i)}
+                                  onPointerMove={onShapePointMove}
+                                  onPointerUp={onShapePointUp}
+                                  onPointerCancel={onShapePointUp}
+                                />
+                              )
+                            })}
+                          <div
+                            className="dim-badge"
+                            style={{ left: shapeRect.x + shapeRect.w / 2, top: shapeRect.y + shapeRect.h, transform: `translate(-50%, 6px) scale(${1 / zoom})`, whiteSpace: 'nowrap' }}
+                          >
+                            {shapeDrawing
+                              ? 'click to add corners · drag to trace freehand · click the first corner (or Enter) to close'
+                              : 'drag a corner to reshape · drag a small dot to add one · Alt-click to remove · Enter when done'}
                           </div>
                         </>
                       )

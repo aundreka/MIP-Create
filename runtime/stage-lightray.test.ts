@@ -106,6 +106,21 @@ describe('lightray sweep', () => {
     expect(v(rec.anim, 'ease')).toBe('linear')
   })
 
+  // The canvas plays no entrance at all, so a parked one-shot sweep would give the author
+  // nothing to look at when they pick the preset — every other preset at least leaves the
+  // element sitting there, but a lightray's resting state is literally nothing.
+  it('previews a one-shot lightray ambiently on the static editor canvas', () => {
+    const { rec } = mount(imageEl({ entrance: ray({ durationMs: 1200 }) }), false)
+    expect(running(rec.anim)).toBe(true)
+    expect(v(rec.anim, 'iter')).toBe('infinite')
+    expect(v(rec.anim, 'name')).toBe('pa-lightray-kf')
+  })
+
+  it('previews a lightray stacked onto an entrance on the canvas too', () => {
+    const { rec } = mount(imageEl({ entrance: { preset: 'pop', durationMs: 600, delayMs: 0, easing: 'ease-out' }, entranceExtra: [ray({ durationMs: 1200 })] }), false)
+    expect(running(rec.anim)).toBe(true)
+  })
+
   it('leaves an element with no lightray untouched', () => {
     const { rec } = mount(imageEl({ loop: { preset: 'pulse', durationMs: 1200, delayMs: 0, easing: 'ease-in-out' } }))
     expect(rec.anim.classList.contains('pa-lightray')).toBe(false)

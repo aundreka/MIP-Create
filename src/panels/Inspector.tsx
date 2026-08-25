@@ -16,6 +16,7 @@ import type {
   ComboRoleConfig,
   ConfettiConfig,
   CountdownConfig,
+  CropShapePreset,
   CtaPulsePreset,
   EndsceneConfig,
   HandguideConfig,
@@ -402,6 +403,7 @@ import { setActiveVariant, useActiveVariant } from '../variantMode'
 import { getTimeline, setTimeline } from '../timeline'
 import { KeyframeEditor } from './KeyframeEditor'
 import { SceneTranslationModal } from './SceneTranslationModal'
+import { RemoveBgModal } from './RemoveBgModal'
 
 const ANCHORS: Anchor[] = ['center', 'top', 'bottom', 'left', 'right', 'top-left', 'top-right', 'bottom-left', 'bottom-right']
 
@@ -1308,9 +1310,12 @@ function BrushControls(props: {
 
 // ---- Combo builder: per-question setup -------------------------------------
 // Every element the game drives is assigned FROM HERE, not from each element's own
-// panel: pick a question, then choose its title, its two options, and the LAYER each
+// panel: pick a question, then choose its title, its options, and the LAYER each
 // option leaves behind. Assigning writes the `comboRole` onto the chosen element and
 // clears it off whoever held that slot before, so a slot is never double-booked.
+//
+// Both counts — questions, and options per question — are open-ended and start at 1,
+// so a board grows by adding slots rather than by emptying ones that came for free.
 //
 // A layer is an ordinary element the author has already placed, so its position,
 // size and crop come straight off the canvas — there is no rect to type in. Since
@@ -1324,16 +1329,20 @@ interface ComboSetupProps {
 }
 function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps): JSX.Element {
   const [active, setActive] = useState(0)
-  const questions = Math.max(1, Math.min(8, Number(params.questions ?? 3)))
+  const questions = Math.max(1, Math.round(Number(params.questions ?? 1)))
   const q = Math.min(active, questions - 1)
 
   const mine = comboMembers(siblings, elementId)
   const anchors = mine.filter((e) => e.comboRole?.role === 'anchor')
   const allLayers = comboLayers(siblings, elementId)
   const titleFor = (n: number): SceneElement | undefined => mine.find((e) => e.comboRole?.role === 'title' && (e.comboRole.question ?? 1) === n)
-  const slotFor = (role: 'option' | 'layer' | 'dragArt', n: number, choice: number): SceneElement | undefined =>
+  const slotFor = (role: 'option' | 'layer' | 'dragArt' | 'caption', n: number, choice: number): SceneElement | undefined =>
     mine.find((e) => e.comboRole?.role === role && (e.comboRole.question ?? 1) === n && (e.comboRole.choice ?? 1) === choice)
   const optionCount = (n: number): number => mine.filter((e) => e.comboRole?.role === 'option' && (e.comboRole.question ?? 1) === n).length
+  // Never fewer slots than are actually wired up: a project saved before this count
+  // existed (or one edited down by mistake) would otherwise hide live assignments.
+  const wired = mine.reduce((n, e) => (e.comboRole?.role === 'anchor' || e.comboRole?.role === 'title' ? n : Math.max(n, e.comboRole?.choice ?? 1)), 1)
+  const optionSlots = Math.max(wired, 1, Math.round(Number(params.options ?? 1)))
 
   const candidates = comboCandidates(siblings)
   const choices = (current: SceneElement | undefined): { value: string; label: string }[] => [
@@ -1367,6 +1376,7 @@ function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps):
     const opt = slotFor('option', q + 1, choice)
     const layer = slotFor('layer', q + 1, choice)
     const art = slotFor('dragArt', q + 1, choice)
+    const caption = slotFor('caption', q + 1, choice)
     return (
       <div key={choice}>
         <div className="group-title2">
@@ -1403,6 +1413,21 @@ function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps):
         ) : (
           <div className="hint pad">Optional. Leave empty and the option&apos;s own picture is what gets dragged.</div>
         )}
+        <Row label="Name shown while held">
+          <Select value={caption?.id ?? ''} onChange={(v) => assign(v, caption, 'caption', q + 1, choice)} options={choices(caption)} />
+        </Row>
+        {caption ? (
+          <>
+            <Toggle label="Show it on the canvas" checked={!!caption.comboRole?.showOnCanvas} onChange={(v) => setLayersVisible([caption], v)} />
+            {jump(caption, `Position “${caption.name || caption.id}” on canvas`)}
+            <div className="hint pad">
+              Optional. Any element — an image of the item&apos;s name, a price, a line of copy. It fades in the moment this option is tapped or dragged and leaves when the drag
+              ends. Unlike the dragged picture it never moves: it appears exactly where you place it on the canvas.
+            </div>
+          </>
+        ) : (
+          <div className="hint pad">Optional. An image or text that appears while this option is held — its name, say.</div>
+        )}
       </div>
     )
   }
@@ -1410,7 +1435,8 @@ function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps):
   return (
     <>
       <div className="group-title2">Questions</div>
-      <NumField label="How many questions" value={questions} step={1} min={1} max={8} onChange={(n) => setParam('questions', Math.round(n))} />
+      <NumField label="How many questions" value={questions} step={1} min={1} onChange={(n) => setParam('questions', Math.max(1, Math.round(n)))} />
+      <NumField label="Options per question" value={optionSlots} step={1} min={1} onChange={(n) => setParam('options', Math.max(1, Math.round(n)))} />
       <Chips
         items={Array.from({ length: questions }, (_, i) => ({
           key: String(i),
@@ -1428,8 +1454,10 @@ function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps):
       {title && jump(title, `Show “${title.name || title.id}” on canvas`)}
       <div className="hint pad">Shown while this question is up, swapped on advance. It never reacts to which option was picked.</div>
 
-      {optionSlot(1)}
-      {optionSlot(2)}
+      {Array.from({ length: optionSlots }, (_, i) => optionSlot(i + 1))}
+      <button className="btn" style={{ width: '100%', marginTop: 6 }} onClick={() => setParam('options', optionSlots + 1)}>
+        Add another option
+      </button>
       <div className="hint pad">
         Only this question&apos;s options are visible and draggable during it. A layer is a normal element you place where it belongs on the anchor — the pick flies onto it and
         hands over, so its position, size and crop are whatever you set on the canvas.
@@ -2175,6 +2203,8 @@ function CatchPopupControls({ params, setParam }: CatchPopupControlsProps): JSX.
 export function Inspector(props: { onProjectSettings: () => void }): JSX.Element {
   const state = useEditorState()
   const [sceneTranslationId, setSceneTranslationId] = useState<string | null>(null)
+  // Which image element the background remover is open for (null = closed).
+  const [removeBg, setRemoveBg] = useState<{ elementId: string; assetId: string } | null>(null)
   const editLocale = useEditLocale()
   const activeVariant = useActiveVariant()
   const variantName = state.project.meta.variants?.find((v) => v.id === activeVariant)?.name
@@ -2789,6 +2819,14 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
     endTransaction()
     window.dispatchEvent(new CustomEvent('pa:crop-edit', { detail: { elementId: id } }))
   }
+  // Free-form crop area — the canvas owns the outline; the panel only starts it.
+  const editCropShape = (mode: 'draw' | 'edit', preset?: CropShapePreset): void => {
+    window.dispatchEvent(new CustomEvent('pa:crop-shape-edit', { detail: { elementId: id, mode, preset } }))
+  }
+  // A cut-out remembers the image it was cut from, so "restore the original" is only
+  // offered while that original is actually still in the library.
+  const originId = el.assetId ? state.assets[el.assetId]?.origin : undefined
+  const originAsset = originId ? state.assets[originId] : undefined
 
   const BOX_PRESETS: { key: string; label: string; box: BoxStyle | undefined }[] = [
     { key: 'none', label: 'None', box: undefined },
@@ -3161,8 +3199,8 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                         (f) =>
                           !BRUSH_PARAM_KEYS.has(f.key) &&
                           !(tpl.id === 'scratch' && (f.key === 'coverColor' || f.key === 'shadowColor')) &&
-                          // ComboSetup owns the question count, right above its per-question chips.
-                          !(tpl.id === 'combo' && f.key === 'questions') &&
+                          // ComboSetup owns both counts, right above its per-question chips.
+                          !(tpl.id === 'combo' && (f.key === 'questions' || f.key === 'options')) &&
                           (f.showIf?.(params) ?? true),
                       )
                       .map(renderField)
@@ -3407,23 +3445,85 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
             )}
           </Accordion>
           {!el.container && el.assetId && (
-            <Accordion id="inspector.crop" title="Crop">
-              <Toggle label="Crop this image" checked={!!el.crop} onChange={(v) => (v ? enableCrop() : patchElement(id, { crop: undefined }))} />
-              {el.crop && (
-                <>
-                  <button className="wide" onClick={() => window.dispatchEvent(new CustomEvent('pa:crop-edit', { detail: { elementId: id } }))}>
-                    Adjust crop on canvas
+            <>
+              <Accordion id="inspector.crop" title="Crop">
+                <Toggle label="Crop this image" checked={!!el.crop} onChange={(v) => (v ? enableCrop() : patchElement(id, { crop: undefined }))} />
+                {el.crop && (
+                  <>
+                    <button className="wide" onClick={() => window.dispatchEvent(new CustomEvent('pa:crop-edit', { detail: { elementId: id } }))}>
+                      Adjust crop on canvas
+                    </button>
+                    <button className="wide" onClick={() => setCrop({ scale: undefined, x: undefined, y: undefined })}>
+                      Reset crop
+                    </button>
+                    <div className="hint pad">
+                      <b>Double-click the image</b> on the canvas to crop it — drag the <b>edges/corners</b> to change what shows, drag the <b>middle</b> to move the picture, and{' '}
+                      <b>scroll</b> to zoom. Press <b>Enter</b> or click away when done.
+                    </div>
+                  </>
+                )}
+              </Accordion>
+              <Accordion id="inspector.cropshape" title="Crop area (free-form)" defaultOpen={false}>
+                {el.cropShape && el.cropShape.points.length >= 3 ? (
+                  <>
+                    <button className="wide" onClick={() => editCropShape('edit')}>
+                      Edit crop area on canvas
+                    </button>
+                    <button className="wide" onClick={() => editCropShape('draw')}>
+                      Draw a new area
+                    </button>
+                    <button className="wide" onClick={() => patchElement(id, { cropShape: undefined })}>
+                      Remove crop area
+                    </button>
+                    <div className="hint pad">
+                      Cropping to {el.cropShape.points.length} corners. On the canvas: <b>drag a corner</b> to reshape, <b>drag a small dot</b> on an edge to add one,{' '}
+                      <b>Alt-click</b> a corner to remove it. The area is stored relative to the box, so resizing the element crops with it.
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <button className="wide" onClick={() => editCropShape('draw')}>
+                      Draw crop area on canvas
+                    </button>
+                    <Row label="Or start from">
+                      <Select
+                        value=""
+                        onChange={(v) => v && editCropShape('edit', v as CropShapePreset)}
+                        options={[
+                          { value: '', label: 'Pick a shape…' },
+                          { value: 'ellipse', label: 'Ellipse / circle' },
+                          { value: 'triangle', label: 'Triangle' },
+                          { value: 'diamond', label: 'Diamond' },
+                          { value: 'pentagon', label: 'Pentagon' },
+                          { value: 'hexagon', label: 'Hexagon' },
+                          { value: 'star', label: 'Star' },
+                        ]}
+                      />
+                    </Row>
+                    <div className="hint pad">
+                      Crop to any shape, not just a rectangle: <b>click</b> to drop corners or <b>drag</b> to trace freehand, then click the first corner (or press <b>Enter</b>) to
+                      close it. Everything outside the outline is cut away, in Preview and in the export.
+                    </div>
+                  </>
+                )}
+              </Accordion>
+              <Accordion id="inspector.removebg" title="Background" defaultOpen={false}>
+                <button className="wide" onClick={() => setRemoveBg({ elementId: id, assetId: el.assetId! })}>
+                  Remove background…
+                </button>
+                {originAsset && (
+                  <button className="wide" onClick={() => patchElement(id, { assetId: state.assets[el.assetId!].origin })}>
+                    Restore original image
                   </button>
-                  <button className="wide" onClick={() => setCrop({ scale: undefined, x: undefined, y: undefined })}>
-                    Reset crop
-                  </button>
-                  <div className="hint pad">
-                    <b>Double-click the image</b> on the canvas to crop it — drag the <b>edges/corners</b> to change what shows, drag the <b>middle</b> to move the picture, and{' '}
-                    <b>scroll</b> to zoom. Press <b>Enter</b> or click away when done.
-                  </div>
-                </>
-              )}
-            </Accordion>
+                )}
+                <div className="hint pad">
+                  {originAsset
+                    ? 'This is a cut-out. The original image is still in the library, so you can put it back at any time.'
+                    : 'Knocks a flat background out of the image, in the browser. The cut-out is saved as a NEW image — the original is never overwritten.'}
+                </div>
+              </Accordion>
+              {removeBg && <RemoveBgModal elementId={removeBg.elementId} assetId={removeBg.assetId} onClose={() => setRemoveBg(null)} />}
+            </>
           )}
           {(() => {
             const cfg = el.button

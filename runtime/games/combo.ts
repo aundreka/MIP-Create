@@ -16,6 +16,10 @@
 //   title   the question headline. Shown while its question is live and swapped on
 //           advance. It never reacts to WHICH option was picked — only to which
 //           question is up.
+//   caption what the option is CALLED — an item name, a price, a blurb. One element
+//           per option, hidden until that option is held and gone again when the
+//           drag ends. Unlike drag art it never moves: it appears exactly where the
+//           author placed it, so a name plate can sit in a fixed spot on the board.
 //   anchor  the base art the layers build on top of. Purely the backdrop; it is
 //           only consulted as the fly-to target for an option whose question has
 //           no layer element assigned yet.
@@ -63,6 +67,18 @@ interface LayerEl {
   canvasShown: boolean
 }
 
+interface CaptionEl {
+  el: HTMLElement
+  question: number
+  choice: number
+  canvasShown: boolean
+  /** Inline opacity layoutRec left on it, to be handed back after a fade. */
+  restOpacity: string
+  /** Bumped on every show, so a fade-out scheduled for an earlier hold can't park a
+   * caption that has since been brought back up. */
+  seq: number
+}
+
 interface Zone {
   x: number
   y: number
@@ -107,7 +123,7 @@ function clampPct(value: unknown, fallback: number): number {
 export function createCombo(): GameModule {
   let ctx: GameContext
   let target: HTMLDivElement
-  let questions = 3
+  let questions = 1
   let pickupScale = 1.25
   let snapBorderPct = 6
   let advanceDelayMs = 600
@@ -115,11 +131,13 @@ export function createCombo(): GameModule {
   let landScale = 0.92
   let crossFadeMs = 300
   let dismissMs = 260
+  let captionFadeMs = 140
   let zonePct: Zone = { x: 18, y: 60, w: 64, h: 32 }
 
   const options: OptionEl[] = []
   const layers: LayerEl[] = []
   const dragArt: DragArtEl[] = []
+  const captions: CaptionEl[] = []
   const anchors: HTMLElement[] = []
   const titles: { el: HTMLElement; question: number }[] = []
   /** Chosen option index per question (0-based question), -1 = unanswered. */
@@ -147,8 +165,7 @@ export function createCombo(): GameModule {
   const optionsFor = (question: number): OptionEl[] => options.filter((o) => o.question === question)
 
   /** The option a hint should point at: the first one still up for grabs. */
-  const liveOption = (): OptionEl | undefined =>
-    done || busy ? undefined : optionsFor(current + 1).find((o) => !o.el.classList.contains(OFF_CLASS))
+  const liveOption = (): OptionEl | undefined => (done || busy ? undefined : optionsFor(current + 1).find((o) => !o.el.classList.contains(OFF_CLASS)))
 
   /** Publish that option as `data-combo-hint`, the way the basket game publishes its
    * next unplaced item. An editable handguide element in 'combo' mode follows this
@@ -237,8 +254,7 @@ export function createCombo(): GameModule {
   // The option element itself never moves aside: it stays put as the invisible drag
   // handle, which is what keeps pointer capture, hit-testing against the drop area
   // and the hint marker all working exactly as they do without drag art.
-  const dragArtFor = (option: OptionEl): DragArtEl | undefined =>
-    dragArt.find((a) => a.question === option.question && a.choice === option.choice)
+  const dragArtFor = (option: OptionEl): DragArtEl | undefined => dragArt.find((a) => a.question === option.question && a.choice === option.choice)
 
   /** The element the player sees themselves dragging: the proxy if there is one, else
    * the option itself. Everything downstream — the enlargement, the flight, the
@@ -303,6 +319,59 @@ export function createCombo(): GameModule {
     const node = scaleNode(art.el)
     node.style.transition = ''
     node.style.scale = ''
+  }
+
+  // ---- captions ------------------------------------------------------------
+  // Optional per-option NAME PLATE: an ordinary element — the item's name, a price,
+  // a line of copy — that appears while its option is held and leaves when the drag
+  // ends. It stays exactly where the author placed it; the drag proxy is what rides
+  // the finger. Pick and caption are paired the same way a layer is: same question,
+  // same choice.
+  const captionFor = (option: OptionEl): CaptionEl | undefined => captions.find((c) => c.question === option.question && c.choice === option.choice)
+
+  const showCaption = (item: OptionEl): void => {
+    const cap = captionFor(item)
+    if (!cap) return
+    // Only sample the resting opacity when it is genuinely at rest: re-grabbing an
+    // option mid fade-out would otherwise record the 0 as its authored value.
+    if (cap.el.classList.contains(OFF_CLASS)) cap.restOpacity = cap.el.style.opacity
+    cap.seq++
+    if (captionFadeMs <= 0) {
+      show(cap.el)
+      return
+    }
+    cap.el.style.transition = ''
+    cap.el.style.opacity = '0'
+    show(cap.el)
+    // Flush the 0 so there is a value to animate from (see fadeInLayer).
+    void cap.el.offsetWidth
+    cap.el.style.transition = `opacity ${captionFadeMs}ms ease`
+    cap.el.style.opacity = '1'
+  }
+
+  /** Put every caption away — cheap, and it can't strand one on screen if a drag is
+   * interrupted between questions. */
+  const hideCaptions = (fadeMs = 0): void => {
+    for (const cap of captions) {
+      const visible = !cap.el.classList.contains(OFF_CLASS)
+      if (fadeMs > 0 && visible) {
+        const seq = cap.seq
+        cap.el.style.transition = `opacity ${fadeMs}ms ease`
+        cap.el.style.opacity = '0'
+        after(fadeMs, () => {
+          if (cap.seq === seq) parkCaption(cap)
+        })
+      } else {
+        parkCaption(cap)
+      }
+    }
+  }
+
+  const parkCaption = (cap: CaptionEl): void => {
+    hide(cap.el)
+    cap.el.style.transition = ''
+    // layoutRec owns this property; hand back exactly what it had written.
+    cap.el.style.opacity = cap.restOpacity
   }
 
   /** Bring a layer up from transparent over `ms`, so it arrives as the option on top
@@ -386,6 +455,10 @@ export function createCombo(): GameModule {
     markHint()
     ctx.sfx.play('comboDrop')
 
+    // The name plate leaves with the options it was naming, rather than hanging over
+    // the composed art while the pick flies home.
+    hideCaptions(dismissMs)
+
     for (const other of optionsFor(q + 1)) {
       if (other === item) continue
       other.el.style.transition = `opacity ${dismissMs}ms ease`
@@ -422,8 +495,7 @@ export function createCombo(): GameModule {
     const flyer = art?.el ?? item.el
     const to = destination.getBoundingClientRect()
     const rect = flyer.getBoundingClientRect()
-    const fit =
-      rect.width > 0 && rect.height > 0 && to.width > 0 && to.height > 0 ? Math.min(to.width / rect.width, to.height / rect.height) : 1
+    const fit = rect.width > 0 && rect.height > 0 && to.width > 0 && to.height > 0 ? Math.min(to.width / rect.width, to.height / rect.height) : 1
     // The flyer's resting centre. A proxy already knows its own (sampled at pick-up);
     // an option's is its live centre minus the drag offset it is carrying.
     const home = art ? art.home : { x: rect.left + rect.width / 2 - item.dx, y: rect.top + rect.height / 2 - item.dy }
@@ -476,6 +548,7 @@ export function createCombo(): GameModule {
       // Swap in the proxy FIRST, so the enlargement lands on whichever element the
       // player is about to be carrying.
       showDragArt(item)
+      showCaption(item)
       setScale(proxyFor(item), pickupScale, 140)
       ctx.sfx.play('comboPick')
 
@@ -501,6 +574,7 @@ export function createCombo(): GameModule {
         } else {
           item.el.style.zIndex = item.homeZ
           item.el.style.cursor = 'grab'
+          hideCaptions(captionFadeMs)
           hideDragArt(140)
           restoreOptionArt(item, 140)
           setScale(item.el, 1, 140)
@@ -550,6 +624,8 @@ export function createCombo(): GameModule {
           home: { x: 0, y: 0 },
           restOpacity: '',
         })
+      } else if (role === 'caption') {
+        captions.push({ el, question, choice, canvasShown: el.dataset.comboCanvasShow === '1', restOpacity: el.style.opacity, seq: 0 })
       } else if (role === 'title') {
         titles.push({ el, question })
       } else if (role === 'anchor') {
@@ -561,7 +637,9 @@ export function createCombo(): GameModule {
   return {
     mount(c, params) {
       ctx = c
-      questions = Math.max(1, Math.min(8, Math.round(num(params.questions, 3))))
+      // No ceiling: a funnel can be as long as the author wires up, and a question
+      // with nothing tagged for it is skipped rather than stalling (nextPlayable).
+      questions = Math.max(1, Math.round(num(params.questions, 1)))
       pickupScale = Math.max(1, Math.min(2, num(params.pickupScale, 1.25)))
       snapBorderPct = Math.max(0, Math.min(25, num(params.snapBorderPct, 6)))
       advanceDelayMs = Math.max(0, Math.min(5000, num(params.advanceDelayMs, 600)))
@@ -569,6 +647,7 @@ export function createCombo(): GameModule {
       landScale = Math.max(0.1, Math.min(2, num(params.landScale, 0.92)))
       crossFadeMs = Math.max(0, Math.min(3000, num(params.crossFadeMs, 300)))
       dismissMs = Math.max(0, Math.min(2000, num(params.dismissMs, 260)))
+      captionFadeMs = Math.max(0, Math.min(2000, num(params.captionFadeMs, 140)))
       const x = Math.min(98, clampPct(params.zoneX, 18))
       const y = Math.min(98, clampPct(params.zoneY, 60))
       zonePct = {
@@ -599,6 +678,7 @@ export function createCombo(): GameModule {
       // Whatever the author left visible while positioning, play starts clean.
       hideAllLayers()
       hideDragArt()
+      hideCaptions()
       current = nextPlayable(0)
       if (current >= questions) {
         // Nothing is wired up at all — win immediately rather than stranding the player.
@@ -655,10 +735,18 @@ export function createCombo(): GameModule {
         art.el.style.transition = ''
         delete art.el.dataset.comboClaimedBy
       }
+      for (const cap of captions) {
+        if (cap.canvasShown) cap.el.classList.remove(OFF_CLASS)
+        else cap.el.classList.add(OFF_CLASS)
+        cap.el.style.transition = ''
+        cap.el.style.opacity = cap.restOpacity
+        delete cap.el.dataset.comboClaimedBy
+      }
       for (const anchor of anchors) delete anchor.dataset.comboClaimedBy
       options.length = 0
       layers.length = 0
       dragArt.length = 0
+      captions.length = 0
       titles.length = 0
       anchors.length = 0
       answers.length = 0
@@ -674,7 +762,10 @@ export const COMBO_TEMPLATE: GameTemplate = {
   id: 'combo',
   label: 'Combo builder',
   paramFields: [
-    { key: 'questions', label: 'Questions', type: 'number', min: 1, max: 8, step: 1 },
+    // 'questions' and 'options' are both uncapped and both rendered by the editor's
+    // own Combo setup panel, right above the per-question chips.
+    { key: 'questions', label: 'Questions', type: 'number', min: 1, step: 1 },
+    { key: 'options', label: 'Options per question', type: 'number', min: 1, step: 1 },
     { key: 'pickupScale', label: 'Drag grow scale', type: 'number', min: 1, max: 2, step: 0.05 },
     { key: 'snapBorderPct', label: 'Snap border (%)', type: 'number', min: 0, max: 25, step: 1 },
     { key: 'flyMs', label: 'Fly-to-layer (ms)', type: 'number', min: 0, max: 3000, step: 20 },
@@ -682,9 +773,14 @@ export const COMBO_TEMPLATE: GameTemplate = {
     { key: 'crossFadeMs', label: 'Cross-fade into the layer (ms)', type: 'number', min: 0, max: 3000, step: 20 },
     { key: 'advanceDelayMs', label: 'Delay before next question (ms)', type: 'number', min: 0, max: 5000, step: 50 },
     { key: 'dismissMs', label: 'Unpicked option exit (ms)', type: 'number', min: 0, max: 2000, step: 20 },
+    { key: 'captionFadeMs', label: 'Name plate fade (ms)', type: 'number', min: 0, max: 2000, step: 20 },
   ],
   defaultParams: {
-    questions: 3,
+    questions: 1,
+    // Editor-only: how many option slots the setup panel offers per question. The
+    // game itself counts whatever elements are tagged, so raising it costs nothing
+    // until slots are filled.
+    options: 1,
     pickupScale: 1.25,
     snapBorderPct: 6,
     flyMs: 520,
@@ -692,6 +788,7 @@ export const COMBO_TEMPLATE: GameTemplate = {
     crossFadeMs: 300,
     advanceDelayMs: 600,
     dismissMs: 260,
+    captionFadeMs: 140,
     zoneX: 18,
     zoneY: 60,
     zoneW: 64,

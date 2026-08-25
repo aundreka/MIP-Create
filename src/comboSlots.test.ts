@@ -86,9 +86,11 @@ describe('combo drag art', () => {
     const moved = assignComboSlot({ nextId: 'cue', current: undefined, role: 'dragArt', gameId: GAME, question: 2, choice: 2, elements: [a] })
     expect(moved[0].patch.comboRole).toMatchObject({ showOnCanvas: true, question: 2, choice: 2 })
 
-    // Canvas visibility is shared by both hidden-by-default kinds, so it carries over.
+    // Canvas visibility is shared by every hidden-by-default kind, so it carries over.
     const asLayer = assignComboSlot({ nextId: 'cue', current: undefined, role: 'layer', gameId: GAME, question: 1, choice: 1, elements: [a] })
     expect(asLayer[0].patch.comboRole?.showOnCanvas).toBe(true)
+    const asCaption = assignComboSlot({ nextId: 'cue', current: undefined, role: 'caption', gameId: GAME, question: 1, choice: 3, elements: [a] })
+    expect(asCaption[0].patch.comboRole).toMatchObject({ role: 'caption', question: 1, choice: 3, showOnCanvas: true })
   })
 })
 
@@ -130,6 +132,7 @@ describe('combo labels', () => {
     expect(comboOptionLabel(el('Hat', { comboRole: { role: 'option', question: 2, choice: 1 } }))).toBe('Hat — Q2 option 1')
     expect(comboOptionLabel(el('Hat', { comboRole: { role: 'layer', question: 3, choice: 2 } }))).toBe('Hat — Q3 layer 2')
     expect(comboOptionLabel(el('Glow', { comboRole: { role: 'dragArt', question: 2, choice: 1 } }))).toBe('Glow — Q2 drag art 1')
+    expect(comboOptionLabel(el('Name', { comboRole: { role: 'caption', question: 2, choice: 5 } }))).toBe('Name — Q2 name plate 5')
   })
 
   it('summarises a role in plain language for the element panel', () => {
@@ -138,5 +141,6 @@ describe('combo labels', () => {
     expect(comboSlotSummary({ role: 'layer', question: 1, choice: 2 })).toBe("question 1's layer for option 2")
     expect(comboSlotSummary({ role: 'option', question: 4, choice: 1 })).toBe('question 4, option 1')
     expect(comboSlotSummary({ role: 'dragArt', question: 3, choice: 2 })).toBe("what question 3's option 2 looks like while dragged")
+    expect(comboSlotSummary({ role: 'caption', question: 3, choice: 4 })).toBe("the name plate shown while question 3's option 4 is held")
   })
 })
