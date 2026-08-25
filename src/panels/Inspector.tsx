@@ -89,6 +89,9 @@ import {
 import { Accordion, Chips, ColorField, NumField, Row, Select, Slider, Swatches, Toggle } from '../ui'
 import {
   AlignCenterHorizontal,
+  Eye,
+  EyeOff,
+  ScanSearch,
   AlignCenterVertical,
   AlignEndHorizontal,
   AlignEndVertical,
@@ -1324,17 +1327,17 @@ function BrushControls(props: {
 
 // ---- Combo builder: per-question setup -------------------------------------
 // Every element the game drives is assigned FROM HERE, not from each element's own
-// panel: pick a question, then choose its title, its options, and the LAYER each
-// option leaves behind. Assigning writes the `comboRole` onto the chosen element and
-// clears it off whoever held that slot before, so a slot is never double-booked.
+// panel: pick a question, then choose its title, its options, and — per option — the
+// layer it leaves behind, the outline that layer replaces, and the cues shown while
+// it is held. Assigning writes the `comboRole` onto the chosen element and clears it
+// off whoever held that slot before, so a slot is never double-booked.
 //
 // Both counts — questions, and options per question — are open-ended and start at 1,
 // so a board grows by adding slots rather than by emptying ones that came for free.
 //
-// A layer is an ordinary element the author has already placed, so its position,
-// size and crop come straight off the canvas — there is no rect to type in. Since
-// every layer would otherwise pile up on the anchor while editing, each one gets a
-// show/hide toggle here (authoring-only; play always starts with all of them hidden).
+// Every slot is the same shape on screen (label, dropdown, actions), because the
+// panel is dozens of them in a row: anything spelled out per slot is paid for dozens
+// of times over. What a slot means lives in the tooltips and in this comment.
 interface ComboSetupProps {
   params: Record<string, unknown>
   setParam: (k: string, v: unknown) => void
@@ -1350,7 +1353,7 @@ function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps):
   const anchors = mine.filter((e) => e.comboRole?.role === 'anchor')
   const allLayers = comboLayers(siblings, elementId)
   const titleFor = (n: number): SceneElement | undefined => mine.find((e) => e.comboRole?.role === 'title' && (e.comboRole.question ?? 1) === n)
-  const slotFor = (role: 'option' | 'layer' | 'dragArt' | 'caption', n: number, choice: number): SceneElement | undefined =>
+  const slotFor = (role: ComboRoleConfig['role'], n: number, choice: number): SceneElement | undefined =>
     mine.find((e) => e.comboRole?.role === role && (e.comboRole.question ?? 1) === n && (e.comboRole.choice ?? 1) === choice)
   const optionCount = (n: number): number => mine.filter((e) => e.comboRole?.role === 'option' && (e.comboRole.question ?? 1) === n).length
   // Never fewer slots than are actually wired up: a project saved before this count
@@ -1376,71 +1379,72 @@ function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps):
 
   const setLayersVisible = (els: SceneElement[], visible: boolean): void => apply(els.map((e) => setCanvasVisible(e, visible)))
 
-  const jump = (el: SceneElement, label = 'Show on canvas'): JSX.Element => (
-    <button className="btn" style={{ width: '100%', marginTop: 4 }} onClick={() => selectOnly(el.id)}>
-      {label}
-    </button>
+  /** One assignment. `hint` is the tooltip — what this slot is for lives there rather
+   * than in a paragraph under every one of them. `hides` marks the kinds play keeps
+   * hidden, which get the eye that holds them on the canvas while being positioned. */
+  const slot = (label: string, hint: string, current: SceneElement | undefined, role: ComboRoleConfig['role'], choice?: number, hides = false): JSX.Element => (
+    <div className="combo-slot">
+      <span title={hint}>{label}</span>
+      <Select value={current?.id ?? ''} onChange={(v) => assign(v, current, role, q + 1, choice)} options={choices(current)} title={hint} />
+      <span className="combo-slot-actions">
+        {current && hides && (
+          <button
+            className={'icon-btn' + (current.comboRole?.showOnCanvas ? ' on' : '')}
+            title={current.comboRole?.showOnCanvas ? 'Showing on the canvas while you position it (play always hides it)' : 'Hidden — show it on the canvas while you position it'}
+            onClick={() => setLayersVisible([current], !current.comboRole?.showOnCanvas)}
+          >
+            <Icon icon={current.comboRole?.showOnCanvas ? Eye : EyeOff} size={13} />
+          </button>
+        )}
+        {current && (
+          <button className="icon-btn" title={`Select “${current.name || current.id}” on the canvas`} onClick={() => selectOnly(current.id)}>
+            <Icon icon={ScanSearch} size={13} />
+          </button>
+        )}
+      </span>
+    </div>
   )
 
-  const title = titleFor(q + 1)
-
-  /** One option with the layer it leaves behind and the cue shown while it is held —
-   * the trio the author thinks in. */
+  /** One option and everything that hangs off it. */
   const optionSlot = (choice: number): JSX.Element => {
     const opt = slotFor('option', q + 1, choice)
-    const layer = slotFor('layer', q + 1, choice)
-    const art = slotFor('dragArt', q + 1, choice)
-    const caption = slotFor('caption', q + 1, choice)
     return (
       <div key={choice}>
         <div className="group-title2">
           Option {choice}
-          {opt ? '' : ' — empty'}
+          {opt ? '' : ' · empty'}
         </div>
-        <Row label="Draggable">
-          <Select value={opt?.id ?? ''} onChange={(v) => assign(v, opt, 'option', q + 1, choice)} options={choices(opt)} />
-        </Row>
-        {opt && jump(opt, `Show “${opt.name || opt.id}” on canvas`)}
-        <Row label="Layer it leaves">
-          <Select value={layer?.id ?? ''} onChange={(v) => assign(v, layer, 'layer', q + 1, choice)} options={choices(layer)} />
-        </Row>
-        {layer && (
-          <>
-            <Toggle label="Show this layer on the canvas" checked={!!layer.comboRole?.showOnCanvas} onChange={(v) => setLayersVisible([layer], v)} />
-            {jump(layer, `Position “${layer.name || layer.id}” on canvas`)}
-          </>
+        {slot('Drag', 'The draggable answer. Only the live question’s options are visible and can be picked up.', opt, 'option', choice)}
+        {slot(
+          'Layer',
+          'What the pick leaves behind, placed where it belongs on the canvas. The option flies onto it and hands over.',
+          slotFor('layer', q + 1, choice),
+          'layer',
+          choice,
+          true,
         )}
-        {opt && !layer && <div className="hint pad">This option leaves nothing behind — it will just fly to the anchor and vanish.</div>}
-        <Row label="Looks like, while dragged">
-          <Select value={art?.id ?? ''} onChange={(v) => assign(v, art, 'dragArt', q + 1, choice)} options={choices(art)} />
-        </Row>
-        {art ? (
-          <>
-            <Toggle label="Show it on the canvas" checked={!!art.comboRole?.showOnCanvas} onChange={(v) => setLayersVisible([art], v)} />
-            {jump(art, `Size “${art.name || art.id}” on canvas`)}
-            <div className="hint pad">
-              Optional. While this option is held, its own picture switches off and THIS one rides under the finger in its place, enlarged — and it is what flies onto the layer at
-              the end. Use it when the tray picture and the in-hand picture should differ: a flat swatch in the tray, a big render in the hand. Only its size matters; it is moved
-              to the finger.
-            </div>
-          </>
-        ) : (
-          <div className="hint pad">Optional. Leave empty and the option&apos;s own picture is what gets dragged.</div>
+        {slot(
+          'Outline',
+          'Optional placeholder standing where this pick lands — a silhouette, an empty frame. It dissolves as the layer fades in, so the outline becomes the finished piece. Any of the question’s options being picked takes it down.',
+          slotFor('outline', q + 1, choice),
+          'outline',
+          choice,
         )}
-        <Row label="Name shown while held">
-          <Select value={caption?.id ?? ''} onChange={(v) => assign(v, caption, 'caption', q + 1, choice)} options={choices(caption)} />
-        </Row>
-        {caption ? (
-          <>
-            <Toggle label="Show it on the canvas" checked={!!caption.comboRole?.showOnCanvas} onChange={(v) => setLayersVisible([caption], v)} />
-            {jump(caption, `Position “${caption.name || caption.id}” on canvas`)}
-            <div className="hint pad">
-              Optional. Any element — an image of the item&apos;s name, a price, a line of copy. It fades in the moment this option is tapped or dragged and leaves when the drag
-              ends. Unlike the dragged picture it never moves: it appears exactly where you place it on the canvas.
-            </div>
-          </>
-        ) : (
-          <div className="hint pad">Optional. An image or text that appears while this option is held — its name, say.</div>
+        {slot(
+          'In hand',
+          'Optional. While this option is held, its own picture switches off and this one rides under the finger, enlarged — and it is what flies onto the layer. Only its size matters; it is moved to the finger.',
+          slotFor('dragArt', q + 1, choice),
+          'dragArt',
+          choice,
+          true,
+        )}
+        {slot(
+          'Name',
+          'Optional name plate — an item name, a price, a line of copy. It fades in while this option is held and leaves when the drag ends, staying exactly where you place it.',
+          slotFor('caption', q + 1, choice),
+          'caption',
+          choice,
+          true,
         )}
       </div>
     )
@@ -1459,64 +1463,42 @@ function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps):
           onClick: () => setActive(i),
         }))}
       />
-      <div className="hint pad">A question marked ! has no options yet and is skipped at runtime rather than stalling the game.</div>
+      <div className="hint pad">! = no options yet, so that question is skipped in play.</div>
 
-      <div className="group-title2">Question {q + 1} title</div>
-      <Row label="Title">
-        <Select value={title?.id ?? ''} onChange={(v) => assign(v, title, 'title', q + 1)} options={choices(title)} />
-      </Row>
-      {title && jump(title, `Show “${title.name || title.id}” on canvas`)}
-      <div className="hint pad">Shown while this question is up, swapped on advance. It never reacts to which option was picked.</div>
-
+      <div className="group-title2">Question {q + 1}</div>
+      {slot('Title', 'The question headline, shown while this question is up. It never reacts to which option was picked.', titleFor(q + 1), 'title')}
       {Array.from({ length: optionSlots }, (_, i) => optionSlot(i + 1))}
-      <button className="btn" style={{ width: '100%', marginTop: 6 }} onClick={() => setParam('options', optionSlots + 1)}>
-        Add another option
-      </button>
-      <div className="hint pad">
-        Only this question&apos;s options are visible and draggable during it. A layer is a normal element you place where it belongs on the anchor — the pick flies onto it and
-        hands over, so its position, size and crop are whatever you set on the canvas.
-      </div>
 
-      <div className="group-title2">Layers on the canvas ({allLayers.length})</div>
-      <div className="hint pad">Play always starts with every layer hidden and reveals them as picks land, so these toggles only affect what you see while editing.</div>
+      <div className="group-title2">Canvas</div>
       {allLayers.length > 0 && (
-        <div className="grid2">
+        <div className="grid2" style={{ padding: '2px 10px' }}>
           <button className="btn" onClick={() => setLayersVisible(allLayers, true)}>
-            Show all
+            Show layers
           </button>
           <button className="btn" onClick={() => setLayersVisible(allLayers, false)}>
-            Hide all
+            Hide layers
           </button>
         </div>
       )}
-      {allLayers.map((l) => (
-        <Toggle
-          key={l.id}
-          label={`Q${l.comboRole?.question ?? 1} · option ${l.comboRole?.choice ?? 1} — ${l.name || l.id}`}
-          checked={!!l.comboRole?.showOnCanvas}
-          onChange={(v) => setLayersVisible([l], v)}
-        />
-      ))}
-
-      <div className="group-title2">Drop area</div>
-      <button className="btn" style={{ width: '100%', marginTop: 6 }} onClick={() => window.dispatchEvent(new CustomEvent('pa:zone-edit', { detail: { elementId } }))}>
-        Set drop area on canvas
+      <button className="btn wide" onClick={() => window.dispatchEvent(new CustomEvent('pa:zone-edit', { detail: { elementId } }))}>
+        Set drop area
       </button>
-      <div className="hint pad">
-        Draw the invisible area an option must be released into. There is exactly one drop area for the whole game — drag the box to move it, corner handles to resize, Esc to
-        finish.
-      </div>
+      <div className="hint pad">Drop area: drag to move, corners to resize, Esc to finish.</div>
 
-      <div className="group-title2">Anchor images ({anchors.length})</div>
+      <div className="group-title2">Anchor</div>
       {anchors.map((a) => (
-        <div key={a.id}>
-          <Row label="Anchor">
-            <Select value={a.id} onChange={(v) => assign(v, a, 'anchor')} options={choices(a)} />
-          </Row>
-          {jump(a, `Show “${a.name || a.id}” on canvas`)}
+        <div className="combo-slot" key={a.id}>
+          <span title="The base art the layers build on. Only used as the fly-to target for an option with no layer of its own.">Anchor</span>
+          <Select value={a.id} onChange={(v) => assign(v, a, 'anchor')} options={choices(a)} />
+          <span className="combo-slot-actions">
+            <button className="icon-btn" title={`Select “${a.name || a.id}” on the canvas`} onClick={() => selectOnly(a.id)}>
+              <Icon icon={ScanSearch} size={13} />
+            </button>
+          </span>
         </div>
       ))}
-      <Row label="Add anchor">
+      <div className="combo-slot">
+        <span title="The base art the layers build on. Only used as the fly-to target for an option with no layer of its own.">Add</span>
         <Select
           value=""
           onChange={(v) => assign(v, undefined, 'anchor')}
@@ -1525,14 +1507,7 @@ function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps):
             ...candidates.filter((e) => e.comboRole?.role !== 'anchor').map((e) => ({ value: e.id, label: comboOptionLabel(e) })),
           ]}
         />
-      </Row>
-      <div className="hint pad">
-        The base art the layers build on top of. Optional: it is only used as the fly-to target for an option that has no layer of its own. Set an anchor to <b>none</b> to release
-        it.
-      </div>
-      <div className="hint pad">
-        Any scene element can use <b>On option picked up</b> / <b>On option dropped</b> / <b>On next question</b> in its Animation panel and the matching triggers in its Sounds
-        panel.
+        <span className="combo-slot-actions" />
       </div>
     </>
   )
@@ -3653,7 +3628,6 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                         Edit in “{game.name || game.id}”
                       </button>
                     )}
-                    <div className="hint pad">Assign and re-assign slots from the Combo builder game&apos;s panel.</div>
                   </>
                 )
               })()}

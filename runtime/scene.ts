@@ -682,13 +682,16 @@ export interface BasketItemConfig {
 //             where the author placed it.
 export interface ComboRoleConfig {
   gameId?: string
-  role: 'option' | 'layer' | 'title' | 'anchor' | 'dragArt' | 'caption'
-  /** 'option' / 'layer' / 'dragArt' / 'caption' / 'title': which question this
-   * belongs to (1-based). */
+  role: 'option' | 'layer' | 'title' | 'anchor' | 'dragArt' | 'caption' | 'outline'
+  /** 'option' / 'layer' / 'dragArt' / 'caption' / 'outline' / 'title': which question
+   * this belongs to (1-based). */
   question?: number
-  /** 'option' / 'layer' / 'dragArt' / 'caption': which of the question's choices
-   * (1-based; a question can have as many as the author wires up). A layer, a drag
-   * art and a caption each pair with the option of the same question + choice. */
+  /** 'option' / 'layer' / 'dragArt' / 'caption' / 'outline': which of the question's
+   * choices (1-based; a question can have as many as the author wires up). A layer, a
+   * drag art and a caption each pair with the option of the same question + choice.
+   * An outline is addressed the same way but is not matched against the WINNER: a
+   * question's outlines all leave together when any of its options is picked, so one
+   * outline can stand in for the whole question. */
   choice?: number
   /** 'layer' / 'dragArt' / 'caption', authoring-only: keep this element visible on
    * the editor canvas while it is being positioned. All three are always hidden when

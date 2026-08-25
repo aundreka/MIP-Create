@@ -110,6 +110,24 @@ function caption(id: string, question: number, choice: number, showOnCanvas?: bo
   } as SceneElement
 }
 
+/** A placeholder standing where the pick will land, until it does. */
+function outline(id: string, question: number, choice: number): SceneElement {
+  return {
+    id,
+    type: 'image',
+    name: id,
+    assetId: 'layerA',
+    x: 540,
+    y: 500,
+    w: 300,
+    h: 300,
+    anchor: 'center',
+    zIndex: 4,
+    mode: 'fit',
+    comboRole: { gameId: 'combo-game', role: 'outline', question, choice },
+  } as SceneElement
+}
+
 /** A layer is a normal element the author placed where the pick should land. */
 function layer(id: string, question: number, choice: number, assetId: string, showOnCanvas?: boolean): SceneElement {
   return {
@@ -949,6 +967,105 @@ describe('combo builder', () => {
       // No listeners left on window, and nothing to receive them if there were.
       document.body.dispatchEvent(pointer('pointermove', 900, 900))
       expect(opt.style.translate).toBe('')
+    })
+  })
+
+  describe('outline', () => {
+    /** Board with a placeholder over the landing spot, ready for a drop on a1. */
+    function board(...extra: SceneElement[]): { q: (id: string) => HTMLElement; drop: () => void; stage: ReturnType<typeof buildScene> } {
+      const game = { ...GAME, game: { ...GAME.game!, params: { ...(GAME.game!.params as object), flyMs: 500, crossFadeMs: 200 } } } as SceneElement
+      const stage = build([game, ANCHOR, option('a1', 1, 1, 'optA'), option('a2', 1, 2, 'optB'), layer('l-a1', 1, 1, 'layerA'), ...extra])
+      stage.layoutAll()
+      stage.startGames(true)
+      const q = (id: string): HTMLElement => stage.root.querySelector<HTMLElement>(`[data-id="${id}"]`)!
+      stubRect(stage.root.querySelector<HTMLElement>('[data-combo-target="1"]')!, 0, 0, 1000, 1000)
+      stubRect(q('a1'), 200, 200, 100, 100)
+      stubRect(q('l-a1'), 600, 600, 200, 200)
+      const drop = (): void => {
+        q('a1').dispatchEvent(pointer('pointerdown', 250, 250))
+        q('a1').dispatchEvent(pointer('pointerup', 250, 250))
+      }
+      return { q, drop, stage }
+    }
+
+    it('stands over the landing spot while its question is unanswered', () => {
+      const { q, stage } = board(outline('o1', 1, 1), outline('o2', 2, 1))
+      expect(q('o1').classList.contains('pa-combo-off')).toBe(false)
+      // A later question's placeholder waits its turn rather than piling up.
+      expect(q('o2').classList.contains('pa-combo-off')).toBe(true)
+      stage.destroy()
+    })
+
+    it('dissolves on exactly the curve the layer arrives on', () => {
+      const { q, drop, stage } = board(outline('o1', 1, 1))
+      drop()
+      // Opaque through the travel: the placeholder is still marking the spot.
+      vi.advanceTimersByTime(290)
+      expect(q('o1').style.opacity).not.toBe('0')
+
+      // Cross-fade window opens — the layer comes up as the outline goes down, both
+      // linear so the combined opacity doesn't dip into a flicker.
+      vi.advanceTimersByTime(20)
+      expect(q('o1').style.transition).toContain('opacity 200ms linear')
+      expect(q('o1').style.opacity).toBe('0')
+      expect(q('l-a1').style.transition).toContain('opacity 200ms linear')
+      expect(q('l-a1').style.opacity).toBe('1')
+
+      vi.advanceTimersByTime(250)
+      expect(q('o1').classList.contains('pa-combo-off')).toBe(true)
+      stage.destroy()
+    })
+
+    it('gives its authored opacity back instead of being promoted to solid', () => {
+      // layoutRec rewrites the authored opacity inline on every layout pass, so the
+      // fade has to hand that exact value back rather than clearing the property.
+      const ghost = { ...outline('o1', 1, 1), opacity: 0.35 } as SceneElement
+      const { q, drop, stage } = board(ghost)
+      drop()
+      vi.advanceTimersByTime(600)
+      expect(q('o1').style.opacity).toBe('0.35')
+      stage.destroy()
+    })
+
+    it('takes the whole question’s placeholders down, not just the winner’s', () => {
+      // Outlines are addressed per option so a board where each choice lands somewhere
+      // different can mark both spots — but a pick answers the QUESTION, so every
+      // placeholder it was holding a space for leaves with it. That is also what lets
+      // a single outline stand in for a whole question.
+      const { q, drop, stage } = board(outline('o1', 1, 1), outline('o2', 1, 2))
+      expect(q('o2').classList.contains('pa-combo-off')).toBe(false)
+      drop()
+      vi.advanceTimersByTime(600)
+      expect(q('o1').classList.contains('pa-combo-off')).toBe(true)
+      expect(q('o2').classList.contains('pa-combo-off')).toBe(true)
+      stage.destroy()
+    })
+
+    it('leaves with the option even when there is no layer to replace it', () => {
+      const stage = build([GAME, ANCHOR, option('b1', 1, 1, 'optA'), outline('o1', 1, 1)])
+      stage.layoutAll()
+      stage.startGames(true)
+      const q = (id: string): HTMLElement => stage.root.querySelector<HTMLElement>(`[data-id="${id}"]`)!
+      stubRect(stage.root.querySelector<HTMLElement>('[data-combo-target="1"]')!, 0, 0, 1000, 1000)
+      stubRect(q('b1'), 200, 200, 100, 100)
+      stubRect(q('anchor'), 0, 0, 600, 600)
+      q('b1').dispatchEvent(pointer('pointerdown', 250, 250))
+      q('b1').dispatchEvent(pointer('pointerup', 250, 250))
+      vi.advanceTimersByTime(600)
+      expect(q('o1').classList.contains('pa-combo-off')).toBe(true)
+      stage.destroy()
+    })
+
+    it('comes back to the canvas on destroy, like an option or a title', () => {
+      // An outline is part of the board being arranged, so unlike a layer it carries
+      // no per-element canvas flag — it is simply visible while editing.
+      const { q, drop, stage } = board(outline('o1', 1, 1))
+      const node = q('o1')
+      drop()
+      vi.advanceTimersByTime(600)
+      expect(node.classList.contains('pa-combo-off')).toBe(true)
+      stage.destroy()
+      expect(node.classList.contains('pa-combo-off')).toBe(false)
     })
   })
 

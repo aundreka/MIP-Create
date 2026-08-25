@@ -1625,6 +1625,43 @@ button.frame-chip:hover {
   opacity: 0.35;
 }
 
+/* ---- combo builder: one assignment per line ----
+   label | element dropdown | (eye, for the kinds play hides) | locate on canvas.
+   A grid rather than stacked .field blocks, because this panel is dozens of these
+   in a row and each one stacked cost three lines of height. */
+.combo-slot {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+}
+.combo-slot > span {
+  color: var(--muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.combo-slot select {
+  padding: 3px 6px;
+}
+/* Fixed width, filled from the right: a slot shows nothing until something is in it,
+   and only the kinds play hides get the second button. Letting the column size to its
+   contents would step every dropdown in and out as slots get assigned, which in a
+   list this long reads as noise. */
+.combo-slot-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1px;
+}
+.combo-slot-actions .icon-btn {
+  padding: 3px;
+}
+.combo-slot-actions .icon-btn.on {
+  color: var(--accent);
+}
+
 /* ---- inspector fields ---- */
 .field {
   display: block;

@@ -20,6 +20,13 @@
 //           per option, hidden until that option is held and gone again when the
 //           drag ends. Unlike drag art it never moves: it appears exactly where the
 //           author placed it, so a name plate can sit in a fixed spot on the board.
+//   outline a placeholder standing where a pick is about to land — a dashed
+//           silhouette, an empty frame, a "your sofa here" ghost. Visible for as
+//           long as its question is unanswered, then it dissolves on exactly the
+//           curve the layer arrives on, so the two read as one swap rather than a
+//           blink. Addressed per option like a layer, but ALL of a question's
+//           outlines leave together on a pick, so assigning just one covers the
+//           common case of a single shared placeholder for the whole question.
 //   anchor  the base art the layers build on top of. Purely the backdrop; it is
 //           only consulted as the fly-to target for an option whose question has
 //           no layer element assigned yet.
@@ -76,6 +83,17 @@ interface CaptionEl {
   restOpacity: string
   /** Bumped on every show, so a fade-out scheduled for an earlier hold can't park a
    * caption that has since been brought back up. */
+  seq: number
+}
+
+interface OutlineEl {
+  el: HTMLElement
+  question: number
+  choice: number
+  /** Inline opacity layoutRec left on it, to be handed back after a fade. */
+  restOpacity: string
+  /** Bumped on every show, so a fade-out scheduled for an earlier question can't
+   * park an outline that has since come back up. */
   seq: number
 }
 
@@ -138,6 +156,7 @@ export function createCombo(): GameModule {
   const layers: LayerEl[] = []
   const dragArt: DragArtEl[] = []
   const captions: CaptionEl[] = []
+  const outlines: OutlineEl[] = []
   const anchors: HTMLElement[] = []
   const titles: { el: HTMLElement; question: number }[] = []
   /** Chosen option index per question (0-based question), -1 = unanswered. */
@@ -383,6 +402,52 @@ export function createCombo(): GameModule {
     cap.el.style.opacity = cap.restOpacity
   }
 
+  // ---- outlines ------------------------------------------------------------
+  // Optional per-question PLACEHOLDER: whatever should stand where the pick is about
+  // to land — a dashed silhouette, an empty frame, a ghosted preview. It is an
+  // ordinary element sitting exactly where the author put it, so it lines up with the
+  // layer by eye rather than by numbers, and it is up for as long as its question is
+  // unanswered. Unlike a layer it is not addressed by WHICH option won: a question's
+  // outlines all leave together the moment a pick lands, so one assigned outline
+  // serves a whole question and per-option ones serve a board where each choice lands
+  // somewhere different.
+  const showOutline = (o: OutlineEl): void => {
+    // Only sample the resting opacity while it is genuinely at rest, or a question
+    // re-shown mid fade-out would record the 0 as its authored value.
+    if (o.el.classList.contains(OFF_CLASS)) o.restOpacity = o.el.style.opacity
+    o.seq++
+    o.el.style.transition = ''
+    o.el.style.opacity = o.restOpacity
+    show(o.el)
+  }
+
+  const parkOutline = (o: OutlineEl): void => {
+    hide(o.el)
+    o.el.style.transition = ''
+    // layoutRec owns this property; hand back exactly what it had written.
+    o.el.style.opacity = o.restOpacity
+  }
+
+  /** Take question `question`'s outlines down over `fadeMs`. Called with the layer's
+   * cross-fade so the placeholder dissolves as the real thing arrives in its place;
+   * a linear pair keeps the combined opacity steady across the swap. */
+  const hideOutlines = (question: number, fadeMs = 0): void => {
+    for (const o of outlines) {
+      if (question > 0 && o.question !== question) continue
+      const visible = !o.el.classList.contains(OFF_CLASS)
+      if (fadeMs > 0 && visible) {
+        const seq = o.seq
+        o.el.style.transition = `opacity ${fadeMs}ms linear`
+        o.el.style.opacity = '0'
+        after(fadeMs, () => {
+          if (o.seq === seq) parkOutline(o)
+        })
+      } else {
+        parkOutline(o)
+      }
+    }
+  }
+
   /** Bring a layer up from transparent over `ms`, so it arrives as the option on top
    * of it fades away and the two read as one object rather than a swap.
    *
@@ -419,6 +484,11 @@ export function createCombo(): GameModule {
     for (const o of options) {
       if (o.question === q + 1 && answers[q] < 0) show(o.el)
       else hide(o.el)
+    }
+    // A placeholder is up exactly as long as the question it is holding a space for.
+    for (const o of outlines) {
+      if (o.question === q + 1 && answers[q] < 0) showOutline(o)
+      else parkOutline(o)
     }
   }
 
@@ -479,8 +549,10 @@ export function createCombo(): GameModule {
     const layer = layerFor(item)
     const destination = flyTarget(item)
     if (!destination) {
-      // Nothing to fly into — still a valid pick, the option just leaves.
+      // Nothing to fly into — still a valid pick, the option just leaves, and the
+      // placeholder goes with it rather than outliving the question it belonged to.
       hide(item.el)
+      hideOutlines(q + 1, dismissMs)
       after(advanceDelayMs, advance)
       return
     }
@@ -524,8 +596,12 @@ export function createCombo(): GameModule {
 
     // Start the layer's fade-in at the same moment the flyer starts fading out. A
     // linear pair keeps the combined opacity roughly constant across the swap; eased
-    // curves dip in the middle and read as a flicker.
-    if (layer) after(flyMs - cross, () => fadeInLayer(layer.el, cross))
+    // curves dip in the middle and read as a flicker. The placeholder leaves on the
+    // same beat, so what the player sees is the outline BECOMING the finished piece.
+    after(flyMs - cross, () => {
+      if (layer) fadeInLayer(layer.el, cross)
+      hideOutlines(q + 1, cross)
+    })
 
     after(flyMs, () => {
       if (layer) show(layer.el)
@@ -727,6 +803,11 @@ export function createCombo(): GameModule {
         })
       } else if (role === 'caption') {
         captions.push({ el, question, choice, canvasShown: el.dataset.comboCanvasShow === '1', restOpacity: el.style.opacity, seq: 0 })
+      } else if (role === 'outline') {
+        // No canvas-visibility flag: an outline is part of the board the author is
+        // arranging, so it stays visible while editing the way an option or a title
+        // does, and showQuestion is what collapses it to the live question in play.
+        outlines.push({ el, question, choice, restOpacity: el.style.opacity, seq: 0 })
       } else if (role === 'title') {
         titles.push({ el, question })
       } else if (role === 'anchor') {
@@ -799,6 +880,7 @@ export function createCombo(): GameModule {
       hideAllLayers()
       hideDragArt()
       hideCaptions()
+      hideOutlines(0)
       current = nextPlayable(0)
       if (current >= questions) {
         // Nothing is wired up at all — win immediately rather than stranding the player.
@@ -870,11 +952,20 @@ export function createCombo(): GameModule {
         cap.el.style.opacity = cap.restOpacity
         delete cap.el.dataset.comboClaimedBy
       }
+      for (const o of outlines) {
+        // Like an option or a title, an outline is always visible on the canvas —
+        // there is no per-element authoring flag to put back, just the board.
+        o.el.classList.remove(OFF_CLASS)
+        o.el.style.transition = ''
+        o.el.style.opacity = o.restOpacity
+        delete o.el.dataset.comboClaimedBy
+      }
       for (const anchor of anchors) delete anchor.dataset.comboClaimedBy
       options.length = 0
       layers.length = 0
       dragArt.length = 0
       captions.length = 0
+      outlines.length = 0
       titles.length = 0
       anchors.length = 0
       answers.length = 0

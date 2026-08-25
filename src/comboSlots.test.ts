@@ -57,6 +57,15 @@ describe('combo slot assignment', () => {
     expect(repurposed[0].patch.comboRole?.showOnCanvas).toBeUndefined()
   })
 
+  it('never carries a canvas flag onto an outline, which is always visible while editing', () => {
+    // An outline is part of the board being arranged, like an option or a title, so
+    // there is no per-element show/hide state for it to inherit.
+    const shown = el('shown', { comboRole: { gameId: GAME, role: 'layer', question: 1, choice: 1, showOnCanvas: true } })
+    const edits = assignComboSlot({ nextId: 'shown', current: undefined, role: 'outline', gameId: GAME, question: 1, choice: 1, elements: [shown] })
+    expect(edits[0].patch.comboRole?.showOnCanvas).toBeUndefined()
+    expect(edits[0].patch.comboRole?.role).toBe('outline')
+  })
+
   it('clears the competing drag models when it claims an element', () => {
     const a = el('a', { basketItem: { gameId: 'basket-1' }, drag: { group: 'a' } })
     const edits = assignComboSlot({ nextId: 'a', current: undefined, role: 'option', gameId: GAME, question: 1, choice: 1, elements: [a] })
@@ -133,6 +142,7 @@ describe('combo labels', () => {
     expect(comboOptionLabel(el('Hat', { comboRole: { role: 'layer', question: 3, choice: 2 } }))).toBe('Hat — Q3 layer 2')
     expect(comboOptionLabel(el('Glow', { comboRole: { role: 'dragArt', question: 2, choice: 1 } }))).toBe('Glow — Q2 drag art 1')
     expect(comboOptionLabel(el('Name', { comboRole: { role: 'caption', question: 2, choice: 5 } }))).toBe('Name — Q2 name plate 5')
+    expect(comboOptionLabel(el('Ghost', { comboRole: { role: 'outline', question: 1, choice: 2 } }))).toBe('Ghost — Q1 outline 2')
   })
 
   it('summarises a role in plain language for the element panel', () => {
@@ -142,5 +152,6 @@ describe('combo labels', () => {
     expect(comboSlotSummary({ role: 'option', question: 4, choice: 1 })).toBe('question 4, option 1')
     expect(comboSlotSummary({ role: 'dragArt', question: 3, choice: 2 })).toBe("what question 3's option 2 looks like while dragged")
     expect(comboSlotSummary({ role: 'caption', question: 3, choice: 4 })).toBe("the name plate shown while question 3's option 4 is held")
+    expect(comboSlotSummary({ role: 'outline', question: 2, choice: 1 })).toBe("the placeholder standing where question 2's pick lands")
   })
 })

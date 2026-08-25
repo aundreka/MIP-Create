@@ -81,6 +81,7 @@ export function comboOptionLabel(el: SceneElement): string {
   if (r.role === 'dragArt') return `${base} — Q${r.question ?? 1} drag art ${r.choice ?? 1}`
   if (r.role === 'caption') return `${base} — Q${r.question ?? 1} name plate ${r.choice ?? 1}`
   if (r.role === 'layer') return `${base} — Q${r.question ?? 1} layer ${r.choice ?? 1}`
+  if (r.role === 'outline') return `${base} — Q${r.question ?? 1} outline ${r.choice ?? 1}`
   return `${base} — Q${r.question ?? 1} option ${r.choice ?? 1}`
 }
 
@@ -91,6 +92,7 @@ export function comboSlotSummary(role: ComboRoleConfig): string {
   if (role.role === 'dragArt') return `what question ${role.question ?? 1}'s option ${role.choice ?? 1} looks like while dragged`
   if (role.role === 'caption') return `the name plate shown while question ${role.question ?? 1}'s option ${role.choice ?? 1} is held`
   if (role.role === 'layer') return `question ${role.question ?? 1}'s layer for option ${role.choice ?? 1}`
+  if (role.role === 'outline') return `the placeholder standing where question ${role.question ?? 1}'s pick lands`
   return `question ${role.question ?? 1}, option ${role.choice ?? 1}`
 }
 
