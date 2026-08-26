@@ -724,6 +724,19 @@ export interface PickConfig {
 export interface FillConfig {
   group: string
   index?: number // which pick of the group this slot shows (default = scene order)
+  // How the chosen picture sits in this slot's box. The box itself is the element's
+  // own x/y/w/h, dragged and resized on the canvas like anything else; these decide
+  // what happens INSIDE it once a picture lands there.
+  //   'cover'   (default) fills the box, cropping whatever doesn't fit
+  //   'contain' shows the whole picture, letterboxing inside the box
+  //   'fill'    stretches to the box exactly (may distort)
+  fit?: 'cover' | 'contain' | 'fill'
+  // Which part survives a 'cover' crop, as % of the picture (0-100, default 50) — so a
+  // portrait cropped to a short box can keep the face rather than the chin.
+  focusX?: number
+  focusY?: number
+  // Extra zoom on top of the fit. 1 = none, >1 zooms in around the focal point.
+  zoom?: number
 }
 export interface GenerateConfig {
   needs?: string[]

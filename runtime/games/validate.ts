@@ -6,7 +6,7 @@
 
 import type { GameTemplate, ParamField } from './types'
 
-const FIELD_TYPES = new Set(['number', 'color', 'select', 'text', 'boolean'])
+const FIELD_TYPES = new Set(['number', 'color', 'select', 'text', 'boolean', 'font'])
 const ACCEPTS = new Set(['image', 'video', 'audio', 'html'])
 
 function checkField(tplId: string, f: ParamField, errs: string[]): void {

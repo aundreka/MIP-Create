@@ -4,7 +4,8 @@
 // short way round rather than unwinding the whole strip.
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createCarousel, landingIndex, wrapDelta } from './carousel'
+import { CAROUSEL_TEMPLATE, createCarousel, landingIndex, wrapDelta } from './carousel'
+import { validateTemplate } from './validate'
 import { getPicks, clearPicks } from '../selection'
 import { mulberry32, type GameContext } from './types'
 
@@ -419,5 +420,32 @@ describe('carousel', () => {
     expect(landingIndex(2.1, 0)).toBe(2)
     expect(landingIndex(2.1, 8)).toBeGreaterThan(2)
     expect(landingIndex(2.1, -8)).toBeLessThan(2)
+  })
+})
+
+// The editor renders a template's panel straight from paramFields, so the contract
+// additions that make that panel navigable are worth pinning here.
+describe('the carousel panel is described well enough to navigate', () => {
+  it('files every field under a heading', () => {
+    const ungrouped = CAROUSEL_TEMPLATE.paramFields.filter((f) => !f.group)
+    expect(ungrouped).toEqual([])
+  })
+
+  it('keeps each heading contiguous, so the panel is blocks rather than a stripe', () => {
+    // The editor emits a heading whenever the group changes; a group that reappears
+    // later would print its title twice.
+    const seen: string[] = []
+    for (const f of CAROUSEL_TEMPLATE.paramFields) if (f.group !== seen[seen.length - 1]) seen.push(f.group!)
+    expect(seen).toEqual([...new Set(seen)])
+  })
+
+  it('asks for fonts with a picker, not a typed asset id', () => {
+    const fonts = CAROUSEL_TEMPLATE.paramFields.filter((f) => /font/i.test(f.key))
+    expect(fonts.length).toBeGreaterThan(0)
+    expect(fonts.every((f) => f.type === 'font')).toBe(true)
+  })
+
+  it('passes the registry contract with the new field types', () => {
+    expect(validateTemplate(CAROUSEL_TEMPLATE)).toEqual([])
   })
 })

@@ -2047,7 +2047,18 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
             n.className = 'pa-fill'
             n.src = src
             const radius = rec.el.box?.pill ? '9999px' : rec.el.box?.radiusPx ? rec.el.box.radiusPx * scale() + 'px' : ''
-            n.style.cssText = `position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none;border-radius:${radius};`
+            // How the picture sits in the slot is the author's call: the box is the
+            // element they placed and sized, and these decide what happens inside it.
+            // Cover stays the default so slots authored before this look unchanged.
+            const cfg = rec.el.fill
+            const fit = cfg?.fit ?? 'cover'
+            const fx = Math.max(0, Math.min(100, cfg?.focusX ?? 50))
+            const fy = Math.max(0, Math.min(100, cfg?.focusY ?? 50))
+            const zoom = Math.max(0.1, Math.min(5, cfg?.zoom ?? 1))
+            n.style.cssText =
+              `position:absolute;inset:0;width:100%;height:100%;object-fit:${fit};object-position:${fx}% ${fy}%;` +
+              `pointer-events:none;border-radius:${radius};` +
+              (zoom !== 1 ? `transform:scale(${zoom});transform-origin:${fx}% ${fy}%;` : '')
             if (isVideo) {
               n.autoplay = true
               n.loop = true

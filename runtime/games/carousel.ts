@@ -121,6 +121,7 @@ export function createCarousel(): GameModule {
   let labelWeight = 500
   let labelActiveWeight = 800
   let labelFont = ''
+  let labelActiveFont = ''
   let labelImgH = 40 // label picture height in design px (side slots)
   let labelImgCenterScale = 1.25
   let labelDX = 0 // label offset in EVERY slot, design px
@@ -258,6 +259,12 @@ export function createCarousel(): GameModule {
       } else {
         // Typed labels re-set font-size instead of scaling, so they stay crisp.
         it.label.style.transform = `translate(-50%,-50%) translate(${lx}px,${ly}px)`
+        if (labelActiveFont) {
+          // A font FAMILY cannot be interpolated, so it swaps at the halfway point — by
+          // which time the label is visibly on its way in or out, where a swap reads as
+          // intended rather than as a glitch.
+          it.label.style.fontFamily = (t > 0.5 ? labelActiveFont : labelFont) || '-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif'
+        }
         it.label.style.fontSize = lerp(labelSize, labelActiveSize, t) * s + 'px'
         it.label.style.fontWeight = String(Math.round(lerp(labelWeight, labelActiveWeight, t)))
         it.label.style.color = mix(labelColor, labelActiveColor, t)
@@ -413,6 +420,8 @@ export function createCarousel(): GameModule {
       labelWeight = clamp(num(params.labelWeight, 500), 100, 900)
       labelActiveWeight = clamp(num(params.labelActiveWeight, 800), 100, 900)
       labelFont = cssFontFamily(str(params.labelFontFamily, ''))
+      // Blank means the selected label keeps the same face as the rest.
+      labelActiveFont = cssFontFamily(str(params.labelActiveFontFamily, ''))
       labelImgH = clamp(num(params.labelImgHeightPx, 40), 4, 600)
       labelImgCenterScale = clamp(num(params.labelImgCenterScale, 1.25), 0.2, 4)
       labelDX = clamp(num(params.labelOffsetX, 0), -2000, 2000)
@@ -529,43 +538,39 @@ export const CAROUSEL_TEMPLATE: GameTemplate = {
   id: 'carousel',
   label: 'Carousel (swipe to choose)',
   paramFields: [
-    { key: 'count', label: 'Choices', type: 'number', min: 2, max: 12, step: 1 },
-    { key: 'labels', label: 'Labels under each choice (comma-separated)', type: 'text', showIf: typedLabels },
-    { key: 'linkGroup', label: 'Link name — put this in a Fill slot to mirror the choice', type: 'text' },
-    { key: 'liveUpdate', label: 'Update the linked element while swiping', type: 'boolean' },
-    { key: 'changesToWin', label: 'Changes before it counts as won (0 = never, the CTA ends it)', type: 'number', min: 0, max: 12, step: 1 },
-    { key: 'loop', label: 'Loop around forever', type: 'boolean' },
-    { key: 'startIndex', label: 'Starting choice (0-based, -1 = middle)', type: 'number', min: -1, max: 11, step: 1 },
-    // --- every slot ---
-    { key: 'itemWidthPx', label: 'Choice width (design px)', type: 'number', min: 4, max: 4000, step: 2 },
-    { key: 'itemHeightPx', label: 'Choice height (design px)', type: 'number', min: 4, max: 4000, step: 2 },
-    { key: 'gapPx', label: 'Gap between choices (design px)', type: 'number', min: 0, max: 4000, step: 2 },
-    { key: 'rowOffsetY', label: 'Move the whole row up / down (design px)', type: 'number', min: -4000, max: 4000, step: 2 },
-    { key: 'labelGapPx', label: 'Gap under the choice, before the label (design px)', type: 'number', min: 0, max: 2000, step: 2, showIf: labelsOn },
-    { key: 'sideScale', label: 'Side choices size (×)', type: 'number', min: 0.2, max: 2, step: 0.05 },
-    { key: 'sideOpacityPct', label: 'Side choices opacity (%)', type: 'number', min: 0, max: 100, step: 5 },
-    { key: 'tiltDeg', label: '3D turn per step (deg, 0 = flat)', type: 'number', min: 0, max: 70, step: 1 },
-    // --- the centre slot only ---
-    { key: 'centerScale', label: 'CENTRE choice size (× — this is the whole selection cue)', type: 'number', min: 0.2, max: 3, step: 0.05 },
-    { key: 'centerOffsetX', label: 'CENTRE choice nudge X (design px)', type: 'number', min: -2000, max: 2000, step: 1 },
-    { key: 'centerOffsetY', label: 'CENTRE choice nudge Y (design px, − is up)', type: 'number', min: -2000, max: 2000, step: 1 },
-    // --- labels, in every slot ---
-    { key: 'showLabels', label: 'Show the labels', type: 'boolean' },
-    { key: 'labelOffsetX', label: 'Label nudge X, every slot (design px)', type: 'number', min: -2000, max: 2000, step: 1, showIf: labelsOn },
-    { key: 'labelOffsetY', label: 'Label nudge Y, every slot (design px, − is up)', type: 'number', min: -2000, max: 2000, step: 1, showIf: labelsOn },
-    { key: 'labelCenterOffsetX', label: 'CENTRE label nudge X (design px)', type: 'number', min: -2000, max: 2000, step: 1, showIf: labelsOn },
-    { key: 'labelCenterOffsetY', label: 'CENTRE label nudge Y (design px, − is up)', type: 'number', min: -2000, max: 2000, step: 1, showIf: labelsOn },
-    // --- picture labels ---
-    { key: 'labelImgHeightPx', label: 'Label image height (design px)', type: 'number', min: 4, max: 600, step: 1, showIf: pictureLabels },
-    { key: 'labelImgCenterScale', label: 'CENTRE label image size (×)', type: 'number', min: 0.2, max: 4, step: 0.05, showIf: pictureLabels },
-    // --- typed labels ---
-    { key: 'labelFontFamily', label: 'Label font (family or uploaded font id)', type: 'text', showIf: typedLabels },
-    { key: 'labelSizePx', label: 'Label size (design px)', type: 'number', min: 4, max: 300, step: 1, showIf: typedLabels },
-    { key: 'labelActiveSizePx', label: 'CENTRE label size (design px)', type: 'number', min: 4, max: 300, step: 1, showIf: typedLabels },
-    { key: 'labelWeight', label: 'Label weight', type: 'number', min: 100, max: 900, step: 100, showIf: typedLabels },
-    { key: 'labelActiveWeight', label: 'CENTRE label weight', type: 'number', min: 100, max: 900, step: 100, showIf: typedLabels },
-    { key: 'labelColor', label: 'Label colour', type: 'color', showIf: typedLabels },
-    { key: 'labelActiveColor', label: 'CENTRE label colour', type: 'color', showIf: typedLabels },
+    { key: 'count', group: 'Choices', label: 'Choices', type: 'number', min: 2, max: 12, step: 1 },
+    { key: 'labels', group: 'Choices', label: 'Labels under each choice (comma-separated)', type: 'text', showIf: typedLabels },
+    { key: 'changesToWin', group: 'Choices', label: 'Changes before it counts as won (0 = never, the CTA ends it)', type: 'number', min: 0, max: 12, step: 1 },
+    { key: 'loop', group: 'Choices', label: 'Loop around forever', type: 'boolean' },
+    { key: 'startIndex', group: 'Choices', label: 'Starting choice (0-based, -1 = middle)', type: 'number', min: -1, max: 11, step: 1 },
+    { key: 'itemWidthPx', group: 'Size & spacing', label: 'Choice width (design px)', type: 'number', min: 4, max: 4000, step: 2 },
+    { key: 'itemHeightPx', group: 'Size & spacing', label: 'Choice height (design px)', type: 'number', min: 4, max: 4000, step: 2 },
+    { key: 'gapPx', group: 'Size & spacing', label: 'Gap between choices (design px)', type: 'number', min: 0, max: 4000, step: 2 },
+    { key: 'rowOffsetY', group: 'Size & spacing', label: 'Move the whole row up / down (design px)', type: 'number', min: -4000, max: 4000, step: 2 },
+    { key: 'labelGapPx', group: 'Size & spacing', label: 'Gap under the choice, before the label (design px)', type: 'number', min: 0, max: 2000, step: 2, showIf: labelsOn },
+    { key: 'sideScale', group: 'Side choices', label: 'Side choices size (×)', type: 'number', min: 0.2, max: 2, step: 0.05 },
+    { key: 'sideOpacityPct', group: 'Side choices', label: 'Side choices opacity (%)', type: 'number', min: 0, max: 100, step: 5 },
+    { key: 'tiltDeg', group: 'Side choices', label: '3D turn per step (deg, 0 = flat)', type: 'number', min: 0, max: 70, step: 1 },
+    { key: 'centerScale', group: 'Centre (selected)', label: 'CENTRE choice size (× — this is the whole selection cue)', type: 'number', min: 0.2, max: 3, step: 0.05 },
+    { key: 'centerOffsetX', group: 'Centre (selected)', label: 'CENTRE choice nudge X (design px)', type: 'number', min: -2000, max: 2000, step: 1 },
+    { key: 'centerOffsetY', group: 'Centre (selected)', label: 'CENTRE choice nudge Y (design px, − is up)', type: 'number', min: -2000, max: 2000, step: 1 },
+    { key: 'showLabels', group: 'Labels', label: 'Show the labels', type: 'boolean' },
+    { key: 'labelOffsetX', group: 'Labels', label: 'Label nudge X, every slot (design px)', type: 'number', min: -2000, max: 2000, step: 1, showIf: labelsOn },
+    { key: 'labelOffsetY', group: 'Labels', label: 'Label nudge Y, every slot (design px, − is up)', type: 'number', min: -2000, max: 2000, step: 1, showIf: labelsOn },
+    { key: 'labelCenterOffsetX', group: 'Labels', label: 'CENTRE label nudge X (design px)', type: 'number', min: -2000, max: 2000, step: 1, showIf: labelsOn },
+    { key: 'labelCenterOffsetY', group: 'Labels', label: 'CENTRE label nudge Y (design px, − is up)', type: 'number', min: -2000, max: 2000, step: 1, showIf: labelsOn },
+    { key: 'labelFontFamily', group: 'Label text', label: 'Label font', type: 'font', showIf: typedLabels },
+    { key: 'labelSizePx', group: 'Label text', label: 'Label size (design px)', type: 'number', min: 4, max: 300, step: 1, showIf: typedLabels },
+    { key: 'labelWeight', group: 'Label text', label: 'Label weight', type: 'number', min: 100, max: 900, step: 100, showIf: typedLabels },
+    { key: 'labelColor', group: 'Label text', label: 'Label colour', type: 'color', showIf: typedLabels },
+    { key: 'labelActiveFontFamily', group: 'Label text', label: 'CENTRE label font (blank = the same one)', type: 'font', showIf: typedLabels },
+    { key: 'labelActiveSizePx', group: 'Label text', label: 'CENTRE label size (design px)', type: 'number', min: 4, max: 300, step: 1, showIf: typedLabels },
+    { key: 'labelActiveWeight', group: 'Label text', label: 'CENTRE label weight', type: 'number', min: 100, max: 900, step: 100, showIf: typedLabels },
+    { key: 'labelActiveColor', group: 'Label text', label: 'CENTRE label colour', type: 'color', showIf: typedLabels },
+    { key: 'labelImgHeightPx', group: 'Label images', label: 'Label image height (design px)', type: 'number', min: 4, max: 600, step: 1, showIf: pictureLabels },
+    { key: 'labelImgCenterScale', group: 'Label images', label: 'CENTRE label image size (×)', type: 'number', min: 0.2, max: 4, step: 0.05, showIf: pictureLabels },
+    { key: 'linkGroup', group: 'Linked image', label: 'Link name — put this in a Fill slot to mirror the choice', type: 'text' },
+    { key: 'liveUpdate', group: 'Linked image', label: 'Update the linked element while swiping', type: 'boolean' },
   ],
   assetSlots: [
     { key: 'images', label: 'Choice image', list: true, countParam: 'count' },
@@ -599,6 +604,7 @@ export const CAROUSEL_TEMPLATE: GameTemplate = {
     labelImgHeightPx: 40,
     labelImgCenterScale: 1.25,
     labelFontFamily: '',
+    labelActiveFontFamily: '',
     labelSizePx: 26,
     labelActiveSizePx: 34,
     labelWeight: 500,

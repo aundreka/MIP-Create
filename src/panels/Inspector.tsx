@@ -47,6 +47,7 @@ import { RIPPLE_DEFAULT_COLOR, RIPPLE_DEFAULT_OPACITY, RIPPLE_HAND_REF_W, RIPPLE
 import { GAME_TEMPLATES } from '../../runtime/games/registry'
 import { splitList } from '../../runtime/games/holdgauge'
 import type { ParamField } from '../../runtime/games/types'
+import type { AssetMap } from '../../runtime/types'
 import { importFont } from '../bridge'
 import {
   activeSceneDef,
@@ -1358,6 +1359,46 @@ function BrushControls(props: {
 // as many as the author wants (name, price, blurb — each placed and animated on its
 // own), and a shared one at the bottom comes up for whichever option is held. Each
 // row ends with an 'Add' row that attaches one more.
+/** Pick an uploaded font, or upload one right here. The asset id doubles as the CSS
+ * family (see bridge.importFont), which is what gets stored — the same picker text
+ * elements use, so a template never has to ask an author to type an id. */
+function FontField({ label, value, assets, onChange }: { label: string; value: string; assets: AssetMap; onChange: (v: string) => void }): JSX.Element {
+  const fontAssets = Object.entries(assets).filter(([, a]) => a.kind === 'font')
+  // A family typed in before this picker existed ("Poppins, sans-serif") is kept as an
+  // option of its own rather than silently dropped.
+  const custom = value && !assets[value] ? value : null
+  const upload = async (): Promise<void> => {
+    const f = await importFont()
+    if (!f) return
+    addAsset(f.id, { src: f.src, w: 0, h: 0, kind: 'font' })
+    onChange(f.id)
+  }
+  return (
+    <Row label={label}>
+      <div style={{ display: 'flex', gap: 4 }}>
+        <Select
+          value={value}
+          onChange={onChange}
+          options={[
+            { value: '', label: 'Default' },
+            ...fontAssets.map(([fid]) => ({ value: fid, label: fid.replace(/_/g, ' ') })),
+            ...(custom ? [{ value: custom, label: `${custom} (system)` }] : []),
+          ]}
+        />
+        <button
+          className="icon-btn"
+          title="Upload font (.ttf .otf .woff .woff2)"
+          onClick={() => {
+            void upload()
+          }}
+        >
+          <Icon icon={Upload} size={13} />
+        </button>
+      </div>
+    </Row>
+  )
+}
+
 interface ComboSetupProps {
   params: Record<string, unknown>
   setParam: (k: string, v: unknown) => void
@@ -3063,7 +3104,9 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
         // by default, and ticking it drops the button under the win/lose card.
         <>
           <Toggle label="Below overlays (dimmed, not hidden)" checked={!!el.belowOverlay} onChange={(v) => patchElement(id, { belowOverlay: v || undefined })} />
-          {el.belowOverlay && <div className="hint pad">The win/lose card now covers the CTA — it shows through the dim instead of on top of it, and taps land on the card while it is up.</div>}
+          {el.belowOverlay && (
+            <div className="hint pad">The win/lose card now covers the CTA — it shows through the dim instead of on top of it, and taps land on the card while it is up.</div>
+          )}
         </>
       ) : (
         <Toggle label="Above overlays" checked={!!el.overlayImmune} onChange={(v) => patchElement(id, { overlayImmune: v || undefined })} />
@@ -3305,6 +3348,8 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               return <NumField key={f.key} label={f.label} value={typeof v === 'number' ? v : 0} step={f.step ?? 1} min={f.min} max={f.max} onChange={(n) => setParam(f.key, n)} />
             if (f.type === 'color')
               return <ColorField key={f.key} label={f.label} value={typeof v === 'string' && v ? v : undefined} allowNone onChange={(c) => setParam(f.key, c ?? '')} />
+            if (f.type === 'font')
+              return <FontField key={f.key} label={f.label} value={typeof v === 'string' ? v : ''} assets={state.assets} onChange={(nv) => setParam(f.key, nv)} />
             if (f.type === 'boolean') return <Toggle key={f.key} label={f.label} checked={!!v} onChange={(b) => setParam(f.key, b)} />
             if (f.type === 'select')
               return (
@@ -3345,7 +3390,20 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                           !(tpl.id === 'combo' && (f.key === 'questions' || f.key === 'options')) &&
                           (f.showIf?.(params) ?? true),
                       )
-                      .map(renderField)
+                      // A template can title its sections (ParamField.group): emit a
+                      // heading whenever the group changes, so thirty knobs read as a
+                      // few blocks. Ungrouped fields render exactly as they always did.
+                      .reduce<JSX.Element[]>((out, f, i, list) => {
+                        if (f.group && f.group !== list[i - 1]?.group)
+                          out.push(
+                            <div className="group-title2" key={'grp-' + f.group}>
+                              {f.group}
+                            </div>,
+                          )
+                        const node = renderField(f)
+                        if (node) out.push(node)
+                        return out
+                      }, [])
                   )}
                   {tpl.id === 'scratch' && (
                     <ColorField
@@ -3437,13 +3495,13 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                         a side choice to bring it in.
                       </div>
                       <div className="hint pad">
-                        Every size, gap and nudge is in <b>design px</b> — the number you type is the size you get, and resizing the game box no longer resizes the choices with
-                        it. Slot pitch is simply <b>choice width + gap</b>, so a gap of 0 butts them together. The canvas redraws as you type.
+                        Every size, gap and nudge is in <b>design px</b> — the number you type is the size you get, and resizing the game box no longer resizes the choices with it.
+                        Slot pitch is simply <b>choice width + gap</b>, so a gap of 0 butts them together. The canvas redraws as you type.
                       </div>
                       <div className="hint pad">
                         To make a <b>separate element</b> follow the choice: select it, open <b>Select &amp; generate</b>, switch on <b>Fill slot</b> and type the same{' '}
-                        <b>Link name</b> (<code>{String(params.linkGroup ?? 'carousel')}</code>). It swaps to that choice&apos;s <b>Linked element image</b> — or, if you leave
-                        that empty, to the choice image itself.
+                        <b>Link name</b> (<code>{String(params.linkGroup ?? 'carousel')}</code>). It swaps to that choice&apos;s <b>Linked element image</b> — or, if you leave that
+                        empty, to the choice image itself.
                       </div>
                       <div className="hint pad">
                         Each choice can carry its own <b>Label image</b> instead of typed text. Labels belong to their choice, not to a slot, so a label always travels with the
@@ -3451,8 +3509,8 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                       </div>
                       <div className="hint pad">
                         Fields marked <b>CENTRE</b> apply only to the selected slot — size it and move it wherever you want, for the choice image and the label separately, and
-                        every other slot keeps the settings above. The carousel eases between the two as you swipe. Nudges are in design px; keep the game box tall enough for a
-                        big lift, since it clips at its own edges.
+                        every other slot keeps the settings above. The carousel eases between the two as you swipe. Nudges are in design px; keep the game box tall enough for a big
+                        lift, since it clips at its own edges.
                       </div>
                     </>
                   )}
@@ -3877,6 +3935,28 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                     onChange={(e) => patchElement(id, { fill: { ...el.fill!, group: e.target.value || 'a' } })}
                   />
                 </Row>
+                <Row label="Fit">
+                  <Select
+                    value={el.fill.fit ?? 'cover'}
+                    onChange={(v) => patchElement(id, { fill: { ...el.fill!, fit: v as 'cover' | 'contain' | 'fill' } })}
+                    options={[
+                      { value: 'cover', label: 'Cover (fill the box, may crop)' },
+                      { value: 'contain', label: 'Contain (show all of it)' },
+                      { value: 'fill', label: 'Stretch (exact box, may distort)' },
+                    ]}
+                  />
+                </Row>
+                {(el.fill.fit ?? 'cover') !== 'fill' && (
+                  <div className="grid2">
+                    <NumField label="Focus X %" value={el.fill.focusX ?? 50} step={5} min={0} max={100} onChange={(n) => patchElement(id, { fill: { ...el.fill!, focusX: n } })} />
+                    <NumField label="Focus Y %" value={el.fill.focusY ?? 50} step={5} min={0} max={100} onChange={(n) => patchElement(id, { fill: { ...el.fill!, focusY: n } })} />
+                  </div>
+                )}
+                <NumField label="Zoom (1 = none)" value={el.fill.zoom ?? 1} step={0.05} min={0.1} max={5} onChange={(n) => patchElement(id, { fill: { ...el.fill!, zoom: n } })} />
+                <div className="hint pad">
+                  The <b>box</b> is this element — drag and resize it on the canvas like any other. These decide what the picture does inside it: <b>Cover</b> crops to fill,{' '}
+                  <b>Contain</b> shows all of it. <b>Focus</b> picks which part survives a crop (50/50 = centre; drop Y toward 0 to keep a face).
+                </div>
                 <NumField
                   label="Slot # (0=auto)"
                   value={(el.fill.index ?? -1) + 1}

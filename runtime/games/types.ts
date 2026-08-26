@@ -64,7 +64,15 @@ export interface GameModule {
 export interface ParamField {
   key: string
   label: string
-  type: 'number' | 'color' | 'select' | 'text' | 'boolean'
+  /** 'font' renders the same picker text elements use — every uploaded font in the
+   * project, plus an upload button — and stores the chosen asset id (which doubles as
+   * the CSS family). A plain 'text' field would make the author type that id. */
+  type: 'number' | 'color' | 'select' | 'text' | 'boolean' | 'font'
+  /** Editor-only: the heading this field sits under. Consecutive fields sharing a
+   * group are rendered as one titled block, so a template with thirty knobs reads as
+   * a handful of sections instead of one long column. Ungrouped fields render exactly
+   * as before, so this costs existing templates nothing. */
+  group?: string
   min?: number
   max?: number
   step?: number
