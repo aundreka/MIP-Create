@@ -514,6 +514,7 @@ function ElementSound(props: { el: SceneElement }): JSX.Element {
   // labels — "When the dial reaches NEUTRAL" beats "stage 2".
   const isHoldGauge = el.game?.templateId === 'holdgauge'
   const hasThoughtWhacker = scene.elements.some((candidate) => candidate.game?.templateId === 'thoughtwhack')
+  const isCarousel = el.game?.templateId === 'carousel'
   const isCombo = el.game?.templateId === 'combo'
   const hasCombo = scene.elements.some((candidate) => candidate.game?.templateId === 'combo')
   const gaugeStages = ((): { value: string; label: string }[] => {
@@ -570,6 +571,15 @@ function ElementSound(props: { el: SceneElement }): JSX.Element {
         ]
       : []),
     ...(isCombo ? [{ value: 'onReveal', label: 'When the game is won' }] : []),
+    ...(isCarousel
+      ? [
+          { value: 'swipeStart', label: 'When a swipe starts' },
+          { value: 'swipeTick', label: 'As each choice passes the centre' },
+          { value: 'swipeSettle', label: 'When it lands on a new choice' },
+          { value: 'choiceConfirm', label: 'When the selected choice is tapped' },
+          { value: 'onReveal', label: 'When the game is won' },
+        ]
+      : []),
     ...gaugeStages,
     ...(isScratching ? [{ value: 'whileScratching', label: 'While scratching (loop)' }] : []),
     ...(isScratching || el.reveal ? [{ value: 'onReveal', label: 'When revealed / win' }] : []),

@@ -175,6 +175,9 @@ export function createCarousel(): GameModule {
   // pointer capture, which RETARGETS the later events to the root itself — by pointerup
   // the original target is long gone, and a tap would find nothing under it.
   let downHit: Item | null = null
+  // A press is not yet a swipe: the start sound waits until the finger has actually
+  // travelled past the tap threshold, so confirming a choice doesn't fire it too.
+  let swipeAnnounced = false
 
   let published = -1
   let settledIdx = 0 // what is at the centre right now (drives the pass-by tick)
@@ -328,7 +331,7 @@ export function createCarousel(): GameModule {
   const passCentre = (): void => {
     const i = idxOf(pos)
     if (i === settledIdx && published === i) return
-    if (i !== settledIdx) ctx.sfx.play('tap')
+    if (i !== settledIdx) ctx.sfx.play('swipeTick')
     settledIdx = i
     if (live) publish(i)
   }
@@ -338,6 +341,7 @@ export function createCarousel(): GameModule {
     publish(i)
     if (i === lastSettled) return // released without moving on — not a change
     lastSettled = i
+    ctx.sfx.play('swipeSettle')
     if (done || changesToWin <= 0) return
     changes++
     if (changes < changesToWin) return
@@ -355,7 +359,7 @@ export function createCarousel(): GameModule {
     pulseT = 0
     pulseK = 1
     render() // start from the resting size, so the bump has no step at its foot
-    ctx.sfx.play('correct')
+    ctx.sfx.play('choiceConfirm')
     run()
     // Let the bump play out before the scene takes over: a win that cuts away
     // mid-swell never reads as a confirmation of what was tapped.
@@ -428,6 +432,7 @@ export function createCarousel(): GameModule {
     dragStartX = e.clientX
     dragStartPos = pos
     downHit = items.find((it) => it.wrap.contains(e.target as Node)) ?? null
+    swipeAnnounced = false
     vel = 0
     prevSampleX = sampleX = e.clientX
     prevSampleT = sampleT = e.timeStamp
@@ -440,6 +445,10 @@ export function createCarousel(): GameModule {
     e.preventDefault()
     const dx = e.clientX - dragStartX
     moved = Math.max(moved, Math.abs(dx))
+    if (!swipeAnnounced && moved >= 6) {
+      swipeAnnounced = true
+      ctx.sfx.play('swipeStart')
+    }
     const raw = dragStartPos - dx / step
     // Off the ends (no loop): let it stretch, at a third of the finger's travel.
     if (!loop && raw < 0) pos = raw * 0.35

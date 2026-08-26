@@ -20,6 +20,9 @@ interface Rig {
   labels: HTMLDivElement[]
   played: string[]
   completed: () => boolean
+  /** Did the module raise the win signal the "on game won" sound hangs off? */
+  won: () => boolean
+  winBeforeComplete: () => boolean
   /** A deliberate drag from x0 to x1 that eases to a stop before the lift. */
   swipe(x0: number, x1: number, ms?: number): void
   /** A fast flick released while the finger is still travelling. */
@@ -60,7 +63,17 @@ function makeRig(params: Record<string, unknown> = {}, opts: { w?: number } = {}
   mod.mount(ctx, params)
   mod.start()
   let done = false
-  mod.onComplete(() => (done = true))
+  // The stage plays the "When the game is won" binding off onWin, and times the scene's
+  // win phase off onComplete — so the order between them is what that binding depends
+  // on. onComplete holds ONE callback, so both live in the same registration.
+  let wonAt = -1
+  let doneAt = -1
+  let seq = 0
+  mod.onWin?.(() => (wonAt = ++seq))
+  mod.onComplete(() => {
+    done = true
+    doneAt = ++seq
+  })
   const wraps = [...root.children] as HTMLDivElement[]
   const arts = wraps.map((w) => w.firstElementChild as HTMLDivElement)
   const labels = wraps.map((w) => w.querySelector('.pa-carousel-label') as HTMLDivElement)
@@ -91,6 +104,8 @@ function makeRig(params: Record<string, unknown> = {}, opts: { w?: number } = {}
     labels,
     played,
     completed: () => done,
+    won: () => wonAt > 0,
+    winBeforeComplete: () => wonAt > 0 && doneAt > 0 && wonAt < doneAt,
     swipe(x0, x1, ms = 240) {
       send('pointerdown', x0)
       const steps = 8
@@ -633,6 +648,72 @@ describe('carousel', () => {
     r.tap(3)
     r.settle()
     expect(r.scaleOf(2)).toBeCloseTo(wonAt, 3) // the row did not move on
+  })
+
+  it('fires a swipe-start sound once the finger really is swiping', () => {
+    useFrames()
+    const r = makeRig({ count: 5, itemWidthPx: 80, gapPx: 20, startIndex: 2 })
+    r.swipe(300, 300 - 100)
+    r.settle()
+    expect(r.played.filter((e) => e === 'swipeStart')).toHaveLength(1)
+  })
+
+  it('does not call a tap a swipe', () => {
+    useFrames()
+    const r = makeRig({ count: 5, changesToWin: 0, itemWidthPx: 80, startIndex: 2 })
+    r.tap(2)
+    r.settle()
+    expect(r.played).not.toContain('swipeStart')
+  })
+
+  it('ticks as each choice passes the centre', () => {
+    useFrames()
+    const r = makeRig({ count: 8, itemWidthPx: 80, gapPx: 20, changesToWin: 0, loop: false, startIndex: 0 })
+    r.flick(360, 360 - 100) // carries past more than one choice
+    r.settle()
+    // One tick per choice crossed, not one per swipe.
+    const ticks = r.played.filter((e) => e === 'swipeTick').length
+    expect(ticks).toBeGreaterThan(1)
+  })
+
+  it('sounds when it lands on a new choice, but not on a release that went nowhere', () => {
+    useFrames()
+    const r = makeRig({ count: 5, itemWidthPx: 80, gapPx: 20, changesToWin: 0, startIndex: 2 })
+    r.swipe(300, 300 - 100)
+    r.settle()
+    expect(r.played.filter((e) => e === 'swipeSettle')).toHaveLength(1)
+    r.swipe(300, 300) // pressed and released without moving on
+    r.settle()
+    expect(r.played.filter((e) => e === 'swipeSettle')).toHaveLength(1)
+  })
+
+  it('sounds its own note when the selected choice is confirmed', () => {
+    useFrames()
+    const r = makeRig({ count: 5, changesToWin: 0, itemWidthPx: 80, startIndex: 2 })
+    r.tap(2)
+    r.settle()
+    expect(r.played).toContain('choiceConfirm')
+  })
+
+  it('raises the win signal the “on game won” sound hangs off', () => {
+    useFrames()
+    const r = makeRig({ count: 5, changesToWin: 0, itemWidthPx: 80, startIndex: 2 })
+    expect(r.won()).toBe(false)
+    r.tap(2)
+    r.settle()
+    expect(r.won()).toBe(true)
+    // Before completion, which is what lets the stage line the sound up with the
+    // scene's own win phase rather than after it.
+    expect(r.winBeforeComplete()).toBe(true)
+  })
+
+  it('raises it for a win reached by swiping too', () => {
+    useFrames()
+    const r = makeRig({ count: 5, changesToWin: 1, tapCentreWins: false, itemWidthPx: 80, gapPx: 20, startIndex: 2 })
+    r.swipe(300, 300 - 100)
+    r.settle()
+    expect(r.won()).toBe(true)
+    expect(r.winBeforeComplete()).toBe(true)
   })
 
   it('takes the short way round the ring', () => {

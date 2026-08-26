@@ -6,6 +6,7 @@
 // group shows that choice's linked art, and it keeps up as the choice changes.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { on } from './emitter'
 import { buildScene } from './stage'
 import { computeMetrics, setDesign } from './responsive'
 import { clearPicks, setPicks } from './selection'
@@ -180,6 +181,35 @@ describe('an element outside the carousel follows the chosen item', () => {
     expect(fillSrc()).toBe('model-red.png')
     expect(n.style.objectFit).toBe('contain')
     expect(n.style.objectPosition).toBe('50% 20%')
+  })
+
+  it('plays the “when the game is won” binding through the stage', () => {
+    // The carousel raises onWin; the stage turns that into the element's own onReveal
+    // binding, timed to the scene's win phase. This is the whole path, end to end.
+    const heard: string[] = []
+    const off = on('sfx-asset', (id: unknown) => heard.push(String(id)))
+    const game = carouselEl({ changesToWin: 0 }) as SceneElement & { sfx?: { event: string; assetId: string }[] }
+    game.sfx = [{ event: 'onReveal', assetId: 'win_sting' }]
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    const stage = buildScene(scene([game, previewEl()]), ASSETS, { mount })
+    stage.layoutAll()
+    stage.startGames(true)
+    const slot = mount.querySelector<HTMLElement>('.pa-game')!
+    // Tap the selected choice: press on it, release on the root (pointer capture
+    // retargets, exactly as a browser does).
+    const wrap = slot.firstElementChild as HTMLElement
+    const send = (type: string, onto: HTMLElement): void => {
+      const e = new Event(type, { bubbles: true }) as PointerEvent
+      Object.defineProperties(e, { pointerId: { value: 1 }, clientX: { value: 10 }, clientY: { value: 10 }, timeStamp: { value: 0 } })
+      onto.dispatchEvent(e)
+    }
+    send('pointerdown', wrap)
+    send('pointerup', slot)
+    vi.advanceTimersByTime(3000) // the bump, then the stage's win-phase delay
+    expect(heard).toContain('win_sting')
+    off()
+    stage.destroy()
   })
 
   it('stops mirroring once the scene is torn down', () => {
