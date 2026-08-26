@@ -16,6 +16,7 @@ interface Rig {
   root: HTMLDivElement
   wraps: HTMLDivElement[]
   arts: HTMLDivElement[]
+  labels: HTMLDivElement[]
   played: string[]
   completed: () => boolean
   /** A deliberate drag from x0 to x1 that eases to a stop before the lift. */
@@ -24,8 +25,17 @@ interface Rig {
   flick(x0: number, x1: number): void
   /** Run the settle spring to rest. */
   settle(): void
+  /** Advance exactly one animation frame. */
+  frame(): void
+  /** Press and drag to x1, leaving the finger down, with a frame rendered. */
+  hold(x0: number, x1: number): void
+  /** Lift the finger that `hold` left down. */
+  lift(x: number): void
   scaleOf(i: number): number
   xOf(i: number): number
+  artShift(i: number): { x: number; y: number }
+  labelShift(i: number): { x: number; y: number }
+  labelScale(i: number): number
 }
 
 let now = 0
@@ -50,6 +60,7 @@ function makeRig(params: Record<string, unknown> = {}): Rig {
   mod.onComplete(() => (done = true))
   const wraps = [...root.children] as HTMLDivElement[]
   const arts = wraps.map((w) => w.firstElementChild as HTMLDivElement)
+  const labels = wraps.map((w) => w.querySelector('.pa-carousel-label') as HTMLDivElement)
   const send = (type: string, x: number): void => {
     const e = new Event(type, { bubbles: true }) as PointerEvent
     Object.defineProperties(e, {
@@ -74,6 +85,7 @@ function makeRig(params: Record<string, unknown> = {}): Rig {
     root,
     wraps,
     arts,
+    labels,
     played,
     completed: () => done,
     swipe(x0, x1, ms = 240) {
@@ -98,8 +110,34 @@ function makeRig(params: Record<string, unknown> = {}): Rig {
       send('pointerup', x1)
     },
     settle,
+    frame() {
+      now += 16
+      vi.advanceTimersByTime(16)
+    },
+    hold(x0, x1) {
+      send('pointerdown', x0)
+      for (let i = 1; i <= 4; i++) {
+        now += 16
+        send('pointermove', x0 + ((x1 - x0) * i) / 4)
+      }
+      now += 80 // settle the finger so a later lift is a drag, not a flick
+      send('pointermove', x1)
+      vi.advanceTimersByTime(16) // let the drag frame render
+    },
+    lift(x) {
+      send('pointerup', x)
+    },
     scaleOf: (i) => num(arts[i].style.transform, /scale\(([-\d.]+)\)/),
     xOf: (i) => num(wraps[i].style.transform, /translate3d\(([-\d.]+)px/),
+    artShift: (i) => {
+      const m = /translate3d\(([-\d.]+)px,([-\d.]+)px/.exec(arts[i].style.transform)
+      return { x: Number(m?.[1] ?? NaN), y: Number(m?.[2] ?? NaN) }
+    },
+    labelShift: (i) => {
+      const m = /translate\(-50%,-50%\) translate\(([-\d.]+)px,([-\d.]+)px\)/.exec(labels[i].style.transform)
+      return { x: Number(m?.[1] ?? NaN), y: Number(m?.[2] ?? NaN) }
+    },
+    labelScale: (i) => num(labels[i].style.transform, /scale\(([-\d.]+)\)/),
   }
 }
 
@@ -207,6 +245,99 @@ describe('carousel', () => {
       r.settle()
     }
     expect(r.completed()).toBe(false)
+  })
+
+  it('gives each option a label image that rides in its own wrap', () => {
+    useFrames()
+    const r = makeRig({ count: 3, labelImages: ['lbl0', 'lbl1', 'lbl2'], labelImgHeightPx: 40 })
+    // The label lives inside the SAME wrap as its art, which is what keeps the two
+    // together through every slot — not a separate row indexed by slot.
+    r.wraps.forEach((wrap, i) => {
+      const img = wrap.querySelector('img[src^="lbl"]') as HTMLImageElement
+      expect(img).toBeTruthy()
+      expect(img.getAttribute('src')).toBe('lbl' + i)
+      expect(wrap.contains(r.labels[i])).toBe(true)
+    })
+  })
+
+  it('keeps a label with its own option after the row moves', () => {
+    useFrames()
+    const r = makeRig({ count: 5, labelImages: ['a', 'b', 'c', 'd', 'e'], itemPct: 20, gapPct: 5 })
+    const srcAt = (i: number): string => (r.wraps[i].querySelector('img[src]:not([src^="sw"])') as HTMLImageElement).getAttribute('src')!
+    r.swipe(300, 300 - (W * 25) / 100)
+    r.settle()
+    // Option 3 is now centred; its label is still option 3's, not slot 3's.
+    expect(r.scaleOf(3)).toBeGreaterThan(1.4)
+    expect(srcAt(3)).toBe('d')
+    expect(srcAt(2)).toBe('c')
+  })
+
+  it('falls back to typed text for an option with no label image', () => {
+    useFrames()
+    const r = makeRig({ count: 3, labels: 'One, Two, Three', labelImages: ['a', '', 'c'] })
+    expect(r.wraps[1].querySelector('img[src="a"], img[src="c"]')).toBeNull()
+    expect(r.labels[1].textContent).toBe('Two')
+    expect(r.labels[0].querySelector('img')).toBeTruthy()
+  })
+
+  it('offsets the centre choice without touching the side ones', () => {
+    useFrames()
+    const r = makeRig({ count: 5, centerOffsetX: 12, centerOffsetY: -30, itemPct: 20, gapPct: 5 })
+    expect(r.artShift(2)).toEqual({ x: 12, y: -30 }) // centred
+    expect(r.artShift(1)).toEqual({ x: 0, y: 0 }) // side slots stay put
+    expect(r.artShift(3)).toEqual({ x: 0, y: 0 })
+  })
+
+  it('offsets and resizes the centre label independently of the art', () => {
+    useFrames()
+    const r = makeRig({
+      count: 5,
+      labelImages: ['a', 'b', 'c', 'd', 'e'],
+      labelOffsetY: 6,
+      labelCenterOffsetX: -8,
+      labelCenterOffsetY: 40,
+      labelImgCenterScale: 2,
+      centerOffsetY: -20,
+      itemPct: 20,
+      gapPct: 5,
+    })
+    expect(r.labelShift(2)).toEqual({ x: -8, y: 40 }) // centre state
+    expect(r.labelShift(1)).toEqual({ x: 0, y: 6 }) // base state, every side slot
+    expect(r.labelScale(2)).toBeCloseTo(2, 3)
+    expect(r.labelScale(1)).toBeCloseTo(1, 3)
+    // The art moved its own way — the two are independent.
+    expect(r.artShift(2).y).toBe(-20)
+  })
+
+  it('carries the centre state to whichever option arrives there', () => {
+    useFrames()
+    const r = makeRig({ count: 5, centerOffsetY: -24, labelCenterOffsetY: 18, labelImages: ['a', 'b', 'c', 'd', 'e'], itemPct: 20, gapPct: 5 })
+    r.swipe(300, 300 - (W * 25) / 100)
+    r.settle()
+    expect(r.artShift(3)).toEqual({ x: 0, y: -24 }) // now it is 3 that is lifted
+    expect(r.artShift(2)).toEqual({ x: 0, y: 0 }) // and 2 has returned to base
+    expect(r.labelShift(3).y).toBe(18)
+    expect(r.labelShift(2).y).toBe(0)
+  })
+
+  it('eases between the two states rather than snapping at the halfway point', () => {
+    useFrames()
+    const r = makeRig({ count: 5, centerOffsetY: -100, itemPct: 20, gapPct: 5 })
+    const step = (W * 25) / 100
+    // Hold the row half a step across. Neither option is centred, so BOTH should
+    // be showing a partial amount of the centre state — a snap at the midpoint
+    // would leave one at 0 and the other already at -100.
+    r.hold(300, 300 - step / 2)
+    for (const i of [2, 3]) {
+      expect(r.artShift(i).y).toBeLessThan(-1)
+      expect(r.artShift(i).y).toBeGreaterThan(-99)
+      expect(r.scaleOf(i)).toBeGreaterThan(1)
+      expect(r.scaleOf(i)).toBeLessThan(1.45)
+    }
+    r.lift(300 - step / 2)
+    r.settle()
+    expect(r.artShift(3).y).toBeCloseTo(-100, 5) // fully arrived
+    expect(r.artShift(2).y).toBeCloseTo(0, 5) // fully departed
   })
 
   it('takes the short way round the ring', () => {

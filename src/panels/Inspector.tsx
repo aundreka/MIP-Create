@@ -3441,6 +3441,15 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                         <b>Link name</b> (<code>{String(params.linkGroup ?? 'carousel')}</code>). It swaps to that choice&apos;s <b>Linked element image</b> — or, if you leave
                         that empty, to the choice image itself.
                       </div>
+                      <div className="hint pad">
+                        Each choice can carry its own <b>Label image</b> instead of typed text. Labels belong to their choice, not to a slot, so a label always travels with the
+                        picture it names. Label images are sized by <b>height</b>, so wordmarks of different lengths still read at one weight.
+                      </div>
+                      <div className="hint pad">
+                        Fields marked <b>CENTRE</b> apply only to the selected slot — size it and move it wherever you want, for the choice image and the label separately, and
+                        every other slot keeps the settings above. The carousel eases between the two as you swipe. Nudges are in design px; keep the game box tall enough for a
+                        big lift, since it clips at its own edges.
+                      </div>
                     </>
                   )}
                   {tpl.id === 'basket' && (

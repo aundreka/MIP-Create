@@ -13,6 +13,15 @@
 // clamped and each item's offset is taken modulo the count, so the row rotates
 // forever in either direction; with it off the ends rubber-band.
 //
+// TWO STATES, ONE EASING — every option owns its art and its label as ONE unit
+// (they share a `wrap` that the slot position moves), so a label never drifts
+// away from the choice it names, whichever slot that choice is sitting in. Each
+// piece is authored twice: a BASE size/offset it holds in every side slot, and a
+// CENTRE size/offset it reaches when selected. Both are driven by the same eased
+// `t` (0 at a side slot, 1 dead centre), so the centre choice can be bigger AND
+// somewhere else entirely — lifted, nudged, its label pushed clear — while every
+// other slot stays exactly as authored, and the trip between the two is smooth.
+//
 // LINKING — the settled choice is published into a selection group (selection.ts),
 // which is the same store the Inspector's "Fill slot" elements read. Give any
 // scene element `fill` with this game's group and it swaps its source to the
@@ -57,6 +66,7 @@ function mix(a: string, b: string, t: number): string {
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
 const smooth = (t: number): number => t * t * (3 - 2 * t)
+const lerp = (a: number, b: number, t: number): number => a + (b - a) * t
 
 /** Shortest signed distance across a ring of `n` slots, in (-n/2, n/2]. */
 export function wrapDelta(d: number, n: number): number {
@@ -75,6 +85,8 @@ interface Item {
   wrap: HTMLDivElement
   art: HTMLDivElement
   label: HTMLDivElement
+  /** Set when this option's label is a picture rather than typed text. */
+  labelImg: HTMLImageElement | null
   index: number
 }
 
@@ -93,6 +105,8 @@ export function createCarousel(): GameModule {
   let aspect = 1
   let centerScale = 1.45
   let sideScale = 1
+  let centerDX = 0 // centre-slot art offset, design px
+  let centerDY = 0
   let sideOpacity = 1
   let tiltDeg = 0
   let showLabels = true
@@ -103,6 +117,12 @@ export function createCarousel(): GameModule {
   let labelWeight = 500
   let labelActiveWeight = 800
   let labelFont = ''
+  let labelImgH = 40 // label picture height in design px (side slots)
+  let labelImgCenterScale = 1.25
+  let labelDX = 0 // label offset in EVERY slot, design px
+  let labelDY = 0
+  let labelCenterDX = 0 // label offset once the option is centred
+  let labelCenterDY = 0
 
   const items: Item[] = []
   let w = 300
@@ -110,9 +130,10 @@ export function createCarousel(): GameModule {
   let itemW = 66
   let itemH = 66
   let step = 84
-  let bandH = 96
   let gapY = 10
   let span = 4
+  let artCy = 48 // art centre, in wrap-local px
+  let labelCy = 100 // label centre, in wrap-local px
 
   // Motion state. `pos` is in item units; `target` is the item it is settling on.
   let pos = 0
@@ -146,6 +167,10 @@ export function createCarousel(): GameModule {
     const r = Math.round(p)
     return count > 0 ? ((r % count) + count) % count : 0
   }
+  /** A label's own height in this slot state — pictures share one height, typed
+   * labels are as tall as their type. */
+  const labelHeightOf = (it: Item, centred: boolean): number =>
+    it.labelImg ? labelImgH * sc() * (centred ? Math.max(1, labelImgCenterScale) : 1) : (centred ? Math.max(labelSize, labelActiveSize) : labelSize) * sc() * 1.35
 
   const publish = (i: number): void => {
     if (i === published) return
@@ -159,31 +184,46 @@ export function createCarousel(): GameModule {
     itemW = Math.max(16, (w * itemPct) / 100)
     itemH = Math.max(16, itemW / aspect)
     step = Math.max(itemW * 0.35, (w * (itemPct + gapPct)) / 100)
-    bandH = itemH * Math.max(1, centerScale)
     gapY = itemH * 0.14
     // Draw only what can actually reach the screen. When looping, an item's offset
     // flips sign at half the ring and it teleports to the other end — keeping the
     // drawn span inside the viewport means that flip always happens out of sight.
-    span = (w / 2 + (itemW * Math.max(1, centerScale)) / 2) / step + 0.02
-    const labelH = showLabels ? labelActiveSize * sc() * 1.35 : 0
-    const top = (h - (bandH + (showLabels ? gapY + labelH : 0))) / 2
-    const artTop = (bandH - itemH) / 2
+    // Centre offsets are excluded on purpose: they only apply to the centre item,
+    // which is nowhere near the wrap boundary.
+    span = (w / 2 + (itemW * Math.max(sideScale, centerScale)) / 2) / step + 0.02
+
+    // Reserve room for BOTH states of both pieces, then centre that whole envelope
+    // in the mount — so lifting or growing the centre choice doesn't shove the row
+    // off its own box. Measured from the art's un-offset centre at y = 0.
+    const s = sc()
+    const baseH = items.length ? Math.max(...items.map((it) => labelHeightOf(it, false))) : 0
+    const cenH = items.length ? Math.max(...items.map((it) => labelHeightOf(it, true))) : 0
+    labelCy = itemH / 2 + gapY + baseH / 2
+    let minY = Math.min((-itemH * sideScale) / 2, (-itemH * centerScale) / 2 + centerDY * s)
+    let maxY = Math.max((itemH * sideScale) / 2, (itemH * centerScale) / 2 + centerDY * s)
+    if (showLabels) {
+      minY = Math.min(minY, labelCy - baseH / 2 + labelDY * s, labelCy - cenH / 2 + labelCenterDY * s)
+      maxY = Math.max(maxY, labelCy + baseH / 2 + labelDY * s, labelCy + cenH / 2 + labelCenterDY * s)
+    }
+    artCy = -minY
+    const top = (h - (maxY - minY)) / 2
+
     for (const it of items) {
       it.wrap.style.width = itemW + 'px'
       it.wrap.style.top = top + 'px'
-      it.art.style.top = artTop + 'px'
+      it.art.style.top = artCy - itemH / 2 + 'px'
       it.art.style.height = itemH + 'px'
       it.art.style.fontSize = itemH * 0.3 + 'px'
       it.art.style.borderRadius = itemH * 0.5 + 'px'
-      it.label.style.top = bandH + gapY + 'px'
-      it.label.style.width = step * 1.9 + 'px'
-      it.label.style.marginLeft = -(step * 1.9 - itemW) / 2 + 'px'
+      it.label.style.top = artCy + labelCy + 'px'
+      if (it.labelImg) it.labelImg.style.height = labelImgH * s + 'px'
     }
     render()
   }
 
   const render = (): void => {
     const cx = w / 2 - itemW / 2
+    const s = sc()
     for (const it of items) {
       const d = loop ? wrapDelta(it.index - pos, count) : it.index - pos
       const ad = Math.abs(d)
@@ -192,17 +232,27 @@ export function createCarousel(): GameModule {
         continue
       }
       it.wrap.style.visibility = 'visible'
+      // t = 0 in a side slot, 1 dead centre. One easing drives every difference
+      // between the two authored states, so they can differ freely and still
+      // travel smoothly into each other.
       const t = smooth(clamp(1 - ad, 0, 1))
-      const s = sideScale + (centerScale - sideScale) * t
       it.wrap.style.transform = `translate3d(${cx + d * step}px,0,0)`
       it.wrap.style.zIndex = String(1000 - Math.round(ad * 100))
       it.wrap.style.opacity = String(sideOpacity + (1 - sideOpacity) * t)
       const z = tiltDeg ? -Math.min(ad, 2) * itemW * 0.2 : 0
       const ry = tiltDeg ? -clamp(d, -1.6, 1.6) * tiltDeg : 0
-      it.art.style.transform = `translateZ(${z}px) rotateY(${ry}deg) scale(${s})`
-      if (showLabels) {
-        it.label.style.fontSize = (labelSize + (labelActiveSize - labelSize) * t) * sc() + 'px'
-        it.label.style.fontWeight = String(Math.round(labelWeight + (labelActiveWeight - labelWeight) * t))
+      const scale = lerp(sideScale, centerScale, t)
+      it.art.style.transform = `translate3d(${centerDX * s * t}px,${centerDY * s * t}px,${z}px) rotateY(${ry}deg) scale(${scale})`
+      if (!showLabels) continue
+      const lx = lerp(labelDX, labelCenterDX, t) * s
+      const ly = lerp(labelDY, labelCenterDY, t) * s
+      if (it.labelImg) {
+        it.label.style.transform = `translate(-50%,-50%) translate(${lx}px,${ly}px) scale(${lerp(1, labelImgCenterScale, t)})`
+      } else {
+        // Typed labels re-set font-size instead of scaling, so they stay crisp.
+        it.label.style.transform = `translate(-50%,-50%) translate(${lx}px,${ly}px)`
+        it.label.style.fontSize = lerp(labelSize, labelActiveSize, t) * s + 'px'
+        it.label.style.fontWeight = String(Math.round(lerp(labelWeight, labelActiveWeight, t)))
         it.label.style.color = mix(labelColor, labelActiveColor, t)
       }
     }
@@ -321,8 +371,10 @@ export function createCarousel(): GameModule {
       ctx = c
       count = Math.max(2, Math.min(12, Math.round(num(params.count, 5))))
       const list = (v: unknown): string[] => (Array.isArray(v) ? (v as string[]) : [])
-      images = list(params.images).map((id) => (id ? ctx.assets.src(id) : ''))
+      const ids = list(params.images)
+      images = ids.map((id) => (id ? ctx.assets.src(id) : ''))
       results = list(params.results)
+      const labelIds = list(params.labelImages)
       labels = str(params.labels, '')
         .split(',')
         .map((s) => s.trim())
@@ -333,8 +385,10 @@ export function createCarousel(): GameModule {
       itemPct = clamp(num(params.itemPct, 22), 6, 60)
       gapPct = clamp(num(params.gapPct, 6), 0, 60)
       aspect = clamp(num(params.itemAspect, 1), 0.2, 5)
-      centerScale = clamp(num(params.centerScale, 1.45), 1, 3)
+      centerScale = clamp(num(params.centerScale, 1.45), 0.2, 3)
       sideScale = clamp(num(params.sideScale, 1), 0.2, 2)
+      centerDX = clamp(num(params.centerOffsetX, 0), -2000, 2000)
+      centerDY = clamp(num(params.centerOffsetY, 0), -2000, 2000)
       sideOpacity = clamp(num(params.sideOpacityPct, 100), 0, 100) / 100
       tiltDeg = clamp(num(params.tiltDeg, 0), 0, 70)
       showLabels = params.showLabels !== false
@@ -345,6 +399,12 @@ export function createCarousel(): GameModule {
       labelWeight = clamp(num(params.labelWeight, 500), 100, 900)
       labelActiveWeight = clamp(num(params.labelActiveWeight, 800), 100, 900)
       labelFont = cssFontFamily(str(params.labelFontFamily, ''))
+      labelImgH = clamp(num(params.labelImgHeightPx, 40), 4, 600)
+      labelImgCenterScale = clamp(num(params.labelImgCenterScale, 1.25), 0.2, 4)
+      labelDX = clamp(num(params.labelOffsetX, 0), -2000, 2000)
+      labelDY = clamp(num(params.labelOffsetY, 0), -2000, 2000)
+      labelCenterDX = clamp(num(params.labelCenterOffsetX, 0), -2000, 2000)
+      labelCenterDY = clamp(num(params.labelCenterOffsetY, 0), -2000, 2000)
 
       ctx.root.style.touchAction = 'none'
       ctx.root.style.overflow = 'hidden'
@@ -370,16 +430,32 @@ export function createCarousel(): GameModule {
           art.style.background = PALETTE[i % PALETTE.length]
           art.textContent = String(i + 1)
         }
+        // The label rides inside the same wrap as its art, so whichever slot the
+        // option travels to, its label travels with it — offsets below are always
+        // relative to that option's own art, never to the slot.
         const label = document.createElement('div')
-        label.style.cssText = 'position:absolute;left:0;text-align:center;white-space:nowrap;line-height:1.2;user-select:none;pointer-events:none;'
-        if (labelFont) label.style.fontFamily = labelFont
-        else label.style.fontFamily = '-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif'
-        label.textContent = labels[i] ?? ''
+        label.className = 'pa-carousel-label'
+        label.style.cssText = 'position:absolute;left:50%;top:0;text-align:center;white-space:nowrap;line-height:1.2;user-select:none;pointer-events:none;will-change:transform;'
+        let labelImg: HTMLImageElement | null = null
+        const labelSrc = labelIds[i] ? ctx.assets.src(labelIds[i]) : ''
+        if (labelSrc) {
+          labelImg = document.createElement('img')
+          labelImg.src = labelSrc
+          labelImg.alt = ''
+          labelImg.draggable = false
+          // Height-sized, width left to the picture's own aspect: a long wordmark
+          // and a short one then read at the same weight, the way type would.
+          labelImg.style.cssText = 'display:block;width:auto;pointer-events:none;'
+          label.appendChild(labelImg)
+        } else {
+          label.style.fontFamily = labelFont || '-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif'
+          label.textContent = labels[i] ?? ''
+        }
         if (!showLabels) label.style.display = 'none'
         wrap.appendChild(art)
         wrap.appendChild(label)
         ctx.root.appendChild(wrap)
-        items.push({ wrap, art, label, index: i })
+        items.push({ wrap, art, label, labelImg, index: i })
       }
       const start = Math.round(num(params.startIndex, -1))
       pos = target = settledIdx = lastSettled = start >= 0 && start < count ? start : Math.floor(count / 2)
@@ -422,35 +498,62 @@ export function createCarousel(): GameModule {
   }
 }
 
+const labelsOn = (p: Record<string, unknown>): boolean => p.showLabels !== false
+/** True once any option has been given a label picture — the picture controls
+ * replace the type controls for those options. */
+const hasLabelImages = (p: Record<string, unknown>): boolean => Array.isArray(p.labelImages) && (p.labelImages as string[]).some(Boolean)
+/** True only when EVERY option has one, i.e. no typed label is left to style. */
+const allLabelImages = (p: Record<string, unknown>): boolean => {
+  const n = Math.max(2, Math.min(12, Math.round(typeof p.count === 'number' ? p.count : 5)))
+  const a = p.labelImages
+  return Array.isArray(a) && a.length >= n && (a as string[]).slice(0, n).every(Boolean)
+}
+const typedLabels = (p: Record<string, unknown>): boolean => labelsOn(p) && !allLabelImages(p)
+const pictureLabels = (p: Record<string, unknown>): boolean => labelsOn(p) && hasLabelImages(p)
+
 export const CAROUSEL_TEMPLATE: GameTemplate = {
   id: 'carousel',
   label: 'Carousel (swipe to choose)',
   paramFields: [
     { key: 'count', label: 'Choices', type: 'number', min: 2, max: 12, step: 1 },
-    { key: 'labels', label: 'Labels under each choice (comma-separated)', type: 'text' },
+    { key: 'labels', label: 'Labels under each choice (comma-separated)', type: 'text', showIf: typedLabels },
     { key: 'linkGroup', label: 'Link name — put this in a Fill slot to mirror the choice', type: 'text' },
     { key: 'liveUpdate', label: 'Update the linked element while swiping', type: 'boolean' },
     { key: 'changesToWin', label: 'Changes before it counts as won (0 = never, the CTA ends it)', type: 'number', min: 0, max: 12, step: 1 },
     { key: 'loop', label: 'Loop around forever', type: 'boolean' },
     { key: 'startIndex', label: 'Starting choice (0-based, -1 = middle)', type: 'number', min: -1, max: 11, step: 1 },
+    // --- every slot ---
     { key: 'itemPct', label: 'Choice width (% of the game width)', type: 'number', min: 6, max: 60, step: 1 },
     { key: 'gapPct', label: 'Gap between choices (% of the game width)', type: 'number', min: 0, max: 60, step: 1 },
     { key: 'itemAspect', label: 'Choice aspect (width ÷ height)', type: 'number', min: 0.2, max: 5, step: 0.05 },
-    { key: 'centerScale', label: 'Centre choice size (× — this is the whole selection cue)', type: 'number', min: 1, max: 3, step: 0.05 },
     { key: 'sideScale', label: 'Side choices size (×)', type: 'number', min: 0.2, max: 2, step: 0.05 },
     { key: 'sideOpacityPct', label: 'Side choices opacity (%)', type: 'number', min: 0, max: 100, step: 5 },
     { key: 'tiltDeg', label: '3D turn per step (deg, 0 = flat)', type: 'number', min: 0, max: 70, step: 1 },
+    // --- the centre slot only ---
+    { key: 'centerScale', label: 'CENTRE choice size (× — this is the whole selection cue)', type: 'number', min: 0.2, max: 3, step: 0.05 },
+    { key: 'centerOffsetX', label: 'CENTRE choice nudge X (design px)', type: 'number', min: -2000, max: 2000, step: 1 },
+    { key: 'centerOffsetY', label: 'CENTRE choice nudge Y (design px, − is up)', type: 'number', min: -2000, max: 2000, step: 1 },
+    // --- labels, in every slot ---
     { key: 'showLabels', label: 'Show the labels', type: 'boolean' },
-    { key: 'labelFontFamily', label: 'Label font (family or uploaded font id)', type: 'text', showIf: (p) => p.showLabels !== false },
-    { key: 'labelSizePx', label: 'Label size (design px)', type: 'number', min: 4, max: 300, step: 1, showIf: (p) => p.showLabels !== false },
-    { key: 'labelActiveSizePx', label: 'Centre label size (design px)', type: 'number', min: 4, max: 300, step: 1, showIf: (p) => p.showLabels !== false },
-    { key: 'labelWeight', label: 'Label weight', type: 'number', min: 100, max: 900, step: 100, showIf: (p) => p.showLabels !== false },
-    { key: 'labelActiveWeight', label: 'Centre label weight', type: 'number', min: 100, max: 900, step: 100, showIf: (p) => p.showLabels !== false },
-    { key: 'labelColor', label: 'Label colour', type: 'color', showIf: (p) => p.showLabels !== false },
-    { key: 'labelActiveColor', label: 'Centre label colour', type: 'color', showIf: (p) => p.showLabels !== false },
+    { key: 'labelOffsetX', label: 'Label nudge X, every slot (design px)', type: 'number', min: -2000, max: 2000, step: 1, showIf: labelsOn },
+    { key: 'labelOffsetY', label: 'Label nudge Y, every slot (design px, − is up)', type: 'number', min: -2000, max: 2000, step: 1, showIf: labelsOn },
+    { key: 'labelCenterOffsetX', label: 'CENTRE label nudge X (design px)', type: 'number', min: -2000, max: 2000, step: 1, showIf: labelsOn },
+    { key: 'labelCenterOffsetY', label: 'CENTRE label nudge Y (design px, − is up)', type: 'number', min: -2000, max: 2000, step: 1, showIf: labelsOn },
+    // --- picture labels ---
+    { key: 'labelImgHeightPx', label: 'Label image height (design px)', type: 'number', min: 4, max: 600, step: 1, showIf: pictureLabels },
+    { key: 'labelImgCenterScale', label: 'CENTRE label image size (×)', type: 'number', min: 0.2, max: 4, step: 0.05, showIf: pictureLabels },
+    // --- typed labels ---
+    { key: 'labelFontFamily', label: 'Label font (family or uploaded font id)', type: 'text', showIf: typedLabels },
+    { key: 'labelSizePx', label: 'Label size (design px)', type: 'number', min: 4, max: 300, step: 1, showIf: typedLabels },
+    { key: 'labelActiveSizePx', label: 'CENTRE label size (design px)', type: 'number', min: 4, max: 300, step: 1, showIf: typedLabels },
+    { key: 'labelWeight', label: 'Label weight', type: 'number', min: 100, max: 900, step: 100, showIf: typedLabels },
+    { key: 'labelActiveWeight', label: 'CENTRE label weight', type: 'number', min: 100, max: 900, step: 100, showIf: typedLabels },
+    { key: 'labelColor', label: 'Label colour', type: 'color', showIf: typedLabels },
+    { key: 'labelActiveColor', label: 'CENTRE label colour', type: 'color', showIf: typedLabels },
   ],
   assetSlots: [
     { key: 'images', label: 'Choice image', list: true, countParam: 'count' },
+    { key: 'labelImages', label: 'Label image', list: true, countParam: 'count' },
     { key: 'results', label: 'Linked element image', list: true, countParam: 'count' },
   ],
   defaultParams: {
@@ -464,11 +567,19 @@ export const CAROUSEL_TEMPLATE: GameTemplate = {
     itemPct: 22,
     gapPct: 6,
     itemAspect: 1,
-    centerScale: 1.45,
     sideScale: 1,
     sideOpacityPct: 100,
     tiltDeg: 0,
+    centerScale: 1.45,
+    centerOffsetX: 0,
+    centerOffsetY: 0,
     showLabels: true,
+    labelOffsetX: 0,
+    labelOffsetY: 0,
+    labelCenterOffsetX: 0,
+    labelCenterOffsetY: 0,
+    labelImgHeightPx: 40,
+    labelImgCenterScale: 1.25,
     labelFontFamily: '',
     labelSizePx: 26,
     labelActiveSizePx: 34,
@@ -477,6 +588,7 @@ export const CAROUSEL_TEMPLATE: GameTemplate = {
     labelColor: '#5b6472',
     labelActiveColor: '#101418',
     images: [],
+    labelImages: [],
     results: [],
   },
   // Swipe right→left across the centred row.
