@@ -22,6 +22,15 @@
 // somewhere else entirely — lifted, nudged, its label pushed clear — while every
 // other slot stays exactly as authored, and the trip between the two is smooth.
 //
+// LABELS AS ELEMENTS — a choice's label can be an ordinary scene element the author
+// tagged (`carouselRole`), discovered and claimed here exactly the way combo.ts
+// collects its board: the picture, its size, its crop and its animation are then the
+// element's own, and the game only decides WHERE it goes. It is authored against the
+// CENTRE slot, and the offset it was placed at is preserved through every other slot,
+// scaling with its choice so the two read as one object. A tagged label supersedes
+// that choice's built-in label; anything untagged falls back to the picture slot or
+// the typed text, so the quick path still works.
+//
 // LINKING — the settled choice is published into a selection group (selection.ts),
 // which is the same store the Inspector's "Fill slot" elements read. Give any
 // scene element `fill` with this game's group and it swaps its source to the
@@ -30,8 +39,32 @@
 
 import { cssFontFamily } from '../font'
 import { setPicks } from '../selection'
-import type { GameContext, GameModule, GameTemplate, HintMove } from './types'
+import type { GameContext, GameModule, GameTemplate, HintMove, Pt } from './types'
 import { num, str } from './types'
+
+/** Hidden without touching inline display/opacity, both of which layoutRec rewrites
+ * on every layout pass. Exported so stage.ts can start a tagged label hidden at build
+ * time, before play begins. Mirrors combo's COMBO_OFF_CLASS. */
+export const CAROUSEL_OFF_CLASS = 'pa-carousel-off'
+
+function center(el: HTMLElement): Pt {
+  const r = el.getBoundingClientRect()
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
+}
+
+/**
+ * Where to hang a scale so it grows a scene element ABOUT ITS VISIBLE CENTRE.
+ *
+ * The outer .pa-el is positioned by layoutRec with `transform: translate(tx%,ty%)`,
+ * and the CSS `scale` property composes AFTER that about the centre of the box BEFORE
+ * that positional shift — so scaling the outer slides the element instead of swelling
+ * it in place. The inner .pa-el-anim fills the box and carries no positional
+ * transform, so its origin already IS the visible centre. Same reasoning as combo's
+ * scaleNode(), and it leaves the outer box measurable at natural size.
+ */
+function scaleNode(el: HTMLElement): HTMLElement {
+  return el.querySelector<HTMLElement>('.pa-el-anim') ?? el
+}
 
 const PALETTE = ['#ef4444', '#f59e0b', '#22c55e', '#3b82f6', '#a855f7', '#ec4899']
 
@@ -90,6 +123,27 @@ interface Item {
   index: number
 }
 
+/** A scene element tagged as one choice's label. The game moves and scales it; the
+ * element keeps everything else about itself. */
+interface LabelEl {
+  el: HTMLElement
+  /** 0-based, already matched to an item. */
+  choice: number
+  /** Whether the author left it visible on the editor canvas, so destroy() can put
+   * the canvas back exactly as it found it. */
+  canvasShown: boolean
+  /** Resting centre with our transform cleared — re-sampled on every relayout, since
+   * layoutRec repositions the element whenever the viewport changes. */
+  home: Pt
+  /** Where the author placed it relative to the CENTRE slot's art centre. This is the
+   * relationship play preserves in every other slot. */
+  offset: Pt
+  /** Inline values we overwrite, handed back on destroy. */
+  restTranslate: string
+  restTransition: string
+  restScale: string
+}
+
 export function createCarousel(): GameModule {
   let ctx: GameContext
   let count = 5
@@ -125,6 +179,11 @@ export function createCarousel(): GameModule {
   let labelCenterDY = 0
 
   const items: Item[] = []
+  /** Tagged scene elements this game drives, and everything it claimed (including
+   * tags it could not use) so destroy() can release the lot. */
+  const labelEls: LabelEl[] = []
+  const claimed: HTMLElement[] = []
+  let labelElCenterScale = 1
   let w = 300
   let h = 400
   let itemW = 66
@@ -132,6 +191,7 @@ export function createCarousel(): GameModule {
   let step = 84
   let gapY = 10
   let span = 4
+  let rowTop = 0 // every wrap's top, in root-local px
   let artCy = 48 // art centre, in wrap-local px
   let labelCy = 100 // label centre, in wrap-local px
 
@@ -206,11 +266,11 @@ export function createCarousel(): GameModule {
       maxY = Math.max(maxY, labelCy + baseH / 2 + labelDY * s, labelCy + cenH / 2 + labelCenterDY * s)
     }
     artCy = -minY
-    const top = (h - (maxY - minY)) / 2
+    rowTop = (h - (maxY - minY)) / 2
 
     for (const it of items) {
       it.wrap.style.width = itemW + 'px'
-      it.wrap.style.top = top + 'px'
+      it.wrap.style.top = rowTop + 'px'
       it.art.style.top = artCy - itemH / 2 + 'px'
       it.art.style.height = itemH + 'px'
       it.art.style.fontSize = itemH * 0.3 + 'px'
@@ -221,14 +281,94 @@ export function createCarousel(): GameModule {
     render()
   }
 
+  // ---- tagged label elements ----------------------------------------------
+  // Discovery mirrors combo.ts: walk the stage for tagged elements, honour an explicit
+  // game id, and claim anything unaddressed first-come so two carousels in one scene
+  // can't fight over the same label.
+  const collectLabels = (): void => {
+    const stageRoot = ctx.root.closest('.pa-root')
+    if (!stageRoot) return
+    for (const el of Array.from(stageRoot.querySelectorAll<HTMLElement>('[data-carousel-role]'))) {
+      const wanted = el.dataset.carouselGameId
+      if (wanted ? wanted !== ctx.elementId : !!el.dataset.carouselClaimedBy) continue
+      el.dataset.carouselClaimedBy = ctx.elementId ?? 'carousel'
+      claimed.push(el)
+      if (el.dataset.carouselRole !== 'label') continue
+      const choice = Math.round(Number(el.dataset.carouselChoice) || 1) - 1
+      // A label left pointing at a choice that no longer exists is claimed (so it is
+      // released cleanly) but not driven — better an unmoved label than one parked
+      // on a slot the row does not have.
+      if (choice < 0 || choice >= count) continue
+      labelEls.push({
+        el,
+        choice,
+        canvasShown: el.dataset.carouselCanvasShow === '1',
+        home: { x: 0, y: 0 },
+        offset: { x: 0, y: 0 },
+        restTranslate: '',
+        restTransition: '',
+        restScale: '',
+      })
+    }
+  }
+
+  /** The centre slot's art centre, in screen px — the point every label was authored
+   * against. */
+  const centreAnchor = (rootRect: DOMRect): Pt => ({
+    x: rootRect.left + w / 2 + centerDX * sc(),
+    y: rootRect.top + rowTop + artCy + centerDY * sc(),
+  })
+
+  /** Re-read where layoutRec has put each label with our transform cleared, and take
+   * its authored offset from that. Runs at start and on every relayout, because a
+   * resize moves the element out from under a stale sample — and because the offset is
+   * measured in screen px, re-measuring is also what rescales it for the new viewport. */
+  const resampleLabels = (): void => {
+    if (!labelEls.length) return
+    for (const lab of labelEls) {
+      lab.el.style.transition = ''
+      lab.el.style.translate = ''
+    }
+    // Writes above, reads below: one reflow for the batch rather than one per label.
+    const rootRect = ctx.root.getBoundingClientRect()
+    const anchorPt = centreAnchor(rootRect)
+    for (const lab of labelEls) {
+      lab.home = center(lab.el)
+      lab.offset = { x: lab.home.x - anchorPt.x, y: lab.home.y - anchorPt.y }
+    }
+  }
+
+  /** Put one label where its choice is now. `t` is the same easing the art rides, and
+   * `k` shrinks the authored relationship along with the art, so the choice and its
+   * label travel as one object rather than two things that happen to agree. */
+  const placeLabel = (lab: LabelEl, rootRect: DOMRect, d: number, t: number, artScale: number): void => {
+    const s = sc()
+    const k = centerScale > 0 ? artScale / centerScale : 1
+    const ax = rootRect.left + w / 2 - itemW / 2 + d * step + itemW / 2 + centerDX * s * t
+    const ay = rootRect.top + rowTop + artCy + centerDY * s * t
+    const x = ax + lab.offset.x * k + lerp(labelDX, labelCenterDX, t) * s
+    const y = ay + lab.offset.y * k + lerp(labelDY, labelCenterDY, t) * s
+    lab.el.style.translate = `${x - lab.home.x}px ${y - lab.home.y}px`
+    scaleNode(lab.el).style.scale = String(k * lerp(1, labelElCenterScale, t))
+  }
+
   const render = (): void => {
     const cx = w / 2 - itemW / 2
     const s = sc()
+    // One box read for the whole frame — tagged labels are positioned in screen px,
+    // and measuring per label would force a layout flush per item. Only once play has
+    // started: mount() lays out on the STATIC EDITOR CANVAS too, and a label yanked to
+    // its slot there would fight the author positioning it.
+    const rootRect = started && labelEls.length ? ctx.root.getBoundingClientRect() : null
     for (const it of items) {
       const d = loop ? wrapDelta(it.index - pos, count) : it.index - pos
       const ad = Math.abs(d)
       if (ad > span) {
         it.wrap.style.visibility = 'hidden'
+        // Its label goes with it: a tagged element lives outside the game box, so
+        // nothing else would take it off screen as the row wraps around.
+        const off = rootRect && labelEls.find((l) => l.choice === it.index)
+        if (off) off.el.classList.add(CAROUSEL_OFF_CLASS)
         continue
       }
       it.wrap.style.visibility = 'visible'
@@ -243,6 +383,11 @@ export function createCarousel(): GameModule {
       const ry = tiltDeg ? -clamp(d, -1.6, 1.6) * tiltDeg : 0
       const scale = lerp(sideScale, centerScale, t)
       it.art.style.transform = `translate3d(${centerDX * s * t}px,${centerDY * s * t}px,${z}px) rotateY(${ry}deg) scale(${scale})`
+      const tagged = rootRect ? labelEls.find((l) => l.choice === it.index) : undefined
+      if (tagged) {
+        tagged.el.classList.remove(CAROUSEL_OFF_CLASS)
+        placeLabel(tagged, rootRect!, d, t, scale)
+      }
       if (!showLabels) continue
       const lx = lerp(labelDX, labelCenterDX, t) * s
       const ly = lerp(labelDY, labelCenterDY, t) * s
@@ -405,6 +550,7 @@ export function createCarousel(): GameModule {
       labelDY = clamp(num(params.labelOffsetY, 0), -2000, 2000)
       labelCenterDX = clamp(num(params.labelCenterOffsetX, 0), -2000, 2000)
       labelCenterDY = clamp(num(params.labelCenterOffsetY, 0), -2000, 2000)
+      labelElCenterScale = clamp(num(params.labelElCenterScale, 1), 0.2, 4)
 
       ctx.root.style.touchAction = 'none'
       ctx.root.style.overflow = 'hidden'
@@ -457,6 +603,10 @@ export function createCarousel(): GameModule {
         ctx.root.appendChild(wrap)
         items.push({ wrap, art, label, labelImg, index: i })
       }
+      // Claim the tagged labels here, but drive nothing yet: mount() also runs on the
+      // static editor canvas, where a label being flung to its slot would fight the
+      // author positioning it. start() (interactive only) is what takes them over.
+      collectLabels()
       const start = Math.round(num(params.startIndex, -1))
       pos = target = settledIdx = lastSettled = start >= 0 && start < count ? start : Math.floor(count / 2)
       publish(settledIdx)
@@ -465,13 +615,35 @@ export function createCarousel(): GameModule {
     start() {
       if (started) return
       started = true
+      for (const lab of labelEls) {
+        lab.restTranslate = lab.el.style.translate
+        lab.restTransition = lab.el.style.transition
+        lab.restScale = scaleNode(lab.el).style.scale
+        // Whatever the author left hidden while positioning, play shows every label —
+        // it is the choice's name, not an authoring aid.
+        lab.el.classList.remove(CAROUSEL_OFF_CLASS)
+        // A tagged label supersedes that choice's built-in one, so the two can't
+        // double up.
+        const it = items[lab.choice]
+        if (it) it.label.style.display = 'none'
+      }
+      resampleLabels()
+      render()
       ctx.root.style.cursor = 'grab'
       ctx.root.addEventListener('pointerdown', onDown)
       ctx.root.addEventListener('pointermove', onMove)
       ctx.root.addEventListener('pointerup', onUp)
       ctx.root.addEventListener('pointercancel', onUp)
     },
-    relayout: layout,
+    relayout() {
+      layout()
+      // After the row is re-laid out, not before: the anchor a label's offset is
+      // measured from has just moved.
+      if (started) {
+        resampleLabels()
+        render()
+      }
+    },
     getHint(): HintMove | null {
       if (done && changesToWin > 0) return null
       const r = ctx.root.getBoundingClientRect()
@@ -492,8 +664,21 @@ export function createCarousel(): GameModule {
       ctx.root.removeEventListener('pointermove', onMove)
       ctx.root.removeEventListener('pointerup', onUp)
       ctx.root.removeEventListener('pointercancel', onUp)
+      for (const lab of labelEls) {
+        lab.el.style.transition = lab.restTransition
+        lab.el.style.translate = lab.restTranslate
+        scaleNode(lab.el).style.scale = lab.restScale
+        // Put the canvas back exactly as it was found: a label the author had shown
+        // stays shown, one they had hidden stays hidden.
+        if (lab.canvasShown) lab.el.classList.remove(CAROUSEL_OFF_CLASS)
+        else lab.el.classList.add(CAROUSEL_OFF_CLASS)
+      }
+      for (const el of claimed) delete el.dataset.carouselClaimedBy
+      labelEls.length = 0
+      claimed.length = 0
       ctx.root.innerHTML = ''
       items.length = 0
+      started = false
     },
   }
 }
@@ -540,6 +725,7 @@ export const CAROUSEL_TEMPLATE: GameTemplate = {
     { key: 'labelCenterOffsetX', label: 'CENTRE label nudge X (design px)', type: 'number', min: -2000, max: 2000, step: 1, showIf: labelsOn },
     { key: 'labelCenterOffsetY', label: 'CENTRE label nudge Y (design px, − is up)', type: 'number', min: -2000, max: 2000, step: 1, showIf: labelsOn },
     // --- picture labels ---
+    { key: 'labelElCenterScale', label: 'CENTRE label element size (× — for labels assigned from the canvas)', type: 'number', min: 0.2, max: 4, step: 0.05 },
     { key: 'labelImgHeightPx', label: 'Label image height (design px)', type: 'number', min: 4, max: 600, step: 1, showIf: pictureLabels },
     { key: 'labelImgCenterScale', label: 'CENTRE label image size (×)', type: 'number', min: 0.2, max: 4, step: 0.05, showIf: pictureLabels },
     // --- typed labels ---
@@ -578,6 +764,7 @@ export const CAROUSEL_TEMPLATE: GameTemplate = {
     labelOffsetY: 0,
     labelCenterOffsetX: 0,
     labelCenterOffsetY: 0,
+    labelElCenterScale: 1,
     labelImgHeightPx: 40,
     labelImgCenterScale: 1.25,
     labelFontFamily: '',

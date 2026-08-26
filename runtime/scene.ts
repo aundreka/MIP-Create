@@ -708,6 +708,30 @@ export interface ComboRoleConfig {
    * can see one at a time instead of the whole stack at once. */
   showOnCanvas?: boolean
 }
+// ---- carousel labels -------------------------------------------------------
+// Enlists an ordinary scene element as one choice's LABEL in a Carousel game, the
+// same way ComboRoleConfig enlists one into a Combo board: the label is a real
+// element, so its picture, size, crop, shape and animation all come from the
+// ordinary element tools instead of from numbers in the game panel.
+//
+// Position is authored by eye too, but relative to the CENTRE slot: place the label
+// where it belongs against the selected choice, and the carousel keeps exactly that
+// relationship as its choice travels through every other slot — the pair moves and
+// scales as one. The game's centre-slot nudges then apply on top, so the selected
+// choice's label can still sit somewhere the side ones don't.
+//
+// Because every label is authored against the same centre position they would stack
+// on the canvas, `showOnCanvas` reveals one at a time while it is being placed —
+// exactly as a Combo layer does.
+export interface CarouselRoleConfig {
+  gameId?: string
+  role: 'label'
+  /** Which choice this labels (1-based). */
+  choice?: number
+  /** Authoring-only: keep this label visible on the editor canvas while it is being
+   * positioned. Play drives every label regardless, so it never reaches the player. */
+  showOnCanvas?: boolean
+}
 export interface SlotConfig {
   group?: string
   key?: string
@@ -1018,6 +1042,7 @@ export interface SceneElement {
   drag?: DragConfig
   basketItem?: BasketItemConfig
   comboRole?: ComboRoleConfig
+  carouselRole?: CarouselRoleConfig
   slot?: SlotConfig
   pick?: PickConfig
   fill?: FillConfig

@@ -45,6 +45,16 @@ import { ownsSlot, patchSlot, projectLayoutPatch, resolvedLayout, seedSlot, with
 import { TAP_FADE_DEFAULT_MS } from '../../runtime/elements/button'
 import { RIPPLE_DEFAULT_COLOR, RIPPLE_DEFAULT_OPACITY, RIPPLE_HAND_REF_W, RIPPLE_MAX_R } from '../../runtime/hint'
 import { GAME_TEMPLATES } from '../../runtime/games/registry'
+import {
+  assignCarouselSlot,
+  carouselCandidates,
+  carouselLabelFor,
+  carouselMembers,
+  carouselOptionLabel,
+  carouselSlotSummary,
+  setCarouselCanvasVisible,
+  type CarouselSlotEdit,
+} from '../carouselSlots'
 import { splitList } from '../../runtime/games/holdgauge'
 import type { ParamField } from '../../runtime/games/types'
 import { importFont } from '../bridge'
@@ -1338,6 +1348,92 @@ function BrushControls(props: {
 
 // ---- Combo builder: per-question setup -------------------------------------
 // Every element the game drives is assigned FROM HERE, not from each element's own
+// panel: one row per choice, each naming the scene element that labels it. Assigning
+// writes the `carouselRole` onto the chosen element and clears it off whoever held
+// that slot before, so a slot is never double-booked — the same wiring model as the
+// Combo board's panel, and for the same reason: the whole arrangement is legible on
+// one screen instead of being spread across every element.
+//
+// Every label is placed against the CENTRE slot, so on the canvas they all stack in
+// the same spot. The eye on each row shows one at a time while it is being positioned;
+// play drives them all regardless, so the flag never reaches the player.
+interface CarouselSetupProps {
+  elementId: string
+  siblings: SceneElement[]
+  count: number
+}
+function CarouselSetup({ elementId, siblings, count }: CarouselSetupProps): JSX.Element {
+  const mine = carouselMembers(siblings, elementId)
+  const candidates = carouselCandidates(siblings)
+  const anyShown = mine.some((e) => e.carouselRole?.showOnCanvas)
+
+  const apply = (edits: CarouselSlotEdit[]): void => {
+    if (!edits.length) return
+    beginTransaction()
+    for (const e of edits) patchElement(e.id, e.patch)
+    endTransaction()
+  }
+  const setShown = (els: SceneElement[], visible: boolean): void => apply(els.map((e) => setCarouselCanvasVisible(e, visible)))
+
+  const row = (choice: number): JSX.Element => {
+    const current = carouselLabelFor(siblings, elementId, choice)
+    const hint =
+      'The element that labels this choice. Its picture, size, crop and animation are its own — place it against the CENTRE slot and the carousel keeps that relationship in every other slot.'
+    return (
+      <div className="combo-slot" key={`${choice}-${current?.id ?? 'add'}`}>
+        <span title={hint}>Label {choice}</span>
+        <Select
+          value={current?.id ?? ''}
+          onChange={(v) => apply(assignCarouselSlot({ nextId: v, current, gameId: elementId, choice, elements: siblings }))}
+          options={[
+            { value: '', label: '— none —' },
+            ...candidates.map((e) => ({ value: e.id, label: carouselOptionLabel(e) + (current && e.id === current.id ? ' ✓' : '') })),
+          ]}
+          title={hint}
+        />
+        <span className="combo-slot-actions">
+          {current && (
+            <button
+              className={'icon-btn' + (current.carouselRole?.showOnCanvas ? ' on' : '')}
+              title={current.carouselRole?.showOnCanvas ? 'Showing on the canvas while you position it (play drives it either way)' : 'Hidden — show it on the canvas while you position it'}
+              onClick={() => setShown([current], !current.carouselRole?.showOnCanvas)}
+            >
+              <Icon icon={current.carouselRole?.showOnCanvas ? Eye : EyeOff} size={13} />
+            </button>
+          )}
+          {current && (
+            <button className="icon-btn" title={`Select “${current.name || current.id}” on the canvas`} onClick={() => selectOnly(current.id)}>
+              <Icon icon={ScanSearch} size={13} />
+            </button>
+          )}
+        </span>
+      </div>
+    )
+  }
+
+  return (
+    <>
+      <div className="group-title2" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span>Label elements</span>
+        {!!mine.length && (
+          <button className="icon-btn" title={anyShown ? 'Hide every label on the canvas' : 'Show every label on the canvas'} onClick={() => setShown(mine, !anyShown)}>
+            <Icon icon={anyShown ? EyeOff : Eye} size={13} />
+          </button>
+        )}
+      </div>
+      {Array.from({ length: count }, (_, i) => row(i + 1))}
+      <div className="hint pad">
+        Optional — leave these empty to use the <b>Label image</b> slots or the typed labels below. An element assigned here replaces both for that choice, and brings the full
+        image tools with it: crop, shape, its own animation.
+      </div>
+      <div className="hint pad">
+        Position each one <b>against the centre choice</b> — that is the relationship the carousel carries into every other slot, scaling the label with its choice. The{' '}
+        <b>CENTRE</b> nudges below then shift the selected one on top of that.
+      </div>
+    </>
+  )
+}
+
 // panel: pick a question, then choose its title, its options, and — per option — the
 // layer it leaves behind, the outline that layer replaces, and the cues shown while
 // it is held. Assigning writes the `comboRole` onto the chosen element and clears it
@@ -3332,6 +3428,9 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               ) : (
                 <>
                   {tpl.id === 'combo' && <ComboSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
+                  {tpl.id === 'carousel' && (
+                    <CarouselSetup elementId={id} siblings={activeSceneDef(state)?.elements ?? []} count={Math.max(2, Math.min(12, Math.round(Number(params.count ?? 5))))} />
+                  )}
                   {tpl.id === 'combo' && <div className="group-title2">Feel &amp; timing</div>}
                   {tpl.id === 'catch' ? (
                     <CatchTemplateInspector params={params} setParam={setParam} />
@@ -3770,6 +3869,24 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 </>
               )
             })()}
+            {el.carouselRole &&
+              (() => {
+                // Read-only, like the combo one: which element labels which choice is
+                // chosen in the Carousel game's own panel.
+                const game = activeSceneDef(state)?.elements.find((c) => c.id === el.carouselRole!.gameId)
+                return (
+                  <>
+                    <div className="hint pad">
+                      Carousel: this element is <b>{carouselSlotSummary(el.carouselRole!)}</b>. Place it where it belongs against the <b>centre</b> choice.
+                    </div>
+                    {game && (
+                      <button className="btn" style={{ width: '100%', marginTop: 4 }} onClick={() => selectOnly(game.id)}>
+                        Edit in “{game.name || game.id}”
+                      </button>
+                    )}
+                  </>
+                )
+              })()}
             {el.comboRole &&
               (() => {
                 // Read-only on purpose: which element fills which slot is chosen in the

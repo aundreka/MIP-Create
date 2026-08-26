@@ -45,6 +45,7 @@ import { applyUnboxingImages, createUnboxingContent } from './elements/unboxing'
 import { createConfetti, createConfettiContent, type ConfettiController } from './elements/confetti'
 import { computeDeadline, formatCountdown, formatTickerIntervalMs, needsTicker } from './elements/countdown'
 import { createGameHost, type GameHost } from './gameHost'
+import { CAROUSEL_OFF_CLASS } from './games/carousel'
 import { mulberry32 } from './games/types'
 import { COMBO_OFF_CLASS } from './games/combo'
 import { attachScratchCover } from './reveal'
@@ -752,7 +753,7 @@ html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;overscroll-b
    the same reason as .pa-el--t-off: layoutRec rewrites inline display and opacity on
    every layout pass, so an inline hide would be dropped by the next resize.
    visibility keeps the box measurable, which the fly-to-layer maths needs. */
-.pa-combo-off{opacity:0 !important;visibility:hidden !important;pointer-events:none !important;}
+.pa-combo-off,.pa-carousel-off{opacity:0 !important;visibility:hidden !important;pointer-events:none !important;}
 /* One end of a cross-scene morph, hidden while its frozen copy is in flight (see morph.ts).
    A CLASS for the same reason as .pa-el--t-off: layoutRec rewrites inline opacity from the
    element on every layout pass, so an inline hide would be dropped by the next resize. */
@@ -1266,6 +1267,17 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
         if (el.comboRole.showOnCanvas) outer.dataset.comboCanvasShow = '1'
         else outer.classList.add(COMBO_OFF_CLASS)
       }
+    }
+
+    if (el.carouselRole) {
+      outer.dataset.carouselRole = el.carouselRole.role
+      if (el.carouselRole.gameId) outer.dataset.carouselGameId = el.carouselRole.gameId
+      if (el.carouselRole.choice) outer.dataset.carouselChoice = String(el.carouselRole.choice)
+      // Every label is authored against the same centre slot, so they would stack on
+      // the canvas: hidden while editing unless the author asks to see this one. Play
+      // drives them all regardless, so the flag never reaches the player.
+      if (el.carouselRole.showOnCanvas) outer.dataset.carouselCanvasShow = '1'
+      else outer.classList.add(CAROUSEL_OFF_CLASS)
     }
 
     const anim = document.createElement('div')
