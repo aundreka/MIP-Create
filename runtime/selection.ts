@@ -4,6 +4,14 @@
 // module singleton so picks persist across scenes.
 
 const sel = new Map<string, string[]>()
+// Anything that mirrors a group (the stage's fill slots) subscribes here, so a
+// pick made away from a `pick` element — a carousel game settling on a choice —
+// updates the same slots a tap would.
+const subs = new Set<(group: string) => void>()
+
+function notify(group: string): void {
+  for (const cb of [...subs]) cb(group)
+}
 
 export function getPicks(group: string): string[] {
   return sel.get(group) ?? []
@@ -24,6 +32,19 @@ export function togglePick(group: string, id: string | undefined, capacity: numb
     while (Number.isFinite(capacity) && capacity > 0 && arr.length > capacity) arr.shift()
   }
   sel.set(group, arr)
+  notify(group)
+}
+/** Replace a group's picks outright. For sources that own the whole selection
+ * rather than toggling one item at a time (a carousel's centre slot). */
+export function setPicks(group: string, ids: string[]): void {
+  if (!group) return
+  sel.set(group, ids.filter(Boolean))
+  notify(group)
+}
+/** Listen for changes to any group. Returns an unsubscribe. */
+export function onPicksChanged(cb: (group: string) => void): () => void {
+  subs.add(cb)
+  return () => subs.delete(cb)
 }
 export function clearPicks(): void {
   sel.clear()

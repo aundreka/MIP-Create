@@ -3430,6 +3430,19 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                       <div className="hint pad">The animated hint hand follows a currently visible, unwhacked thought and retargets after every whack.</div>
                     </>
                   )}
+                  {tpl.id === 'carousel' && (
+                    <>
+                      <div className="hint pad">
+                        The centre choice is the selection — it eases up to the size you set above and back down as it leaves, so there is no outline or frame. Swipe, flick or tap
+                        a side choice to bring it in.
+                      </div>
+                      <div className="hint pad">
+                        To make a <b>separate element</b> follow the choice: select it, open <b>Select &amp; generate</b>, switch on <b>Fill slot</b> and type the same{' '}
+                        <b>Link name</b> (<code>{String(params.linkGroup ?? 'carousel')}</code>). It swaps to that choice&apos;s <b>Linked element image</b> — or, if you leave
+                        that empty, to the choice image itself.
+                      </div>
+                    </>
+                  )}
                   {tpl.id === 'basket' && (
                     <>
                       <button

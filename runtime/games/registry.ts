@@ -33,6 +33,7 @@ import { HOLDGAUGE_TEMPLATE } from './holdgauge'
 import { EMBED_TEMPLATE } from './embed'
 import { BASKET_TEMPLATE } from './basket'
 import { COMBO_TEMPLATE } from './combo'
+import { CAROUSEL_TEMPLATE } from './carousel'
 
 export const GAME_TEMPLATES: GameTemplate[] = [
   FLIPBOOK_TEMPLATE,
@@ -56,6 +57,7 @@ export const GAME_TEMPLATES: GameTemplate[] = [
   SLIDER_TEMPLATE,
   HOLDGAUGE_TEMPLATE,
   SWIPE_TEMPLATE,
+  CAROUSEL_TEMPLATE,
   WHACK_TEMPLATE,
   THOUGHTWHACK_TEMPLATE,
   CONVEYOR_TEMPLATE,
