@@ -206,7 +206,8 @@ describe('an element outside the carousel follows the chosen item', () => {
     }
     send('pointerdown', wrap)
     send('pointerup', slot)
-    vi.advanceTimersByTime(3000) // the bump, then the stage's win-phase delay
+    // No clock advance at all: a confirming tap is its own beat, so the stage plays the
+    // win sound on it rather than behind the win animation's 500ms lead-in.
     expect(heard).toContain('win_sting')
     off()
     stage.destroy()

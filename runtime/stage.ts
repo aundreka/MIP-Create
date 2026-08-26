@@ -1381,6 +1381,9 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     if ((binding.delayMs ?? 0) > 0) emit('sfx-asset-loop-start', binding.assetId, binding.volume ?? 1, binding.delayMs)
     else emit('sfx-asset-loop-start', binding.assetId, binding.volume ?? 1)
   }
+  /** Templates whose win IS the player's own action, so their win sound plays at once
+   * instead of waiting for the win animation's lead-in. */
+  const WIN_SFX_ON_THE_BEAT = new Set(['basket', 'carousel'])
   const GAME_WIN_SFX_BIAS_MS = 500
   const gameWinSoundDelayMs = (rec?: Rec): number => {
     const phaseDelay = rec ? phaseLeadDelayMs(rec.el, 'gameWin') : 0
@@ -1804,10 +1807,12 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
             onWin: () => {
               for (const b of rec.el.sfx ?? []) {
                 if (b.event !== 'onReveal' || !b.assetId) continue
-                // Basket completion is already a strong visual beat: play its
-                // authored win sound as the final item lands. Other templates keep
-                // the existing animation-aligned delay.
-                if (rec.el.game?.templateId === 'basket') emitBoundSfx(b)
+                // Some games end ON a beat the player just made — the final item
+                // landing in the basket, the tap that confirms a carousel choice. For
+                // those the authored win sound belongs on that moment; the lead-in
+                // that lines other games' sounds up with their win ANIMATION only
+                // reads as lag. Other templates keep the existing delay.
+                if (WIN_SFX_ON_THE_BEAT.has(rec.el.game?.templateId ?? '')) emitBoundSfx(b)
                 else enterSfxTimers.push(window.setTimeout(() => emitBoundSfx(b), gameWinSoundDelayMs(rec)))
               }
             },

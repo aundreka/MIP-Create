@@ -360,16 +360,15 @@ export function createCarousel(): GameModule {
     pulseK = 1
     render() // start from the resting size, so the bump has no step at its foot
     ctx.sfx.play('choiceConfirm')
+    // The win is announced NOW, on the tap. onWin exists precisely so a win sound can
+    // land on the moment rather than after the animation — holding it back until the
+    // bump finished put the sound most of a second behind the finger.
+    winCb?.()
+    ctx.sfx.play('gameWin')
     run()
-    // Let the bump play out before the scene takes over: a win that cuts away
-    // mid-swell never reads as a confirmation of what was tapped.
-    timers.push(
-      window.setTimeout(() => {
-        winCb?.()
-        ctx.sfx.play('gameWin')
-        completeCb?.()
-      }, PULSE_MS),
-    )
+    // Only the COMPLETION waits for the bump: that is what hands the scene over, and a
+    // cut away mid-swell never reads as a confirmation of what was tapped.
+    timers.push(window.setTimeout(() => completeCb?.(), PULSE_MS))
   }
 
   const tick = (now: number): void => {

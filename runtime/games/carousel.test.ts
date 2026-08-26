@@ -629,7 +629,18 @@ describe('carousel', () => {
     expect(r.scaleOf(1)).toBeCloseTo(other, 5)
   })
 
-  it('holds the win back until the pulse has played', () => {
+  it('announces the win on the tap itself, not after the bump', () => {
+    useFrames()
+    const r = makeRig({ count: 5, changesToWin: 0, itemWidthPx: 80, startIndex: 2 })
+    r.tap(2)
+    // No frames, no timers: the win signal — which is what a win SOUND hangs off — is
+    // already up. Holding it until the bump finished put the sound a beat behind the
+    // finger, which is the one thing a confirmation must not be.
+    expect(r.won()).toBe(true)
+    expect(r.played).toContain('choiceConfirm')
+  })
+
+  it('still holds the scene hand-over until the pulse has played', () => {
     useFrames()
     const r = makeRig({ count: 5, changesToWin: 0, itemWidthPx: 80, startIndex: 2 })
     r.tap(2)
