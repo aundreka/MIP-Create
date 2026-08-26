@@ -312,6 +312,13 @@ export function playProject(project: Project, assets: AssetMap, opts: { mount: H
   // redirect cover (11000) that coverRedirect fades the destination scene in at —
   // so even a win-overlay → end-card redirect plays out underneath a CTA that
   // never blinks.
+  //
+  // A carry-over element opted into `belowOverlay` wants the opposite against overlays
+  // only, and a per-element z-index cannot express that: the layer is a stacking
+  // context, so nothing inside it can ever paint below the overlay outside it. Those
+  // elements get a SECOND layer of their own at z 8000 — above every scene root (1/2)
+  // and the cross-fade pair, but below the overlay (9000) and both immune tiers. A
+  // plain scene change still runs underneath them; a win/lose card now covers them.
   const persistDefs: SceneElement[] = []
   {
     const seen = new Set<string>()
@@ -326,8 +333,22 @@ export function playProject(project: Project, assets: AssetMap, opts: { mount: H
   }
   const stripPersist = (els: SceneElement[]): SceneElement[] => (persistDefs.length ? els.filter((e) => !e.persist) : els)
 
-  let persistLayer: HTMLDivElement | null = null
-  let persistStage: StageHandle | null = null
+  // The two carry-over layers, high (default) and low (belowOverlay). Everything below
+  // walks this list, so both tiers lay out, fade, hide and tear down identically.
+  type PersistTier = { defs: SceneElement[]; z: number; layer: HTMLDivElement | null; stage: StageHandle | null }
+  const persistTiers: PersistTier[] = [
+    { defs: persistDefs.filter((e) => !e.belowOverlay), z: 12000, layer: null, stage: null },
+    { defs: persistDefs.filter((e) => !!e.belowOverlay), z: 8000, layer: null, stage: null },
+  ]
+  const persistStages = (): StageHandle[] => persistTiers.map((t) => t.stage).filter((st): st is StageHandle => !!st)
+  // The record for a carry-over element, whichever tier holds it.
+  const persistRec = (id: string): ReturnType<StageHandle['get']> => {
+    for (const t of persistTiers) {
+      const rec = t.stage?.get(id)
+      if (rec) return rec
+    }
+    return undefined
+  }
   // Which carry-over elements take taps. Only interactive ones (anything wrapping a
   // <button> — the CTA) do; static art stays click-through so the scene beneath still
   // receives the tap that advances it.
@@ -341,18 +362,19 @@ export function playProject(project: Project, assets: AssetMap, opts: { mount: H
   // Re-lay out the layer and re-impose the carry-over state: layoutRec rewrites outer
   // opacity from the element, undoing an in-progress fade-out on every resize.
   const layoutPersist = (): void => {
-    if (!persistStage) return
-    persistStage.layoutAll()
-    for (const el of persistDefs) {
-      const rec = persistStage.get(el.id)
-      if (rec) persistOpacity.set(el.id, rec.outer.style.opacity)
+    for (const t of persistTiers) {
+      if (!t.stage) continue
+      t.stage.layoutAll()
+      for (const el of t.defs) {
+        const rec = t.stage.get(el.id)
+        if (rec) persistOpacity.set(el.id, rec.outer.style.opacity)
+      }
     }
     applyPersistVis()
   }
   const applyPersistVis = (): void => {
-    if (!persistStage) return
     for (const el of persistDefs) {
-      const rec = persistStage.get(el.id)
+      const rec = persistRec(el.id)
       if (!rec) continue
       const off = persistHidden.has(el.id)
       rec.outer.style.transition = 'opacity 220ms ease'
@@ -361,34 +383,42 @@ export function playProject(project: Project, assets: AssetMap, opts: { mount: H
     }
   }
   const syncPersist = (sceneId: string): void => {
-    if (!persistStage) return
+    if (!persistTiers.some((t) => t.stage)) return
     persistHidden.clear()
     for (const el of persistDefs) if (!showsOn(el, sceneId)) persistHidden.add(el.id)
     applyPersistVis()
   }
   const buildPersist = (): void => {
     if (!persistDefs.length) return
-    persistLayer = document.createElement('div')
-    persistLayer.style.cssText = 'position:absolute;inset:0;z-index:12000;pointer-events:none;'
-    container.appendChild(persistLayer)
-    // float:true keeps the stage's pa-root transparent and skips the bleed div (the
-    // scene below owns the background). buildScene localizes the elements itself.
-    persistStage = buildScene({ meta: project.meta, elements: persistDefs }, assets, { mount: persistLayer, float: true })
-    for (const el of persistDefs) {
-      const rec = persistStage.get(el.id)
-      if (rec) persistTappable.set(el.id, !!rec.outer.querySelector('button'))
+    for (const t of persistTiers) {
+      if (!t.defs.length) continue // no empty layer for a tier nobody opted into
+      const layer = document.createElement('div')
+      layer.style.cssText = `position:absolute;inset:0;z-index:${t.z};pointer-events:none;`
+      container.appendChild(layer)
+      t.layer = layer
+      // float:true keeps the stage's pa-root transparent and skips the bleed div (the
+      // scene below owns the background). buildScene localizes the elements itself.
+      t.stage = buildScene({ meta: project.meta, elements: t.defs }, assets, { mount: layer, float: true })
+      for (const el of t.defs) {
+        const rec = t.stage.get(el.id)
+        if (rec) persistTappable.set(el.id, !!rec.outer.querySelector('button'))
+      }
     }
     layoutPersist()
     // Wires the same per-element behaviour a scene would give them: tap animations,
     // element SFX, idle show/hide. (There are no games up here.)
-    persistStage.startGames(opts.interactive)
-    if (opts.interactive) persistStage.playEntrances()
+    for (const st of persistStages()) {
+      st.startGames(opts.interactive)
+      if (opts.interactive) st.playEntrances()
+    }
   }
   const destroyPersist = (): void => {
-    persistStage?.destroy()
-    persistLayer?.remove()
-    persistStage = null
-    persistLayer = null
+    for (const t of persistTiers) {
+      t.stage?.destroy()
+      t.layer?.remove()
+      t.stage = null
+      t.layer = null
+    }
     persistTappable.clear()
     persistHidden.clear()
     persistOpacity.clear()
@@ -733,7 +763,7 @@ export function playProject(project: Project, assets: AssetMap, opts: { mount: H
         ...new Set([
           ...gameRoot.querySelectorAll<HTMLElement>('.pa-el--hide-on-overlay'),
           ...parkedEls.filter((el) => el.classList.contains('pa-el--hide-on-overlay')),
-          ...(persistStage?.root.querySelectorAll<HTMLElement>('.pa-el--hide-on-overlay') ?? []),
+          ...persistStages().flatMap((st) => Array.from(st.root.querySelectorAll<HTMLElement>('.pa-el--hide-on-overlay'))),
         ]),
       ]
       const savedDisplay = hideEls.map((el) => el.style.display)

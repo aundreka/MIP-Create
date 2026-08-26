@@ -121,6 +121,41 @@ describe('CTA stacking against a floating overlay', () => {
     expect(gameRoot().contains(el)).toBe(true)
   })
 
+  // The carry-over case, which is how the CTA is actually authored in real projects
+  // (persist:true — it keeps pulsing across scene cuts). Its layer is a stacking context,
+  // so belowOverlay has to move it to a lower LAYER; a per-element z can't reach past it.
+  const layerOf = (el: HTMLElement): HTMLElement => el.closest<HTMLElement>('.pa-stage > div[style*="z-index"]')!
+
+  it('a carried-over CTA rides the high layer by default, above the overlay', () => {
+    play(ctaEl({ persist: true }))
+    win()
+
+    expect(mount.querySelector('.pa-el[data-id="cardtext"]')).toBeTruthy() // card is up
+    const el = cta()!
+    expect(layerOf(el).style.zIndex).toBe('12000') // above the overlay's 9000
+    expect(el.style.display).not.toBe('none')
+  })
+
+  it('a carried-over CTA with belowOverlay drops to a layer under the overlay', () => {
+    play(ctaEl({ persist: true, belowOverlay: true }))
+    win()
+
+    expect(mount.querySelector('.pa-el[data-id="cardtext"]')).toBeTruthy()
+    const el = cta()!
+    expect(layerOf(el).style.zIndex).toBe('8000') // under the overlay's 9000…
+    expect(el.style.display).not.toBe('none') // …and still not hidden
+    // Only the tier it belongs to exists — no empty 12000 layer left behind.
+    expect(mount.querySelector('.pa-stage > div[style*="z-index: 12000"]')).toBeNull()
+  })
+
+  it('still carries across a scene change from the low layer', () => {
+    play(ctaEl({ persist: true, belowOverlay: true }))
+    const before = cta()
+    win()
+
+    expect(cta()).toBe(before) // same DOM node — the pulse never restarted
+  })
+
   it('hideOnOverlay is still the separate "gone for the card’s life" choice', () => {
     play(ctaEl({ hideOnOverlay: true }))
     win()
