@@ -39,9 +39,11 @@
 // the background — can be named as HOLD EFFECT targets (holdEffectIds), which dims /
 // desaturates / fades them. That is a list of ids rather than a role, so an element
 // already playing a part on the board can take the effect too. When it is on is a
-// choice (holdEffectWhen): 'hold' for as long as an option is being carried, or
+// choice (holdEffectWhen): 'hold' for as long as an option is being carried,
 // 'untilPick' from the moment the scene opens until the FIRST pick lands — a board
-// that starts muted and comes to life once the player commits to something.
+// that starts muted and comes to life once the player commits to something — or
+// 'both', which opens muted, is lifted by that first pick, and then comes back for
+// every drag after it.
 //
 // Because each question contributes its own layer rather than a whole flat image,
 // the art needed is options x questions rather than options^questions, and a
@@ -195,9 +197,10 @@ export function createCombo(): GameModule {
   let captionFadeMs = 140
   let holdFilter = ''
   let holdEffectMs = 180
-  /** Effect on from scene enter and off for good at the first pick, rather than on
-   * only while something is being carried. */
-  let holdUntilPick = false
+  /** When the hold effect is on: while something is carried ('hold'), from scene
+   * enter until the first pick ('untilPick'), or both — muted from the opening frame,
+   * lifted by the first pick, and back for every drag after that ('both'). */
+  let holdWhen: 'hold' | 'untilPick' | 'both' = 'hold'
   /** Picks needed to win; 0 = every question the board has. */
   let winPicks = 0
   /** A question stays up until every one of its options has been placed, instead of
@@ -494,6 +497,11 @@ export function createCombo(): GameModule {
    * every layout pass, so anything written there is lost at the next resize. Applied
    * outside, the effect composes with whatever the element already looks like instead
    * of replacing it. */
+  /** Whether the effect belongs ON with nothing being carried: only before the first
+   * pick has landed, and only in the modes that open with it on. A drag that comes to
+   * nothing therefore returns the board to this, not to bare. */
+  const effectAtRest = (): boolean => holdWhen !== 'hold' && picksMade() === 0
+
   const setHoldEffect = (on: boolean, ms = holdEffectMs): void => {
     if (!holdFilter) return
     for (const fx of effects) {
@@ -837,7 +845,9 @@ export function createCombo(): GameModule {
       // player is about to be carrying.
       showDragArt(item)
       showCaptions(item)
-      if (!holdUntilPick) setHoldEffect(true)
+      // 'untilPick' is the one mode a pick-up must not re-arm: it is already on
+      // before the first pick, and gone for good after it.
+      if (holdWhen !== 'untilPick') setHoldEffect(true)
       setScale(proxyFor(item), pickupScale, 140)
       ctx.sfx.play('comboPick')
 
@@ -881,7 +891,7 @@ export function createCombo(): GameModule {
           item.el.style.zIndex = item.homeZ
           item.el.style.cursor = 'grab'
           hideCaptions(captionFadeMs)
-          if (!holdUntilPick) setHoldEffect(false)
+          setHoldEffect(effectAtRest())
           hideDragArt(140)
           restoreOptionArt(item, 140)
           setScale(item.el, 1, 140)
@@ -998,7 +1008,8 @@ export function createCombo(): GameModule {
       dismissMs = Math.max(0, Math.min(2000, num(params.dismissMs, 260)))
       captionFadeMs = Math.max(0, Math.min(2000, num(params.captionFadeMs, 140)))
       holdEffectMs = Math.max(0, Math.min(2000, num(params.holdEffectMs, 180)))
-      holdUntilPick = String(params.holdEffectWhen ?? 'hold') === 'untilPick'
+      const when = String(params.holdEffectWhen ?? 'hold')
+      holdWhen = when === 'untilPick' || when === 'both' ? when : 'hold'
       winPicks = Math.max(0, Math.round(num(params.winPicks, 0)))
       multiPick = params.multiPick === true || params.multiPick === 'true'
       dropPerOption = String(params.dropTarget ?? 'zone') === 'slot'
@@ -1067,7 +1078,7 @@ export function createCombo(): GameModule {
       // Instantly, not over holdEffectMs: this is the state the scene OPENS in, so a
       // muted board should already be muted on the first painted frame rather than
       // fading down in front of the player.
-      setHoldEffect(holdUntilPick, 0)
+      setHoldEffect(effectAtRest(), 0)
       current = nextPlayable(0)
       if (current >= questions) {
         // Nothing is wired up at all — win immediately rather than stranding the player.
@@ -1217,7 +1228,7 @@ export const COMBO_TEMPLATE: GameTemplate = {
     // colour knobs and for opacity, so the default set does nothing at all.
     holdEffectIds: '',
     // 'hold' = only while an option is carried; 'untilPick' = from scene enter until
-    // the first pick lands.
+    // the first pick lands; 'both' = both of those.
     holdEffectWhen: 'hold',
     holdBrightness: 1,
     holdContrast: 1,

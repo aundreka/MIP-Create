@@ -938,6 +938,13 @@ export interface SceneElement {
   overlayImmune?: boolean // always rendered above in-game overlays (e.g. scratch-grid lose/win)
   overlayTop?: boolean // a HIGHER immune tier — floats above other "above overlays" elements
   hideOnOverlay?: boolean // hidden while a floating overlay (win/lose card) is up over this scene
+  // Opt OUT of overlay immunity — the third stacking choice next to "above" and
+  // "hidden": the element stays in its scene root, so a floating overlay (win/lose
+  // card) covers it and it reads through the dim instead of on top of it. Its only
+  // real use is the CTA, which is immune by default; it also overrides an explicit
+  // overlayImmune / overlayTop. Note this puts the element UNDER the overlay's
+  // pointer-catching layer, so it stops being tappable while the card is up.
+  belowOverlay?: boolean
   // Carry this element ACROSS scene changes. It is built ONCE into a layer that sits
   // above every scene root (and above floating overlays and cross-fades), so a scene
   // transition never rebuilds it: a CTA keeps pulsing straight through the cut instead

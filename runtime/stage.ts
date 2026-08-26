@@ -2484,9 +2484,12 @@ function layoutRec(rec: Rec): void {
   // overlayTop is a higher immune tier (z:10050) that floats above ordinary
   // "above overlays" elements (z:10000); keep it in sync with scenes.ts.
   outer.style.zIndex = floatedImmune ? (rec.el.overlayTop ? '10050' : '10000') : rec.el.type === 'handguide' && rec.hg ? '99999' : String(e.zIndex)
-  // CTA is always immune; other elements opt in via overlayImmune / overlayTop (top tier).
-  outer.classList.toggle('pa-el--immune', rec.el.type === 'cta' || !!rec.el.overlayImmune || !!rec.el.overlayTop)
-  outer.classList.toggle('pa-el--immune-top', !!rec.el.overlayTop)
+  // CTA is immune by default; other elements opt in via overlayImmune / overlayTop (top
+  // tier). `belowOverlay` is the explicit opt-OUT — it wins over all three, leaving the
+  // element in its scene root so a floating overlay dims it instead of it floating above.
+  const immune = !rec.el.belowOverlay && (rec.el.type === 'cta' || !!rec.el.overlayImmune || !!rec.el.overlayTop)
+  outer.classList.toggle('pa-el--immune', immune)
+  outer.classList.toggle('pa-el--immune-top', immune && !!rec.el.overlayTop)
   // Elements that should disappear while a floating overlay is up (opt-in). The
   // scene-overlay handler queries this class and hides them for the overlay's life.
   outer.classList.toggle('pa-el--hide-on-overlay', !!rec.el.hideOnOverlay)

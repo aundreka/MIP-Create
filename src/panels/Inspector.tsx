@@ -1590,13 +1590,16 @@ function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps):
       {fxTargets.length > 0 && (
         <>
           <div className="combo-slot">
-            <span title="When the effect is on: only while an option is being carried, or from the moment the scene opens until the player places their first pick.">On</span>
+            <span title="When the effect is on: only while an option is being carried, from the moment the scene opens until the player places their first pick, or both — open muted, lifted by that first pick, and back for every drag after it.">
+              On
+            </span>
             <Select
               value={String(params.holdEffectWhen ?? 'hold')}
               onChange={(v) => setParam('holdEffectWhen', v)}
               options={[
                 { value: 'hold', label: 'While an option is held' },
                 { value: 'untilPick', label: 'From the start, until the first pick' },
+                { value: 'both', label: 'Both — from the start, then on every hold' },
               ]}
             />
             <span className="combo-slot-actions" />
@@ -3054,7 +3057,13 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
       {(el.type === 'text' || el.type === 'image' || (el.type === 'bar' && el.mode === 'fit')) && sceneHasCatch && (
         <Toggle label="Show after basket moved" checked={!!el.showAfterInteraction} onChange={(v) => patchElement(id, { showAfterInteraction: v || undefined })} />
       )}
-      {el.type !== 'cta' && <Toggle label="Above overlays" checked={!!el.overlayImmune} onChange={(v) => patchElement(id, { overlayImmune: v || undefined })} />}
+      {el.type === 'cta' ? (
+        // The CTA floats above overlays by default, so its toggle drives the opt-OUT flag:
+        // untick it and the win/lose card covers the button (dimmed, still visible) instead.
+        <Toggle label="Above overlays" checked={!el.belowOverlay} onChange={(v) => patchElement(id, { belowOverlay: v ? undefined : true })} />
+      ) : (
+        <Toggle label="Above overlays" checked={!!el.overlayImmune} onChange={(v) => patchElement(id, { overlayImmune: v || undefined })} />
+      )}
       <Toggle label="Above other overlays (top layer)" checked={!!el.overlayTop} onChange={(v) => patchElement(id, { overlayTop: v || undefined })} />
       <Toggle label="Hide on overlay" checked={!!el.hideOnOverlay} onChange={(v) => patchElement(id, { hideOnOverlay: v || undefined })} />
       {CARRY_OVER_TYPES.has(el.type) && (

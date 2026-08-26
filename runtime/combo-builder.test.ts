@@ -760,6 +760,48 @@ describe('combo builder', () => {
       stage.destroy()
     })
 
+    it('can do both: open on, lift at the first pick, and return for every drag after', () => {
+      const els = [
+        { ...FX_GAME, game: { ...FX_GAME.game!, params: { ...FX_GAME.game!.params, holdEffectWhen: 'both' } } } as SceneElement,
+        ANCHOR,
+        option('a1', 1, 1, 'optA'),
+        option('b1', 2, 1, 'optB'),
+        layer('l-a1', 1, 1, 'layerA'),
+      ]
+      const stage = build(els)
+      stage.layoutAll()
+      stage.startGames(true)
+      const q = (id: string): HTMLElement => stage.root.querySelector<HTMLElement>(`[data-id="${id}"]`)!
+      const zone = stage.root.querySelector<HTMLElement>('[data-combo-target="1"]')!
+      stubRect(zone, 0, 0, 1000, 1000)
+      stubRect(q('a1'), 400, 400, 100, 100)
+      stubRect(q('l-a1'), 600, 600, 200, 60)
+      const muted = 'brightness(0.6) saturate(0.2) opacity(0.5)'
+
+      // Open muted, and a drag that comes to nothing leaves it muted.
+      expect(q('anchor').style.filter).toBe(muted)
+      stubRect(zone, 0, 0, 1, 1)
+      q('a1').dispatchEvent(pointer('pointerdown', 450, 450))
+      window.dispatchEvent(pointer('pointerup', 450, 450))
+      expect(q('anchor').style.filter).toBe(muted)
+
+      // The first pick lifts it.
+      stubRect(zone, 0, 0, 1000, 1000)
+      q('a1').dispatchEvent(pointer('pointerdown', 450, 450))
+      window.dispatchEvent(pointer('pointerup', 450, 450))
+      expect(q('anchor').style.filter).toBe('')
+      vi.advanceTimersByTime(400)
+
+      // ...and from here it behaves like 'hold': on while carried, off on release.
+      stubRect(q('b1'), 400, 400, 100, 100)
+      q('b1').dispatchEvent(pointer('pointerdown', 450, 450))
+      expect(q('anchor').style.filter).toBe(muted)
+      stubRect(zone, 0, 0, 1, 1)
+      window.dispatchEvent(pointer('pointerup', 450, 450))
+      expect(q('anchor').style.filter).toBe('')
+      stage.destroy()
+    })
+
     it('does nothing at all when every knob is at rest', () => {
       const stage = build([GAME, ANCHOR, option('a1', 1, 1, 'optA')]) // no hold params
       stage.layoutAll()
