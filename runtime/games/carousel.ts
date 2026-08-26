@@ -178,6 +178,9 @@ export function createCarousel(): GameModule {
   // A press is not yet a swipe: the start sound waits until the finger has actually
   // travelled past the tap threshold, so confirming a choice doesn't fire it too.
   let swipeAnnounced = false
+  // The confirming tap is locked until the row has actually been swiped, so a stray
+  // first touch on the centre can't end the game before anything has been browsed.
+  let hasSwiped = false
 
   let published = -1
   let settledIdx = 0 // what is at the centre right now (drives the pass-by tick)
@@ -333,6 +336,7 @@ export function createCarousel(): GameModule {
     if (i === settledIdx && published === i) return
     if (i !== settledIdx) ctx.sfx.play('swipeTick')
     settledIdx = i
+    markHint()
     if (live) publish(i)
   }
 
@@ -349,6 +353,20 @@ export function createCarousel(): GameModule {
     winCb?.()
     ctx.sfx.play('gameWin')
     completeCb?.()
+  }
+
+  /** Publish the selected choice and the one a left-swipe would bring in, so a placed
+   * handguide can mime the gesture without touching the row — the same way the combo
+   * board publishes its live option. */
+  const markHint = (): void => {
+    const c = idxOf(pos)
+    const n = count > 1 ? (c + 1) % count : c
+    for (const it of items) {
+      if (it.index === c) it.wrap.dataset.carouselCentre = '1'
+      else delete it.wrap.dataset.carouselCentre
+      if (it.index === n && n !== c) it.wrap.dataset.carouselNext = '1'
+      else delete it.wrap.dataset.carouselNext
+    }
   }
 
   /** Tapping the choice that is already selected commits to it. */
@@ -446,6 +464,7 @@ export function createCarousel(): GameModule {
     moved = Math.max(moved, Math.abs(dx))
     if (!swipeAnnounced && moved >= 6) {
       swipeAnnounced = true
+      hasSwiped = true
       ctx.sfx.play('swipeStart')
     }
     const raw = dragStartPos - dx / step
@@ -475,7 +494,7 @@ export function createCarousel(): GameModule {
       // Tapping the choice that is already selected commits to it; tapping any other
       // brings that one to the centre instead. `target` rather than `pos`, so a tap
       // during the settle still counts as confirming the choice on its way in.
-      if (hit && tapWins && hit.index === idxOf(target)) confirm()
+      if (hit && tapWins && hasSwiped && hit.index === idxOf(target)) confirm()
       else goTo(hit ? base + (loop ? wrapDelta(hit.index - base, count) : hit.index - base) : base)
       vel = 0
     } else {
@@ -590,6 +609,7 @@ export function createCarousel(): GameModule {
       pos = target = settledIdx = lastSettled = start >= 0 && start < count ? start : Math.floor(count / 2)
       publish(settledIdx)
       layout()
+      markHint()
     },
     start() {
       if (started) return
@@ -729,13 +749,9 @@ export const CAROUSEL_TEMPLATE: GameTemplate = {
     labelImages: [],
     results: [],
   },
-  // Swipe right→left across the centred row.
-  defaultHandguide: {
-    nodes: [
-      { x: 0.7, y: 0.5 },
-      { x: 0.3, y: 0.5 },
-    ],
-    periodMs: 1700,
-  },
+  // Swipe the next choice in, then tap it to confirm — which is also the order the
+  // game requires, since the confirming tap stays locked until the row has been
+  // swiped. The node only seeds where the hand first appears.
+  defaultHandguide: { mode: 'carousel', nodes: [{ x: 0.7, y: 0.5 }], periodMs: 2600 },
   create: createCarousel,
 }

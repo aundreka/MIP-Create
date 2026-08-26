@@ -506,7 +506,11 @@ export interface HandguideConfig {
   // lifting — the press-and-hold gesture, as opposed to 'tap''s quick dip.
   // 'combo' follows the Combo builder's live option and mimes dragging it into the
   // drop area, advancing to the next question's option on its own.
-  mode: 'smart' | 'tap' | 'radialtap' | 'slide' | 'scratch' | 'match' | 'thoughtwhack' | 'basket' | 'combo' | 'brush' | 'still' | 'hold'
+  // 'carousel' mimes the whole gesture a carousel asks for, in one loop: a swipe that
+  // pulls the next choice into the centre, then a tap on the centre to confirm it —
+  // which is also the order the game requires, since the tap stays locked until the
+  // row has been swiggled at least once.
+  mode: 'smart' | 'tap' | 'radialtap' | 'slide' | 'scratch' | 'match' | 'thoughtwhack' | 'basket' | 'combo' | 'carousel' | 'brush' | 'still' | 'hold'
   toX?: number
   toY?: number
   nodes?: HandguideNode[]

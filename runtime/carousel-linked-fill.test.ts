@@ -199,11 +199,18 @@ describe('an element outside the carousel follows the chosen item', () => {
     // Tap the selected choice: press on it, release on the root (pointer capture
     // retargets, exactly as a browser does).
     const wrap = slot.firstElementChild as HTMLElement
-    const send = (type: string, onto: HTMLElement): void => {
+    let stamp = 0
+    const send = (type: string, onto: HTMLElement, x = 10): void => {
       const e = new Event(type, { bubbles: true }) as PointerEvent
-      Object.defineProperties(e, { pointerId: { value: 1 }, clientX: { value: 10 }, clientY: { value: 10 }, timeStamp: { value: 0 } })
+      Object.defineProperties(e, { pointerId: { value: 1 }, clientX: { value: x }, clientY: { value: 10 }, timeStamp: { value: (stamp += 20) } })
       onto.dispatchEvent(e)
     }
+    // Swipe first: the confirming tap is locked until the row has been swiped, so a
+    // test that only tapped would be miming something the player cannot do.
+    send('pointerdown', slot, 200)
+    send('pointermove', slot, 120)
+    send('pointerup', slot, 120)
+    vi.advanceTimersByTime(1200) // let it settle on the new choice
     send('pointerdown', wrap)
     send('pointerup', slot)
     // No clock advance at all: a confirming tap is its own beat, so the stage plays the

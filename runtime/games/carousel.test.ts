@@ -31,6 +31,8 @@ interface Rig {
   settle(): void
   /** Advance exactly one animation frame. */
   frame(): void
+  /** One real swipe, settled — what unlocks the confirming tap. */
+  swipeOnce(): void
   /** Press and release on one choice, without moving. */
   tap(i: number): void
   /** Press and drag to x1, leaving the finger down, with a frame rendered. */
@@ -131,6 +133,10 @@ function makeRig(params: Record<string, unknown> = {}, opts: { w?: number } = {}
     frame() {
       now += 16
       vi.advanceTimersByTime(16)
+    },
+    swipeOnce() {
+      this.swipe(300, 300 - 100)
+      this.settle()
     },
     tap(i) {
       send('pointerdown', 300, wraps[i])
@@ -559,9 +565,10 @@ describe('carousel', () => {
 
   it('wins when the selected choice is tapped', () => {
     useFrames()
-    const r = makeRig({ count: 5, changesToWin: 0, itemWidthPx: 80, startIndex: 2 })
+    const r = makeRig({ count: 5, changesToWin: 0, itemWidthPx: 80, gapPx: 20, startIndex: 2 })
     expect(r.completed()).toBe(false)
-    r.tap(2)
+    r.swipeOnce() // the tap is locked until the row has been swiped
+    r.tap(3)
     r.settle()
     expect(r.completed()).toBe(true)
   })
@@ -588,6 +595,28 @@ describe('carousel', () => {
     expect(r.scaleOf(3)).toBeGreaterThan(1.4) // it is now
   })
 
+  it('will not let the centre be confirmed before anything has been swiped', () => {
+    useFrames()
+    const r = makeRig({ count: 5, changesToWin: 0, itemWidthPx: 80, gapPx: 20, startIndex: 2 })
+    r.tap(2)
+    r.settle()
+    expect(r.completed()).toBe(false) // a stray first touch must not end the game
+    expect(r.won()).toBe(false)
+    expect(r.played).not.toContain('choiceConfirm')
+  })
+
+  it('unlocks the confirming tap once the row has been swiped', () => {
+    useFrames()
+    const r = makeRig({ count: 5, changesToWin: 0, itemWidthPx: 80, gapPx: 20, startIndex: 2 })
+    r.tap(2)
+    r.settle()
+    expect(r.completed()).toBe(false)
+    r.swipeOnce()
+    r.tap(3)
+    r.settle()
+    expect(r.completed()).toBe(true)
+  })
+
   it('can be switched off, leaving a tap to only re-centre', () => {
     useFrames()
     const r = makeRig({ count: 5, changesToWin: 0, tapCentreWins: false, itemWidthPx: 80, startIndex: 2 })
@@ -598,14 +627,15 @@ describe('carousel', () => {
 
   it('pulses the tapped choice once, and settles back to its own size', () => {
     useFrames()
-    const r = makeRig({ count: 5, changesToWin: 0, itemWidthPx: 80, centerScale: 1.5, startIndex: 2 })
-    const resting = r.scaleOf(2)
+    const r = makeRig({ count: 5, changesToWin: 0, itemWidthPx: 80, gapPx: 20, centerScale: 1.5, startIndex: 2 })
+    r.swipeOnce()
+    const resting = r.scaleOf(3)
     expect(resting).toBeCloseTo(1.5, 3)
-    r.tap(2)
+    r.tap(3)
     const seen: number[] = []
     for (let i = 0; i < 30; i++) {
       r.frame()
-      seen.push(r.scaleOf(2))
+      seen.push(r.scaleOf(3))
     }
     const peak = Math.max(...seen)
     expect(peak).toBeGreaterThan(resting) // it swelled...
@@ -622,17 +652,19 @@ describe('carousel', () => {
 
   it('leaves the other choices alone while one pulses', () => {
     useFrames()
-    const r = makeRig({ count: 5, changesToWin: 0, itemWidthPx: 80, startIndex: 2 })
+    const r = makeRig({ count: 5, changesToWin: 0, itemWidthPx: 80, gapPx: 20, startIndex: 2 })
+    r.swipeOnce()
     const other = r.scaleOf(1)
-    r.tap(2)
+    r.tap(3)
     for (let i = 0; i < 8; i++) r.frame()
     expect(r.scaleOf(1)).toBeCloseTo(other, 5)
   })
 
   it('announces the win on the tap itself, not after the bump', () => {
     useFrames()
-    const r = makeRig({ count: 5, changesToWin: 0, itemWidthPx: 80, startIndex: 2 })
-    r.tap(2)
+    const r = makeRig({ count: 5, changesToWin: 0, itemWidthPx: 80, gapPx: 20, startIndex: 2 })
+    r.swipeOnce()
+    r.tap(3)
     // No frames, no timers: the win signal — which is what a win SOUND hangs off — is
     // already up. Holding it until the bump finished put the sound a beat behind the
     // finger, which is the one thing a confirmation must not be.
@@ -642,8 +674,9 @@ describe('carousel', () => {
 
   it('still holds the scene hand-over until the pulse has played', () => {
     useFrames()
-    const r = makeRig({ count: 5, changesToWin: 0, itemWidthPx: 80, startIndex: 2 })
-    r.tap(2)
+    const r = makeRig({ count: 5, changesToWin: 0, itemWidthPx: 80, gapPx: 20, startIndex: 2 })
+    r.swipeOnce()
+    r.tap(3)
     r.frame()
     expect(r.completed()).toBe(false) // still swelling
     r.settle()
@@ -653,12 +686,13 @@ describe('carousel', () => {
   it('ignores further taps once it has been confirmed', () => {
     useFrames()
     const r = makeRig({ count: 5, changesToWin: 0, itemWidthPx: 80, gapPx: 20, startIndex: 2 })
-    r.tap(2)
-    r.settle()
-    const wonAt = r.scaleOf(2)
+    r.swipeOnce()
     r.tap(3)
     r.settle()
-    expect(r.scaleOf(2)).toBeCloseTo(wonAt, 3) // the row did not move on
+    const wonAt = r.scaleOf(3)
+    r.tap(4)
+    r.settle()
+    expect(r.scaleOf(3)).toBeCloseTo(wonAt, 3) // the row did not move on
   })
 
   it('fires a swipe-start sound once the finger really is swiping', () => {
@@ -700,17 +734,19 @@ describe('carousel', () => {
 
   it('sounds its own note when the selected choice is confirmed', () => {
     useFrames()
-    const r = makeRig({ count: 5, changesToWin: 0, itemWidthPx: 80, startIndex: 2 })
-    r.tap(2)
+    const r = makeRig({ count: 5, changesToWin: 0, itemWidthPx: 80, gapPx: 20, startIndex: 2 })
+    r.swipeOnce()
+    r.tap(3)
     r.settle()
     expect(r.played).toContain('choiceConfirm')
   })
 
   it('raises the win signal the “on game won” sound hangs off', () => {
     useFrames()
-    const r = makeRig({ count: 5, changesToWin: 0, itemWidthPx: 80, startIndex: 2 })
+    const r = makeRig({ count: 5, changesToWin: 0, itemWidthPx: 80, gapPx: 20, startIndex: 2 })
     expect(r.won()).toBe(false)
-    r.tap(2)
+    r.swipeOnce()
+    r.tap(3)
     r.settle()
     expect(r.won()).toBe(true)
     // Before completion, which is what lets the stage line the sound up with the

@@ -164,7 +164,7 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
   // Waypoints (design px). 'slide' uses the configured nodes (or legacy toX/toY);
   // 'smart' targets the CTA/game; 'tap' stays in place (no waypoints).
   let pts: { x: number; y: number; pauseMs?: number }[] = []
-  let kind: 'tap' | 'radialtap' | 'slide' | 'scratch' | 'match' | 'thoughtwhack' | 'basket' | 'combo' | 'brush' | 'still' | 'hold' = 'tap'
+  let kind: 'tap' | 'radialtap' | 'slide' | 'scratch' | 'match' | 'thoughtwhack' | 'basket' | 'combo' | 'carousel' | 'brush' | 'still' | 'hold' = 'tap'
   if (cfg.mode === 'still') {
     kind = 'still'
   } else if (cfg.mode === 'radialtap') {
@@ -191,11 +191,26 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     kind = 'basket'
   } else if (cfg.mode === 'combo') {
     kind = 'combo'
+  } else if (cfg.mode === 'carousel') {
+    kind = 'carousel'
   } else if (cfg.mode === 'brush') {
     kind = 'brush'
   }
   // A hold has to read as a HOLD, so its default cycle is longer than a tap's.
-  const travel = cfg.periodMs && cfg.periodMs > 0 ? cfg.periodMs : kind === 'scratch' ? 600 : kind === 'slide' ? 1500 : kind === 'combo' ? 1900 : kind === 'hold' ? 2000 : 900
+  const travel =
+    cfg.periodMs && cfg.periodMs > 0
+      ? cfg.periodMs
+      : kind === 'scratch'
+        ? 600
+        : kind === 'slide'
+          ? 1500
+          : kind === 'combo'
+            ? 1900
+            : kind === 'carousel'
+              ? 2600
+              : kind === 'hold'
+                ? 2000
+                : 900
   const cubic = (t: number): number => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
   const EASE: Record<string, (t: number) => number> = {
     linear: (t) => t,
@@ -464,6 +479,57 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
       swell = g.carry
       // Fade out after the release so the loop's jump back to the option is unseen.
       content.style.opacity = g.alpha.toFixed(3)
+    } else if (kind === 'carousel') {
+      // One loop performs the whole gesture a carousel asks for, in the order the game
+      // itself requires: a SWIPE that pulls the next choice into the centre, then a
+      // TAP on that centre to confirm it. (The game keeps the confirming tap locked
+      // until the row has been swiped, so a hand that only tapped would be miming
+      // something the player cannot do yet.)
+      //
+      // The carousel publishes both ends the way the combo board publishes its live
+      // option, so the hand follows the real row without touching it.
+      const centreEl = root.querySelector<HTMLElement>('[data-carousel-centre]')
+      const nextEl = root.querySelector<HTMLElement>('[data-carousel-next]')
+      if (!centreEl) {
+        content.style.opacity = '0'
+        raf = requestAnimationFrame(frame)
+        return
+      }
+      const centreRect = centreEl.getBoundingClientRect()
+      const guideRect = rec.outer.getBoundingClientRect()
+      const cx2 = centreRect.left + centreRect.width / 2
+      const cy2 = centreRect.top + centreRect.height / 2
+      // Where the swipe starts: over the choice that a left-drag would pull in. With
+      // nothing to the right (a single choice) fall back to a slot's width across.
+      const startRect = nextEl ? nextEl.getBoundingClientRect() : null
+      const fromX = startRect ? startRect.left + startRect.width / 2 : cx2 + centreRect.width * 1.4
+      const fromY = startRect ? startRect.top + startRect.height / 2 : cy2
+      const phase = ((now - t0) % travel) / travel
+      // The loop in four beats: swipe across, lift and hold, tap, rest.
+      const SWIPE_END = 0.42
+      const TAP_START = 0.58
+      let fingerX: number
+      let fingerY: number
+      let alpha = 1
+      if (phase < SWIPE_END) {
+        // Pressed for the whole drag, easing in and out of contact at either end.
+        const p = cubic(phase / SWIPE_END)
+        fingerX = fromX + (cx2 - fromX) * p
+        fingerY = fromY + (cy2 - fromY) * p
+        press = phase < 0.08 ? cubic(phase / 0.08) : phase > SWIPE_END - 0.08 ? cubic((SWIPE_END - phase) / 0.08) : 1
+      } else {
+        // Already at the centre, so the hand does not travel between the two beats —
+        // it simply lifts, then taps the choice it just brought in.
+        fingerX = cx2
+        fingerY = cy2
+        press = phase < TAP_START ? 0 : tapPress((phase - TAP_START) / (1 - TAP_START))
+        // Fade out at the very end so the jump back to the swipe's start is unseen.
+        if (phase > 0.94) alpha = Math.max(0, (1 - phase) / 0.06)
+      }
+      if (phase < 0.06) alpha = Math.min(1, phase / 0.06)
+      ox = fingerX - (guideRect.left + guideRect.width * 0.22)
+      oy = fingerY - (guideRect.top + guideRect.height * 0.12)
+      content.style.opacity = alpha.toFixed(3)
     } else if (kind === 'slide') {
       const c = (now - t0) % total
       let rem = c

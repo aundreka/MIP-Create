@@ -4087,6 +4087,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                     { value: 'thoughtwhack', label: 'Whack-a-mole (follow an unwhacked thought)' },
                     { value: 'basket', label: 'Basket (drag next unplaced item)' },
                     { value: 'combo', label: 'Combo (drag the live option to the drop area)' },
+                    { value: 'carousel', label: 'Carousel (swipe, then tap the centre)' },
                     { value: 'brush', label: 'Point at the scratch brush (after its intro)' },
                     { value: 'still', label: 'Still (no movement at all)' },
                   ]}
