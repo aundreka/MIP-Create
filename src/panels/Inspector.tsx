@@ -14,7 +14,6 @@ import type {
   ButtonConfig,
   ButtonTapEffect,
   ComboRoleConfig,
-  CarouselRoleConfig,
   ConfettiConfig,
   CountdownConfig,
   CropShapePreset,
@@ -46,17 +45,6 @@ import { ownsSlot, patchSlot, projectLayoutPatch, resolvedLayout, seedSlot, with
 import { TAP_FADE_DEFAULT_MS } from '../../runtime/elements/button'
 import { RIPPLE_DEFAULT_COLOR, RIPPLE_DEFAULT_OPACITY, RIPPLE_HAND_REF_W, RIPPLE_MAX_R } from '../../runtime/hint'
 import { GAME_TEMPLATES } from '../../runtime/games/registry'
-import {
-  assignCarouselSlot,
-  carouselCandidates,
-  carouselSlotFor,
-  carouselWired,
-  carouselMembers,
-  carouselOptionLabel,
-  carouselSlotSummary,
-  setCarouselCanvasVisible,
-  type CarouselSlotEdit,
-} from '../carouselSlots'
 import { splitList } from '../../runtime/games/holdgauge'
 import type { ParamField } from '../../runtime/games/types'
 import { importFont } from '../bridge'
@@ -1350,111 +1338,6 @@ function BrushControls(props: {
 
 // ---- Combo builder: per-question setup -------------------------------------
 // Every element the game drives is assigned FROM HERE, not from each element's own
-// panel: one row per choice, each naming the scene element that labels it. Assigning
-// writes the `carouselRole` onto the chosen element and clears it off whoever held
-// that slot before, so a slot is never double-booked — the same wiring model as the
-// Combo board's panel, and for the same reason: the whole arrangement is legible on
-// one screen instead of being spread across every element.
-//
-// Every label is placed against the CENTRE slot, so on the canvas they all stack in
-// the same spot. The eye on each row shows one at a time while it is being positioned;
-// play drives them all regardless, so the flag never reaches the player.
-interface CarouselSetupProps {
-  params: Record<string, unknown>
-  setParam: (k: string, v: unknown) => void
-  elementId: string
-  siblings: SceneElement[]
-}
-function CarouselSetup({ params, setParam, elementId, siblings }: CarouselSetupProps): JSX.Element {
-  const mine = carouselMembers(siblings, elementId)
-  const candidates = carouselCandidates(siblings)
-  const anyShown = mine.some((e) => e.carouselRole?.showOnCanvas)
-  // Never fewer rows than are actually wired up: a project edited down by mistake would
-  // otherwise hide live assignments.
-  const rows = Math.max(carouselWired(siblings, elementId), 1, Math.round(Number(params.choices ?? 5)))
-
-  const apply = (edits: CarouselSlotEdit[]): void => {
-    if (!edits.length) return
-    beginTransaction()
-    for (const e of edits) patchElement(e.id, e.patch)
-    endTransaction()
-  }
-  const setShown = (els: SceneElement[], visible: boolean): void => apply(els.map((e) => setCarouselCanvasVisible(e, visible)))
-
-  /** One assignment. Every row is the same shape on screen — label, dropdown, actions —
-   * because the panel is a column of them; what a slot means lives in its tooltip. */
-  const slot = (label: string, hint: string, role: CarouselRoleConfig['role'], choice: number): JSX.Element => {
-    const current = carouselSlotFor(siblings, elementId, role, choice)
-    return (
-      <div className="combo-slot" key={`${role}${choice}-${current?.id ?? 'add'}`}>
-        <span title={hint}>{label}</span>
-        <Select
-          value={current?.id ?? ''}
-          onChange={(v) => apply(assignCarouselSlot({ nextId: v, current, gameId: elementId, role, choice, elements: siblings }))}
-          options={[
-            { value: '', label: '— none —' },
-            ...candidates.map((e) => ({ value: e.id, label: carouselOptionLabel(e) + (current && e.id === current.id ? ' ✓' : '') })),
-          ]}
-          title={hint}
-        />
-        <span className="combo-slot-actions">
-          {current && (
-            <button
-              className={'icon-btn' + (current.carouselRole?.showOnCanvas ? ' on' : '')}
-              title={current.carouselRole?.showOnCanvas ? 'Showing on the canvas while you position it (play drives it either way)' : 'Hidden — show it on the canvas while you position it'}
-              onClick={() => setShown([current], !current.carouselRole?.showOnCanvas)}
-            >
-              <Icon icon={current.carouselRole?.showOnCanvas ? Eye : EyeOff} size={13} />
-            </button>
-          )}
-          {current && (
-            <button className="icon-btn" title={`Select “${current.name || current.id}” on the canvas`} onClick={() => selectOnly(current.id)}>
-              <Icon icon={ScanSearch} size={13} />
-            </button>
-          )}
-        </span>
-      </div>
-    )
-  }
-
-  const choiceRow = (n: number): JSX.Element => {
-    const art = carouselSlotFor(siblings, elementId, 'choice', n)
-    return (
-      <div key={n}>
-        <div className="group-title2">
-          Choice {n}
-          {art ? '' : ' · empty'}
-        </div>
-        {slot('Picture', 'The thing being chosen. Place it where it belongs when it is the SELECTED one — the carousel carries that position into every other slot.', 'choice', n)}
-        {slot('Label', 'Optional. What this choice is called — a wordmark, or a text element. It rides with this choice, so a name can never end up under the wrong picture.', 'label', n)}
-        {slot('Reveal', 'Optional. Art elsewhere on the screen that reacts to this choice — the model wearing this shade, the room in this colour. Only the selected choice’s is up.', 'reveal', n)}
-      </div>
-    )
-  }
-
-  return (
-    <>
-      <div className="group-title2" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span>Row</span>
-        {!!mine.length && (
-          <button className="icon-btn" title={anyShown ? 'Hide them all on the canvas' : 'Show them all on the canvas'} onClick={() => setShown(mine, !anyShown)}>
-            <Icon icon={anyShown ? EyeOff : Eye} size={13} />
-          </button>
-        )}
-      </div>
-      <NumField label="Choice slots" value={rows} step={1} min={1} onChange={(n) => setParam('choices', Math.max(1, Math.round(n)))} />
-      <div className="hint pad">
-        Everything the player sees is an element on the canvas — nothing is uploaded into the game. The row is however many <b>Picture</b> slots you fill.
-      </div>
-      <div className="hint pad">
-        Place them all where the <b>selected</b> choice belongs; they stack there, so use the eye to show one at a time while positioning. The offset you place each one at is the
-        relationship the carousel keeps as the row turns, scaling a choice and its label together.
-      </div>
-      {Array.from({ length: rows }, (_, i) => choiceRow(i + 1))}
-    </>
-  )
-}
-
 // panel: pick a question, then choose its title, its options, and — per option — the
 // layer it leaves behind, the outline that layer replaces, and the cues shown while
 // it is held. Assigning writes the `comboRole` onto the chosen element and clears it
@@ -3449,8 +3332,6 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               ) : (
                 <>
                   {tpl.id === 'combo' && <ComboSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
-                  {tpl.id === 'carousel' && <CarouselSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
-                  {tpl.id === 'carousel' && <div className="group-title2">Feel &amp; timing</div>}
                   {tpl.id === 'combo' && <div className="group-title2">Feel &amp; timing</div>}
                   {tpl.id === 'catch' ? (
                     <CatchTemplateInspector params={params} setParam={setParam} />
@@ -3462,8 +3343,6 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                           !(tpl.id === 'scratch' && (f.key === 'coverColor' || f.key === 'shadowColor')) &&
                           // ComboSetup owns both counts, right above its per-question chips.
                           !(tpl.id === 'combo' && (f.key === 'questions' || f.key === 'options')) &&
-                          // CarouselSetup owns the slot count, right above its rows.
-                          !(tpl.id === 'carousel' && f.key === 'choices') &&
                           (f.showIf?.(params) ?? true),
                       )
                       .map(renderField)
@@ -3558,12 +3437,22 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                         a side choice to bring it in.
                       </div>
                       <div className="hint pad">
-                        Fields marked <b>CENTRE</b> apply only to the selected slot, and every other slot keeps the settings above — so the selected choice can be a different
-                        size and sit somewhere the side ones don&apos;t. The carousel eases between the two as you swipe. Nudges are in design px.
+                        Every size, gap and nudge is in <b>design px</b> — the number you type is the size you get, and resizing the game box no longer resizes the choices with
+                        it. Slot pitch is simply <b>choice width + gap</b>, so a gap of 0 butts them together. The canvas redraws as you type.
                       </div>
                       <div className="hint pad">
-                        A <b>text</b> element assigned as a label is <b>restyled</b> at the centre rather than blown up: the type you set on the element is what the side slots
-                        read at, and the CENTRE font fields below are the selected one. Leave a field blank (or 0) to keep the element&apos;s own.
+                        To make a <b>separate element</b> follow the choice: select it, open <b>Select &amp; generate</b>, switch on <b>Fill slot</b> and type the same{' '}
+                        <b>Link name</b> (<code>{String(params.linkGroup ?? 'carousel')}</code>). It swaps to that choice&apos;s <b>Linked element image</b> — or, if you leave
+                        that empty, to the choice image itself.
+                      </div>
+                      <div className="hint pad">
+                        Each choice can carry its own <b>Label image</b> instead of typed text. Labels belong to their choice, not to a slot, so a label always travels with the
+                        picture it names. Label images are sized by <b>height</b>, so wordmarks of different lengths still read at one weight.
+                      </div>
+                      <div className="hint pad">
+                        Fields marked <b>CENTRE</b> apply only to the selected slot — size it and move it wherever you want, for the choice image and the label separately, and
+                        every other slot keeps the settings above. The carousel eases between the two as you swipe. Nudges are in design px; keep the game box tall enough for a
+                        big lift, since it clips at its own edges.
                       </div>
                     </>
                   )}
@@ -3885,25 +3774,6 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 </>
               )
             })()}
-            {el.carouselRole &&
-              (() => {
-                // Read-only, like the combo one: which element labels which choice is
-                // chosen in the Carousel game's own panel.
-                const game = activeSceneDef(state)?.elements.find((c) => c.id === el.carouselRole!.gameId)
-                return (
-                  <>
-                    <div className="hint pad">
-                      Carousel: this element is <b>{carouselSlotSummary(el.carouselRole!)}</b>.
-                      {el.carouselRole!.role !== 'reveal' && <> Place it where it belongs when that choice is the selected one.</>}
-                    </div>
-                    {game && (
-                      <button className="btn" style={{ width: '100%', marginTop: 4 }} onClick={() => selectOnly(game.id)}>
-                        Edit in “{game.name || game.id}”
-                      </button>
-                    )}
-                  </>
-                )
-              })()}
             {el.comboRole &&
               (() => {
                 // Read-only on purpose: which element fills which slot is chosen in the

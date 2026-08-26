@@ -708,45 +708,6 @@ export interface ComboRoleConfig {
    * can see one at a time instead of the whole stack at once. */
   showOnCanvas?: boolean
 }
-// ---- carousel ---------------------------------------------------------------
-// Enlists ordinary scene elements into a Carousel game, exactly as ComboRoleConfig
-// enlists them into a Combo board: nothing the player sees is authored inside the
-// game box. The mount contributes only the swipe surface; every picture is a real
-// element, so its art, size, crop, shape and animation all come from the ordinary
-// element tools.
-//
-//   'choice'  one of the things being chosen — the swatch, the pack, the colour. The
-//             carousel slides it through the slots and grows it as it reaches the
-//             centre; the centre IS the selection, so there is no outline or frame.
-//   'label'   optional, one per choice: what that choice is CALLED. It rides with its
-//             own choice through every slot rather than belonging to a position, so a
-//             name never ends up under the wrong picture. Being an element, it can be
-//             a wordmark, a price, styled text — anything.
-//   'reveal'  optional, one per choice: the art that reacts to the choice from
-//             somewhere else on the screen — the model wearing that shade, the room in
-//             that colour. Only the selected choice's is up; they cross-fade as the
-//             selection moves. Nothing about it is tied to the row, so it can be as
-//             large and as far away as the layout wants.
-//
-// Position is authored by eye against the CENTRE slot: place a choice where it belongs
-// when it is the selected one, and the carousel keeps every element's offset from that
-// point as the row turns, scaling the group together. The game's centre-slot nudges
-// then apply on top, so the selected choice can sit somewhere the side ones don't.
-//
-// Because every choice is authored against the same centre position they would stack
-// on the canvas, `showOnCanvas` reveals one at a time while it is being placed —
-// exactly as a Combo layer does.
-export interface CarouselRoleConfig {
-  gameId?: string
-  role: 'choice' | 'label' | 'reveal'
-  /** Which choice this belongs to (1-based). A label and a reveal each pair with the
-   * choice of the same number. */
-  choice?: number
-  /** Authoring-only: keep this element visible on the editor canvas while it is being
-   * positioned. Play drives every one of them regardless, so it never reaches the
-   * player. */
-  showOnCanvas?: boolean
-}
 export interface SlotConfig {
   group?: string
   key?: string
@@ -1057,7 +1018,6 @@ export interface SceneElement {
   drag?: DragConfig
   basketItem?: BasketItemConfig
   comboRole?: ComboRoleConfig
-  carouselRole?: CarouselRoleConfig
   slot?: SlotConfig
   pick?: PickConfig
   fill?: FillConfig
