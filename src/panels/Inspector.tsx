@@ -3495,6 +3495,11 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                         a side choice to bring it in.
                       </div>
                       <div className="hint pad">
+                        The two choices either side of the centre get their own spacing: <b>Extra gap either side of the CENTRE</b> adds to the regular gap for those two only, so
+                        an enlarged centre stops crowding its neighbours. Negative pulls them in. Remember the centre is scaled up, so it eats into its own gap — the visible space
+                        is always smaller than the number.
+                      </div>
+                      <div className="hint pad">
                         Every size, gap and nudge is in <b>design px</b> — the number you type is the size you get, and resizing the game box no longer resizes the choices with it.
                         Slot pitch is simply <b>choice width + gap</b>, so a gap of 0 butts them together. The canvas redraws as you type.
                       </div>

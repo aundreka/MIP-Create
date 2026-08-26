@@ -356,6 +356,67 @@ describe('carousel', () => {
     expect(r.xOf(3) - r.xOf(2)).toBeCloseTo(140, 3)
   })
 
+  it('gives the centre its own gap, leaving every other gap alone', () => {
+    useFrames()
+    // 100 wide + 20 gap = a 120 pitch everywhere; +30 beside the centre only.
+    const r = makeRig({ count: 7, itemWidthPx: 100, gapPx: 20, centerGapExtraPx: 30, startIndex: 3 })
+    const centreToNeighbour = r.xOf(4) - r.xOf(3)
+    const neighbourToNext = r.xOf(5) - r.xOf(4)
+    expect(centreToNeighbour).toBeCloseTo(150, 3) // 120 + 30
+    expect(neighbourToNext).toBeCloseTo(120, 3) // untouched
+    // ...and the same on the left, since the push is symmetric.
+    expect(r.xOf(3) - r.xOf(2)).toBeCloseTo(150, 3)
+    expect(r.xOf(2) - r.xOf(1)).toBeCloseTo(120, 3)
+  })
+
+  it('can pull the centre’s neighbours in as well as push them out', () => {
+    useFrames()
+    const r = makeRig({ count: 7, itemWidthPx: 100, gapPx: 40, centerGapExtraPx: -20, startIndex: 3 })
+    expect(r.xOf(4) - r.xOf(3)).toBeCloseTo(120, 3) // 140 - 20
+    expect(r.xOf(5) - r.xOf(4)).toBeCloseTo(140, 3)
+  })
+
+  it('leaves the row uniform when no extra is asked for', () => {
+    useFrames()
+    const r = makeRig({ count: 7, itemWidthPx: 100, gapPx: 20, startIndex: 3 })
+    expect(r.xOf(4) - r.xOf(3)).toBeCloseTo(120, 3)
+    expect(r.xOf(5) - r.xOf(4)).toBeCloseTo(120, 3)
+  })
+
+  it('hands the centre gap over as the selection moves', () => {
+    useFrames()
+    // Same row, a different choice selected: the wide gaps must follow the centre.
+    const r = makeRig({ count: 7, itemWidthPx: 100, gapPx: 20, centerGapExtraPx: 30, startIndex: 4 })
+    expect(r.xOf(5) - r.xOf(4)).toBeCloseTo(150, 3)
+    expect(r.xOf(4) - r.xOf(3)).toBeCloseTo(150, 3)
+    expect(r.xOf(3) - r.xOf(2)).toBeCloseTo(120, 3)
+  })
+
+  it('opens the centre gap smoothly instead of snapping it open', () => {
+    useFrames()
+    // A wide mount, so slot 2 out is still on screen and therefore still drawn.
+    const r = makeRig({ count: 7, itemWidthPx: 100, gapPx: 20, centerGapExtraPx: 60, startIndex: 3 }, { w: 900 })
+    const step = 120
+    // The pair straddling the centre always holds the wide gap, so watch the one that
+    // actually has to change: 4→5 is narrow while 3 is selected and wide once 4 is.
+    const gap = (): number => r.xOf(5) - r.xOf(4)
+    expect(gap()).toBeCloseTo(120, 3)
+    const seen = [gap()]
+    r.hold(300, 300 - step / 2)
+    seen.push(gap())
+    for (let i = 0; i < 30; i++) {
+      r.frame()
+      seen.push(gap())
+    }
+    r.lift(300 - step / 2)
+    r.settle()
+    expect(gap()).toBeCloseTo(180, 3) // 4 is selected now
+    // It got there by passing through, not by jumping.
+    expect(seen.some((v) => v > 121 && v < 179)).toBe(true)
+    const steps = seen.slice(1).map((v, i) => Math.abs(v - seen[i]))
+    expect(Math.max(...steps)).toBeLessThan(35)
+  })
+
   it('butts the choices together at a gap of 0', () => {
     useFrames()
     const r = makeRig({ count: 5, itemWidthPx: 100, gapPx: 0 })

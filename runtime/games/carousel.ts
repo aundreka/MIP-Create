@@ -105,6 +105,7 @@ export function createCarousel(): GameModule {
   let itemWpx = 240
   let itemHpx = 240
   let gapXpx = 64
+  let centreExtraPx = 0
   let gapYpx = 34
   let rowDY = 0
   let centerScale = 1.45
@@ -198,7 +199,11 @@ export function createCarousel(): GameModule {
     // drawn span inside the viewport means that flip always happens out of sight.
     // Centre offsets are excluded on purpose: they only apply to the centre item,
     // which is nowhere near the wrap boundary.
-    span = (w / 2 + (itemW * Math.max(sideScale, centerScale)) / 2) / step + 0.02
+    // A choice at |d| >= 1 sits `extra` further out than a uniform row would put it,
+    // so it leaves the screen that much sooner; fold that into the span or the
+    // loop's wrap-around stops happening out of sight.
+    const push = clamp(centreExtraPx * s0, -step * 0.6, step * 4)
+    span = (w / 2 + (itemW * Math.max(sideScale, centerScale)) / 2 - push) / step + 0.02
 
     // Reserve room for BOTH states of both pieces, then centre that whole envelope
     // in the mount — so lifting or growing the centre choice doesn't shove the row
@@ -229,6 +234,28 @@ export function createCarousel(): GameModule {
     render()
   }
 
+  /**
+   * Where slot `d` sits, in px from the centre.
+   *
+   * A plain `d * step` spaces every choice the same, which crowds the enlarged centre
+   * one: its neighbours sit as close to it as they do to each other, even though it is
+   * half again as big. `centreExtraPx` pushes ONLY the two neighbours of the centre
+   * away, by moving everything from |d| >= 1 outward by a fixed amount — so the gap
+   * beside the centre becomes `gap + extra` while every other gap stays `gap`
+   * (slot 2 and slot 1 are both pushed by the same amount, so their spacing is
+   * unchanged).
+   *
+   * The push eases in over the first slot rather than switching on at |d| = 1, because
+   * `d` is continuous while the row moves: a step change here would read as the row
+   * snapping sideways mid-swipe. Clamped so the ease can never run backwards and
+   * reorder the row — the spread's slope peaks at 1.5, so a negative extra beyond
+   * about -step/1.5 would invert it.
+   */
+  const slotX = (d: number): number => {
+    const extra = clamp(centreExtraPx * sc(), -step * 0.6, step * 4)
+    return d * step + Math.sign(d) * smooth(clamp(Math.abs(d), 0, 1)) * extra
+  }
+
   const render = (): void => {
     const cx = w / 2 - itemW / 2
     const s = sc()
@@ -244,7 +271,7 @@ export function createCarousel(): GameModule {
       // between the two authored states, so they can differ freely and still
       // travel smoothly into each other.
       const t = smooth(clamp(1 - ad, 0, 1))
-      it.wrap.style.transform = `translate3d(${cx + d * step}px,0,0)`
+      it.wrap.style.transform = `translate3d(${cx + slotX(d)}px,0,0)`
       it.wrap.style.zIndex = String(1000 - Math.round(ad * 100))
       it.wrap.style.opacity = String(sideOpacity + (1 - sideOpacity) * t)
       const z = tiltDeg ? -Math.min(ad, 2) * itemW * 0.2 : 0
@@ -404,6 +431,7 @@ export function createCarousel(): GameModule {
       itemWpx = clamp(num(params.itemWidthPx, legacyW ?? 240), 4, 4000)
       itemHpx = clamp(num(params.itemHeightPx, itemWpx / clamp(num(params.itemAspect, 1), 0.2, 5)), 4, 4000)
       gapXpx = clamp(num(params.gapPx, legacy(params.gapPct) ?? 64), 0, 4000)
+      centreExtraPx = clamp(num(params.centerGapExtraPx, 0), -2000, 4000)
       gapYpx = clamp(num(params.labelGapPx, itemHpx * 0.14), 0, 2000)
       rowDY = clamp(num(params.rowOffsetY, 0), -4000, 4000)
       centerScale = clamp(num(params.centerScale, 1.45), 0.2, 3)
@@ -546,6 +574,7 @@ export const CAROUSEL_TEMPLATE: GameTemplate = {
     { key: 'itemWidthPx', group: 'Size & spacing', label: 'Choice width (design px)', type: 'number', min: 4, max: 4000, step: 2 },
     { key: 'itemHeightPx', group: 'Size & spacing', label: 'Choice height (design px)', type: 'number', min: 4, max: 4000, step: 2 },
     { key: 'gapPx', group: 'Size & spacing', label: 'Gap between choices (design px)', type: 'number', min: 0, max: 4000, step: 2 },
+    { key: 'centerGapExtraPx', group: 'Size & spacing', label: 'Extra gap either side of the CENTRE (design px)', type: 'number', min: -2000, max: 4000, step: 2 },
     { key: 'rowOffsetY', group: 'Size & spacing', label: 'Move the whole row up / down (design px)', type: 'number', min: -4000, max: 4000, step: 2 },
     { key: 'labelGapPx', group: 'Size & spacing', label: 'Gap under the choice, before the label (design px)', type: 'number', min: 0, max: 2000, step: 2, showIf: labelsOn },
     { key: 'sideScale', group: 'Side choices', label: 'Side choices size (×)', type: 'number', min: 0.2, max: 2, step: 0.05 },
@@ -588,6 +617,7 @@ export const CAROUSEL_TEMPLATE: GameTemplate = {
     itemWidthPx: 240,
     itemHeightPx: 240,
     gapPx: 64,
+    centerGapExtraPx: 0,
     rowOffsetY: 0,
     labelGapPx: 34,
     sideScale: 1,
