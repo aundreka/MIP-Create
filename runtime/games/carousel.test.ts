@@ -28,6 +28,8 @@ interface Rig {
   settle(): void
   /** Advance exactly one animation frame. */
   frame(): void
+  /** Press and release on one choice, without moving. */
+  tap(i: number): void
   /** Press and drag to x1, leaving the finger down, with a frame rendered. */
   hold(x0: number, x1: number): void
   /** Lift the finger that `hold` left down. */
@@ -62,7 +64,7 @@ function makeRig(params: Record<string, unknown> = {}, opts: { w?: number } = {}
   const wraps = [...root.children] as HTMLDivElement[]
   const arts = wraps.map((w) => w.firstElementChild as HTMLDivElement)
   const labels = wraps.map((w) => w.querySelector('.pa-carousel-label') as HTMLDivElement)
-  const send = (type: string, x: number): void => {
+  const send = (type: string, x: number, onto?: HTMLElement): void => {
     const e = new Event(type, { bubbles: true }) as PointerEvent
     Object.defineProperties(e, {
       pointerId: { value: 1 },
@@ -70,7 +72,7 @@ function makeRig(params: Record<string, unknown> = {}, opts: { w?: number } = {}
       clientY: { value: H / 2 },
       timeStamp: { value: now },
     })
-    root.dispatchEvent(e)
+    ;(onto ?? root).dispatchEvent(e)
   }
   // jsdom drives rAF off timers; step the clock by whole frames so the spring
   // integrates the same way it would on screen.
@@ -114,6 +116,15 @@ function makeRig(params: Record<string, unknown> = {}, opts: { w?: number } = {}
     frame() {
       now += 16
       vi.advanceTimersByTime(16)
+    },
+    tap(i) {
+      send('pointerdown', 300, wraps[i])
+      now += 30
+      // Released on the ROOT, not the choice: the root takes pointer capture in a real
+      // browser, which retargets everything after the press to itself. jsdom has no
+      // setPointerCapture, so a test that released on the choice would pass against
+      // code that only works there.
+      send('pointerup', 300)
     },
     hold(x0, x1) {
       send('pointerdown', x0)
@@ -529,6 +540,99 @@ describe('carousel', () => {
     useFrames()
     const r = makeRig({ count: 5, itemPct: 25, itemAspect: 2 }) // 100 wide ÷ 2 = 50 tall
     expect(parseFloat(r.arts[2].style.height)).toBeCloseTo(50, 3)
+  })
+
+  it('wins when the selected choice is tapped', () => {
+    useFrames()
+    const r = makeRig({ count: 5, changesToWin: 0, itemWidthPx: 80, startIndex: 2 })
+    expect(r.completed()).toBe(false)
+    r.tap(2)
+    r.settle()
+    expect(r.completed()).toBe(true)
+  })
+
+  it('wins on a tap even when swiping alone never would', () => {
+    // changesToWin 0 means the row itself never ends the game — the tap is the only
+    // way through, which is the point of it.
+    useFrames()
+    const r = makeRig({ count: 5, changesToWin: 0, itemWidthPx: 80, startIndex: 2 })
+    r.swipe(300, 300 - 100)
+    r.settle()
+    expect(r.completed()).toBe(false)
+    r.tap(3)
+    r.settle()
+    expect(r.completed()).toBe(true)
+  })
+
+  it('brings an unselected choice in rather than winning on it', () => {
+    useFrames()
+    const r = makeRig({ count: 5, changesToWin: 0, itemWidthPx: 80, gapPx: 20, startIndex: 2 })
+    r.tap(3)
+    r.settle()
+    expect(r.completed()).toBe(false) // it was not the selected one
+    expect(r.scaleOf(3)).toBeGreaterThan(1.4) // it is now
+  })
+
+  it('can be switched off, leaving a tap to only re-centre', () => {
+    useFrames()
+    const r = makeRig({ count: 5, changesToWin: 0, tapCentreWins: false, itemWidthPx: 80, startIndex: 2 })
+    r.tap(2)
+    r.settle()
+    expect(r.completed()).toBe(false)
+  })
+
+  it('pulses the tapped choice once, and settles back to its own size', () => {
+    useFrames()
+    const r = makeRig({ count: 5, changesToWin: 0, itemWidthPx: 80, centerScale: 1.5, startIndex: 2 })
+    const resting = r.scaleOf(2)
+    expect(resting).toBeCloseTo(1.5, 3)
+    r.tap(2)
+    const seen: number[] = []
+    for (let i = 0; i < 30; i++) {
+      r.frame()
+      seen.push(r.scaleOf(2))
+    }
+    const peak = Math.max(...seen)
+    expect(peak).toBeGreaterThan(resting) // it swelled...
+    expect(peak).toBeLessThan(resting * 1.2) // ...by a bump, not a jump
+    // One bump: it grows then comes back, it does not keep going.
+    expect(seen[seen.length - 1]).toBeCloseTo(resting, 3)
+    const rises = seen.slice(1).filter((v, i) => v > seen[i]).length
+    const falls = seen.slice(1).filter((v, i) => v < seen[i]).length
+    expect(rises).toBeGreaterThan(2)
+    expect(falls).toBeGreaterThan(2)
+    // Smooth on both sides — no corner at the start or the peak.
+    expect(Math.max(...seen.slice(1).map((v, i) => Math.abs(v - seen[i])))).toBeLessThan(0.05)
+  })
+
+  it('leaves the other choices alone while one pulses', () => {
+    useFrames()
+    const r = makeRig({ count: 5, changesToWin: 0, itemWidthPx: 80, startIndex: 2 })
+    const other = r.scaleOf(1)
+    r.tap(2)
+    for (let i = 0; i < 8; i++) r.frame()
+    expect(r.scaleOf(1)).toBeCloseTo(other, 5)
+  })
+
+  it('holds the win back until the pulse has played', () => {
+    useFrames()
+    const r = makeRig({ count: 5, changesToWin: 0, itemWidthPx: 80, startIndex: 2 })
+    r.tap(2)
+    r.frame()
+    expect(r.completed()).toBe(false) // still swelling
+    r.settle()
+    expect(r.completed()).toBe(true)
+  })
+
+  it('ignores further taps once it has been confirmed', () => {
+    useFrames()
+    const r = makeRig({ count: 5, changesToWin: 0, itemWidthPx: 80, gapPx: 20, startIndex: 2 })
+    r.tap(2)
+    r.settle()
+    const wonAt = r.scaleOf(2)
+    r.tap(3)
+    r.settle()
+    expect(r.scaleOf(2)).toBeCloseTo(wonAt, 3) // the row did not move on
   })
 
   it('takes the short way round the ring', () => {

@@ -43,6 +43,10 @@ const DAMPING = 2 * Math.sqrt(STIFFNESS)
 // and the most items that projection may carry it. Without the cap a hard fling on
 // a fast screen throws the row most of the way round, and the player loses track of
 // which choice they were on.
+// The confirm bump: one swell and back, so a tap on the selected choice is felt as
+// an acknowledgement rather than just ending the game.
+const PULSE_MS = 280
+const PULSE_AMP = 0.12
 const FLICK_PROJECT_S = 0.14
 const MAX_FLICK_CARRY = 3
 
@@ -100,6 +104,7 @@ export function createCarousel(): GameModule {
   let loop = true
   let live = true
   let changesToWin = 3
+  let tapWins = true
   // Sizes and gaps are DESIGN px, the unit the rest of the editor works in: the number
   // typed is the size drawn, and it does not shift when the game box is resized.
   let itemWpx = 240
@@ -149,6 +154,14 @@ export function createCarousel(): GameModule {
   let dragging = false
   let raf = 0
   let lastFrame = -1
+  // One-shot bump on a confirmed choice, advanced by the SAME clamped dt the spring
+  // uses rather than by wall-clock elapsed. A dropped frame — the audio starting, the
+  // scene preparing to change — would otherwise jump straight into the middle of the
+  // swell, and the bump would only ever be seen decaying.
+  let pulseIdx = -1
+  let pulseT = 0
+  let pulseK = 1
+  const timers: number[] = []
   // Pointer samples for the release velocity (two are enough and stay jitter-free).
   let dragId = -1
   let dragStartX = 0
@@ -158,6 +171,10 @@ export function createCarousel(): GameModule {
   let sampleT = 0
   let prevSampleX = 0
   let prevSampleT = 0
+  // Which choice the press landed on. Captured at pointerDOWN because the root takes
+  // pointer capture, which RETARGETS the later events to the root itself — by pointerup
+  // the original target is long gone, and a tap would find nothing under it.
+  let downHit: Item | null = null
 
   let published = -1
   let settledIdx = 0 // what is at the centre right now (drives the pass-by tick)
@@ -284,7 +301,7 @@ export function createCarousel(): GameModule {
       it.wrap.style.opacity = String(sideOpacity + (1 - sideOpacity) * t)
       const z = tiltDeg ? -Math.min(ad, 2) * itemW * 0.2 : 0
       const ry = tiltDeg ? -clamp(d, -1.6, 1.6) * tiltDeg : 0
-      const scale = lerp(sideScale, centerScale, t)
+      const scale = lerp(sideScale, centerScale, t) * (it.index === pulseIdx ? pulseK : 1)
       it.art.style.transform = `translate3d(${centerDX * s * t}px,${centerDY * s * t}px,${z}px) rotateY(${ry}deg) scale(${scale})`
       if (!showLabels) continue
       const lx = lerp(labelDX, labelCenterDX, t) * s
@@ -330,20 +347,57 @@ export function createCarousel(): GameModule {
     completeCb?.()
   }
 
+  /** Tapping the choice that is already selected commits to it. */
+  const confirm = (): void => {
+    if (done) return
+    done = true
+    pulseIdx = idxOf(target)
+    pulseT = 0
+    pulseK = 1
+    render() // start from the resting size, so the bump has no step at its foot
+    ctx.sfx.play('correct')
+    run()
+    // Let the bump play out before the scene takes over: a win that cuts away
+    // mid-swell never reads as a confirmation of what was tapped.
+    timers.push(
+      window.setTimeout(() => {
+        winCb?.()
+        ctx.sfx.play('gameWin')
+        completeCb?.()
+      }, PULSE_MS),
+    )
+  }
+
   const tick = (now: number): void => {
     const dt = lastFrame < 0 ? 1 / 60 : Math.min(0.032, (now - lastFrame) / 1000)
     lastFrame = now
+    if (pulseIdx >= 0) {
+      pulseT += dt
+      const u = pulseT / (PULSE_MS / 1000)
+      // sin over half a turn: starts and ends at rest, peaks in the middle, so the
+      // swell has no corner at either end.
+      if (u >= 1) {
+        pulseIdx = -1
+        pulseK = 1
+      } else pulseK = 1 + PULSE_AMP * Math.sin(Math.PI * u)
+    }
     if (!dragging) {
       vel += (-STIFFNESS * (pos - target) - DAMPING * vel) * dt
       pos += vel * dt
       if (Math.abs(pos - target) < 0.0008 && Math.abs(vel) < 0.01) {
         pos = target
         vel = 0
-        lastFrame = -1
-        raf = 0
         render()
         passCentre()
         settle()
+        // A pulse outlives the row coming to rest — keep the loop alive for it, or the
+        // confirmed choice freezes mid-swell.
+        if (pulseIdx >= 0) {
+          raf = requestAnimationFrame(tick)
+          return
+        }
+        lastFrame = -1
+        raf = 0
         return
       }
     }
@@ -367,12 +421,13 @@ export function createCarousel(): GameModule {
   }
 
   const onDown = (e: PointerEvent): void => {
-    if (done && changesToWin > 0) return
+    if (done) return
     dragId = e.pointerId
     dragging = true
     moved = 0
     dragStartX = e.clientX
     dragStartPos = pos
+    downHit = items.find((it) => it.wrap.contains(e.target as Node)) ?? null
     vel = 0
     prevSampleX = sampleX = e.clientX
     prevSampleT = sampleT = e.timeStamp
@@ -400,15 +455,20 @@ export function createCarousel(): GameModule {
     if (!dragging || e.pointerId !== dragId) return
     dragging = false
     dragId = -1
+    const pressed = downHit
+    downHit = null
     ctx.root.releasePointerCapture?.(e.pointerId)
     const dt = (sampleT - prevSampleT) / 1000
     // Finger px/s → item units/s, sign-flipped: dragging left advances the row.
     vel = dt > 0.001 ? -(sampleX - prevSampleX) / dt / step : 0
     if (moved < 6) {
-      // A tap, not a swipe: bring whichever item was tapped to the centre.
-      const hit = items.find((it) => it.wrap.contains(e.target as Node))
+      const hit = pressed
       const base = Math.round(pos)
-      goTo(hit ? base + (loop ? wrapDelta(hit.index - base, count) : hit.index - base) : base)
+      // Tapping the choice that is already selected commits to it; tapping any other
+      // brings that one to the centre instead. `target` rather than `pos`, so a tap
+      // during the settle still counts as confirming the choice on its way in.
+      if (hit && tapWins && hit.index === idxOf(target)) confirm()
+      else goTo(hit ? base + (loop ? wrapDelta(hit.index - base, count) : hit.index - base) : base)
       vel = 0
     } else {
       goTo(landingIndex(pos, vel))
@@ -431,6 +491,7 @@ export function createCarousel(): GameModule {
       loop = params.loop !== false
       live = params.liveUpdate !== false
       changesToWin = Math.max(0, Math.round(num(params.changesToWin, 3)))
+      tapWins = params.tapCentreWins !== false
       // Projects authored before these were design px carry the old % of the game
       // width; convert them once here so nothing has to be re-dialled by hand.
       const designW = ctx.root.clientWidth / (sc() || 1) || 1080
@@ -533,7 +594,7 @@ export function createCarousel(): GameModule {
     },
     relayout: layout,
     getHint(): HintMove | null {
-      if (done && changesToWin > 0) return null
+      if (done) return null
       const r = ctx.root.getBoundingClientRect()
       const y = r.top + r.height / 2
       const reach = Math.min(r.width * 0.3, step * 1.2)
@@ -548,6 +609,8 @@ export function createCarousel(): GameModule {
     destroy() {
       if (raf) cancelAnimationFrame(raf)
       raf = 0
+      for (const t of timers) window.clearTimeout(t)
+      timers.length = 0
       ctx.root.removeEventListener('pointerdown', onDown)
       ctx.root.removeEventListener('pointermove', onMove)
       ctx.root.removeEventListener('pointerup', onUp)
@@ -578,6 +641,7 @@ export const CAROUSEL_TEMPLATE: GameTemplate = {
     { key: 'count', group: 'Choices', label: 'Choices', type: 'number', min: 2, max: 12, step: 1 },
     { key: 'labels', group: 'Choices', label: 'Labels under each choice (comma-separated)', type: 'text', showIf: typedLabels },
     { key: 'changesToWin', group: 'Choices', label: 'Changes before it counts as won (0 = never, the CTA ends it)', type: 'number', min: 0, max: 12, step: 1 },
+    { key: 'tapCentreWins', group: 'Choices', label: 'Tapping the selected choice wins', type: 'boolean' },
     { key: 'loop', group: 'Choices', label: 'Loop around forever', type: 'boolean' },
     { key: 'startIndex', group: 'Choices', label: 'Starting choice (0-based, -1 = middle)', type: 'number', min: -1, max: 11, step: 1 },
     { key: 'itemWidthPx', group: 'Size & spacing', label: 'Choice width (design px)', type: 'number', min: 4, max: 4000, step: 2 },
@@ -622,6 +686,7 @@ export const CAROUSEL_TEMPLATE: GameTemplate = {
     linkGroup: 'carousel',
     liveUpdate: true,
     changesToWin: 3,
+    tapCentreWins: true,
     loop: true,
     startIndex: -1,
     itemWidthPx: 240,
