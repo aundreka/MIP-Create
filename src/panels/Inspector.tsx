@@ -3495,6 +3495,10 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                         a side choice to bring it in.
                       </div>
                       <div className="hint pad">
+                        Labels have their own position: <b>Where the label sits</b> puts it below, above or right on the choice, and the <b>Label nudge</b> pair moves it from there
+                        — with a separate pair for the selected one. A nudge moves the label only; the choices stay where they are.
+                      </div>
+                      <div className="hint pad">
                         The two choices either side of the centre get their own spacing: <b>Extra gap either side of the CENTRE</b> adds to the regular gap for those two only, so
                         an enlarged centre stops crowding its neighbours. Negative pulls them in. Remember the centre is scaled up, so it eats into its own gap — the visible space
                         is always smaller than the number.

@@ -444,6 +444,68 @@ describe('carousel', () => {
     expect(parseFloat(b.wraps[2].style.top)).toBeCloseTo(parseFloat(b0) - 50, 3)
   })
 
+  it('moves the label without moving the choices', () => {
+    useFrames()
+    const a = makeRig({ count: 3, labels: 'a, b, c', itemWidthPx: 80, itemHeightPx: 80 })
+    const artTop = a.arts[1].style.top
+    const wrapTop = a.wraps[1].style.top
+    document.body.innerHTML = ''
+    const b = makeRig({ count: 3, labels: 'a, b, c', itemWidthPx: 80, itemHeightPx: 80, labelOffsetY: -200 })
+    // Nudging a label is about the label. The row must stay exactly where it was.
+    expect(b.arts[1].style.top).toBe(artTop)
+    expect(b.wraps[1].style.top).toBe(wrapTop)
+  })
+
+  it('nudges the label by exactly what it was asked for', () => {
+    useFrames()
+    const a = makeRig({ count: 3, labels: 'a, b, c', itemWidthPx: 80, itemHeightPx: 80 })
+    const base = parseFloat(a.labels[1].style.top)
+    document.body.innerHTML = ''
+    const b = makeRig({ count: 3, labels: 'a, b, c', itemWidthPx: 80, itemHeightPx: 80, labelOffsetY: -30, labelOffsetX: 12 })
+    expect(parseFloat(b.labels[1].style.top)).toBeCloseTo(base, 3) // the anchor is unchanged...
+    expect(b.labelShift(0)).toEqual({ x: 12, y: -30 }) // ...the nudge is the transform (a side slot; 1 of 3 is the centre)
+  })
+
+  it('gives the centre label a position of its own', () => {
+    useFrames()
+    const r = makeRig({ count: 5, labels: 'a, b, c, d, e', itemWidthPx: 80, labelOffsetY: 8, labelCenterOffsetY: 44, labelCenterOffsetX: -10, startIndex: 2 })
+    expect(r.labelShift(2)).toEqual({ x: -10, y: 44 }) // selected
+    expect(r.labelShift(1)).toEqual({ x: 0, y: 8 }) // every other slot
+  })
+
+  it('puts the label above the choice when asked', () => {
+    useFrames()
+    const below = makeRig({ count: 3, labels: 'a, b, c', itemWidthPx: 80, itemHeightPx: 80 })
+    const artY = parseFloat(below.arts[1].style.top)
+    expect(parseFloat(below.labels[1].style.top)).toBeGreaterThan(artY)
+    document.body.innerHTML = ''
+    const above = makeRig({ count: 3, labels: 'a, b, c', itemWidthPx: 80, itemHeightPx: 80, labelPlacement: 'above' })
+    expect(parseFloat(above.labels[1].style.top)).toBeLessThan(parseFloat(above.arts[1].style.top))
+  })
+
+  it('can sit the label right on top of the choice', () => {
+    useFrames()
+    const r = makeRig({ count: 3, labels: 'a, b, c', itemWidthPx: 80, itemHeightPx: 80, labelPlacement: 'over' })
+    // The label's anchor is the art's own centre, so it reads as a caption on the art.
+    const artCentre = parseFloat(r.arts[1].style.top) + 80 / 2
+    expect(parseFloat(r.labels[1].style.top)).toBeCloseTo(artCentre, 3)
+  })
+
+  it('still reserves room for the label wherever it is placed', () => {
+    useFrames()
+    // Above or below, the row is centred with the label's box accounted for — so the
+    // choices don't ride against the top of the game box when the label moves over them.
+    const below = makeRig({ count: 3, labels: 'a, b, c', itemWidthPx: 80, itemHeightPx: 80 })
+    document.body.innerHTML = ''
+    const above = makeRig({ count: 3, labels: 'a, b, c', itemWidthPx: 80, itemHeightPx: 80, labelPlacement: 'above' })
+    // style.top is the label's CENTRE but the art's TOP EDGE, so compare both against
+    // the art's centre.
+    const centreOf = (r: Rig): number => parseFloat(r.arts[1].style.top) + 80 / 2
+    const gapBelow = parseFloat(below.labels[1].style.top) - centreOf(below)
+    const gapAbove = centreOf(above) - parseFloat(above.labels[1].style.top)
+    expect(gapAbove).toBeCloseTo(gapBelow, 3) // mirrored, same spacing
+  })
+
   it('sets the gap under the choice before its label', () => {
     useFrames()
     const a = makeRig({ count: 3, labels: 'a, b, c', itemWidthPx: 80, itemHeightPx: 80, labelGapPx: 10 })

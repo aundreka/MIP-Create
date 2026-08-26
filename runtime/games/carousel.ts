@@ -107,6 +107,7 @@ export function createCarousel(): GameModule {
   let gapXpx = 64
   let centreExtraPx = 0
   let gapYpx = 34
+  let labelPlace = 'below'
   let rowDY = 0
   let centerScale = 1.45
   let sideScale = 1
@@ -211,12 +212,19 @@ export function createCarousel(): GameModule {
     const s = sc()
     const baseH = items.length ? Math.max(...items.map((it) => labelHeightOf(it, false))) : 0
     const cenH = items.length ? Math.max(...items.map((it) => labelHeightOf(it, true))) : 0
-    labelCy = itemH / 2 + gapY + baseH / 2
+    // Where the label sits before any nudge: under the choice, over it, or on top of
+    // it. Having the three as a choice means the common moves don't have to be derived
+    // as a large negative number.
+    const away = itemH / 2 + gapY + baseH / 2
+    labelCy = labelPlace === 'above' ? -away : labelPlace === 'over' ? 0 : away
     let minY = Math.min((-itemH * sideScale) / 2, (-itemH * centerScale) / 2 + centerDY * s)
     let maxY = Math.max((itemH * sideScale) / 2, (itemH * centerScale) / 2 + centerDY * s)
     if (showLabels) {
-      minY = Math.min(minY, labelCy - baseH / 2 + labelDY * s, labelCy - cenH / 2 + labelCenterDY * s)
-      maxY = Math.max(maxY, labelCy + baseH / 2 + labelDY * s, labelCy + cenH / 2 + labelCenterDY * s)
+      // The label's own box is reserved, so a labelled row still sits where it always
+      // has. Its NUDGES are deliberately left out: moving a label has to move the
+      // label, not shove the choices aside to make room for where it went.
+      minY = Math.min(minY, labelCy - cenH / 2)
+      maxY = Math.max(maxY, labelCy + cenH / 2)
     }
     artCy = -minY
     const top = (h - (maxY - minY)) / 2 + rowDY * s
@@ -433,6 +441,7 @@ export function createCarousel(): GameModule {
       gapXpx = clamp(num(params.gapPx, legacy(params.gapPct) ?? 64), 0, 4000)
       centreExtraPx = clamp(num(params.centerGapExtraPx, 0), -2000, 4000)
       gapYpx = clamp(num(params.labelGapPx, itemHpx * 0.14), 0, 2000)
+      labelPlace = str(params.labelPlacement, 'below')
       rowDY = clamp(num(params.rowOffsetY, 0), -4000, 4000)
       centerScale = clamp(num(params.centerScale, 1.45), 0.2, 3)
       sideScale = clamp(num(params.sideScale, 1), 0.2, 2)
@@ -584,6 +593,7 @@ export const CAROUSEL_TEMPLATE: GameTemplate = {
     { key: 'centerOffsetX', group: 'Centre (selected)', label: 'CENTRE choice nudge X (design px)', type: 'number', min: -2000, max: 2000, step: 1 },
     { key: 'centerOffsetY', group: 'Centre (selected)', label: 'CENTRE choice nudge Y (design px, − is up)', type: 'number', min: -2000, max: 2000, step: 1 },
     { key: 'showLabels', group: 'Labels', label: 'Show the labels', type: 'boolean' },
+    { key: 'labelPlacement', group: 'Labels', label: 'Where the label sits', type: 'select', options: ['below', 'above', 'over'], showIf: labelsOn },
     { key: 'labelOffsetX', group: 'Labels', label: 'Label nudge X, every slot (design px)', type: 'number', min: -2000, max: 2000, step: 1, showIf: labelsOn },
     { key: 'labelOffsetY', group: 'Labels', label: 'Label nudge Y, every slot (design px, − is up)', type: 'number', min: -2000, max: 2000, step: 1, showIf: labelsOn },
     { key: 'labelCenterOffsetX', group: 'Labels', label: 'CENTRE label nudge X (design px)', type: 'number', min: -2000, max: 2000, step: 1, showIf: labelsOn },
@@ -627,6 +637,7 @@ export const CAROUSEL_TEMPLATE: GameTemplate = {
     centerOffsetX: 0,
     centerOffsetY: 0,
     showLabels: true,
+    labelPlacement: 'below',
     labelOffsetX: 0,
     labelOffsetY: 0,
     labelCenterOffsetX: 0,
