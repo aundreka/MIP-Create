@@ -3058,9 +3058,13 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
         <Toggle label="Show after basket moved" checked={!!el.showAfterInteraction} onChange={(v) => patchElement(id, { showAfterInteraction: v || undefined })} />
       )}
       {el.type === 'cta' ? (
-        // The CTA floats above overlays by default, so its toggle drives the opt-OUT flag:
-        // untick it and the win/lose card covers the button (dimmed, still visible) instead.
-        <Toggle label="Above overlays" checked={!el.belowOverlay} onChange={(v) => patchElement(id, { belowOverlay: v ? undefined : true })} />
+        // The CTA already floats above overlays, so an "Above overlays" toggle for it would
+        // render pre-ticked and read as a no-op. Phrase it as the opt-IN it is instead: off
+        // by default, and ticking it drops the button under the win/lose card.
+        <>
+          <Toggle label="Below overlays (dimmed, not hidden)" checked={!!el.belowOverlay} onChange={(v) => patchElement(id, { belowOverlay: v || undefined })} />
+          {el.belowOverlay && <div className="hint pad">The win/lose card now covers the CTA — it shows through the dim instead of on top of it, and taps land on the card while it is up.</div>}
+        </>
       ) : (
         <Toggle label="Above overlays" checked={!!el.overlayImmune} onChange={(v) => patchElement(id, { overlayImmune: v || undefined })} />
       )}
