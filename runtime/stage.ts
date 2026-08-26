@@ -39,7 +39,7 @@ import { createButtonContent, tapFeedbackByNode, wireSceneNav, type TapFeedback 
 import { createChoiceContent } from './elements/choice'
 import { createRipple, dragGesture, elementHintPoint, holdPress, rippleFitForRadius, RIPPLE_HAND_REF_W, RIPPLE_TIMING, tapPress } from './hint'
 import { localize, localizeElement } from './i18n'
-import { getPicks, isPicked, onPicksChanged, togglePick } from './selection'
+import { getPicks, isPicked, togglePick } from './selection'
 import { createEndsceneContent, updateEndsceneMedia, htmlEndsceneMediaEl, mediaNaturalSize, endsceneCoverFrame } from './elements/endscene'
 import { applyUnboxingImages, createUnboxingContent } from './elements/unboxing'
 import { createConfetti, createConfettiContent, type ConfettiController } from './elements/confetti'
@@ -1213,7 +1213,6 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
   let linkedPressWired = false // linked-button press relay attached once
   let dragWired = false // drag-and-drop slots attached once
   let picksWired = false // tap-pick / fill / generate attached once
-  let picksOff: (() => void) | null = null // selection-store subscription for fill slots
   let scratchWired = false // scratch-cover coatings attached once
   const scratchDisposers: (() => void)[] = []
   const tallies = new Map<string, number>() // running reveal totals, keyed by text element id
@@ -2049,7 +2048,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
         const picks = recs.filter((r) => r.el.pick)
         const fills = recs.filter((r) => r.el.fill)
         const gens = recs.filter((r) => r.el.generate)
-        if (picks.length || gens.length || fills.length) {
+        if (picks.length || gens.length) {
           // place an image/video covering a rec's layer (fill slots + generate result)
           const fillInto = (rec: Rec, src: string, isVideo: boolean): void => {
             const prev = rec.anim.querySelector('.pa-fill')
@@ -2097,9 +2096,6 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
             }
           }
           requestAnimationFrame(() => refreshFills()) // initial (cross-scene picks)
-          // A game can own a group too (the carousel publishes its centre choice),
-          // so mirror every store change — not just the taps wired below.
-          picksOff = onPicksChanged((g) => refreshFills(g))
 
           for (const p of picks) {
             p.outer.style.cursor = 'pointer'
@@ -2351,7 +2347,6 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       offSetText()
       offScratchProgress?.()
       offBookPage?.()
-      picksOff?.()
       clearTimelineTimers()
       for (const t of enterSfxTimers) window.clearTimeout(t)
       enterSfxTimers.length = 0
