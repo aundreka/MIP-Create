@@ -25,7 +25,7 @@
 
 import type { GameContext, GameModule, GameTemplate, HintMove } from './types'
 import { num, str } from './types'
-import { onProgress, progressMatches, requestProgress, type ProgressDetail } from './progresschannel'
+import { onProgress, PROGRESS_SOURCE_NONE, progressMatches, requestProgress, type ProgressDetail } from './progresschannel'
 
 /** Fold an opacity into a colour so the TRACK can be translucent without dragging
  * the fill sitting inside it down with it (an `opacity` on the track element would).
@@ -387,6 +387,10 @@ export function createProgressBar(): GameModule {
       started = true
       value = 0
       paintValue(false)
+      // A decorative bar subscribes to nothing and asks nobody: it never fills, and
+      // so — since finish() is only ever reached through receive() — it can never win
+      // the scene out from under the mechanic that is actually being played.
+      if (sourceGameId === PROGRESS_SOURCE_NONE) return
       offProgress = onProgress(ctx.root, receive)
       // Mounting order is scene order, so a source below this bar in the stack has
       // already announced its total by now. Ask again rather than starting blind.

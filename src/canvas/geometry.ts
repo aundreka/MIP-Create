@@ -112,3 +112,14 @@ export function resizeBox(
   else if (hy < 0) ((h = Math.max(min, start.h - dy)), (top = bottom - h))
   return { x: Math.round(left + ax * w), y: Math.round(top + ay * h), w: Math.round(w), h: Math.round(h) }
 }
+
+// ---- canvas zoom range ------------------------------------------------------
+// Shared by the Topbar +/- buttons and the wheel zoom so both stop at the same
+// place. The ceiling is deliberately well past 100% — pixel-nudging small art
+// (handguide dots, badge text) needs real magnification.
+export const MIN_ZOOM = 0.05
+export const MAX_ZOOM = 16
+
+export function clampZoom(z: number): number {
+  return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z))
+}

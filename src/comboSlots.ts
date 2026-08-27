@@ -10,8 +10,8 @@
 //   * an element holds at most one slot — assigning one that already sits somewhere
 //     MOVES it rather than cloning the role
 //   * a layer, drag art or caption keeps its canvas-visibility flag when it moves
-//   * the four drag models (combo role / clean role / basket item / plain draggable)
-//     are exclusive
+//   * the drag models (combo role / clean role / tap role / basket item / plain
+//     draggable) are exclusive
 
 import type { ComboRoleConfig, SceneElement } from '../runtime/scene'
 
@@ -63,6 +63,8 @@ export function assignComboSlot(args: AssignArgs): ComboSlotEdit[] {
       },
       basketItem: undefined,
       cleanRole: undefined,
+      tapRole: undefined,
+      revealRole: undefined,
       drag: undefined,
     },
   })

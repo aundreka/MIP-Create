@@ -30,6 +30,10 @@ export interface ProgressDetail {
   to?: string
 }
 
+/** `sourceGameId` for a bar that is deliberately fed by nothing at all. Not the empty
+ * string, which means "no preference" and therefore takes every source going. */
+export const PROGRESS_SOURCE_NONE = 'none'
+
 const PROGRESS_EVENT = 'pa-progress'
 const REQUEST_EVENT = 'pa-progress-request'
 
@@ -77,8 +81,15 @@ export function onProgressRequest(root: HTMLElement, fn: () => void): () => void
  * the bar the source addressed it to and `self` is who is asking. Either side may
  * narrow, and an empty string on either is "no preference" — which is the default at
  * both ends, so a scene with one bar and one mechanic needs no wiring at all.
+ *
+ * `want` of PROGRESS_SOURCE_NONE is the deliberate opposite of the empty default: a
+ * bar that listens to NOTHING. Without it "unwired" and "wired to everything" are the
+ * same state, so a second bar meant as decoration would silently couple itself to
+ * whatever mechanic happened to be in the scene — and, being a game mount that can
+ * win, could then end the scene on its own.
  */
 export function progressMatches(want: string, from: string, to: string, self: string): boolean {
+  if (want === PROGRESS_SOURCE_NONE) return false
   if (want && want !== from) return false
   if (to && to !== self) return false
   return true

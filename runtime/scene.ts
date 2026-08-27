@@ -122,6 +122,15 @@ export interface ElementAnimations {
   cleanPick?: AnimSpec
   cleanWipe?: AnimSpec
   cleanDrop?: AnimSpec
+  // Replayed when a Tap to remove game in the same scene clears an obstacle. The
+  // obstacle's OWN reaction to being tapped is the ordinary `tap` phase above, which
+  // fires for any tappable element; this is the separate beat of it actually going, so
+  // a counter, a headline or the replacement art can react to that instead.
+  tapRemove?: AnimSpec
+  // Replayed when a Tap to reveal game in the same scene uncovers something. Fires
+  // while the cover is still visible, so an animation on the cover itself plays before
+  // it leaves.
+  tapReveal?: AnimSpec
   // Additional specs stacked ON TOP of the primary one in each phase, played together with it
   // (e.g. entrance = pop + shine). Empty/absent = just the primary. The primary must exist for
   // extras to apply; extras share the primary entrance's trigger.
@@ -138,6 +147,8 @@ export interface ElementAnimations {
   cleanPickExtra?: AnimSpec[]
   cleanWipeExtra?: AnimSpec[]
   cleanDropExtra?: AnimSpec[]
+  tapRemoveExtra?: AnimSpec[]
+  tapRevealExtra?: AnimSpec[]
 }
 
 // ---- colour adjustment -----------------------------------------------------
@@ -523,6 +534,9 @@ export interface HandguideConfig {
   // row has been swiggled at least once.
   // 'dragclean' carries the Drag to clean tool onto the obstacle nearest to it and
   // wipes, re-targeting on its own as obstacles disappear.
+  // 'tapremove' taps the next obstacle a Tap to remove board still has standing, and
+  // moves to the following one as they go.
+  // 'tapreveal' does the same for the next cover a Tap to reveal board has not opened.
   mode:
     | 'smart'
     | 'tap'
@@ -535,6 +549,8 @@ export interface HandguideConfig {
     | 'combo'
     | 'carousel'
     | 'dragclean'
+    | 'tapremove'
+    | 'tapreveal'
     | 'brush'
     | 'still'
     | 'hold'
@@ -750,8 +766,55 @@ export interface ComboRoleConfig {
 export interface CleanRoleConfig {
   gameId?: string
   /** 'draggable' is the tool the player carries (one per game — the first tagged
-   * wins); 'obstacle' is a thing it wipes away (any number). */
-  role: 'draggable' | 'obstacle'
+   * wins); 'obstacle' is a thing it wipes away (any number); 'attachment' is extra
+   * art belonging to ONE obstacle — a shadow, a shine, a label — which is never
+   * hit-tested, never counts toward the total, and leaves exactly when its obstacle
+   * does. */
+  role: 'draggable' | 'obstacle' | 'attachment'
+  /** 'attachment' only: the element id of the obstacle it belongs to.
+   *
+   * An id rather than a position in a list, so nothing renumbers — deleting the second
+   * of five obstacles cannot silently re-point the fifth one's shadow at somebody
+   * else's stain. An attachment whose obstacle is gone is simply inert. */
+  ofId?: string
+}
+
+// Tap to remove: which part an ordinary placed element plays. Assigned from the
+// GAME's panel (see src/tapSlots.ts), the same way the combo board and drag-to-clean
+// are, so one screen owns the whole wiring.
+//
+// Like those, the game touches an element's LOGIC and nothing else. Where it sits, how
+// big it is, how it is cropped and what it animates are all still the element's own.
+export interface TapRoleConfig {
+  gameId?: string
+  /** 'obstacle' is a thing the player taps away; 'after' is what one turns INTO —
+   * placed where the author wants the result, hidden until its obstacle is tapped. */
+  role: 'obstacle' | 'after'
+  /** Which obstacle this is (1-based). An 'after' carries the index of the obstacle it
+   * replaces, and several may share one — a tile, a sparkle and a label can each be a
+   * separately placed element that all arrive together. */
+  index?: number
+  /** 'after' only, authoring-only: keep it visible on the editor canvas while it is
+   * being positioned. Play always starts with every one of them hidden, so this can
+   * never leak into the playable — it exists so the author can see one at a time
+   * instead of the whole stack at once. */
+  showOnCanvas?: boolean
+}
+
+// Tap to reveal: which part an ordinary placed element plays. Assigned from the
+// GAME's panel (see src/revealSlots.ts), like the rest of this family.
+export interface RevealRoleConfig {
+  gameId?: string
+  /** 'cover' is the thing the player taps; 'reveal' is what that tap brings up —
+   * placed where the author wants it, hidden until then. */
+  role: 'cover' | 'reveal'
+  /** 'reveal' only: the element id of the cover that brings it up. An id rather than a
+   * position in a list, so nothing renumbers when a cover is un-assigned. */
+  ofId?: string
+  /** 'reveal' only, authoring-only: keep it visible on the editor canvas while it is
+   * being positioned. Play always starts with every one of them hidden, so this can
+   * never leak into the playable. */
+  showOnCanvas?: boolean
 }
 
 export interface SlotConfig {
@@ -1078,6 +1141,8 @@ export interface SceneElement {
   basketItem?: BasketItemConfig
   comboRole?: ComboRoleConfig
   cleanRole?: CleanRoleConfig
+  tapRole?: TapRoleConfig
+  revealRole?: RevealRoleConfig
   slot?: SlotConfig
   pick?: PickConfig
   fill?: FillConfig

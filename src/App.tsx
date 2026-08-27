@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { EditorCanvas } from './canvas/EditorCanvas'
+import { clampZoom } from './canvas/geometry'
 import { buildCommands } from './commands'
 import { ContextToolbar } from './panels/ContextToolbar'
 import { Inspector } from './panels/Inspector'
@@ -13,6 +14,7 @@ import { currentProjectId, openProject } from './projects'
 import { addAsset, addElement, getState, hasElementClip, nextId, pasteElements, selectOnly, setActiveScene } from './store'
 import { readImageFile } from './bridge'
 import { makeBackground, makeImage } from './factories'
+import { getFlag, setFlag } from './uiState'
 
 // On-demand surfaces — each becomes its own chunk loaded when first opened, so the
 // initial editor (canvas + panels) ships lean (JSZip, the funnel/MIP/SVG builders,
@@ -33,10 +35,12 @@ const QaCheckPanel = lazy(() => import('./panels/QaCheckPanel').then((m) => ({ d
 const PreviewOverlay = lazy(() => import('./preview/PreviewOverlay').then((m) => ({ default: m.PreviewOverlay })))
 const UploadModal = lazy(() => import('./panels/UploadModal').then((m) => ({ default: m.UploadModal })))
 
-const clampZoom = (z: number): number => Math.max(0.05, Math.min(3, z)) // matches the canvas wheel-zoom range
-
 export function App(): JSX.Element {
   const [zoom, setZoom] = useState(1)
+  // Resize handles can swallow small art when zoomed right in — this hides them
+  // (the selection outline stays) without deselecting. Persisted across sessions.
+  const [showHandles, setShowHandles] = useState(() => getFlag('canvasHandles', true))
+  const toggleHandles = (): void => setShowHandles((v) => (setFlag('canvasHandles', !v), !v))
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const [fitSignal, setFitSignal] = useState(0)
   const [preview, setPreview] = useState(() => location.hash.toLowerCase().includes('preview'))
@@ -96,15 +100,19 @@ export function App(): JSX.Element {
     [],
   )
 
-  // Cmd/Ctrl+K opens the command palette (ignored while typing in a field).
+  // Cmd/Ctrl+K opens the command palette, Cmd/Ctrl+Shift+H toggles the canvas
+  // resize handles (both ignored while typing in a field).
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      const t = e.target as HTMLElement
+      const tag = t?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
       if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
-        const t = e.target as HTMLElement
-        const tag = t?.tagName
-        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
         e.preventDefault()
         setCmdK((v) => !v)
+      } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'h' || e.key === 'H')) {
+        e.preventDefault()
+        toggleHandles()
       }
     }
     window.addEventListener('keydown', onKey)
@@ -212,6 +220,8 @@ export function App(): JSX.Element {
           <Topbar
             zoom={zoom}
             onZoom={(z) => setZoom(clampZoom(z))}
+            showHandles={showHandles}
+            onToggleHandles={toggleHandles}
             onFit={() => setFitSignal((n) => n + 1)}
             onPreview={() => { setPreviewScene(null); setPreview(true) }}
             onSaveTemplate={() => setTemplates(true)}
@@ -237,7 +247,7 @@ export function App(): JSX.Element {
             </DockPanel>
             <div className="canvas-col">
               <ContextToolbar />
-              <EditorCanvas zoom={zoom} pan={pan} setZoom={(z) => setZoom(clampZoom(z))} setPan={setPan} fitSignal={fitSignal} />
+              <EditorCanvas zoom={zoom} pan={pan} setZoom={(z) => setZoom(clampZoom(z))} setPan={setPan} fitSignal={fitSignal} showHandles={showHandles} />
               <Timeline />
             </div>
             <DockPanel id="inspector" side="right" defaultWidth={286} min={240} max={520}>

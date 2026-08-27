@@ -260,6 +260,8 @@ export type Phase =
   | 'cleanPick'
   | 'cleanWipe'
   | 'cleanDrop'
+  | 'tapRemove'
+  | 'tapReveal'
 export function phaseSpecs(el: SceneElement, phase: Phase): AnimSpec[] {
   const a = el.animations
   if (!a) return []
@@ -289,6 +291,8 @@ export function phaseSpecs(el: SceneElement, phase: Phase): AnimSpec[] {
             | 'cleanPickExtra'
             | 'cleanWipeExtra'
             | 'cleanDropExtra'
+            | 'tapRemoveExtra'
+            | 'tapRevealExtra'
         ] ?? legacyExtra)
   if (Array.isArray(extra)) for (const s of extra) if (s) out.push(s)
   return out
@@ -311,6 +315,8 @@ const LIGHTRAY_PHASES: Phase[] = [
   'cleanPick',
   'cleanWipe',
   'cleanDrop',
+  'tapRemove',
+  'tapReveal',
 ]
 
 /** The lightray spec from ANY phase, WITH the phase that authored it — drives the .pa-lightray
@@ -462,6 +468,15 @@ export function composeCleanEventAnim(el: SceneElement, event: 'cleanPick' | 'cl
   return composeOneShotAnim(el, event)
 }
 
+/** The Tap to remove and Tap to reveal beats, on the same shape again. */
+export function composeTapRemoveAnim(el: SceneElement): string {
+  return composeOneShotAnim(el, 'tapRemove')
+}
+
+export function composeTapRevealAnim(el: SceneElement): string {
+  return composeOneShotAnim(el, 'tapReveal')
+}
+
 /**
  * A one-shot phase (game win / tap) followed by the element's ordinary loop, held
  * back until the phase has finished so the two never fight over transform. Falls
@@ -470,7 +485,7 @@ export function composeCleanEventAnim(el: SceneElement, event: 'cleanPick' | 'cl
  */
 function composeOneShotAnim(
   el: SceneElement,
-  phase: 'gameWin' | 'tap' | 'thoughtSpawn' | 'thoughtWhack' | 'comboPick' | 'comboDrop' | 'comboNext' | 'cleanPick' | 'cleanWipe' | 'cleanDrop',
+  phase: 'gameWin' | 'tap' | 'thoughtSpawn' | 'thoughtWhack' | 'comboPick' | 'comboDrop' | 'comboNext' | 'cleanPick' | 'cleanWipe' | 'cleanDrop' | 'tapRemove' | 'tapReveal',
 ): string {
   const parts: string[] = []
   let loopDelay = 0

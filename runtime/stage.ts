@@ -20,6 +20,8 @@ import {
   composeGameWinAnim,
   composeTapAnim,
   composeCleanEventAnim,
+  composeTapRemoveAnim,
+  composeTapRevealAnim,
   composeComboEventAnim,
   composeThoughtEventAnim,
   entranceLeadDelayMs,
@@ -176,6 +178,8 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     | 'combo'
     | 'carousel'
     | 'dragclean'
+    | 'tapremove'
+    | 'tapreveal'
     | 'brush'
     | 'still'
     | 'hold' = 'tap'
@@ -209,6 +213,10 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     kind = 'carousel'
   } else if (cfg.mode === 'dragclean') {
     kind = 'dragclean'
+  } else if (cfg.mode === 'tapremove') {
+    kind = 'tapremove'
+  } else if (cfg.mode === 'tapreveal') {
+    kind = 'tapreveal'
   } else if (cfg.mode === 'brush') {
     kind = 'brush'
   }
@@ -440,6 +448,29 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
       const guideRect = rec.outer.getBoundingClientRect()
       const phase = ((now - t0) % travel) / travel
       const dip = tapPress(phase)
+      ox = point.x - (guideRect.left + guideRect.width * 0.22)
+      oy = point.y - guideRect.height * 0.28 * (1 - dip) - (guideRect.top + guideRect.height * 0.12)
+      press = dip
+    } else if (kind === 'tapremove' || kind === 'tapreveal') {
+      // Tap whatever the board still has waiting — the next obstacle on a Tap to
+      // remove board, the next cover on a Tap to reveal one. Each game moves its own
+      // marker after every hit, so this one hand walks the whole board without touching
+      // a real element, and goes quiet the moment there is nothing left.
+      //
+      // One branch for both: the marker differs, the gesture does not.
+      const messEl = root.querySelector<HTMLElement>(kind === 'tapremove' ? '[data-tap-hint]' : '[data-reveal-hint]')
+      if (!messEl) {
+        content.style.opacity = '0'
+        raf = requestAnimationFrame(frame)
+        return
+      }
+      content.style.opacity = '1'
+      const point = elementHintPoint(messEl, 0.65)
+      const guideRect = rec.outer.getBoundingClientRect()
+      const phase = ((now - t0) % travel) / travel
+      const dip = tapPress(phase)
+      // The hand floats a little above the spot and dips down to touch it, landing the
+      // fingertip (22%/12% of the hand, matching transformOrigin) on the target.
       ox = point.x - (guideRect.left + guideRect.width * 0.22)
       oy = point.y - guideRect.height * 0.28 * (1 - dip) - (guideRect.top + guideRect.height * 0.12)
       press = dip
@@ -1032,6 +1063,18 @@ function runCleanEvent(rec: Rec, event: 'cleanPick' | 'cleanWipe' | 'cleanDrop')
   applyLightray(rec, event)
 }
 
+function runTapRemoveEvent(rec: Rec): void {
+  const css = composeTapRemoveAnim(rec.el)
+  if (css !== 'none') restartAnim(rec.anim, css)
+  applyLightray(rec, 'tapRemove')
+}
+
+function runTapRevealEvent(rec: Rec): void {
+  const css = composeTapRevealAnim(rec.el)
+  if (css !== 'none') restartAnim(rec.anim, css)
+  applyLightray(rec, 'tapReveal')
+}
+
 // ---------------------------------------------------------------------------
 // Typewriter reveal (see TypingConfig in scene.ts).
 // ---------------------------------------------------------------------------
@@ -1390,6 +1433,30 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
         else outer.classList.add(COMBO_OFF_CLASS)
       }
     }
+    if (el.revealRole) {
+      outer.dataset.revealRole = el.revealRole.role
+      if (el.revealRole.gameId) outer.dataset.revealGameId = el.revealRole.gameId
+      if (el.revealRole.ofId) outer.dataset.revealOf = el.revealRole.ofId
+      // A reveal starts hidden — the game brings it up when its cover is tapped. The
+      // author can keep one visible on the editor canvas while positioning it; play
+      // hides them all regardless, so this never reaches the player.
+      if (el.revealRole.role === 'reveal') {
+        if (el.revealRole.showOnCanvas) outer.dataset.revealCanvasShow = '1'
+        else outer.classList.add(COMBO_OFF_CLASS)
+      }
+    }
+    if (el.tapRole) {
+      outer.dataset.tapRole = el.tapRole.role
+      if (el.tapRole.gameId) outer.dataset.tapGameId = el.tapRole.gameId
+      if (el.tapRole.index) outer.dataset.tapIndex = String(el.tapRole.index)
+      // An 'after' starts hidden — the game reveals it when its obstacle is tapped.
+      // The author can keep one visible on the editor canvas while positioning it;
+      // play hides them all regardless, so this never reaches the player.
+      if (el.tapRole.role === 'after') {
+        if (el.tapRole.showOnCanvas) outer.dataset.tapCanvasShow = '1'
+        else outer.classList.add(COMBO_OFF_CLASS)
+      }
+    }
     if (el.cleanRole) {
       // Drag to clean tags only. Nothing starts hidden here: the tool and every
       // obstacle are part of the board the author is arranging, so they stay visible
@@ -1397,6 +1464,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       // has actually been wiped in play.
       outer.dataset.cleanRole = el.cleanRole.role
       if (el.cleanRole.gameId) outer.dataset.cleanGameId = el.cleanRole.gameId
+      if (el.cleanRole.ofId) outer.dataset.cleanOf = el.cleanRole.ofId
     }
 
     const anim = document.createElement('div')
@@ -1430,6 +1498,8 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       !el.basketItem &&
       el.comboRole?.role !== 'option' &&
       el.cleanRole?.role !== 'draggable' &&
+      el.tapRole?.role !== 'obstacle' &&
+      el.revealRole?.role !== 'cover' &&
       !hasTapAnim(el)
     if (nonInteractive) {
       outer.style.pointerEvents = 'none'
@@ -1515,7 +1585,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
   }
   /** Templates whose win IS the player's own action, so their win sound plays at once
    * instead of waiting for the win animation's lead-in. */
-  const WIN_SFX_ON_THE_BEAT = new Set(['basket', 'carousel', 'dragclean'])
+  const WIN_SFX_ON_THE_BEAT = new Set(['basket', 'carousel', 'dragclean', 'tapremove', 'tapreveal'])
   const GAME_WIN_SFX_BIAS_MS = 500
   const gameWinSoundDelayMs = (rec?: Rec): number => {
     const phaseDelay = rec ? phaseLeadDelayMs(rec.el, 'gameWin') : 0
@@ -1545,8 +1615,16 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     broadcastGameEvent(event, (target) => runCleanEvent(target, event))
   }
 
+  const fireTapRemoveEvent = (): void => {
+    broadcastGameEvent('tapRemove', runTapRemoveEvent)
+  }
+
+  const fireTapRevealEvent = (): void => {
+    broadcastGameEvent('tapReveal', runTapRevealEvent)
+  }
+
   function broadcastGameEvent(
-    event: 'thoughtSpawn' | 'thoughtWhack' | 'comboPick' | 'comboDrop' | 'comboNext' | 'cleanPick' | 'cleanWipe' | 'cleanDrop',
+    event: 'thoughtSpawn' | 'thoughtWhack' | 'comboPick' | 'comboDrop' | 'comboNext' | 'cleanPick' | 'cleanWipe' | 'cleanDrop' | 'tapRemove' | 'tapReveal',
     run: (target: Rec) => void,
   ): void {
     for (const target of recs) {
@@ -1931,6 +2009,14 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
               }
               if (event === 'cleanPick' || event === 'cleanWipe' || event === 'cleanDrop') {
                 fireCleanEvent(event)
+                return
+              }
+              if (event === 'tapRemove') {
+                fireTapRemoveEvent()
+                return
+              }
+              if (event === 'tapReveal') {
+                fireTapRevealEvent()
                 return
               }
               const bind = (rec.el.sfx ?? []).find((b) => b.event === event && b.assetId)

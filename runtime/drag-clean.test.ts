@@ -76,6 +76,24 @@ function tool(id = 'cloth'): SceneElement {
   } as SceneElement
 }
 
+/** Extra art riding on one obstacle — never cleaned on its own, gone when it goes. */
+function part(id: string, ofId: string): SceneElement {
+  return {
+    id,
+    type: 'image',
+    name: id,
+    assetId: 'stain',
+    x: 700,
+    y: 900,
+    w: 60,
+    h: 60,
+    anchor: 'center',
+    zIndex: 6,
+    mode: 'fit',
+    cleanRole: { gameId: 'clean-game', role: 'attachment', ofId },
+  } as SceneElement
+}
+
 function mess(id: string, x: number, y: number): SceneElement {
   return {
     id,
@@ -132,6 +150,8 @@ function carry(toolEl: HTMLElement, from: { x: number; y: number }, to: { x: num
   stubRect(toolEl, to.x - 100, to.y - 100, 200, 200)
   window.dispatchEvent(pointer('pointermove', to.x, to.y, { pointerId: 1, pointerType: 'touch' }))
 }
+
+const q = (s: ReturnType<typeof buildScene>, id: string): HTMLElement => s.root.querySelector<HTMLElement>(`[data-id="${id}"]`)!
 
 describe('drag to clean', () => {
   let off: (() => void) | null = null
@@ -310,6 +330,53 @@ describe('drag to clean', () => {
 
     window.dispatchEvent(pointer('pointerup', 400, 100, { pointerId: 1, pointerType: 'touch' }))
     expect(heard.length).toBe(3) // cleanDrop
+  })
+
+  it('fades an obstacle’s attachments away with it, and only its own', () => {
+    const stage = build([game(), tool(), mess('m1', 700, 900), mess('m2', 900, 900), part('shadow', 'm1'), part('shine', 'm1'), part('other', 'm2')])
+    stage.layoutAll()
+    stage.startGames(true)
+    const els = place(stage, ['m1', 'm2'])
+
+    carry(els.tool, { x: 100, y: 100 }, { x: 400, y: 100 })
+    expect(els.m1.classList.contains('pa-combo-off')).toBe(true)
+    // Both of m1's pieces go with it, on the same beat.
+    expect(q(stage, 'shadow').classList.contains('pa-combo-off')).toBe(true)
+    expect(q(stage, 'shine').classList.contains('pa-combo-off')).toBe(true)
+    // m2's does not — it belongs to something still standing.
+    expect(q(stage, 'other').classList.contains('pa-combo-off')).toBe(false)
+  })
+
+  it('never treats an attachment as something to clean', () => {
+    const stage = build([game(), bar(), tool(), mess('m1', 700, 900), part('shadow', 'm1')])
+    stage.layoutAll()
+    stage.startGames(true)
+    const track = stage.root.querySelector<HTMLElement>('[data-progress-bar]')!
+    // One obstacle on the board, not two — an attachment is part of a thing, not a
+    // thing. If it counted, the bar would read 1 of 2 and the game could never be won.
+    expect(track.dataset.progressTotal).toBe('1')
+
+    const els = place(stage, ['m1'])
+    // Park the attachment right under the tool. It must not be hit-tested: the only
+    // thing that can end this board is covering the obstacle itself.
+    stubRect(q(stage, 'shadow'), 0, 0, 60, 60)
+    els.tool.dispatchEvent(pointer('pointerdown', 100, 100, { pointerId: 1, pointerType: 'touch' }))
+    window.dispatchEvent(pointer('pointermove', 110, 110, { pointerId: 1, pointerType: 'touch' }))
+    expect(track.dataset.progressValue).toBe('0')
+    expect(q(stage, 'shadow').classList.contains('pa-combo-off')).toBe(false)
+  })
+
+  it('puts attachments back on destroy', () => {
+    const stage = build([game(), tool(), mess('m1', 700, 900), part('shadow', 'm1')])
+    stage.layoutAll()
+    stage.startGames(true)
+    const els = place(stage, ['m1'])
+    carry(els.tool, { x: 100, y: 100 }, { x: 400, y: 100 })
+    expect(q(stage, 'shadow').classList.contains('pa-combo-off')).toBe(true)
+
+    stage.destroy()
+    expect(q(stage, 'shadow').classList.contains('pa-combo-off')).toBe(false)
+    expect(q(stage, 'shadow').dataset.cleanClaimedBy).toBeUndefined()
   })
 
   it('restores every obstacle on destroy, so the canvas is left as it was found', () => {

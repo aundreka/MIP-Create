@@ -14,6 +14,11 @@
 //              it is wiped: an authored 'cleanWipe' animation plays on it (and on
 //              anything else in the scene that wants to react), a sound fires, and
 //              it fades out.
+//   attachment extra art that BELONGS to one obstacle — a shadow under the stain, a
+//              shine on top of it, a label beside it. It is not a thing to clean in
+//              its own right: it is never hit-tested, it never counts toward the
+//              total, and it leaves on exactly the curve its obstacle leaves on, so
+//              the two read as one object going rather than two.
 //
 // "Covers most of one" is measured as overlap area over the area of the SMALLER of
 // the two boxes. That reads correctly in both directions, which a single reading
@@ -49,7 +54,26 @@ const OFF_CLASS = COMBO_OFF_CLASS
 
 interface Obstacle {
   el: HTMLElement
+  /** This obstacle's own element id — what its attachments name to find it. */
+  id: string
   cleaned: boolean
+  /** Inline opacity layoutRec left on it, to be handed back on destroy. */
+  restOpacity: string
+}
+
+/**
+ * A piece of an obstacle rather than an obstacle of its own.
+ *
+ * Addressed by the obstacle's ELEMENT ID rather than by a position in a list, so
+ * nothing renumbers: deleting the second of five obstacles cannot silently re-point
+ * the fifth one's shadow at somebody else's stain. An attachment whose obstacle has
+ * been un-assigned simply never leaves, which is visible and fixable — the failure
+ * an index would give instead is art vanishing off the wrong thing.
+ */
+interface Attachment {
+  el: HTMLElement
+  /** Element id of the obstacle this belongs to. */
+  ofId: string
   /** Inline opacity layoutRec left on it, to be handed back on destroy. */
   restOpacity: string
 }
@@ -106,6 +130,7 @@ export function createDragClean(): GameModule {
   let progressGameId = ''
 
   const obstacles: Obstacle[] = []
+  const attachments: Attachment[] = []
   let drag: HTMLElement | null = null
   let dragHomeZ = ''
 
@@ -231,6 +256,9 @@ export function createDragClean(): GameModule {
     completeCb?.()
   }
 
+  /** The extra art belonging to one obstacle. */
+  const attachedTo = (o: Obstacle): Attachment[] => attachments.filter((a) => a.ofId === o.id)
+
   const wipe = (o: Obstacle): void => {
     o.cleaned = true
     // Broadcast BEFORE the fade so an authored 'cleanWipe' animation on the obstacle
@@ -238,27 +266,40 @@ export function createDragClean(): GameModule {
     ctx.sfx.play('cleanWipe')
     announce()
     markHint()
-    if (fadeMs > 0) {
-      o.el.style.transition = `opacity ${fadeMs}ms ease`
-      o.el.style.opacity = '0'
-      const node = scaleNode(o.el)
-      node.style.transition = `scale ${fadeMs}ms ease, rotate ${fadeMs}ms ease`
-      if (fadeScale !== 1) node.style.scale = String(fadeScale)
-      if (fadeRotateDeg !== 0) node.style.rotate = `${fadeRotateDeg}deg`
-      after(fadeMs, () => park(o))
-    } else {
-      park(o)
-    }
+    // The obstacle and everything attached to it leave on the SAME curve and the same
+    // clock. Anything else — a shorter fade on the shadow, an eased one against a
+    // linear one — reads as the pieces coming apart on the way out.
+    for (const el of [o.el, ...attachedTo(o).map((a) => a.el)]) fadeAway(el)
+    if (fadeMs > 0) after(fadeMs, () => park(o))
+    else park(o)
     if (cleanedCount() >= target()) after(fadeMs, finish)
   }
 
-  /** Put a cleaned obstacle away for good, handing back the inline properties
-   * layoutRec owns so a later layout pass cannot resurrect it half-visible. */
+  /** Start one element's exit. Shared by the obstacle and its attachments so the
+   * whole group animates identically. */
+  const fadeAway = (el: HTMLElement): void => {
+    if (fadeMs <= 0) return
+    el.style.transition = `opacity ${fadeMs}ms ease`
+    el.style.opacity = '0'
+    const node = scaleNode(el)
+    node.style.transition = `scale ${fadeMs}ms ease, rotate ${fadeMs}ms ease`
+    if (fadeScale !== 1) node.style.scale = String(fadeScale)
+    if (fadeRotateDeg !== 0) node.style.rotate = `${fadeRotateDeg}deg`
+  }
+
+  /** Put a cleaned obstacle — and its attachments — away for good, handing back the
+   * inline properties layoutRec owns so a later layout pass cannot resurrect them
+   * half-visible. */
   const park = (o: Obstacle): void => {
-    o.el.classList.add(OFF_CLASS)
-    o.el.style.transition = ''
-    o.el.style.opacity = o.restOpacity
-    const node = scaleNode(o.el)
+    stow(o.el, o.restOpacity)
+    for (const a of attachedTo(o)) stow(a.el, a.restOpacity)
+  }
+
+  const stow = (el: HTMLElement, restOpacity: string): void => {
+    el.classList.add(OFF_CLASS)
+    el.style.transition = ''
+    el.style.opacity = restOpacity
+    const node = scaleNode(el)
     node.style.transition = ''
     node.style.scale = ''
     node.style.rotate = ''
@@ -396,7 +437,12 @@ export function createDragClean(): GameModule {
         el.dataset.cleanDrag = '1'
       } else if (role === 'obstacle') {
         el.dataset.cleanClaimedBy = ctx.elementId ?? 'dragclean'
-        obstacles.push({ el, cleaned: false, restOpacity: el.style.opacity })
+        obstacles.push({ el, id: el.dataset.id ?? '', cleaned: false, restOpacity: el.style.opacity })
+      } else if (role === 'attachment') {
+        // Claimed, but never hit-tested and never counted: it is part of an obstacle,
+        // not one of them. An attachment naming nothing is inert rather than an error.
+        el.dataset.cleanClaimedBy = ctx.elementId ?? 'dragclean'
+        attachments.push({ el, ofId: el.dataset.cleanOf ?? '', restOpacity: el.style.opacity })
       }
     }
   }
@@ -504,7 +550,20 @@ export function createDragClean(): GameModule {
         delete o.el.dataset.cleanHint
         delete o.el.dataset.cleanClaimedBy
       }
+      for (const a of attachments) {
+        // Like an obstacle, an attachment is always visible on the canvas — there is no
+        // per-element authoring flag to put back, just the board as the author left it.
+        a.el.classList.remove(OFF_CLASS)
+        a.el.style.transition = ''
+        a.el.style.opacity = a.restOpacity
+        const node = scaleNode(a.el)
+        node.style.transition = ''
+        node.style.scale = ''
+        node.style.rotate = ''
+        delete a.el.dataset.cleanClaimedBy
+      }
       obstacles.length = 0
+      attachments.length = 0
       drag = null
       dx = 0
       dy = 0

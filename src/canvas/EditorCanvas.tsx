@@ -11,7 +11,7 @@ import type { Anchor, CropPoint, CropShapePreset, ProjectMeta, Scene, SceneDef, 
 import type { AssetMap } from '../../runtime/types'
 import { ContextMenu, type MenuItem } from '../panels/ContextMenu'
 import { getFramePos, setFramePos } from '../canvasLayout'
-import { flipbookBoxes, flipbookOpts, resizeBox, type Box } from './geometry'
+import { clampZoom, flipbookBoxes, flipbookOpts, resizeBox, type Box } from './geometry'
 import { orientOf, ownsSlot, patchSlot, resolvedLayout, withoutSlot } from '../headerLayout'
 import { isSceneHidden, useCanvasView } from '../canvasView'
 import { useActiveVariant } from '../variantMode'
@@ -208,6 +208,9 @@ interface Props {
   setZoom: (z: number) => void
   setPan: (p: { x: number; y: number }) => void
   fitSignal: number
+  /** Draw the corner/edge resize squares on the selection. Off lets you see small
+   * art you're zoomed into; the selection outline and drag-to-move still work. */
+  showHandles: boolean
 }
 
 type Drag =
@@ -243,7 +246,7 @@ type Drag =
   | null
 
 export function EditorCanvas(props: Props): JSX.Element {
-  const { zoom, pan, setZoom, setPan, fitSignal } = props
+  const { zoom, pan, setZoom, setPan, fitSignal, showHandles } = props
   const { project, scene, assets, selectedIds, orientation, trace, activeSceneId } = useEditorState()
   useCanvasView() // re-render when canvas scene visibility changes
   const editLocale = useEditLocale()
@@ -1490,7 +1493,7 @@ export function EditorCanvas(props: Props): JSX.Element {
         const ax = e.clientX - r.left
         const ay = e.clientY - r.top
         const z0 = liveRef.current.zoom
-        const z = Math.max(0.05, Math.min(3, z0 * (e.deltaY < 0 ? 1.1 : 1 / 1.1)))
+        const z = clampZoom(z0 * (e.deltaY < 0 ? 1.1 : 1 / 1.1))
         const p = liveRef.current.pan
         setPan({ x: ax - ((ax - p.x) / z0) * z, y: ay - ((ay - p.y) / z0) * z })
         setZoom(z)
@@ -2501,7 +2504,7 @@ export function EditorCanvas(props: Props): JSX.Element {
           backgroundPosition: `${pan.x}px ${pan.y}px`,
         }}
       />
-      <div className="world" style={{ transform: `translate(${pan.x}px,${pan.y}px) scale(${zoom})` }}>
+      <div className="world" style={{ transform: `translate(${pan.x}px,${pan.y}px) scale(${zoom})`, ['--hz' as string]: String(1 / zoom) } as React.CSSProperties}>
         {visibleScenes.map((sd) => {
           const pos = positions[sd.id] ?? { x: 0, y: 0 }
           const active = sd.id === activeSceneId
@@ -2631,6 +2634,7 @@ export function EditorCanvas(props: Props): JSX.Element {
                     !shapeEdit &&
                     !trackerEdit &&
                     !spineEdit &&
+                    showHandles &&
                     single &&
                     singleRect &&
                     singleHandles.map((h) => (
@@ -2652,14 +2656,15 @@ export function EditorCanvas(props: Props): JSX.Element {
                   {groupBbox && (
                     <>
                       <div className="sel-box group" style={{ left: groupBbox.x, top: groupBbox.y, width: groupBbox.w, height: groupBbox.h }} />
-                      {CORNERS.map((h) => (
-                        <div
-                          key={h.k}
-                          className={'handle h-' + h.k}
-                          style={{ left: groupBbox.x + ((h.hx + 1) / 2) * groupBbox.w, top: groupBbox.y + ((h.hy + 1) / 2) * groupBbox.h }}
-                          onPointerDown={(e) => onHandlePointerDown(e, h, 'group')}
-                        />
-                      ))}
+                      {showHandles &&
+                        CORNERS.map((h) => (
+                          <div
+                            key={h.k}
+                            className={'handle h-' + h.k}
+                            style={{ left: groupBbox.x + ((h.hx + 1) / 2) * groupBbox.w, top: groupBbox.y + ((h.hy + 1) / 2) * groupBbox.h }}
+                            onPointerDown={(e) => onHandlePointerDown(e, h, 'group')}
+                          />
+                        ))}
                       <div
                         className="dim-badge"
                         style={{ left: groupBbox.x + groupBbox.w / 2, top: groupBbox.y + groupBbox.h, transform: `translate(-50%, 6px) scale(${1 / zoom})` }}

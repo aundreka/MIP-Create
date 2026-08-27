@@ -15,6 +15,8 @@ import type {
   ButtonTapEffect,
   CleanRoleConfig,
   ComboRoleConfig,
+  RevealRoleConfig,
+  TapRoleConfig,
   ConfettiConfig,
   CountdownConfig,
   CropShapePreset,
@@ -123,13 +125,38 @@ import {
 } from '../comboSlots'
 import {
   assignCleanSlot,
+  cleanAttachments,
   cleanCandidates,
   cleanDraggable,
   cleanObstacles,
   cleanOptionLabel,
   cleanSlotSummary,
+  releaseCleanObstacle,
   type CleanSlotEdit,
 } from '../cleanSlots'
+import {
+  assignRevealSlot,
+  releaseCover,
+  revealCandidates,
+  revealCovers,
+  revealOptionLabel,
+  revealsOf,
+  revealSlotSummary,
+  setRevealCanvasVisible,
+  type RevealSlotEdit,
+} from '../revealSlots'
+import {
+  assignTapSlot,
+  releaseObstacle,
+  setTapCanvasVisible,
+  tapAfters,
+  tapCandidates,
+  tapObstacles,
+  tapOptionLabel,
+  tapSlotCount,
+  tapSlotSummary,
+  type TapSlotEdit,
+} from '../tapSlots'
 import { DATE_LOCALE_OPTIONS } from '../dateLocales'
 
 // Tap feedback options, shared by the button element and images marked as buttons.
@@ -529,6 +556,10 @@ function ElementSound(props: { el: SceneElement }): JSX.Element {
   const hasCombo = scene.elements.some((candidate) => candidate.game?.templateId === 'combo')
   const isDragClean = el.game?.templateId === 'dragclean'
   const hasDragClean = scene.elements.some((candidate) => candidate.game?.templateId === 'dragclean')
+  const isTapRemove = el.game?.templateId === 'tapremove'
+  const hasTapRemove = scene.elements.some((candidate) => candidate.game?.templateId === 'tapremove')
+  const isTapReveal = el.game?.templateId === 'tapreveal'
+  const hasTapReveal = scene.elements.some((candidate) => candidate.game?.templateId === 'tapreveal')
   const isProgressBar = el.game?.templateId === 'progressbar'
   const hasProgressBar = scene.elements.some((candidate) => candidate.game?.templateId === 'progressbar')
   const gaugeStages = ((): { value: string; label: string }[] => {
@@ -593,6 +624,10 @@ function ElementSound(props: { el: SceneElement }): JSX.Element {
         ]
       : []),
     ...(isDragClean ? [{ value: 'onReveal', label: 'When the game is won' }] : []),
+    ...(hasTapRemove ? [{ value: 'tapRemove', label: 'When an obstacle is tapped away' }] : []),
+    ...(isTapRemove ? [{ value: 'onReveal', label: 'When the game is won' }] : []),
+    ...(hasTapReveal ? [{ value: 'tapReveal', label: 'When a cover is tapped open' }] : []),
+    ...(isTapReveal ? [{ value: 'onReveal', label: 'When the game is won' }] : []),
     ...(hasProgressBar ? [{ value: 'progressStep', label: 'When the progress bar gains a step' }] : []),
     ...(isProgressBar ? [{ value: 'onReveal', label: 'When the bar fills up' }] : []),
     ...(isCarousel
@@ -1460,8 +1495,8 @@ function DragCleanSetup({ params, setParam, elementId, siblings }: DragCleanSetu
     for (const e of edits) patchElement(e.id, e.patch)
     endTransaction()
   }
-  const assign = (nextId: string, current: SceneElement | undefined, role: CleanRoleConfig['role']): void =>
-    apply(assignCleanSlot({ nextId, current, role, gameId: elementId }))
+  const assign = (nextId: string, current: SceneElement | undefined, role: CleanRoleConfig['role'], ofId?: string): void =>
+    apply(assignCleanSlot({ nextId, current, role, gameId: elementId, ofId }))
 
   const choices = (current: SceneElement | undefined): { value: string; label: string }[] => [
     { value: '', label: current ? '— remove —' : '— none —' },
@@ -1469,10 +1504,10 @@ function DragCleanSetup({ params, setParam, elementId, siblings }: DragCleanSetu
   ]
 
   /** One assignment row, the same shape as a combo slot so the two panels read alike. */
-  const slot = (label: string, hint: string, current: SceneElement | undefined, role: CleanRoleConfig['role']): JSX.Element => (
-    <div className="combo-slot" key={`${role}-${current?.id ?? 'add'}`}>
+  const slot = (label: string, hint: string, current: SceneElement | undefined, role: CleanRoleConfig['role'], ofId?: string): JSX.Element => (
+    <div className="combo-slot" key={`${role}-${ofId ?? ''}-${current?.id ?? 'add'}`}>
       <span title={hint}>{label}</span>
-      <Select value={current?.id ?? ''} onChange={(v) => assign(v, current, role)} options={choices(current)} title={hint} />
+      <Select value={current?.id ?? ''} onChange={(v) => assign(v, current, role, ofId)} options={choices(current)} title={hint} />
       <span className="combo-slot-actions">
         {current && (
           <button className="icon-btn" title={`Select “${current.name || current.id}” on the canvas`} onClick={() => selectOnly(current.id)}>
@@ -1487,14 +1522,36 @@ function DragCleanSetup({ params, setParam, elementId, siblings }: DragCleanSetu
     <>
       <div className="group-title2">The board</div>
       {slot('Drag this', 'The cloth / sponge / eraser the player carries. Its art, size and position stay exactly as you placed them.', tool, 'draggable')}
-      {mess.map((o, i) => slot(`Obstacle ${i + 1}`, 'A thing to wipe away. It fades out when the tool covers it.', o, 'obstacle'))}
+      {mess.map((o, i) => (
+        <div key={o.id}>
+          {slot(`Obstacle ${i + 1}`, 'A thing to wipe away. It fades out when the tool covers it.', o, 'obstacle')}
+          {/* Attachments hang off the obstacle they belong to, so the indent is the
+              whole explanation: these are PARTS of the thing above, not more things. */}
+          {[...cleanAttachments(siblings, elementId, o.id), undefined].map((a, n) =>
+            slot(
+              n === 0 ? 'Part of it' : '↳ and',
+              'Extra art belonging to this obstacle — a shadow, a shine, a label. It is never something the player has to clean on its own and never counts toward the total; it just fades away on the same beat.',
+              a,
+              'attachment',
+              o.id,
+            ),
+          )}
+          <div className="combo-slot">
+            <span />
+            <button className="btn" onClick={() => apply(releaseCleanObstacle(siblings, elementId, o.id))}>
+              Remove obstacle {i + 1}
+            </button>
+            <span className="combo-slot-actions" />
+          </div>
+        </div>
+      ))}
       {slot(`Obstacle ${mess.length + 1}`, 'Add another thing to wipe away.', undefined, 'obstacle')}
       <div className="hint pad">
         {!tool
           ? 'Pick the object the player drags. Without one there is nothing to play.'
           : mess.length === 0
             ? 'Now add the obstacles it wipes away.'
-            : `Won when all ${mess.length} are cleaned${Number(params.winObstacles ?? 0) > 0 ? `, or after ${Number(params.winObstacles)} if that is fewer` : ''}. The tool cannot be dragged off screen.`}
+            : `Won when all ${mess.length} are cleaned${Number(params.winObstacles ?? 0) > 0 ? `, or after ${Number(params.winObstacles)} if that is fewer` : ''}. The tool cannot be dragged off screen. “Part of it” rows are art that belongs to an obstacle — never cleaned on their own, never counted, gone when it goes.`}
       </div>
       {bars.length > 0 && (
         <>
@@ -1507,6 +1564,230 @@ function DragCleanSetup({ params, setParam, elementId, siblings }: DragCleanSetu
             />
           </Row>
           <div className="hint pad">One step per obstacle cleaned. Leave it on “every bar” unless this screen has more than one.</div>
+        </>
+      )}
+      <div className="group-title2">Feel &amp; timing</div>
+    </>
+  )
+}
+
+// ---- Tap to remove: role assignment -----------------------------------------
+// A list of obstacles, and under each one the elements it turns into. Both sides are
+// already placed on the canvas; this panel only says which is which.
+//
+// The "becomes" rows are a LIST rather than a single slot, because a tap that clears a
+// tile often has to bring up more than one thing — the clean tile, a sparkle, a label —
+// and each of those wants its own position and its own animation. An obstacle with no
+// replacement simply fades to nothing, which is the common case and costs no clicks.
+interface TapRemoveSetupProps {
+  params: Record<string, unknown>
+  setParam: (k: string, v: unknown) => void
+  elementId: string
+  siblings: SceneElement[]
+}
+function TapRemoveSetup({ params, setParam, elementId, siblings }: TapRemoveSetupProps): JSX.Element {
+  const obstacles = tapObstacles(siblings, elementId)
+  // Always one empty slot past the end, so the board grows by filling rather than by
+  // pressing an "add" button first.
+  const slots = Math.max(tapSlotCount(siblings, elementId), obstacles.length) + 1
+  const candidates = tapCandidates(siblings)
+  const bars = siblings.filter((e) => e.type === 'game-mount' && e.game?.templateId === 'progressbar')
+
+  const apply = (edits: TapSlotEdit[]): void => {
+    if (!edits.length) return
+    beginTransaction()
+    for (const e of edits) patchElement(e.id, e.patch)
+    endTransaction()
+  }
+  const assign = (nextId: string, current: SceneElement | undefined, role: TapRoleConfig['role'], index: number): void =>
+    apply(assignTapSlot({ nextId, current, role, gameId: elementId, index, elements: siblings }))
+
+  const choices = (current: SceneElement | undefined): { value: string; label: string }[] => [
+    { value: '', label: current ? '— remove —' : '— none —' },
+    ...candidates.map((e) => ({ value: e.id, label: tapOptionLabel(e) + (current && e.id === current.id ? ' ✓' : '') })),
+  ]
+
+  /** One assignment row. `hides` marks the kind play keeps hidden, which gets the eye
+   * that holds it on the canvas while it is being positioned. */
+  const slot = (label: string, hint: string, current: SceneElement | undefined, role: TapRoleConfig['role'], index: number, hides = false): JSX.Element => (
+    <div className="combo-slot" key={`${role}${index}-${current?.id ?? 'add'}`}>
+      <span title={hint}>{label}</span>
+      <Select value={current?.id ?? ''} onChange={(v) => assign(v, current, role, index)} options={choices(current)} title={hint} />
+      <span className="combo-slot-actions">
+        {current && hides && (
+          <button
+            className={'icon-btn' + (current.tapRole?.showOnCanvas ? ' on' : '')}
+            title={current.tapRole?.showOnCanvas ? 'Showing on the canvas while you position it (play always hides it)' : 'Hidden — show it on the canvas while you position it'}
+            onClick={() => apply([setTapCanvasVisible(current, !current.tapRole?.showOnCanvas)])}
+          >
+            <Icon icon={current.tapRole?.showOnCanvas ? Eye : EyeOff} size={13} />
+          </button>
+        )}
+        {current && (
+          <button className="icon-btn" title={`Select “${current.name || current.id}” on the canvas`} onClick={() => selectOnly(current.id)}>
+            <Icon icon={ScanSearch} size={13} />
+          </button>
+        )}
+      </span>
+    </div>
+  )
+
+  return (
+    <>
+      <div className="group-title2">The board</div>
+      {Array.from({ length: slots }, (_, i) => {
+        const index = i + 1
+        const obstacle = obstacles.find((e) => (e.tapRole?.index ?? 1) === index)
+        const becomes = tapAfters(siblings, elementId, index)
+        return (
+          <div key={index}>
+            {slot(`Obstacle ${index}`, 'A thing the player taps to get rid of. Its art, size and position stay exactly as you placed them.', obstacle, 'obstacle', index)}
+            {obstacle && (
+              <>
+                {[...becomes, undefined].map((a, n) =>
+                  slot(
+                    n === 0 ? 'Becomes' : '↳ and',
+                    'Optional. An element placed where you want the result — hidden until this obstacle is tapped, then faded up as it fades out. Leave empty and the obstacle just disappears.',
+                    a,
+                    'after',
+                    index,
+                    true,
+                  ),
+                )}
+                <div className="combo-slot">
+                  <span />
+                  <button className="btn" onClick={() => apply(releaseObstacle(siblings, elementId, index))}>
+                    Remove obstacle {index}
+                  </button>
+                  <span className="combo-slot-actions" />
+                </div>
+              </>
+            )}
+          </div>
+        )
+      })}
+      <div className="hint pad">
+        {obstacles.length === 0
+          ? 'Pick the elements the player taps away. Without at least one there is nothing to play.'
+          : `Won when all ${obstacles.length} are removed${Number(params.winObstacles ?? 0) > 0 ? `, or after ${Number(params.winObstacles)} if that is fewer` : ''}. Each obstacle also keeps its own “On tap” animation, under Animation.`}
+      </div>
+      {bars.length > 0 && (
+        <>
+          <div className="group-title2">Progress bar</div>
+          <Row label="Fills which bar">
+            <Select
+              value={String(params.progressGameId ?? '')}
+              onChange={(v) => setParam('progressGameId', v)}
+              options={[{ value: '', label: 'Every bar in this screen' }, ...bars.map((b) => ({ value: b.id, label: b.name || b.id }))]}
+            />
+          </Row>
+          <div className="hint pad">One step per obstacle removed. Leave it on “every bar” unless this screen has more than one.</div>
+        </>
+      )}
+      <div className="group-title2">Feel &amp; timing</div>
+    </>
+  )
+}
+
+// ---- Tap to reveal: role assignment -----------------------------------------
+// A list of covers, and under each one the elements that tap brings up. Both sides are
+// already placed on the canvas; this panel only says which is which.
+//
+// A cover with nothing under it is a perfectly good board — it leaves, and whatever the
+// author put BEHIND it is what shows. So the reveal rows are optional, and the empty
+// state says so rather than looking unfinished.
+interface TapRevealSetupProps {
+  params: Record<string, unknown>
+  setParam: (k: string, v: unknown) => void
+  elementId: string
+  siblings: SceneElement[]
+}
+function TapRevealSetup({ params, setParam, elementId, siblings }: TapRevealSetupProps): JSX.Element {
+  const covers = revealCovers(siblings, elementId)
+  const candidates = revealCandidates(siblings)
+  const bars = siblings.filter((e) => e.type === 'game-mount' && e.game?.templateId === 'progressbar')
+
+  const apply = (edits: RevealSlotEdit[]): void => {
+    if (!edits.length) return
+    beginTransaction()
+    for (const e of edits) patchElement(e.id, e.patch)
+    endTransaction()
+  }
+  const assign = (nextId: string, current: SceneElement | undefined, role: RevealRoleConfig['role'], ofId?: string): void =>
+    apply(assignRevealSlot({ nextId, current, role, gameId: elementId, ofId, elements: siblings }))
+
+  const choices = (current: SceneElement | undefined): { value: string; label: string }[] => [
+    { value: '', label: current ? '— remove —' : '— none —' },
+    ...candidates.map((e) => ({ value: e.id, label: revealOptionLabel(e) + (current && e.id === current.id ? ' ✓' : '') })),
+  ]
+
+  /** One assignment row. `hides` marks the kind play keeps hidden, which gets the eye
+   * that holds it on the canvas while it is being positioned. */
+  const slot = (label: string, hint: string, current: SceneElement | undefined, role: RevealRoleConfig['role'], ofId?: string, hides = false): JSX.Element => (
+    <div className="combo-slot" key={`${role}-${ofId ?? ''}-${current?.id ?? 'add'}`}>
+      <span title={hint}>{label}</span>
+      <Select value={current?.id ?? ''} onChange={(v) => assign(v, current, role, ofId)} options={choices(current)} title={hint} />
+      <span className="combo-slot-actions">
+        {current && hides && (
+          <button
+            className={'icon-btn' + (current.revealRole?.showOnCanvas ? ' on' : '')}
+            title={current.revealRole?.showOnCanvas ? 'Showing on the canvas while you position it (play always hides it)' : 'Hidden — show it on the canvas while you position it'}
+            onClick={() => apply([setRevealCanvasVisible(current, !current.revealRole?.showOnCanvas)])}
+          >
+            <Icon icon={current.revealRole?.showOnCanvas ? Eye : EyeOff} size={13} />
+          </button>
+        )}
+        {current && (
+          <button className="icon-btn" title={`Select “${current.name || current.id}” on the canvas`} onClick={() => selectOnly(current.id)}>
+            <Icon icon={ScanSearch} size={13} />
+          </button>
+        )}
+      </span>
+    </div>
+  )
+
+  return (
+    <>
+      <div className="group-title2">The board</div>
+      {covers.map((c, i) => (
+        <div key={c.id}>
+          {slot(`Cover ${i + 1}`, 'The thing the player taps. Its art, size and position stay exactly as you placed them.', c, 'cover')}
+          {[...revealsOf(siblings, elementId, c.id), undefined].map((r, n) =>
+            slot(
+              n === 0 ? 'Reveals' : '↳ and',
+              'Optional. An element placed where you want it — hidden until this cover is tapped, then faded up and left there. Leave every row empty and the cover simply leaves, showing whatever you placed behind it.',
+              r,
+              'reveal',
+              c.id,
+              true,
+            ),
+          )}
+          <div className="combo-slot">
+            <span />
+            <button className="btn" onClick={() => apply(releaseCover(siblings, elementId, c.id))}>
+              Remove cover {i + 1}
+            </button>
+            <span className="combo-slot-actions" />
+          </div>
+        </div>
+      ))}
+      {slot(`Cover ${covers.length + 1}`, 'Add another thing to tap.', undefined, 'cover')}
+      <div className="hint pad">
+        {covers.length === 0
+          ? 'Pick the elements the player taps. Each one can bring up its own image, or just leave and show whatever you placed behind it.'
+          : `Won when all ${covers.length} are tapped${Number(params.winCovers ?? 0) > 0 ? `, or after ${Number(params.winCovers)} if that is fewer` : ''}. Revealed images stay up for the rest of the game.`}
+      </div>
+      {bars.length > 0 && (
+        <>
+          <div className="group-title2">Progress bar</div>
+          <Row label="Fills which bar">
+            <Select
+              value={String(params.progressGameId ?? '')}
+              onChange={(v) => setParam('progressGameId', v)}
+              options={[{ value: '', label: 'Every bar in this screen' }, ...bars.map((b) => ({ value: b.id, label: b.name || b.id }))]}
+            />
+          </Row>
+          <div className="hint pad">One step per cover tapped. Leave it on “every bar” unless this screen has more than one.</div>
         </>
       )}
       <div className="group-title2">Feel &amp; timing</div>
@@ -1533,6 +1814,7 @@ function ProgressBarSetup({ params, setParam, elementId, siblings, fullWidth, se
   // that starts announcing progress, so this deliberately does not hard-code it.
   const sources = siblings.filter((e) => e.type === 'game-mount' && e.id !== elementId && e.game?.templateId !== 'progressbar')
   const feeder = sources.find((e) => e.id === String(params.sourceGameId ?? ''))
+  const decorative = String(params.sourceGameId ?? '') === 'none'
   return (
     <>
       <div className="group-title2">What fills it</div>
@@ -1540,15 +1822,24 @@ function ProgressBarSetup({ params, setParam, elementId, siblings, fullWidth, se
         <Select
           value={String(params.sourceGameId ?? '')}
           onChange={(v) => setParam('sourceGameId', v)}
-          options={[{ value: '', label: 'Any game on this screen' }, ...sources.map((s) => ({ value: s.id, label: s.name || s.id }))]}
+          options={[
+            { value: '', label: 'Any game on this screen' },
+            ...sources.map((s) => ({ value: s.id, label: s.name || s.id })),
+            // The deliberate opposite of the blank default. Without it "unwired" and
+            // "wired to everything" are the same setting, so a bar meant as decoration
+            // couples itself to whatever mechanic happens to be in the screen.
+            { value: 'none', label: 'Nothing — decorative only' },
+          ]}
         />
       </Row>
       <div className="hint pad">
-        {sources.length === 0
-          ? 'Add a game that reports progress — Drag to clean — and this bar fills as it is played.'
-          : Number(params.steps ?? 0) > 0
-            ? `Counts to ${Number(params.steps)} and wins the screen. If the game feeding it has more steps than that, this bar finishes first and owns the redirect.`
-            : `Counts to however many steps ${feeder ? `“${feeder.name || feeder.id}”` : 'the game feeding it'} has, so the two finish together. Set “Steps to win” to end earlier.`}
+        {decorative
+          ? 'This bar ignores every game and stays where it is. It cannot fill, so it can never win the screen or take over the redirect — use it as artwork, or as a second bar you drive by hand.'
+          : sources.length === 0
+            ? 'Add a game that reports progress — Drag to clean, Tap to remove — and this bar fills as it is played.'
+            : Number(params.steps ?? 0) > 0
+              ? `Counts to ${Number(params.steps)} and wins the screen. If the game feeding it has more steps than that, this bar finishes first and owns the redirect.`
+              : `Counts to however many steps ${feeder ? `“${feeder.name || feeder.id}”` : 'the game feeding it'} has, so the two finish together. Set “Steps to win” to end earlier.`}
       </div>
       <Toggle label="Full screen width (like the header)" checked={fullWidth} onChange={setFullWidth} />
       <div className="hint pad">
@@ -2556,7 +2847,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
       endTransaction()
     }
     const patchAllPhase = (
-      phase: 'entrance' | 'loop' | 'exit' | 'gameWin' | 'tap' | 'thoughtSpawn' | 'thoughtWhack' | 'comboPick' | 'comboDrop' | 'comboNext' | 'cleanPick' | 'cleanWipe' | 'cleanDrop',
+      phase: 'entrance' | 'loop' | 'exit' | 'gameWin' | 'tap' | 'thoughtSpawn' | 'thoughtWhack' | 'comboPick' | 'comboDrop' | 'comboNext' | 'cleanPick' | 'cleanWipe' | 'cleanDrop' | 'tapRemove' | 'tapReveal',
       primary: AnimSpec | undefined,
       extra: AnimSpec[],
     ): void => {
@@ -2695,6 +2986,30 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 onChange={(primary, ex) => patchAllPhase('cleanDrop', primary, ex)}
               />
             </>
+          )}
+          {state.scene.elements.some((e) => e.game?.templateId === 'tapremove') && (
+            <AnimPhase
+              title="On obstacle tapped away"
+              primary={first?.animations?.tapRemove}
+              extra={first?.animations?.tapRemoveExtra}
+              presets={NODE_PRESETS}
+              extraPresets={NODE_PRESETS}
+              defaultSpec={{ preset: 'pop', durationMs: 300, delayMs: 0, easing: 'ease-out' }}
+              defaultExtraSpec={{ preset: 'shine', durationMs: 700, delayMs: 0, easing: 'ease-in-out' }}
+              onChange={(primary, ex) => patchAllPhase('tapRemove', primary, ex)}
+            />
+          )}
+          {state.scene.elements.some((e) => e.game?.templateId === 'tapreveal') && (
+            <AnimPhase
+              title="On cover tapped open"
+              primary={first?.animations?.tapReveal}
+              extra={first?.animations?.tapRevealExtra}
+              presets={NODE_PRESETS}
+              extraPresets={NODE_PRESETS}
+              defaultSpec={{ preset: 'pop', durationMs: 320, delayMs: 0, easing: 'ease-out' }}
+              defaultExtraSpec={{ preset: 'shine', durationMs: 700, delayMs: 0, easing: 'ease-in-out' }}
+              onChange={(primary, ex) => patchAllPhase('tapReveal', primary, ex)}
+            />
           )}
           {state.scene.elements.some((e) => e.game?.templateId === 'thoughtwhack') && (
             <>
@@ -3578,6 +3893,8 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                   {tpl.id === 'combo' && <ComboSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
                   {tpl.id === 'combo' && <div className="group-title2">Feel &amp; timing</div>}
                   {tpl.id === 'dragclean' && <DragCleanSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
+                  {tpl.id === 'tapremove' && <TapRemoveSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
+                  {tpl.id === 'tapreveal' && <TapRevealSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
                   {tpl.id === 'progressbar' && (
                     <ProgressBarSetup
                       params={params}
@@ -4038,6 +4355,8 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                         drag: v ? undefined : el.drag,
                         comboRole: v ? undefined : el.comboRole,
                         cleanRole: v ? undefined : el.cleanRole,
+                        tapRole: v ? undefined : el.tapRole,
+                        revealRole: v ? undefined : el.revealRole,
                       })
                     }
                   />
@@ -4081,6 +4400,45 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                   </>
                 )
               })()}
+            {el.revealRole &&
+              (() => {
+                // Read-only on purpose: which element plays which part is chosen in the
+                // Tap to reveal game's own panel, so one screen owns the whole wiring.
+                const where = revealSlotSummary(el.revealRole)
+                const game = activeSceneDef(state)?.elements.find((c) => c.id === el.revealRole?.gameId)
+                return (
+                  <>
+                    <div className="hint pad">
+                      Tap to reveal: this element is <b>{where}</b>.
+                    </div>
+                    {game && (
+                      <button className="btn" style={{ width: '100%', marginTop: 4 }} onClick={() => selectOnly(game.id)}>
+                        Edit in “{game.name || game.id}”
+                      </button>
+                    )}
+                  </>
+                )
+              })()}
+            {el.tapRole &&
+              (() => {
+                // Read-only on purpose: which element plays which part is chosen in the
+                // Tap to remove game's own panel, so one screen owns the whole wiring
+                // instead of it being spread across every element.
+                const where = tapSlotSummary(el.tapRole)
+                const game = activeSceneDef(state)?.elements.find((c) => c.id === el.tapRole?.gameId)
+                return (
+                  <>
+                    <div className="hint pad">
+                      Tap to remove: this element is <b>{where}</b>.
+                    </div>
+                    {game && (
+                      <button className="btn" style={{ width: '100%', marginTop: 4 }} onClick={() => selectOnly(game.id)}>
+                        Edit in “{game.name || game.id}”
+                      </button>
+                    )}
+                  </>
+                )
+              })()}
             {el.cleanRole &&
               (() => {
                 // Read-only on purpose: which element plays which part is chosen in the
@@ -4110,6 +4468,8 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                   basketItem: v ? undefined : el.basketItem,
                   comboRole: v ? undefined : el.comboRole,
                   cleanRole: v ? undefined : el.cleanRole,
+                  tapRole: v ? undefined : el.tapRole,
+                  revealRole: v ? undefined : el.revealRole,
                 })
               }
             />
@@ -4318,6 +4678,8 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                     { value: 'basket', label: 'Basket (drag next unplaced item)' },
                     { value: 'combo', label: 'Combo (drag the live option to the drop area)' },
                     { value: 'dragclean', label: 'Drag to clean (carry the tool onto the nearest obstacle)' },
+                    { value: 'tapremove', label: 'Tap to remove (tap the next obstacle standing)' },
+                    { value: 'tapreveal', label: 'Tap to reveal (tap the next cover still up)' },
                     { value: 'carousel', label: 'Carousel (swipe, then tap the centre)' },
                     { value: 'brush', label: 'Point at the scratch brush (after its intro)' },
                     { value: 'still', label: 'Still (no movement at all)' },
@@ -5343,6 +5705,42 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
             <div className="hint pad">
               “On obstacle cleaned” fires while the obstacle is still visible, so an animation here plays before it fades. Put one on the obstacle itself for a per-item wipe, or
               on a counter, headline or background to react to every clean. Assign the roles in the Drag to clean game&rsquo;s own panel.
+            </div>
+          </>
+        )}
+        {state.scene.elements.some((e) => e.game?.templateId === 'tapremove') && (
+          <>
+            <AnimPhase
+              title="On obstacle tapped away"
+              primary={el.animations?.tapRemove}
+              extra={el.animations?.tapRemoveExtra}
+              presets={NODE_PRESETS}
+              extraPresets={NODE_PRESETS}
+              defaultSpec={{ preset: 'pop', durationMs: 300, delayMs: 0, easing: 'ease-out' }}
+              defaultExtraSpec={{ preset: 'shine', durationMs: 700, delayMs: 0, easing: 'ease-in-out' }}
+              onChange={(primary, ex) => patchElement(id, { animations: { ...(el.animations ?? {}), tapRemove: primary, tapRemoveExtra: ex.length ? ex : undefined } })}
+            />
+            <div className="hint pad">
+              Fires while the obstacle is still visible, so an animation here plays before it fades. For the obstacle&rsquo;s OWN reaction to the tap itself, use “On tap” above —
+              that works on any tappable element and needs nothing from the game.
+            </div>
+          </>
+        )}
+        {state.scene.elements.some((e) => e.game?.templateId === 'tapreveal') && (
+          <>
+            <AnimPhase
+              title="On cover tapped open"
+              primary={el.animations?.tapReveal}
+              extra={el.animations?.tapRevealExtra}
+              presets={NODE_PRESETS}
+              extraPresets={NODE_PRESETS}
+              defaultSpec={{ preset: 'pop', durationMs: 320, delayMs: 0, easing: 'ease-out' }}
+              defaultExtraSpec={{ preset: 'shine', durationMs: 700, delayMs: 0, easing: 'ease-in-out' }}
+              onChange={(primary, ex) => patchElement(id, { animations: { ...(el.animations ?? {}), tapReveal: primary, tapRevealExtra: ex.length ? ex : undefined } })}
+            />
+            <div className="hint pad">
+              Fires while the cover is still visible, so an animation here plays before it leaves. The revealed image has its own fade-in under the game&rsquo;s settings; give it an
+              “Entrance” only if you want something on top of that.
             </div>
           </>
         )}

@@ -12,6 +12,7 @@ interface UIState {
   accordion: Record<string, boolean>
   groupCollapsed: Record<string, boolean>
   dock: Record<string, DockState>
+  flags: Record<string, boolean>
 }
 
 function load(): UIState {
@@ -19,12 +20,12 @@ function load(): UIState {
     const raw = localStorage.getItem(LS_KEY)
     if (raw) {
       const v = JSON.parse(raw) as Partial<UIState>
-      return { accordion: v.accordion ?? {}, groupCollapsed: v.groupCollapsed ?? {}, dock: v.dock ?? {} }
+      return { accordion: v.accordion ?? {}, groupCollapsed: v.groupCollapsed ?? {}, dock: v.dock ?? {}, flags: v.flags ?? {} }
     }
   } catch {
     /* ignore */
   }
-  return { accordion: {}, groupCollapsed: {}, dock: {} }
+  return { accordion: {}, groupCollapsed: {}, dock: {}, flags: {} }
 }
 
 const cache = load()
@@ -35,6 +36,15 @@ function save(): void {
   } catch {
     /* ignore */
   }
+}
+
+// Simple on/off view preferences (e.g. whether the canvas draws resize handles).
+export function getFlag(id: string, dflt: boolean): boolean {
+  return cache.flags[id] ?? dflt
+}
+export function setFlag(id: string, on: boolean): void {
+  cache.flags[id] = on
+  save()
 }
 
 export function getAccordion(id: string, dflt: boolean): boolean {

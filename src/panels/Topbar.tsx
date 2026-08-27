@@ -8,7 +8,7 @@ import { getState, joinProjectGroup, loadProject as storeLoad, markSaved, redo, 
 import { createProject, currentProjectId, openProject, projectsInGroup, saveCurrent } from '../projects'
 import { ContextMenu, type MenuItem } from './ContextMenu'
 import { HeaderPopover } from './HeaderPopover'
-import { CalendarDays, ChevronDown, FolderOpen, Icon, Menu, Minus, Play, Plus, Redo2, Undo2, Upload } from '../icons'
+import { CalendarDays, ChevronDown, FolderOpen, Frame, Icon, Menu, Minus, Play, Plus, Redo2, Undo2, Upload } from '../icons'
 import { toggleTheme, useTheme } from '../theme'
 import { setEditLocale, useEditLocale } from '../locale'
 import { setActiveVariant, useActiveVariant } from '../variantMode'
@@ -28,6 +28,8 @@ async function doOpen(): Promise<void> {
 export function Topbar(props: {
   zoom: number
   onZoom: (z: number) => void
+  showHandles: boolean
+  onToggleHandles: () => void
   onFit: () => void
   onPreview: () => void
   onSaveTemplate: () => void
@@ -182,6 +184,14 @@ export function Topbar(props: {
           <Icon icon={Plus} size={14} />
         </button>
       </span>
+      <button
+        className={'icon' + (props.showHandles ? ' on' : '')}
+        title={(props.showHandles ? 'Hide' : 'Show') + ' selection handles (Ctrl+Shift+H)'}
+        aria-pressed={props.showHandles}
+        onClick={props.onToggleHandles}
+      >
+        <Icon icon={Frame} size={15} />
+      </button>
 
       <span className="spacer" />
       <button

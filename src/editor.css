@@ -1381,9 +1381,12 @@ button.frame-chip:hover {
 }
 .sel-box {
   position: absolute;
-  border: 1.5px solid var(--accent);
+  border: calc(1.5px * var(--hz, 1)) solid var(--accent);
   pointer-events: none;
 }
+/* Handles live inside the zoomed `.world`, so they'd blow up to fist-sized squares
+   at high zoom and cover the art you zoomed in to see. --hz is 1/zoom, set on the
+   world — scaling by it keeps every handle ~10 screen px at any zoom level. */
 .handle {
   position: absolute;
   width: 10px;
@@ -1392,6 +1395,7 @@ button.frame-chip:hover {
   background: #fff;
   border: 1.5px solid var(--accent);
   border-radius: 2px;
+  transform: scale(var(--hz, 1));
 }
 .h-nw,
 .h-se {

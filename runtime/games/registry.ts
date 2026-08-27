@@ -35,6 +35,8 @@ import { BASKET_TEMPLATE } from './basket'
 import { COMBO_TEMPLATE } from './combo'
 import { CAROUSEL_TEMPLATE } from './carousel'
 import { DRAGCLEAN_TEMPLATE } from './dragclean'
+import { TAPREMOVE_TEMPLATE } from './tapremove'
+import { TAPREVEAL_TEMPLATE } from './tapreveal'
 import { PROGRESSBAR_TEMPLATE } from './progressbar'
 
 export const GAME_TEMPLATES: GameTemplate[] = [
@@ -54,6 +56,8 @@ export const GAME_TEMPLATES: GameTemplate[] = [
   BASKET_TEMPLATE,
   COMBO_TEMPLATE,
   DRAGCLEAN_TEMPLATE,
+  TAPREMOVE_TEMPLATE,
+  TAPREVEAL_TEMPLATE,
   DRAG_TEMPLATE,
   CATCH_TEMPLATE,
   BUBBLES_TEMPLATE,
