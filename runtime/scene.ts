@@ -114,6 +114,14 @@ export interface ElementAnimations {
   comboPick?: AnimSpec
   comboDrop?: AnimSpec
   comboNext?: AnimSpec
+  // Replayed when a Drag to clean game in the same scene emits its three gameplay
+  // events: the tool is picked up, an obstacle is cleaned, and the tool is let go.
+  // Like the combo ones these are authorable on ANY scene element, so the obstacle
+  // itself can have its own wipe animation while a counter, a headline or a
+  // background reacts to the same beat.
+  cleanPick?: AnimSpec
+  cleanWipe?: AnimSpec
+  cleanDrop?: AnimSpec
   // Additional specs stacked ON TOP of the primary one in each phase, played together with it
   // (e.g. entrance = pop + shine). Empty/absent = just the primary. The primary must exist for
   // extras to apply; extras share the primary entrance's trigger.
@@ -127,6 +135,9 @@ export interface ElementAnimations {
   comboPickExtra?: AnimSpec[]
   comboDropExtra?: AnimSpec[]
   comboNextExtra?: AnimSpec[]
+  cleanPickExtra?: AnimSpec[]
+  cleanWipeExtra?: AnimSpec[]
+  cleanDropExtra?: AnimSpec[]
 }
 
 // ---- colour adjustment -----------------------------------------------------
@@ -510,7 +521,23 @@ export interface HandguideConfig {
   // pulls the next choice into the centre, then a tap on the centre to confirm it —
   // which is also the order the game requires, since the tap stays locked until the
   // row has been swiggled at least once.
-  mode: 'smart' | 'tap' | 'radialtap' | 'slide' | 'scratch' | 'match' | 'thoughtwhack' | 'basket' | 'combo' | 'carousel' | 'brush' | 'still' | 'hold'
+  // 'dragclean' carries the Drag to clean tool onto the obstacle nearest to it and
+  // wipes, re-targeting on its own as obstacles disappear.
+  mode:
+    | 'smart'
+    | 'tap'
+    | 'radialtap'
+    | 'slide'
+    | 'scratch'
+    | 'match'
+    | 'thoughtwhack'
+    | 'basket'
+    | 'combo'
+    | 'carousel'
+    | 'dragclean'
+    | 'brush'
+    | 'still'
+    | 'hold'
   toX?: number
   toY?: number
   nodes?: HandguideNode[]
@@ -712,6 +739,21 @@ export interface ComboRoleConfig {
    * can see one at a time instead of the whole stack at once. */
   showOnCanvas?: boolean
 }
+// Drag to clean: which part an ordinary placed element plays. Assigned from the
+// GAME's panel (see src/cleanSlots.ts) rather than the element's own, so one screen
+// owns the whole wiring — the same arrangement the combo board uses, and for the
+// same reason: the roles only make sense relative to each other.
+//
+// The game touches an element's LOGIC and nothing else. Where it sits, how big it
+// is, how it is cropped and what it animates are all still the element's own, edited
+// on the canvas exactly as they would be if no game existed.
+export interface CleanRoleConfig {
+  gameId?: string
+  /** 'draggable' is the tool the player carries (one per game — the first tagged
+   * wins); 'obstacle' is a thing it wipes away (any number). */
+  role: 'draggable' | 'obstacle'
+}
+
 export interface SlotConfig {
   group?: string
   key?: string
@@ -1035,6 +1077,7 @@ export interface SceneElement {
   drag?: DragConfig
   basketItem?: BasketItemConfig
   comboRole?: ComboRoleConfig
+  cleanRole?: CleanRoleConfig
   slot?: SlotConfig
   pick?: PickConfig
   fill?: FillConfig

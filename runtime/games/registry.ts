@@ -34,6 +34,8 @@ import { EMBED_TEMPLATE } from './embed'
 import { BASKET_TEMPLATE } from './basket'
 import { COMBO_TEMPLATE } from './combo'
 import { CAROUSEL_TEMPLATE } from './carousel'
+import { DRAGCLEAN_TEMPLATE } from './dragclean'
+import { PROGRESSBAR_TEMPLATE } from './progressbar'
 
 export const GAME_TEMPLATES: GameTemplate[] = [
   FLIPBOOK_TEMPLATE,
@@ -51,6 +53,7 @@ export const GAME_TEMPLATES: GameTemplate[] = [
   VENDING_TEMPLATE,
   BASKET_TEMPLATE,
   COMBO_TEMPLATE,
+  DRAGCLEAN_TEMPLATE,
   DRAG_TEMPLATE,
   CATCH_TEMPLATE,
   BUBBLES_TEMPLATE,
@@ -67,6 +70,7 @@ export const GAME_TEMPLATES: GameTemplate[] = [
   SONGMIX_TEMPLATE,
   SCROLL_TEMPLATE,
   COUNTDOWN_TEMPLATE,
+  PROGRESSBAR_TEMPLATE,
   EMBED_TEMPLATE,
 ]
 

@@ -19,6 +19,7 @@ import {
   composeElementAnim,
   composeGameWinAnim,
   composeTapAnim,
+  composeCleanEventAnim,
   composeComboEventAnim,
   composeThoughtEventAnim,
   entranceLeadDelayMs,
@@ -164,7 +165,20 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
   // Waypoints (design px). 'slide' uses the configured nodes (or legacy toX/toY);
   // 'smart' targets the CTA/game; 'tap' stays in place (no waypoints).
   let pts: { x: number; y: number; pauseMs?: number }[] = []
-  let kind: 'tap' | 'radialtap' | 'slide' | 'scratch' | 'match' | 'thoughtwhack' | 'basket' | 'combo' | 'carousel' | 'brush' | 'still' | 'hold' = 'tap'
+  let kind:
+    | 'tap'
+    | 'radialtap'
+    | 'slide'
+    | 'scratch'
+    | 'match'
+    | 'thoughtwhack'
+    | 'basket'
+    | 'combo'
+    | 'carousel'
+    | 'dragclean'
+    | 'brush'
+    | 'still'
+    | 'hold' = 'tap'
   if (cfg.mode === 'still') {
     kind = 'still'
   } else if (cfg.mode === 'radialtap') {
@@ -193,6 +207,8 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     kind = 'combo'
   } else if (cfg.mode === 'carousel') {
     kind = 'carousel'
+  } else if (cfg.mode === 'dragclean') {
+    kind = 'dragclean'
   } else if (cfg.mode === 'brush') {
     kind = 'brush'
   }
@@ -206,11 +222,13 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
           ? 1500
           : kind === 'combo'
             ? 1900
-            : kind === 'carousel'
-              ? 2600
-              : kind === 'hold'
-                ? 2000
-                : 900
+            : kind === 'dragclean'
+              ? 1800
+              : kind === 'carousel'
+                ? 2600
+                : kind === 'hold'
+                  ? 2000
+                  : 900
   const cubic = (t: number): number => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
   const EASE: Record<string, (t: number) => number> = {
     linear: (t) => t,
@@ -303,7 +321,8 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     let ox = 0
     let oy = 0
     let press = 0
-    // 'combo' only: carrying something reads as the hand swelling, not shrinking.
+    // The carry modes ('combo', 'dragclean') only: holding something reads as the
+    // hand swelling, not shrinking.
     let swell = 0
     if (kind === 'brush') {
       // Mime dragging the brush across the card. The hand sits IN FRONT of the brush and BELOW it
@@ -479,6 +498,38 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
       swell = g.carry
       // Fade out after the release so the loop's jump back to the option is unseen.
       content.style.opacity = g.alpha.toFixed(3)
+    } else if (kind === 'dragclean') {
+      // Carry the Drag to clean tool onto the obstacle it is nearest to and wipe.
+      //
+      // Both ends are published by the game and both move: the tool sits wherever the
+      // player last let go of it, and the target changes as obstacles disappear (the
+      // game re-points data-clean-hint at the nearest one still standing). Read fresh
+      // every frame, so the hand re-aims mid-loop rather than miming a wipe onto
+      // something that is already gone.
+      //
+      // Shares the combo drag curve, so the placed hand and the coded hint hand
+      // perform the identical grab / carry / release gesture.
+      const toolEl = root.querySelector<HTMLElement>('[data-clean-drag]')
+      const messEl = root.querySelector<HTMLElement>('[data-clean-hint]')
+      if (!toolEl || !messEl) {
+        content.style.opacity = '0'
+        raf = requestAnimationFrame(frame)
+        return
+      }
+      const toolRect = toolEl.getBoundingClientRect()
+      const messRect = messEl.getBoundingClientRect()
+      const guideRect = rec.outer.getBoundingClientRect()
+      const g = dragGesture(((now - t0) % travel) / travel)
+      const fromX = toolRect.left + toolRect.width / 2
+      const fromY = toolRect.top + toolRect.height / 2
+      const fingerX = fromX + (messRect.left + messRect.width / 2 - fromX) * g.travel
+      const fingerY = fromY + (messRect.top + messRect.height / 2 - fromY) * g.travel
+      ox = fingerX - (guideRect.left + guideRect.width * 0.22)
+      oy = fingerY - (guideRect.top + guideRect.height * 0.12)
+      press = g.press
+      swell = g.carry
+      // Fade out after the release so the loop's jump back to the tool is unseen.
+      content.style.opacity = g.alpha.toFixed(3)
     } else if (kind === 'carousel') {
       // One loop performs the whole gesture a carousel asks for, in the order the game
       // itself requires: a SWIPE that pulls the next choice into the centre, then a
@@ -586,7 +637,7 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     }
     // A drag softens the contact dip to leave room for the carry swell; every other
     // mode keeps the original press-only scale.
-    const dip = kind === 'combo' ? 0.1 : 0.18
+    const dip = kind === 'combo' || kind === 'dragclean' ? 0.1 : 0.18
     content.style.transform = `translate(${Math.round(ox)}px,${Math.round(oy)}px) scale(${(1 - press * dip + swell * 0.14).toFixed(3)})`
     raf = requestAnimationFrame(frame)
   }
@@ -975,6 +1026,12 @@ function runComboEvent(rec: Rec, event: 'comboPick' | 'comboDrop' | 'comboNext')
   applyLightray(rec, event)
 }
 
+function runCleanEvent(rec: Rec, event: 'cleanPick' | 'cleanWipe' | 'cleanDrop'): void {
+  const css = composeCleanEventAnim(rec.el, event)
+  if (css !== 'none') restartAnim(rec.anim, css)
+  applyLightray(rec, event)
+}
+
 // ---------------------------------------------------------------------------
 // Typewriter reveal (see TypingConfig in scene.ts).
 // ---------------------------------------------------------------------------
@@ -1333,6 +1390,14 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
         else outer.classList.add(COMBO_OFF_CLASS)
       }
     }
+    if (el.cleanRole) {
+      // Drag to clean tags only. Nothing starts hidden here: the tool and every
+      // obstacle are part of the board the author is arranging, so they stay visible
+      // and placeable on the canvas, and the game only removes an obstacle once it
+      // has actually been wiped in play.
+      outer.dataset.cleanRole = el.cleanRole.role
+      if (el.cleanRole.gameId) outer.dataset.cleanGameId = el.cleanRole.gameId
+    }
 
     const anim = document.createElement('div')
     anim.className = 'pa-el-anim'
@@ -1364,6 +1429,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       !el.button &&
       !el.basketItem &&
       el.comboRole?.role !== 'option' &&
+      el.cleanRole?.role !== 'draggable' &&
       !hasTapAnim(el)
     if (nonInteractive) {
       outer.style.pointerEvents = 'none'
@@ -1449,7 +1515,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
   }
   /** Templates whose win IS the player's own action, so their win sound plays at once
    * instead of waiting for the win animation's lead-in. */
-  const WIN_SFX_ON_THE_BEAT = new Set(['basket', 'carousel'])
+  const WIN_SFX_ON_THE_BEAT = new Set(['basket', 'carousel', 'dragclean'])
   const GAME_WIN_SFX_BIAS_MS = 500
   const gameWinSoundDelayMs = (rec?: Rec): number => {
     const phaseDelay = rec ? phaseLeadDelayMs(rec.el, 'gameWin') : 0
@@ -1475,7 +1541,14 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     broadcastGameEvent(event, (target) => runComboEvent(target, event))
   }
 
-  function broadcastGameEvent(event: 'thoughtSpawn' | 'thoughtWhack' | 'comboPick' | 'comboDrop' | 'comboNext', run: (target: Rec) => void): void {
+  const fireCleanEvent = (event: 'cleanPick' | 'cleanWipe' | 'cleanDrop'): void => {
+    broadcastGameEvent(event, (target) => runCleanEvent(target, event))
+  }
+
+  function broadcastGameEvent(
+    event: 'thoughtSpawn' | 'thoughtWhack' | 'comboPick' | 'comboDrop' | 'comboNext' | 'cleanPick' | 'cleanWipe' | 'cleanDrop',
+    run: (target: Rec) => void,
+  ): void {
     for (const target of recs) {
       if (target.el.hidden) continue
       if (target.el.animations?.[event] || target.el.animations?.[`${event}Extra`]?.length) run(target)
@@ -1854,6 +1927,10 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
               }
               if (event === 'comboPick' || event === 'comboDrop' || event === 'comboNext') {
                 fireComboEvent(event)
+                return
+              }
+              if (event === 'cleanPick' || event === 'cleanWipe' || event === 'cleanDrop') {
+                fireCleanEvent(event)
                 return
               }
               const bind = (rec.el.sfx ?? []).find((b) => b.event === event && b.assetId)

@@ -246,7 +246,20 @@ export function ctaPulseAnimation(cta: import('./scene').CtaConfig | undefined):
 
 // A phase can hold MULTIPLE stacked specs: the primary (`entrance`/`loop`/`exit`/`gameWin`) plus any
 // `…Extra[]` played together with it (e.g. entrance = pop + shine). Collect them in order.
-export type Phase = 'entrance' | 'loop' | 'exit' | 'gameWin' | 'tap' | 'thoughtSpawn' | 'thoughtWhack' | 'comboPick' | 'comboDrop' | 'comboNext'
+export type Phase =
+  | 'entrance'
+  | 'loop'
+  | 'exit'
+  | 'gameWin'
+  | 'tap'
+  | 'thoughtSpawn'
+  | 'thoughtWhack'
+  | 'comboPick'
+  | 'comboDrop'
+  | 'comboNext'
+  | 'cleanPick'
+  | 'cleanWipe'
+  | 'cleanDrop'
 export function phaseSpecs(el: SceneElement, phase: Phase): AnimSpec[] {
   const a = el.animations
   if (!a) return []
@@ -273,6 +286,9 @@ export function phaseSpecs(el: SceneElement, phase: Phase): AnimSpec[] {
             | 'comboPickExtra'
             | 'comboDropExtra'
             | 'comboNextExtra'
+            | 'cleanPickExtra'
+            | 'cleanWipeExtra'
+            | 'cleanDropExtra'
         ] ?? legacyExtra)
   if (Array.isArray(extra)) for (const s of extra) if (s) out.push(s)
   return out
@@ -281,7 +297,21 @@ export function phaseSpecs(el: SceneElement, phase: Phase): AnimSpec[] {
 // Phase search order for the reflection sweep. `loop` FIRST: an element that carries both an
 // ambient loop sweep and a one-shot one can only run one of them (a single pair of pseudo-elements),
 // and the ambient one is the safer pick — it is visible for the element's whole life either way.
-const LIGHTRAY_PHASES: Phase[] = ['loop', 'entrance', 'exit', 'gameWin', 'tap', 'thoughtSpawn', 'thoughtWhack', 'comboPick', 'comboDrop', 'comboNext']
+const LIGHTRAY_PHASES: Phase[] = [
+  'loop',
+  'entrance',
+  'exit',
+  'gameWin',
+  'tap',
+  'thoughtSpawn',
+  'thoughtWhack',
+  'comboPick',
+  'comboDrop',
+  'comboNext',
+  'cleanPick',
+  'cleanWipe',
+  'cleanDrop',
+]
 
 /** The lightray spec from ANY phase, WITH the phase that authored it — drives the .pa-lightray
  * pseudo sweep. The reflection is a class-driven effect, so it can be added in any phase, not just
@@ -427,13 +457,21 @@ export function composeComboEventAnim(el: SceneElement, event: 'comboPick' | 'co
   return composeOneShotAnim(el, event)
 }
 
+/** The Drag to clean beats — same one-shot-then-resume-the-loop shape as combo's. */
+export function composeCleanEventAnim(el: SceneElement, event: 'cleanPick' | 'cleanWipe' | 'cleanDrop'): string {
+  return composeOneShotAnim(el, event)
+}
+
 /**
  * A one-shot phase (game win / tap) followed by the element's ordinary loop, held
  * back until the phase has finished so the two never fight over transform. Falls
  * back to the CTA pulse when the element has no authored loop, exactly as the loop
  * path does, so a CTA keeps pulsing after the phase instead of going still.
  */
-function composeOneShotAnim(el: SceneElement, phase: 'gameWin' | 'tap' | 'thoughtSpawn' | 'thoughtWhack' | 'comboPick' | 'comboDrop' | 'comboNext'): string {
+function composeOneShotAnim(
+  el: SceneElement,
+  phase: 'gameWin' | 'tap' | 'thoughtSpawn' | 'thoughtWhack' | 'comboPick' | 'comboDrop' | 'comboNext' | 'cleanPick' | 'cleanWipe' | 'cleanDrop',
+): string {
   const parts: string[] = []
   let loopDelay = 0
   for (const e of phaseSpecs(el, phase)) {

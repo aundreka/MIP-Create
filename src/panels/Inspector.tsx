@@ -13,6 +13,7 @@ import type {
   BoxStyle,
   ButtonConfig,
   ButtonTapEffect,
+  CleanRoleConfig,
   ComboRoleConfig,
   ConfettiConfig,
   CountdownConfig,
@@ -120,6 +121,15 @@ import {
   setCanvasVisible,
   type ComboSlotEdit,
 } from '../comboSlots'
+import {
+  assignCleanSlot,
+  cleanCandidates,
+  cleanDraggable,
+  cleanObstacles,
+  cleanOptionLabel,
+  cleanSlotSummary,
+  type CleanSlotEdit,
+} from '../cleanSlots'
 import { DATE_LOCALE_OPTIONS } from '../dateLocales'
 
 // Tap feedback options, shared by the button element and images marked as buttons.
@@ -517,6 +527,10 @@ function ElementSound(props: { el: SceneElement }): JSX.Element {
   const isCarousel = el.game?.templateId === 'carousel'
   const isCombo = el.game?.templateId === 'combo'
   const hasCombo = scene.elements.some((candidate) => candidate.game?.templateId === 'combo')
+  const isDragClean = el.game?.templateId === 'dragclean'
+  const hasDragClean = scene.elements.some((candidate) => candidate.game?.templateId === 'dragclean')
+  const isProgressBar = el.game?.templateId === 'progressbar'
+  const hasProgressBar = scene.elements.some((candidate) => candidate.game?.templateId === 'progressbar')
   const gaugeStages = ((): { value: string; label: string }[] => {
     if (!isHoldGauge) return []
     const p = el.game?.params ?? {}
@@ -571,6 +585,16 @@ function ElementSound(props: { el: SceneElement }): JSX.Element {
         ]
       : []),
     ...(isCombo ? [{ value: 'onReveal', label: 'When the game is won' }] : []),
+    ...(hasDragClean
+      ? [
+          { value: 'cleanPick', label: 'When the tool is picked up' },
+          { value: 'cleanWipe', label: 'When an obstacle is cleaned' },
+          { value: 'cleanDrop', label: 'When the tool is let go' },
+        ]
+      : []),
+    ...(isDragClean ? [{ value: 'onReveal', label: 'When the game is won' }] : []),
+    ...(hasProgressBar ? [{ value: 'progressStep', label: 'When the progress bar gains a step' }] : []),
+    ...(isProgressBar ? [{ value: 'onReveal', label: 'When the bar fills up' }] : []),
     ...(isCarousel
       ? [
           { value: 'swipeStart', label: 'When a swipe starts' },
@@ -1406,6 +1430,133 @@ function FontField({ label, value, assets, onChange }: { label: string; value: s
         </button>
       </div>
     </Row>
+  )
+}
+
+// ---- Drag to clean: role assignment ----------------------------------------
+// One tool, any number of obstacles, all of them elements the author has already
+// placed on the canvas. Assigned from HERE rather than from each element's own panel
+// for the same reason the combo board is: the roles only mean something relative to
+// each other, so one screen should own the wiring.
+//
+// This panel deliberately offers no art, no size and no position. Everything the
+// player sees is the element's own, edited on the canvas — the game supplies only the
+// rule that this one wipes those ones away.
+interface DragCleanSetupProps {
+  params: Record<string, unknown>
+  setParam: (k: string, v: unknown) => void
+  elementId: string
+  siblings: SceneElement[]
+}
+function DragCleanSetup({ params, setParam, elementId, siblings }: DragCleanSetupProps): JSX.Element {
+  const tool = cleanDraggable(siblings, elementId)
+  const mess = cleanObstacles(siblings, elementId)
+  const candidates = cleanCandidates(siblings)
+  const bars = siblings.filter((e) => e.type === 'game-mount' && e.game?.templateId === 'progressbar')
+
+  const apply = (edits: CleanSlotEdit[]): void => {
+    if (!edits.length) return
+    beginTransaction()
+    for (const e of edits) patchElement(e.id, e.patch)
+    endTransaction()
+  }
+  const assign = (nextId: string, current: SceneElement | undefined, role: CleanRoleConfig['role']): void =>
+    apply(assignCleanSlot({ nextId, current, role, gameId: elementId }))
+
+  const choices = (current: SceneElement | undefined): { value: string; label: string }[] => [
+    { value: '', label: current ? '— remove —' : '— none —' },
+    ...candidates.map((e) => ({ value: e.id, label: cleanOptionLabel(e) + (current && e.id === current.id ? ' ✓' : '') })),
+  ]
+
+  /** One assignment row, the same shape as a combo slot so the two panels read alike. */
+  const slot = (label: string, hint: string, current: SceneElement | undefined, role: CleanRoleConfig['role']): JSX.Element => (
+    <div className="combo-slot" key={`${role}-${current?.id ?? 'add'}`}>
+      <span title={hint}>{label}</span>
+      <Select value={current?.id ?? ''} onChange={(v) => assign(v, current, role)} options={choices(current)} title={hint} />
+      <span className="combo-slot-actions">
+        {current && (
+          <button className="icon-btn" title={`Select “${current.name || current.id}” on the canvas`} onClick={() => selectOnly(current.id)}>
+            <Icon icon={ScanSearch} size={13} />
+          </button>
+        )}
+      </span>
+    </div>
+  )
+
+  return (
+    <>
+      <div className="group-title2">The board</div>
+      {slot('Drag this', 'The cloth / sponge / eraser the player carries. Its art, size and position stay exactly as you placed them.', tool, 'draggable')}
+      {mess.map((o, i) => slot(`Obstacle ${i + 1}`, 'A thing to wipe away. It fades out when the tool covers it.', o, 'obstacle'))}
+      {slot(`Obstacle ${mess.length + 1}`, 'Add another thing to wipe away.', undefined, 'obstacle')}
+      <div className="hint pad">
+        {!tool
+          ? 'Pick the object the player drags. Without one there is nothing to play.'
+          : mess.length === 0
+            ? 'Now add the obstacles it wipes away.'
+            : `Won when all ${mess.length} are cleaned${Number(params.winObstacles ?? 0) > 0 ? `, or after ${Number(params.winObstacles)} if that is fewer` : ''}. The tool cannot be dragged off screen.`}
+      </div>
+      {bars.length > 0 && (
+        <>
+          <div className="group-title2">Progress bar</div>
+          <Row label="Fills which bar">
+            <Select
+              value={String(params.progressGameId ?? '')}
+              onChange={(v) => setParam('progressGameId', v)}
+              options={[{ value: '', label: 'Every bar in this screen' }, ...bars.map((b) => ({ value: b.id, label: b.name || b.id }))]}
+            />
+          </Row>
+          <div className="hint pad">One step per obstacle cleaned. Leave it on “every bar” unless this screen has more than one.</div>
+        </>
+      )}
+      <div className="group-title2">Feel &amp; timing</div>
+    </>
+  )
+}
+
+// ---- Progress bar: what it counts, and how wide it is -----------------------
+// Everything else about the bar is an ordinary param field (colours, borders,
+// shadows, the fill animation) rendered by the generic template renderer. What
+// belongs here is the pair of things that are not params at all: which game feeds
+// it, and the element GEOMETRY that makes it span the screen.
+interface ProgressBarSetupProps {
+  params: Record<string, unknown>
+  setParam: (k: string, v: unknown) => void
+  elementId: string
+  siblings: SceneElement[]
+  fullWidth: boolean
+  setFullWidth: (v: boolean) => void
+}
+function ProgressBarSetup({ params, setParam, elementId, siblings, fullWidth, setFullWidth }: ProgressBarSetupProps): JSX.Element {
+  // Anything that can feed a bar: every game mount in the screen except the bars
+  // themselves. Today that is Drag to clean; the channel is open to any mechanic
+  // that starts announcing progress, so this deliberately does not hard-code it.
+  const sources = siblings.filter((e) => e.type === 'game-mount' && e.id !== elementId && e.game?.templateId !== 'progressbar')
+  const feeder = sources.find((e) => e.id === String(params.sourceGameId ?? ''))
+  return (
+    <>
+      <div className="group-title2">What fills it</div>
+      <Row label="Filled by">
+        <Select
+          value={String(params.sourceGameId ?? '')}
+          onChange={(v) => setParam('sourceGameId', v)}
+          options={[{ value: '', label: 'Any game on this screen' }, ...sources.map((s) => ({ value: s.id, label: s.name || s.id }))]}
+        />
+      </Row>
+      <div className="hint pad">
+        {sources.length === 0
+          ? 'Add a game that reports progress — Drag to clean — and this bar fills as it is played.'
+          : Number(params.steps ?? 0) > 0
+            ? `Counts to ${Number(params.steps)} and wins the screen. If the game feeding it has more steps than that, this bar finishes first and owns the redirect.`
+            : `Counts to however many steps ${feeder ? `“${feeder.name || feeder.id}”` : 'the game feeding it'} has, so the two finish together. Set “Steps to win” to end earlier.`}
+      </div>
+      <Toggle label="Full screen width (like the header)" checked={fullWidth} onChange={setFullWidth} />
+      <div className="hint pad">
+        {fullWidth
+          ? 'Edge to edge on every screen, letterboxing included. The box’s height still sets how tall it is; drag it up or down to place it.'
+          : 'The bar fills the box you drew. Turn this on to span the whole screen instead.'}
+      </div>
+    </>
   )
 }
 
@@ -2405,7 +2556,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
       endTransaction()
     }
     const patchAllPhase = (
-      phase: 'entrance' | 'loop' | 'exit' | 'gameWin' | 'tap' | 'thoughtSpawn' | 'thoughtWhack' | 'comboPick' | 'comboDrop' | 'comboNext',
+      phase: 'entrance' | 'loop' | 'exit' | 'gameWin' | 'tap' | 'thoughtSpawn' | 'thoughtWhack' | 'comboPick' | 'comboDrop' | 'comboNext' | 'cleanPick' | 'cleanWipe' | 'cleanDrop',
       primary: AnimSpec | undefined,
       extra: AnimSpec[],
     ): void => {
@@ -2508,6 +2659,40 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 defaultSpec={{ preset: 'pop', durationMs: 380, delayMs: 0, easing: 'ease-out' }}
                 defaultExtraSpec={{ preset: 'shine', durationMs: 800, delayMs: 0, easing: 'ease-in-out' }}
                 onChange={(primary, ex) => patchAllPhase('comboNext', primary, ex)}
+              />
+            </>
+          )}
+          {state.scene.elements.some((e) => e.game?.templateId === 'dragclean') && (
+            <>
+              <AnimPhase
+                title="On tool picked up"
+                primary={first?.animations?.cleanPick}
+                extra={first?.animations?.cleanPickExtra}
+                presets={NODE_PRESETS}
+                extraPresets={NODE_PRESETS}
+                defaultSpec={{ preset: 'pop', durationMs: 260, delayMs: 0, easing: 'ease-out' }}
+                defaultExtraSpec={{ preset: 'glow', durationMs: 600, delayMs: 0, easing: 'ease-in-out' }}
+                onChange={(primary, ex) => patchAllPhase('cleanPick', primary, ex)}
+              />
+              <AnimPhase
+                title="On obstacle cleaned"
+                primary={first?.animations?.cleanWipe}
+                extra={first?.animations?.cleanWipeExtra}
+                presets={NODE_PRESETS}
+                extraPresets={NODE_PRESETS}
+                defaultSpec={{ preset: 'pop', durationMs: 300, delayMs: 0, easing: 'ease-out' }}
+                defaultExtraSpec={{ preset: 'shine', durationMs: 700, delayMs: 0, easing: 'ease-in-out' }}
+                onChange={(primary, ex) => patchAllPhase('cleanWipe', primary, ex)}
+              />
+              <AnimPhase
+                title="On tool let go"
+                primary={first?.animations?.cleanDrop}
+                extra={first?.animations?.cleanDropExtra}
+                presets={NODE_PRESETS}
+                extraPresets={NODE_PRESETS}
+                defaultSpec={{ preset: 'pop', durationMs: 240, delayMs: 0, easing: 'ease-out' }}
+                defaultExtraSpec={{ preset: 'shine', durationMs: 600, delayMs: 0, easing: 'ease-in-out' }}
+                onChange={(primary, ex) => patchAllPhase('cleanDrop', primary, ex)}
               />
             </>
           )}
@@ -3388,6 +3573,21 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 <>
                   {tpl.id === 'combo' && <ComboSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
                   {tpl.id === 'combo' && <div className="group-title2">Feel &amp; timing</div>}
+                  {tpl.id === 'dragclean' && <DragCleanSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
+                  {tpl.id === 'progressbar' && (
+                    <ProgressBarSetup
+                      params={params}
+                      setParam={setParam}
+                      elementId={id}
+                      siblings={activeSceneDef(state)?.elements ?? []}
+                      // Full width is not a game param: a game mount already goes
+                      // through the same 'extend' layout path the header bar does, so
+                      // this is the element's own Mode, surfaced here rather than left
+                      // for the author to find in Geometry.
+                      fullWidth={g.mode === 'extend'}
+                      setFullWidth={(v) => patchGeometry(id, { mode: v ? 'extend' : 'fit' })}
+                    />
+                  )}
                   {tpl.id === 'catch' ? (
                     <CatchTemplateInspector params={params} setParam={setParam} />
                   ) : (
@@ -3398,6 +3598,10 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                           !(tpl.id === 'scratch' && (f.key === 'coverColor' || f.key === 'shadowColor')) &&
                           // ComboSetup owns both counts, right above its per-question chips.
                           !(tpl.id === 'combo' && (f.key === 'questions' || f.key === 'options')) &&
+                          // Progress wiring is a dropdown of real elements in the setup
+                          // panels above, never a typed-in element id.
+                          f.key !== 'sourceGameId' &&
+                          f.key !== 'progressGameId' &&
                           (f.showIf?.(params) ?? true),
                       )
                       // A template can title its sections (ParamField.group): emit a
@@ -3829,6 +4033,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                         basketItem: v ? { gameId: basketGames[0]?.id } : undefined,
                         drag: v ? undefined : el.drag,
                         comboRole: v ? undefined : el.comboRole,
+                        cleanRole: v ? undefined : el.cleanRole,
                       })
                     }
                   />
@@ -3872,6 +4077,26 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                   </>
                 )
               })()}
+            {el.cleanRole &&
+              (() => {
+                // Read-only on purpose: which element plays which part is chosen in the
+                // Drag to clean game's own panel, so one screen owns the whole wiring
+                // instead of it being spread across every element.
+                const where = cleanSlotSummary(el.cleanRole)
+                const game = activeSceneDef(state)?.elements.find((c) => c.id === el.cleanRole?.gameId)
+                return (
+                  <>
+                    <div className="hint pad">
+                      Drag to clean: this element is <b>{where}</b>.
+                    </div>
+                    {game && (
+                      <button className="btn" style={{ width: '100%', marginTop: 4 }} onClick={() => selectOnly(game.id)}>
+                        Edit in “{game.name || game.id}”
+                      </button>
+                    )}
+                  </>
+                )
+              })()}
             <Toggle
               label="Draggable item"
               checked={!!el.drag}
@@ -3880,6 +4105,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                   drag: v ? { group: el.slot?.group ?? 'a' } : undefined,
                   basketItem: v ? undefined : el.basketItem,
                   comboRole: v ? undefined : el.comboRole,
+                  cleanRole: v ? undefined : el.cleanRole,
                 })
               }
             />
@@ -4087,6 +4313,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                     { value: 'thoughtwhack', label: 'Whack-a-mole (follow an unwhacked thought)' },
                     { value: 'basket', label: 'Basket (drag next unplaced item)' },
                     { value: 'combo', label: 'Combo (drag the live option to the drop area)' },
+                    { value: 'dragclean', label: 'Drag to clean (carry the tool onto the nearest obstacle)' },
                     { value: 'carousel', label: 'Carousel (swipe, then tap the centre)' },
                     { value: 'brush', label: 'Point at the scratch brush (after its intro)' },
                     { value: 'still', label: 'Still (no movement at all)' },
@@ -5074,6 +5301,44 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
             />
             <div className="hint pad">
               The next-question phase fires once the incoming title and options are on screen, so a pop here animates them in. Tag them under Drag &amp; drop &rarr; Combo role.
+            </div>
+          </>
+        )}
+        {state.scene.elements.some((e) => e.game?.templateId === 'dragclean') && (
+          <>
+            <AnimPhase
+              title="On tool picked up"
+              primary={el.animations?.cleanPick}
+              extra={el.animations?.cleanPickExtra}
+              presets={NODE_PRESETS}
+              extraPresets={NODE_PRESETS}
+              defaultSpec={{ preset: 'pop', durationMs: 260, delayMs: 0, easing: 'ease-out' }}
+              defaultExtraSpec={{ preset: 'glow', durationMs: 600, delayMs: 0, easing: 'ease-in-out' }}
+              onChange={(primary, ex) => patchElement(id, { animations: { ...(el.animations ?? {}), cleanPick: primary, cleanPickExtra: ex.length ? ex : undefined } })}
+            />
+            <AnimPhase
+              title="On obstacle cleaned"
+              primary={el.animations?.cleanWipe}
+              extra={el.animations?.cleanWipeExtra}
+              presets={NODE_PRESETS}
+              extraPresets={NODE_PRESETS}
+              defaultSpec={{ preset: 'pop', durationMs: 300, delayMs: 0, easing: 'ease-out' }}
+              defaultExtraSpec={{ preset: 'shine', durationMs: 700, delayMs: 0, easing: 'ease-in-out' }}
+              onChange={(primary, ex) => patchElement(id, { animations: { ...(el.animations ?? {}), cleanWipe: primary, cleanWipeExtra: ex.length ? ex : undefined } })}
+            />
+            <AnimPhase
+              title="On tool let go"
+              primary={el.animations?.cleanDrop}
+              extra={el.animations?.cleanDropExtra}
+              presets={NODE_PRESETS}
+              extraPresets={NODE_PRESETS}
+              defaultSpec={{ preset: 'pop', durationMs: 240, delayMs: 0, easing: 'ease-out' }}
+              defaultExtraSpec={{ preset: 'shine', durationMs: 600, delayMs: 0, easing: 'ease-in-out' }}
+              onChange={(primary, ex) => patchElement(id, { animations: { ...(el.animations ?? {}), cleanDrop: primary, cleanDropExtra: ex.length ? ex : undefined } })}
+            />
+            <div className="hint pad">
+              “On obstacle cleaned” fires while the obstacle is still visible, so an animation here plays before it fades. Put one on the obstacle itself for a per-item wipe, or
+              on a counter, headline or background to react to every clean. Assign the roles in the Drag to clean game&rsquo;s own panel.
             </div>
           </>
         )}
