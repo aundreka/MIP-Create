@@ -76,15 +76,15 @@ const KEYFRAMES = `
    settles with a smaller second dip. Reads as a nod / press rather than a hop, so it
    pairs well with things anchored to the top of the composition. */
 @keyframes pa-bounce-reverse{0%,100%{transform:translateY(0)}30%{transform:translateY(calc(18px * var(--pa-s,1)))}55%{transform:translateY(0)}75%{transform:translateY(calc(7px * var(--pa-s,1)))}}
-/* ROLL — a ball rolling into place: the element travels a short design-relative
-   distance (so it scales with --pa-s like the slides) while rotating in the SAME
-   direction as the travel, then rocks slightly past rest and settles. Direction names
-   the way it TRAVELS: roll-right rolls rightwards (enters from the left, turning
-   clockwise), roll-left rolls leftwards (enters from the right, turning
-   anticlockwise). Rotation is about the element centre, so a round asset reads as a
-   real roll and a rectangular one as a gentle tumble. */
-@keyframes pa-roll-right{0%{transform:translateX(calc(-64px * var(--pa-s,1))) rotate(-70deg);opacity:0}20%{opacity:1}70%{transform:translateX(calc(10px * var(--pa-s,1))) rotate(12deg);opacity:1}100%{transform:translateX(0) rotate(0);opacity:1}}
-@keyframes pa-roll-left{0%{transform:translateX(calc(64px * var(--pa-s,1))) rotate(70deg);opacity:0}20%{opacity:1}70%{transform:translateX(calc(-10px * var(--pa-s,1))) rotate(-12deg);opacity:1}100%{transform:translateX(0) rotate(0);opacity:1}}
+/* ROLL — a ball rolling into place: the element covers a long design-relative distance
+   (so it scales with --pa-s like the slides) while turning a SLIGHT amount in the same
+   direction as the travel, then rocks a little past rest and settles. A gentle roll, not
+   a full tumble — the turn reads as weight on the slide rather than as a spin. Direction
+   names the way it TRAVELS: roll-right rolls rightwards (enters from the left, turning
+   clockwise), roll-left rolls leftwards (enters from the right, turning anticlockwise).
+   Rotation is about the element centre. */
+@keyframes pa-roll-right{0%{transform:translateX(calc(-190px * var(--pa-s,1))) rotate(-26deg);opacity:0}18%{opacity:1}72%{transform:translateX(calc(16px * var(--pa-s,1))) rotate(5deg);opacity:1}100%{transform:translateX(0) rotate(0);opacity:1}}
+@keyframes pa-roll-left{0%{transform:translateX(calc(190px * var(--pa-s,1))) rotate(26deg);opacity:0}18%{opacity:1}72%{transform:translateX(calc(-16px * var(--pa-s,1))) rotate(-5deg);opacity:1}100%{transform:translateX(0) rotate(0);opacity:1}}
 @keyframes pa-shake{0%,100%{transform:translateX(0)}20%{transform:translateX(calc(-6px * var(--pa-s,1)))}40%{transform:translateX(calc(6px * var(--pa-s,1)))}60%{transform:translateX(calc(-4px * var(--pa-s,1)))}80%{transform:translateX(calc(4px * var(--pa-s,1)))}}
 @keyframes pa-wave{0%,100%{transform:rotate(-4deg)}50%{transform:rotate(4deg)}}
 /* Both of these ANIMATE the filter property, which replaces it wholesale for the animation's
@@ -365,6 +365,11 @@ export function phaseTotalMs(el: SceneElement, phase: Phase): number {
  * simple on/off. Before its own delay the spec still fills from its 0% frame (fill:both).
  */
 export function phaseFrameCss(el: SceneElement, phase: Phase, elapsedMs: number): string {
+  return phaseFrameCssParts(el, phase, elapsedMs).join(', ')
+}
+
+/** Per-layer form of {@link phaseFrameCss} — one entry per stacked spec. */
+export function phaseFrameCssParts(el: SceneElement, phase: Phase, elapsedMs: number): string[] {
   return phaseSpecs(el, phase)
     .filter((s) => s.preset !== 'lightray') // pseudo-driven sweep, not a node animation
     .filter((s) => s.preset !== 'typewriter') // JS-driven text reveal/erase
@@ -376,7 +381,6 @@ export function phaseFrameCss(el: SceneElement, phase: Phase, elapsedMs: number)
       return `${name} ${s.durationMs}ms ${s.easing || 'ease'} ${delay - t}ms 1 normal both`
     })
     .filter(Boolean)
-    .join(', ')
 }
 
 /** Earliest entrance start (min delay across stacked entrance specs) — when the element first appears. */
@@ -414,6 +418,12 @@ function ctaPulseCss(el: SceneElement, delayMs: number): string {
  * 'lightray' loop specs are excluded here — that sweep lives on the .pa-lightray pseudo-element.
  */
 export function composeElementAnim(el: SceneElement, includeEntrance: boolean): string {
+  return composeElementAnimParts(el, includeEntrance).join(', ') || 'none'
+}
+
+/** Per-layer form of {@link composeElementAnim} — one entry per stacked spec, in the
+ * order the layers are nested (see applyAnimParts in stage.ts). */
+export function composeElementAnimParts(el: SceneElement, includeEntrance: boolean): string[] {
   const parts: string[] = []
   let loopDelay = 0
   if (includeEntrance) {
@@ -436,17 +446,21 @@ export function composeElementAnim(el: SceneElement, includeEntrance: boolean): 
     const pulse = ctaPulseCss(el, loopDelay) // no explicit loop → CTA default pulse
     if (pulse) parts.push(pulse)
   }
-  return parts.join(', ') || 'none'
+  return parts
 }
 
 /** The exit animation shorthand — all stacked exit specs, comma-joined ('' if none). */
 export function exitCss(el: SceneElement): string {
+  return exitCssParts(el).join(', ')
+}
+
+/** Per-layer form of {@link exitCss}. */
+export function exitCssParts(el: SceneElement): string[] {
   return phaseSpecs(el, 'exit')
     .filter((e) => e.preset !== 'lightray') // pseudo-driven sweep, not a node animation
     .filter((e) => e.preset !== 'typewriter') // JS-driven text erase
     .map((e) => animationCss(e, false))
     .filter(Boolean)
-    .join(', ')
 }
 
 /** Whether the element should play an entrance at the given trigger (primary entrance gates the phase). */
@@ -496,10 +510,57 @@ export function composeTapRevealAnim(el: SceneElement): string {
  * back to the CTA pulse when the element has no authored loop, exactly as the loop
  * path does, so a CTA keeps pulsing after the phase instead of going still.
  */
-function composeOneShotAnim(
-  el: SceneElement,
-  phase: 'gameWin' | 'tap' | 'thoughtSpawn' | 'thoughtWhack' | 'comboPick' | 'comboDrop' | 'comboNext' | 'cleanPick' | 'cleanWipe' | 'cleanDrop' | 'tapRemove' | 'tapReveal',
-): string {
+export type OneShotPhase =
+  | 'gameWin'
+  | 'tap'
+  | 'thoughtSpawn'
+  | 'thoughtWhack'
+  | 'comboPick'
+  | 'comboDrop'
+  | 'comboNext'
+  | 'cleanPick'
+  | 'cleanWipe'
+  | 'cleanDrop'
+  | 'tapRemove'
+  | 'tapReveal'
+function composeOneShotAnim(el: SceneElement, phase: OneShotPhase): string {
+  return composeOneShotAnimParts(el, phase).join(', ') || 'none'
+}
+
+const ONE_SHOT_PHASES: OneShotPhase[] = [
+  'gameWin',
+  'tap',
+  'thoughtSpawn',
+  'thoughtWhack',
+  'comboPick',
+  'comboDrop',
+  'comboNext',
+  'cleanPick',
+  'cleanWipe',
+  'cleanDrop',
+  'tapRemove',
+  'tapReveal',
+]
+
+/**
+ * The most node animations that can ever run on this element AT THE SAME TIME —
+ * the widest of its composed phases (entrance + loop, an exit, or any one-shot event
+ * + the loop that resumes under it).
+ *
+ * Stacked animations only actually stack if each gets its OWN node: two CSS animations
+ * on one element that both touch `transform` (or both touch `opacity`) don't blend —
+ * the last one in the list simply wins and the other is invisible. stage.ts nests this
+ * many `.pa-el-anim` boxes so each spec animates its own box and the transforms
+ * multiply, opacities multiply and filters chain the way an author expects.
+ */
+export function animLayerCount(el: SceneElement): number {
+  let n = Math.max(composeElementAnimParts(el, true).length, composeElementAnimParts(el, false).length, exitCssParts(el).length)
+  for (const phase of ONE_SHOT_PHASES) n = Math.max(n, composeOneShotAnimParts(el, phase).length)
+  return Math.max(1, n)
+}
+
+/** Per-layer form of {@link composeOneShotAnim}. */
+export function composeOneShotAnimParts(el: SceneElement, phase: OneShotPhase): string[] {
   const parts: string[] = []
   let loopDelay = 0
   for (const e of phaseSpecs(el, phase)) {
@@ -520,5 +581,5 @@ function composeOneShotAnim(
     const pulse = ctaPulseCss(el, loopDelay)
     if (pulse) parts.push(pulse)
   }
-  return parts.join(', ') || 'none'
+  return parts
 }

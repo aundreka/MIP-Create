@@ -136,7 +136,9 @@ const hide = (el: HTMLElement): (() => void) => {
  * flushes style synchronously, so the suppression is invisible.
  */
 export function restingBox(el: HTMLElement): MorphBox | null {
-  const nodes = [el, ...Array.from(el.querySelectorAll<HTMLElement>('.pa-el-anim'))]
+  // Every box in the animation chain, not just the outermost: a stacked animation
+  // lives on the nested .pa-el-anim-l layers and offsets the rect just as much.
+  const nodes = [el, ...Array.from(el.querySelectorAll<HTMLElement>('.pa-el-anim,.pa-el-anim-l'))]
   const saved = nodes.map((n) => n.style.animation)
   nodes.forEach((n) => (n.style.animation = 'none'))
   const r = el.getBoundingClientRect()

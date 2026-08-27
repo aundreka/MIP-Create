@@ -5,10 +5,16 @@
 // correctly between EXTEND bars and FIT content. Each element is:
 //   .pa-el        outer box — positioned in screen px; carries anchor translate
 //                 + rotation; z-index.
-//   .pa-el-anim   inner box — carries animation transforms (CTA pulse now; the
-//                 full entrance/loop/exit system in Pass 4) so they never fight
-//                 the positional layout.
-//   content       the <img> / text / button.
+//   .pa-el-anim   inner box — carries animation transforms (CTA pulse, and the
+//                 entrance/loop/exit system) so they never fight the positional
+//                 layout.
+//   .pa-el-anim-l one further nested box per animation that has to run AT THE SAME
+//                 TIME as another (stacked specs, or an entrance with a loop under
+//                 it). CSS gives no blending between two animations on one node —
+//                 the last in the list simply owns transform/opacity — so each gets
+//                 its own box and the browser composes them. Elements with a single
+//                 animation, i.e. nearly all of them, get none of these.
+//   content       the <img> / text / button, mounted inside the innermost box.
 
 import type { Anchor, AnimSpec, Scene, SceneElement, SceneOverlay, SfxBinding } from './scene'
 import { adjustFilterCss, cropShapeCss } from './scene'
@@ -16,24 +22,19 @@ import type { AssetEntry, AssetMap, RuntimeCtx } from './types'
 import { cssFontFamily } from './font'
 import { designH, designW as baseDesignW, isLandscape, scale, sx, sy, viewH, viewW } from './responsive'
 import {
-  composeElementAnim,
-  composeGameWinAnim,
-  composeTapAnim,
-  composeCleanEventAnim,
-  composeTapRemoveAnim,
-  composeTapRevealAnim,
-  composeComboEventAnim,
-  composeThoughtEventAnim,
+  animLayerCount,
+  composeElementAnimParts,
+  composeOneShotAnimParts,
   entranceLeadDelayMs,
   entranceTriggers,
-  exitCss,
+  exitCssParts,
   injectAnimStyles,
   lightrayHit,
-  phaseFrameCss,
+  phaseFrameCssParts,
   phaseLeadDelayMs,
   phaseTotalMs,
 } from './anim'
-import type { Phase } from './anim'
+import type { OneShotPhase, Phase } from './anim'
 import { applyImageCrop, createContainerContent, createImageContent, styleContainer } from './elements/image'
 import { applyBarFill, createBarContent } from './elements/bar'
 import { createTextContent } from './elements/text'
@@ -57,6 +58,18 @@ interface Rec {
   el: SceneElement
   outer: HTMLDivElement
   anim: HTMLDivElement
+  // Nested animation boxes, outermost first — layers[0] IS `anim`, and the element's
+  // content is mounted inside the innermost one. One layer per animation that can run
+  // at the same time as another (see animLayerCount in anim.ts): two CSS animations on
+  // ONE node that both touch transform/opacity don't blend — the last one silently
+  // wins — so a stacked "pop + float" only reads as stacked when each spec drives its
+  // own box and the transforms multiply.
+  layers: HTMLDivElement[]
+  // The box the content was mounted into (the innermost layer at build time). Kept
+  // separately because ensureAnimLayers can nest a further box under it later, and
+  // anything keyed on the mount node — the image-as-button tap feedback — must still
+  // resolve. It stays an ancestor of the content either way.
+  mountHost: HTMLElement
   content: HTMLElement | null
   intrinsic: { w: number; h: number }
   // The scene root this element was built into. Not the same as outer.parentElement:
@@ -961,7 +974,7 @@ html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;overscroll-b
   user-select:none;-webkit-user-select:none;
   font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
 .pa-el{position:absolute;left:0;top:0;transform-origin:center center;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-user-drag:none;}
-.pa-el-anim{width:100%;height:100%;touch-action:none;}
+.pa-el-anim,.pa-el-anim-l{width:100%;height:100%;touch-action:none;}
 .pa-img{display:block;width:100%;height:100%;pointer-events:none;user-select:none;-webkit-user-drag:none;}
 .pa-bar{width:100%;height:100%;}
 .pa-cta{display:block;width:100%;height:100%;padding:0;margin:0;border:0;background:transparent;cursor:pointer;
@@ -1041,12 +1054,63 @@ function setAnimHints(node: HTMLElement, on: boolean): void {
   node.style.willChange = on ? 'transform, opacity, filter' : ''
   node.style.backfaceVisibility = on ? 'hidden' : ''
 }
+
+// ---- stacked animations: one nested box per concurrent spec ----------------
+// CSS gives NO blending between two animations on the same node: whichever comes last
+// in the `animation` list owns `transform` (and `opacity`, and `filter`) outright, so a
+// stacked "slide up + pulse" used to play as a bare pulse. Nesting one box per spec
+// makes the browser compose them for us — the outer box's transform multiplies the
+// inner's, opacities multiply, filters chain — which is what stacking is supposed to
+// mean. Layer 0 is `rec.anim` itself, so single-animation elements (the overwhelming
+// majority) get no extra nodes at all.
+const MAX_ANIM_LAYERS = 6
+
+/** Grow the nested chain to `want` boxes, moving the innermost box's children (the
+ * element content) down into the new one. Only ever grows: a rebuilt stage sizes the
+ * chain correctly up front, and this covers the editor adding a stacked animation to
+ * an element that is already on the canvas. */
+function ensureAnimLayers(rec: Rec, want: number): void {
+  const n = Math.min(want, MAX_ANIM_LAYERS)
+  while (rec.layers.length < n) {
+    const inner = rec.layers[rec.layers.length - 1]
+    const next = document.createElement('div')
+    next.className = 'pa-el-anim-l'
+    while (inner.firstChild) next.appendChild(inner.firstChild)
+    inner.appendChild(next)
+    rec.layers.push(next)
+  }
+}
+
+/** Spread one composed phase across the chain: part i drives layer i. Anything past
+ * MAX_ANIM_LAYERS is comma-joined onto the last box (degrading to the old
+ * last-one-wins behaviour rather than dropping it silently). Layers with nothing to
+ * play are cleared so a previous phase can't leak into this one. */
+function applyAnimParts(rec: Rec, parts: string[], restart: boolean): void {
+  ensureAnimLayers(rec, parts.length)
+  for (let i = 0; i < rec.layers.length; i++) {
+    const node = rec.layers[i]
+    const last = i === rec.layers.length - 1
+    const css = last && parts.length > rec.layers.length ? parts.slice(i).join(', ') : (parts[i] ?? '')
+    if (!css) {
+      clearNodeAnim(node)
+      continue
+    }
+    if (restart) restartAnim(node, css)
+    else {
+      node.style.animation = css
+      setAnimHints(node, true)
+    }
+  }
+}
+
+/** Same play-state on every box — the timeline scrub pauses/resumes the whole stack. */
+function setAnimPlayState(rec: Rec, state: string): void {
+  for (const node of rec.layers) node.style.animationPlayState = state
+}
 // Persistent loop/pulse — applied at mount and after edits; runs everywhere
 // (including the static editor canvas), like the CTA pulse always has.
 function applyMountAnim(rec: Rec): void {
-  const css = composeElementAnim(rec.el, false)
-  rec.anim.style.animation = css === 'none' ? '' : css
-  setAnimHints(rec.anim, css !== 'none')
+  applyAnimParts(rec, composeElementAnimParts(rec.el, false), false)
   applyLightray(rec) // no active phase: only an ambient (loop) sweep runs
 }
 // The 'lightray' preset is a pseudo-element glare sweep (see anim.ts). Feed its timing via CSS
@@ -1110,18 +1174,21 @@ function clearNodeAnim(node: HTMLElement): void {
   node.style.animation = ''
   setAnimHints(node, false)
 }
+/** Replay a one-shot phase across the layer chain. An element with nothing authored
+ * for the phase keeps whatever it was already playing, as it always has. */
+function runOneShot(rec: Rec, phase: OneShotPhase): void {
+  const parts = composeOneShotAnimParts(rec.el, phase)
+  if (parts.length) applyAnimParts(rec, parts, true)
+}
 // Entrance (+ its loop, delayed to start after the entrance) — interactive only.
 function runEntrance(rec: Rec): void {
-  const css = composeElementAnim(rec.el, true)
-  if (css !== 'none') restartAnim(rec.anim, css)
-  else clearNodeAnim(rec.anim)
+  applyAnimParts(rec, composeElementAnimParts(rec.el, true), true)
   applyLightray(rec, 'entrance')
   const cfg = phaseTypingConfig(rec.el, 'entrance') ?? rec.el.typing
   if (cfg) startTyping(rec, 0, cfg) // the typewriter shares the entrance's origin
 }
 function runGameWin(rec: Rec): void {
-  const css = composeGameWinAnim(rec.el)
-  if (css !== 'none') restartAnim(rec.anim, css)
+  runOneShot(rec, 'gameWin')
   applyLightray(rec, 'gameWin')
   const cfg = phaseTypingConfig(rec.el, 'gameWin')
   if (cfg) startTyping(rec, 0, cfg)
@@ -1133,38 +1200,32 @@ function hasTapAnim(el: SceneElement): boolean {
 // Replayed on every tap of the element (restartAnim rewinds a still-running one, so
 // impatient repeat taps re-trigger rather than being swallowed).
 function runTap(rec: Rec): void {
-  const css = composeTapAnim(rec.el)
-  if (css !== 'none') restartAnim(rec.anim, css)
+  runOneShot(rec, 'tap')
   applyLightray(rec, 'tap')
 }
 
 function runThoughtEvent(rec: Rec, event: 'thoughtSpawn' | 'thoughtWhack'): void {
-  const css = composeThoughtEventAnim(rec.el, event)
-  if (css !== 'none') restartAnim(rec.anim, css)
+  runOneShot(rec, event)
   applyLightray(rec, event)
 }
 
 function runComboEvent(rec: Rec, event: 'comboPick' | 'comboDrop' | 'comboNext'): void {
-  const css = composeComboEventAnim(rec.el, event)
-  if (css !== 'none') restartAnim(rec.anim, css)
+  runOneShot(rec, event)
   applyLightray(rec, event)
 }
 
 function runCleanEvent(rec: Rec, event: 'cleanPick' | 'cleanWipe' | 'cleanDrop'): void {
-  const css = composeCleanEventAnim(rec.el, event)
-  if (css !== 'none') restartAnim(rec.anim, css)
+  runOneShot(rec, event)
   applyLightray(rec, event)
 }
 
 function runTapRemoveEvent(rec: Rec): void {
-  const css = composeTapRemoveAnim(rec.el)
-  if (css !== 'none') restartAnim(rec.anim, css)
+  runOneShot(rec, 'tapRemove')
   applyLightray(rec, 'tapRemove')
 }
 
 function runTapRevealEvent(rec: Rec): void {
-  const css = composeTapRevealAnim(rec.el)
-  if (css !== 'none') restartAnim(rec.anim, css)
+  runOneShot(rec, 'tapReveal')
   applyLightray(rec, 'tapReveal')
 }
 
@@ -1564,9 +1625,21 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     anim.className = 'pa-el-anim'
     outer.appendChild(anim)
 
+    // One nested box per animation this element can run at the same time as another,
+    // so stacked specs compose instead of overwriting each other (see applyAnimParts).
+    // Almost every element wants exactly one, and then this chain is just `anim`.
+    const layers: HTMLDivElement[] = [anim]
+    for (let i = 1; i < Math.min(animLayerCount(el), MAX_ANIM_LAYERS); i++) {
+      const layer = document.createElement('div')
+      layer.className = 'pa-el-anim-l'
+      layers[layers.length - 1].appendChild(layer)
+      layers.push(layer)
+    }
+    const innermost = layers[layers.length - 1]
+
     // Resolve through byId so handlers see live inspector edits, not the element
     // as it was at build time (the update path swaps rec.el without rebuilding).
-    const content = mountContent(el, anim, ctx, () => byId.get(el.id)?.el ?? el)
+    const content = mountContent(el, innermost, ctx, () => byId.get(el.id)?.el ?? el)
     // Marker for the scene manager: background elements get a physical-gap cover
     // in pa-stage (see parkImmune in scenes.ts), found via this class.
     if (el.type === 'background') outer.classList.add('pa-el--background')
@@ -1596,14 +1669,14 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       !hasTapAnim(el)
     if (nonInteractive) {
       outer.style.pointerEvents = 'none'
-      anim.style.pointerEvents = 'none'
+      for (const layer of layers) layer.style.pointerEvents = 'none'
     }
 
     root.appendChild(outer)
 
     const a = ctx.asset(el.assetId)
     const intrinsic = a ? { w: a.w, h: a.h } : { w: 100, h: 100 }
-    const rec: Rec = { el, outer, anim, content, intrinsic, sceneRoot: root }
+    const rec: Rec = { el, outer, anim, layers, mountHost: innermost, content, intrinsic, sceneRoot: root }
     if (el.type === 'confetti' && content) rec.confetti = createConfetti(content as HTMLCanvasElement, () => rec.el)
     recs.push(rec)
     byId.set(el.id, rec)
@@ -1838,7 +1911,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     for (const rec of recs) {
       if (rec.el.timing || !rec.outer.classList.contains('pa-el--t-off')) continue
       rec.outer.classList.remove('pa-el--t-off')
-      rec.anim.style.animationPlayState = ''
+      setAnimPlayState(rec, '')
       applyMountAnim(rec)
     }
   }
@@ -1856,7 +1929,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     const entranceTyping = phaseTypingConfig(rec.el, 'entrance') ?? rec.el.typing
     const exitTyping = phaseTypingConfig(rec.el, 'exit')
     const goneAt = w.outMs === Infinity ? Infinity : w.outMs + exitMs
-    rec.anim.style.animationPlayState = '' // a previous freeze may have paused it
+    setAnimPlayState(rec, '') // a previous freeze may have paused it
     const syncCountdown = (sceneMs: number): void => {
       if (rec.el.type !== 'countdown') return
       const mode = rec.el.countdown?.mode
@@ -1891,9 +1964,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       if (fromMs < w.inMs + entMs) {
         // Playback resumed mid-entrance: a negative delay (phaseFrameCss) starts the
         // animation partway through, and the loop takes over when it would have ended.
-        const css = phaseFrameCss(rec.el, 'entrance', fromMs - w.inMs)
-        if (css) restartAnim(rec.anim, css)
-        else clearNodeAnim(rec.anim)
+        applyAnimParts(rec, phaseFrameCssParts(rec.el, 'entrance', fromMs - w.inMs), true)
         if (entranceTyping) startTyping(rec, fromMs - w.inMs, entranceTyping)
         at(fromMs, w.inMs + entMs, () => applyMountAnim(rec))
       } else {
@@ -1904,9 +1975,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     // --- out ---
     if (w.outMs !== Infinity) {
       at(fromMs, w.outMs, () => {
-        const css = phaseFrameCss(rec.el, 'exit', Math.max(0, fromMs - w.outMs))
-        if (css) restartAnim(rec.anim, css)
-        else clearNodeAnim(rec.anim)
+        applyAnimParts(rec, phaseFrameCssParts(rec.el, 'exit', Math.max(0, fromMs - w.outMs)), true)
         if (exitTyping) startTypingOut(rec, Math.max(0, fromMs - w.outMs))
       })
       at(fromMs, goneAt, () => setTimedVisible(rec, false))
@@ -1947,13 +2016,13 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       if (phase === 'exit' && exitTyping) freezeTypingOut(rec, ms - w.outMs)
       else if (entranceTyping) freezeTyping(rec, ms - w.inMs) // scrub through the type-out
       if (!phase) {
-        rec.anim.style.animationPlayState = ''
+        setAnimPlayState(rec, '')
         applyMountAnim(rec) // between in and out — the loop runs live
         continue
       }
-      const css = phaseFrameCss(rec.el, phase, ms - (phase === 'entrance' ? w.inMs : w.outMs))
-      rec.anim.style.animation = css
-      rec.anim.style.animationPlayState = css ? 'paused' : ''
+      const parts = phaseFrameCssParts(rec.el, phase, ms - (phase === 'entrance' ? w.inMs : w.outMs))
+      applyAnimParts(rec, parts, false)
+      setAnimPlayState(rec, parts.length ? 'paused' : '')
     }
   }
   const clearTimelinePreview = (): void => {
@@ -1962,7 +2031,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     releaseVideos()
     for (const rec of timedRecs()) {
       rec.outer.classList.remove('pa-el--t-off')
-      rec.anim.style.animationPlayState = ''
+      setAnimPlayState(rec, '')
       applyMountAnim(rec)
       if ((rec.el.typing || phaseTypingConfig(rec.el, 'entrance') || phaseTypingConfig(rec.el, 'exit')) && rec.typeShown != null) stopTyping(rec, true) // back to the full string for editing
     }
@@ -2207,7 +2276,8 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
         const linkedTo = (srcId: string): Rec[] => recs.filter((r) => r.el.id !== srcId && r.el.button?.linkedButtonIds?.includes(srcId))
         // Where wireSceneNav published this element's press/release: the <button>
         // content for a button element, the .pa-el-anim wrapper for an image-as-button.
-        const feedback = (rec: Rec): TapFeedback | undefined => (rec.content ? tapFeedbackByNode.get(rec.content) : undefined) ?? tapFeedbackByNode.get(rec.anim)
+        const feedback = (rec: Rec): TapFeedback | undefined =>
+          (rec.content ? tapFeedbackByNode.get(rec.content) : undefined) ?? tapFeedbackByNode.get(rec.mountHost) ?? tapFeedbackByNode.get(rec.anim)
         for (const src of recs) {
           const relay = (fn: (t: Rec) => void) => (): void => {
             for (const t of linkedTo(src.el.id)) fn(t)
@@ -2559,8 +2629,8 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     },
     playExit() {
       for (const rec of recs) {
-        const css = exitCss(rec.el)
-        if (css) restartAnim(rec.anim, css)
+        const parts = exitCssParts(rec.el)
+        if (parts.length) applyAnimParts(rec, parts, true)
         applyLightray(rec, 'exit')
       }
     },

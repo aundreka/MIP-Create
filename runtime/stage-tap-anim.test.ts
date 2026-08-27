@@ -109,10 +109,18 @@ describe('on-tap animation', () => {
     expect(rec.anim.style.animation).toContain('320ms')
   })
 
-  it('stacks extras alongside the primary tap spec', () => {
+  // Stacked specs get one nested box EACH (see applyAnimParts in stage.ts): two
+  // animations on a single node don't blend, the last one just wins, so the shine
+  // would have silently replaced the pop.
+  it('stacks extras alongside the primary tap spec, one per nested layer', () => {
     const { rec } = mount(imageEl({ tap: tapSpec, tapExtra: [{ preset: 'shine', durationMs: 900, delayMs: 0, easing: 'ease-in-out' }] }))
     tap(rec.anim)
-    expect(rec.anim.style.animation).toContain('320ms')
-    expect(rec.anim.style.animation).toContain('900ms')
+    const layers = [rec.anim, ...Array.from(rec.anim.querySelectorAll<HTMLElement>('.pa-el-anim-l'))]
+    expect(layers.length).toBeGreaterThan(1)
+    const css = layers.map((n) => n.style.animation)
+    expect(css[0]).toContain('320ms')
+    expect(css[1]).toContain('900ms')
+    // and never doubled up on one node, which is what made them fight
+    expect(css[0]).not.toContain('900ms')
   })
 })
