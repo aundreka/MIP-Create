@@ -72,6 +72,19 @@ const KEYFRAMES = `
 .pa-typing-caret::after{content:'';display:inline-block;width:.08em;height:1em;margin-left:.06em;
   vertical-align:-.12em;background:currentColor;animation:pa-caret-blink 1s step-end infinite;}
 @keyframes pa-bounce{0%,100%{transform:translateY(0)}30%{transform:translateY(calc(-18px * var(--pa-s,1)))}55%{transform:translateY(0)}75%{transform:translateY(calc(-7px * var(--pa-s,1)))}}
+/* REVERSE BOUNCE — the mirror of pa-bounce: the element dips DOWNWARD first and
+   settles with a smaller second dip. Reads as a nod / press rather than a hop, so it
+   pairs well with things anchored to the top of the composition. */
+@keyframes pa-bounce-reverse{0%,100%{transform:translateY(0)}30%{transform:translateY(calc(18px * var(--pa-s,1)))}55%{transform:translateY(0)}75%{transform:translateY(calc(7px * var(--pa-s,1)))}}
+/* ROLL — a ball rolling into place: the element travels a short design-relative
+   distance (so it scales with --pa-s like the slides) while rotating in the SAME
+   direction as the travel, then rocks slightly past rest and settles. Direction names
+   the way it TRAVELS: roll-right rolls rightwards (enters from the left, turning
+   clockwise), roll-left rolls leftwards (enters from the right, turning
+   anticlockwise). Rotation is about the element centre, so a round asset reads as a
+   real roll and a rectangular one as a gentle tumble. */
+@keyframes pa-roll-right{0%{transform:translateX(calc(-64px * var(--pa-s,1))) rotate(-70deg);opacity:0}20%{opacity:1}70%{transform:translateX(calc(10px * var(--pa-s,1))) rotate(12deg);opacity:1}100%{transform:translateX(0) rotate(0);opacity:1}}
+@keyframes pa-roll-left{0%{transform:translateX(calc(64px * var(--pa-s,1))) rotate(70deg);opacity:0}20%{opacity:1}70%{transform:translateX(calc(-10px * var(--pa-s,1))) rotate(-12deg);opacity:1}100%{transform:translateX(0) rotate(0);opacity:1}}
 @keyframes pa-shake{0%,100%{transform:translateX(0)}20%{transform:translateX(calc(-6px * var(--pa-s,1)))}40%{transform:translateX(calc(6px * var(--pa-s,1)))}60%{transform:translateX(calc(-4px * var(--pa-s,1)))}80%{transform:translateX(calc(4px * var(--pa-s,1)))}}
 @keyframes pa-wave{0%,100%{transform:rotate(-4deg)}50%{transform:rotate(4deg)}}
 /* Both of these ANIMATE the filter property, which replaces it wholesale for the animation's

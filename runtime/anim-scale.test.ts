@@ -41,7 +41,7 @@ describe('animation scale factor', () => {
 
     // Presets whose keyframes move the element by an authored distance. A raw px
     // offset here (no var(--pa-s)) is the bug this test exists to catch.
-    for (const name of ['slide-up', 'slide-down', 'slide-left', 'slide-right', 'bounce', 'shake', 'float', 'subtle-float']) {
+    for (const name of ['slide-up', 'slide-down', 'slide-left', 'slide-right', 'bounce', 'bounce-reverse', 'roll-right', 'roll-left', 'shake', 'float', 'subtle-float']) {
       const rule = keyframeRule(css, name)
       expect(rule, `pa-${name} missing`).not.toBe('')
       const bare = rule.match(/-?\d+(\.\d+)?px/g)?.filter((px) => !rule.includes(`${px} * var(--pa-s`)) ?? []

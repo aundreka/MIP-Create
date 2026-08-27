@@ -25,6 +25,8 @@ const HEADER_ENTRANCE_PRESETS: { value: AnimPresetId; label: string }[] = [
   { value: 'wipe-right', label: 'Wipe right' },
   { value: 'wipe-left', label: 'Wipe left' },
   { value: 'wipe-up', label: 'Wipe up' },
+  { value: 'roll-right', label: 'Roll right' },
+  { value: 'roll-left', label: 'Roll left' },
 ]
 
 const HEADER_LOOP_PRESETS: { value: AnimPresetId; label: string }[] = [
@@ -34,6 +36,7 @@ const HEADER_LOOP_PRESETS: { value: AnimPresetId; label: string }[] = [
   { value: 'wave', label: 'Wave' },
   { value: 'shake', label: 'Shake' },
   { value: 'bounce', label: 'Bounce' },
+  { value: 'bounce-reverse', label: 'Bounce reverse' },
   { value: 'glow', label: 'Glow' },
   { value: 'shine', label: 'Shine' },
 ]

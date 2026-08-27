@@ -57,6 +57,12 @@ export type AnimPresetId =
   | 'typewriter'
   | 'pop'
   | 'bounce'
+  // The mirror of 'bounce': dips downward first instead of hopping up.
+  | 'bounce-reverse'
+  // Rolls into place like a ball — travels a short distance while rotating the same
+  // way, then rocks slightly past rest. The name says which way it TRAVELS.
+  | 'roll-right'
+  | 'roll-left'
   | 'shake'
   | 'wave'
   | 'shine'

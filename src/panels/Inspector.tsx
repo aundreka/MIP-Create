@@ -994,10 +994,13 @@ const ENTRANCE_PRESETS: AnimPresetId[] = [
   'drop',
   'pop',
   'bounce',
+  'bounce-reverse',
+  'roll-right',
+  'roll-left',
   'spin',
   'lightray',
 ]
-const LOOP_PRESETS: AnimPresetId[] = ['pulse', 'float', 'subtle-float', 'bounce', 'shake', 'wave', 'shine', 'lightray', 'glow', 'spin']
+const LOOP_PRESETS: AnimPresetId[] = ['pulse', 'float', 'subtle-float', 'bounce', 'bounce-reverse', 'roll-right', 'roll-left', 'shake', 'wave', 'shine', 'lightray', 'glow', 'spin']
 const EXIT_PRESETS: AnimPresetId[] = ['fade-out', 'typewriter', 'wipe-out-left', 'wipe-out-right', 'wipe-out-up', 'scale-out', 'swipe-out-left', 'swipe-out-right', 'lightray']
 // Presets offered for STACKED (extra) animations: every node-driven preset + the reflection.
 const NODE_PRESETS: AnimPresetId[] = [
@@ -1015,6 +1018,9 @@ const NODE_PRESETS: AnimPresetId[] = [
   'drop',
   'pop',
   'bounce',
+  'bounce-reverse',
+  'roll-right',
+  'roll-left',
   'shake',
   'wave',
   'shine',
@@ -1051,6 +1057,9 @@ const PRESET_LABELS: Partial<Record<AnimPresetId, string>> = {
   'swipe-left': 'slide across ← (flies in from the right)',
   'swipe-up': 'slide across ↑ (flies in from the bottom)',
   drop: 'drop / fall (falls in from above)',
+  'bounce-reverse': 'bounce reverse (dips downward)',
+  'roll-right': 'roll → (rolls in from the left)',
+  'roll-left': 'roll ← (rolls in from the right)',
   'swipe-right': 'slide across → (flies in from the left)',
   'swipe-out-left': 'slide off ← (flies past the left edge)',
   'swipe-out-right': 'slide off → (flies past the right edge)',
