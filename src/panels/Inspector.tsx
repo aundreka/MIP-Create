@@ -88,7 +88,7 @@ import {
   type AlignOp,
   type ConvertTo,
 } from '../store'
-import { Accordion, Chips, ColorField, NumField, Row, Select, Slider, Swatches, Toggle } from '../ui'
+import { Accordion, Chips, ColorField, NumField, Row, SearchSelect, Select, Slider, Swatches, Toggle } from '../ui'
 import {
   AlignCenterHorizontal,
   Eye,
@@ -3561,10 +3561,14 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
           return (
             <Accordion id="inspector.game" title="Game">
               <Row label="Template">
-                <Select
+                {/* SearchSelect rather than Select: the registry is past thirty
+                    mechanics, which is well past the point where an unsorted column
+                    is something you scan rather than something you read. */}
+                <SearchSelect
                   value={tpl.id}
                   onChange={(v) => patchElement(id, { game: { ...(el.game ?? { params: {} }), templateId: v, params: {} } })}
                   options={GAME_TEMPLATES.map((t) => ({ value: t.id, label: t.label }))}
+                  title="Which mechanic this game plays"
                 />
               </Row>
               {tpl.id === 'scratch_grid' ? (

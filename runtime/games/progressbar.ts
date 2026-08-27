@@ -57,6 +57,18 @@ function shadowCss(x: number, y: number, blur: number, spread: number, color: st
   return `${inset ? 'inset ' : ''}${(x * s).toFixed(1)}px ${(y * s).toFixed(1)}px ${(blur * s).toFixed(1)}px ${(spread * s).toFixed(1)}px ${color}`
 }
 
+/**
+ * A corner radius in screen px, capped at half the SHORTER side.
+ *
+ * The panel offers 999 as "pill", and taken literally that is a 999px radius — which
+ * on a bar 40px tall is a pill (the cap does the work) but on a box 1000px tall is a
+ * circle. A pill is defined by the shape it is applied to, not by a number, so the
+ * cap is what makes the label honest at every box the author might draw.
+ */
+function radiusPx(design: number, w: number, h: number, s: number): string {
+  return Math.max(0, Math.min(design * s, Math.min(w, h) / 2)).toFixed(1) + 'px'
+}
+
 /** The fill's paint: a flat colour, or a gradient when a second colour is given. */
 function fillPaint(a: string, b: string, angleDeg: number): string {
   if (!a) return 'transparent'
@@ -128,11 +140,19 @@ export function createProgressBar(): GameModule {
   const steps = (): number => Math.max(1, stepsParam || sourceTotal || 1)
 
   // ---- painting ------------------------------------------------------------
-  /** Rebuild the segment children. Only called when the count changes — a source
-   * announcing its total for the first time — so the common case repaints nothing. */
-  const buildSegments = (): void => {
+  /** What `inner` currently holds. Tracked explicitly rather than inferred from
+   * segs.length, which cannot tell "a continuous fill is already built" apart from
+   * "nothing is built yet" — both read as zero segments, and the early-out then
+   * skipped building the fill at all, leaving an empty track on screen. */
+  let built: { style: 'continuous' | 'segmented'; count: number } | null = null
+
+  /** Rebuild the fill children. Only does work when the shape actually changes — a
+   * source announcing its total for the first time, or the style being switched — so
+   * the common case repaints nothing. */
+  const buildFill = (): void => {
     const want = fillStyle === 'segmented' ? steps() : 0
-    if (segs.length === want) return
+    if (built && built.style === fillStyle && built.count === want) return
+    built = { style: fillStyle, count: want }
     inner.textContent = ''
     segs = []
     fill = null
@@ -173,7 +193,7 @@ export function createProgressBar(): GameModule {
     track.style.height = h.toFixed(1) + 'px'
     track.style.background = withAlpha(trackColor, trackOpacity)
     track.style.border = trackBorderPx > 0 ? `${(trackBorderPx * k).toFixed(1)}px solid ${withAlpha(trackBorderColor, trackOpacity)}` : ''
-    track.style.borderRadius = (trackRadiusPx * k).toFixed(1) + 'px'
+    track.style.borderRadius = radiusPx(trackRadiusPx, w, h, k)
     track.style.boxShadow = trackShadow ? shadowCssScaled(trackShadow, k) : ''
 
     const pad = trackPadPx * k
@@ -189,7 +209,9 @@ export function createProgressBar(): GameModule {
 
     const paint = fillPaint(fillColor, fillColor2, fillAngleDeg)
     const border = fillBorderPx > 0 ? `${(fillBorderPx * k).toFixed(1)}px solid ${fillBorderColor}` : ''
-    const radius = (fillRadiusPx * k).toFixed(1) + 'px'
+    // The fill sits inside the track's padding, so it is measured against the inner
+    // box — otherwise a padded bar's fill would be rounder than the bar around it.
+    const radius = radiusPx(fillRadiusPx, Math.max(0, w - pad * 2), Math.max(0, h - pad * 2), k)
     const shadow = fillShadow ? shadowCssScaled(fillShadow, k) : ''
     for (const seg of segs) {
       seg.style.background = paint
@@ -273,7 +295,7 @@ export function createProgressBar(): GameModule {
     // so a changed total has to rebuild the segments before the value is painted.
     if (total > 0 && total !== sourceTotal) {
       sourceTotal = total
-      buildSegments()
+      buildFill()
       layout()
     }
     const clamped = Math.max(0, Math.min(steps(), Math.round(next)))
@@ -357,7 +379,7 @@ export function createProgressBar(): GameModule {
       if (shell) shell.style.pointerEvents = 'none'
       ctx.root.style.pointerEvents = 'none'
 
-      buildSegments()
+      buildFill()
       layout()
     },
     start() {
@@ -392,6 +414,7 @@ export function createProgressBar(): GameModule {
       shell = null
       ctx.root.style.pointerEvents = rootPointerEvents
       ctx.root.innerHTML = ''
+      built = null
       segs = []
       fill = null
       value = 0

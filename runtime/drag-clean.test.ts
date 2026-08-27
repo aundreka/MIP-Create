@@ -398,6 +398,47 @@ describe('progress bar', () => {
     expect(track.dataset.progressTotal).toBe('4')
   })
 
+  it('builds a continuous fill, not an empty track', () => {
+    // The regression this pins: the fill children were rebuilt only when the SEGMENT
+    // count changed, and continuous mode wants zero segments — so "already built" and
+    // "nothing built yet" both read as zero and the fill was never created at all.
+    // The track painted, the fill did not, and the bar looked like it was missing.
+    const stage = build([game(), bar(), tool(), mess('m1', 700, 900), mess('m2', 900, 900)])
+    stage.layoutAll()
+    stage.startGames(true)
+
+    const fill = stage.root.querySelector<HTMLElement>('[data-progress-fill]')
+    expect(fill).not.toBeNull()
+    expect(fill!.style.background).toBe('rgb(61, 220, 132)')
+    expect(fill!.style.width).toBe('0%') // nothing cleaned yet
+
+    const els = place(stage, ['m1', 'm2'])
+    carry(els.tool, { x: 100, y: 100 }, { x: 400, y: 100 })
+    expect(fill!.style.width).toBe('50%')
+  })
+
+  it('shows itself part-filled on the editor canvas, so it can be styled', () => {
+    // start() is what zeroes it, and the canvas never calls it: a bar an author has
+    // just placed has to show its fill colour, or there is nothing to judge.
+    const stage = build([game(), bar({ steps: 4 }), tool(), mess('m1', 700, 900)])
+    stage.layoutAll()
+    stage.startGames(false)
+
+    const track = stage.root.querySelector<HTMLElement>('[data-progress-bar]')!
+    const fill = stage.root.querySelector<HTMLElement>('[data-progress-fill]')!
+    expect(track.dataset.progressValue).toBe('2')
+    expect(fill.style.width).toBe('50%')
+  })
+
+  it('rebuilds the fill when the style is switched between continuous and segmented', () => {
+    const stage = build([game(), bar({ fillStyle: 'segmented' }), tool(), mess('m1', 700, 900), mess('m2', 900, 900)])
+    stage.layoutAll()
+    stage.startGames(true)
+    // Two obstacles announced => two segments, and no leftover continuous fill.
+    expect(stage.root.querySelectorAll('[data-progress-seg]').length).toBe(2)
+    expect(stage.root.querySelector('[data-progress-fill]')).toBeNull()
+  })
+
   it('draws one segment per step in segmented mode', () => {
     const stage = build([game(), bar({ fillStyle: 'segmented' }), tool(), mess('m1', 700, 900), mess('m2', 900, 900), mess('m3', 300, 900)])
     stage.layoutAll()

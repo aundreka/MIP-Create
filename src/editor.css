@@ -2311,6 +2311,95 @@ svg {
   pointer-events: none;
 }
 
+/* ---- SearchSelect: type-to-filter dropdown for long lists ---- */
+/* The trigger is a <button> dressed as the native select above, so a row that swaps
+   one for the other does not shift by a pixel. */
+.search-select-btn {
+  font: inherit;
+  color: var(--ink);
+  background: var(--input-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 4px 26px 4px 6px;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: border-color var(--t-fast) var(--ease);
+}
+.search-select-btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--ink) 22%, var(--line));
+}
+.search-select-btn.open {
+  border-color: var(--accent);
+}
+.search-select-pop {
+  position: fixed;
+  z-index: 9999;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--sh-3);
+  padding: 5px;
+  animation: swatch-popup-in 120ms var(--ease);
+}
+.search-select-search {
+  margin-bottom: 4px;
+}
+.search-select-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.search-select-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+  cursor: pointer;
+}
+/* Two different marks, and they have to stay legible apart: `.hl` is the CURSOR —
+   what Enter will pick — and `.on` is what is currently chosen. The cursor follows the
+   keyboard AND the mouse, so there is only ever one of it; a separate :hover style
+   would fight the arrow keys over which row looks live. It gets an accent wash rather
+   than --fill-subtle, which at 4% white is invisible on the popover's panel. */
+.search-select-item.hl {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.search-select-item.on {
+  color: var(--accent);
+  font-weight: 600;
+}
+.search-select-item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.search-select-item > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.search-select-empty,
+.search-select-more {
+  padding: 6px 8px 3px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.search-select-more {
+  border-top: 1px solid var(--line);
+  margin-top: 4px;
+}
+
 /* ---- checkbox primitive ---- */
 .checkbox {
   display: inline-flex;

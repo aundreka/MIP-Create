@@ -1219,14 +1219,18 @@ export function addGameScene(templateId: string): void {
   // The scrollable page IS the whole screen: full-bleed extend mount (like an
   // endscene video) so the image fills the viewport width at any aspect.
   const fullBleed = templateId === 'scroll'
+  // A progress bar is a thin horizontal strip near the top of the screen, not a play
+  // area. Given the usual big square mount it renders as an enormous pill and reads
+  // as broken, so — like the full-bleed scroll page above — it gets its own box.
+  const isBar = templateId === 'progressbar'
   const gameEl: SceneElement = {
     id: nextId('game'),
     type: 'game-mount',
     name: tpl?.label ?? 'Game',
     x: c.x,
-    y: fullBleed ? c.y : Math.round(m.baseH * 0.45),
-    w: fullBleed ? m.baseW : Math.round(m.baseW * 0.9),
-    h: fullBleed ? m.baseH : Math.round(m.baseH * 0.52),
+    y: fullBleed ? c.y : isBar ? Math.round(m.baseH * 0.12) : Math.round(m.baseH * 0.45),
+    w: fullBleed ? m.baseW : isBar ? Math.round(m.baseW * 0.8) : Math.round(m.baseW * 0.9),
+    h: fullBleed ? m.baseH : isBar ? Math.round(m.baseH * 0.03) : Math.round(m.baseH * 0.52),
     anchor: 'center',
     zIndex: 10,
     mode: fullBleed ? 'extend' : 'fit',

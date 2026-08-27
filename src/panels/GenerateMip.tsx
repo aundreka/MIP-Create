@@ -10,7 +10,7 @@ import { GAME_TEMPLATES } from '../../runtime/games/registry'
 import { extractTheme } from '../brandTheme'
 import { buildMip, type UploadAsset } from '../mipGen'
 import { DEFAULT_THEME, type BgStyle, type Theme } from '../svgAssets'
-import { ColorField, Modal, Select, Toggle } from '../ui'
+import { ColorField, Modal, SearchSelect, Select, Toggle } from '../ui'
 import { Icon, ScanSearch, Upload } from '../icons'
 
 export function GenerateMip(props: { onClose: () => void; onQaCheck?: () => void }): JSX.Element {
@@ -94,7 +94,7 @@ export function GenerateMip(props: { onClose: () => void; onQaCheck?: () => void
           </label>
           <div className="field">
             <span>Game type</span>
-            <Select value={gameId} onChange={setGameId} options={GAME_TEMPLATES.map((t) => ({ value: t.id, label: t.label }))} />
+            <SearchSelect value={gameId} onChange={setGameId} options={GAME_TEMPLATES.map((t) => ({ value: t.id, label: t.label }))} title="Which mechanic to generate" />
           </div>
           <div className="field">
             <span>Background</span>

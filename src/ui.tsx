@@ -286,6 +286,208 @@ export function Select<T extends string>(props: {
   )
 }
 
+// ---- SearchSelect: a Select for lists too long to eyeball --------------------
+// The native <select> above is right for a handful of choices — it is one element,
+// it is keyboard- and screen-reader-native, and it costs nothing. It stops being
+// right somewhere around twenty options, where finding the one you want turns into
+// scanning an unsorted column. The game-template picker crossed that line.
+//
+// So this is the same control with two additions and no other changes in behaviour:
+// you can TYPE to narrow the list, and only the first `limit` matches are drawn, with
+// a line saying how many are hidden. The cap is what keeps the popover a glanceable
+// block rather than a scrollbar — the search box, not the scroll wheel, is how you
+// reach the rest.
+//
+// Below `searchAfter` options the search box is not drawn at all, so dropping this in
+// where a list happens to be short costs the author nothing.
+export function SearchSelect<T extends string>(props: {
+  label?: string
+  value: T
+  onChange: (v: T) => void
+  options: readonly { value: T; label: string; disabled?: boolean }[]
+  /** Most matches drawn at once (default 8). The rest are reachable by typing. */
+  limit?: number
+  /** Only show the search box once the list is at least this long (default 10). */
+  searchAfter?: number
+  placeholder?: string
+  className?: string
+  title?: string
+}): JSX.Element {
+  const limit = props.limit ?? 8
+  const searchAfter = props.searchAfter ?? 10
+  const [open, setOpen] = useState(false)
+  const [q, setQ] = useState('')
+  const [hl, setHl] = useState(0)
+  const [pos, setPos] = useState<{ left: number; top: number; width: number; drop: 'down' | 'up' } | null>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const popRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const current = props.options.find((o) => o.value === props.value)
+  const searchable = props.options.length >= searchAfter
+  // Match on the LABEL and the value: the label is what is read, but a value is
+  // often the shorter, more memorable handle ("dragclean" for "Drag to clean").
+  const needle = q.trim().toLowerCase()
+  const matches = needle ? props.options.filter((o) => (o.label + ' ' + o.value).toLowerCase().includes(needle)) : props.options
+  const shown = matches.slice(0, limit)
+  const hidden = matches.length - shown.length
+
+  useEffect(() => {
+    if (!open) return
+    const away = (e: MouseEvent): void => {
+      if (!popRef.current?.contains(e.target as Node) && !btnRef.current?.contains(e.target as Node)) setOpen(false)
+    }
+    // Capture phase, so a scroll inside the inspector column counts too: the popover
+    // is portalled to <body> and would otherwise stay put while its trigger slid away.
+    const gone = (): void => setOpen(false)
+    document.addEventListener('mousedown', away)
+    window.addEventListener('scroll', gone, true)
+    window.addEventListener('resize', gone)
+    return () => {
+      document.removeEventListener('mousedown', away)
+      window.removeEventListener('scroll', gone, true)
+      window.removeEventListener('resize', gone)
+    }
+  }, [open])
+
+  useEffect(() => {
+    if (open) inputRef.current?.focus()
+  }, [open])
+
+  // A narrowed list re-homes the highlight: leaving it on index 3 of a list that is
+  // now one item long would make Enter do nothing.
+  useEffect(() => setHl(0), [q])
+
+  const openPop = (): void => {
+    if (open) {
+      setOpen(false)
+      return
+    }
+    const r = btnRef.current?.getBoundingClientRect()
+    if (r) {
+      // Room for the search box, the capped list and the "+N more" line. Flip above
+      // when the trigger sits near the bottom of the window, which in a tall
+      // inspector column is most of the time.
+      const need = (searchable ? 38 : 0) + Math.min(limit, props.options.length) * 27 + 16
+      const below = window.innerHeight - r.bottom - 8
+      const drop: 'down' | 'up' = below >= need || below >= r.top ? 'down' : 'up'
+      setPos({ left: r.left, top: drop === 'down' ? r.bottom + 4 : r.top - 4, width: Math.max(r.width, 180), drop })
+    }
+    setQ('')
+    setHl(Math.max(0, props.options.findIndex((o) => o.value === props.value)))
+    setOpen(true)
+  }
+
+  const choose = (o: { value: T; disabled?: boolean }): void => {
+    if (o.disabled) return
+    props.onChange(o.value)
+    setOpen(false)
+  }
+
+  const onKey = (e: React.KeyboardEvent): void => {
+    if (e.key === 'Escape') {
+      setOpen(false)
+      return
+    }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      if (!shown.length) return
+      const step = e.key === 'ArrowDown' ? 1 : -1
+      setHl((n) => (n + step + shown.length) % shown.length)
+      return
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      const pick = shown[Math.min(hl, shown.length - 1)]
+      if (pick) choose(pick)
+    }
+  }
+
+  const control = (
+    <span className={'select-wrap search-select' + (props.className ? ' ' + props.className : '')}>
+      <button
+        ref={btnRef}
+        type="button"
+        className={'search-select-btn' + (open ? ' open' : '')}
+        title={props.title}
+        aria-label={props.title ?? props.label}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={openPop}
+        onKeyDown={(e) => {
+          // Opening straight into the list from the keyboard, the way a native
+          // <select> does, rather than making Tab-then-Space-then-Arrow the only way in.
+          if (!open && (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ')) {
+            e.preventDefault()
+            openPop()
+          }
+        }}
+      >
+        {current?.label ?? props.placeholder ?? '—'}
+      </button>
+      <Icon icon={ChevronDown} size={14} className="select-chevron" />
+    </span>
+  )
+
+  const pop =
+    open && pos
+      ? createPortal(
+          <div
+            ref={popRef}
+            className="search-select-pop"
+            style={{ left: pos.left, width: pos.width, ...(pos.drop === 'down' ? { top: pos.top } : { bottom: window.innerHeight - pos.top }) }}
+            role="listbox"
+          >
+            {searchable && (
+              <input
+                ref={inputRef}
+                className="search-select-search"
+                value={q}
+                placeholder="Search…"
+                onChange={(e) => setQ(e.target.value)}
+                onKeyDown={onKey}
+              />
+            )}
+            <div className="search-select-list">
+              {shown.map((o, i) => (
+                <button
+                  key={o.value}
+                  type="button"
+                  role="option"
+                  aria-selected={o.value === props.value}
+                  disabled={o.disabled}
+                  className={'search-select-item' + (o.value === props.value ? ' on' : '') + (i === hl ? ' hl' : '')}
+                  onMouseEnter={() => setHl(i)}
+                  onClick={() => choose(o)}
+                >
+                  <span>{o.label}</span>
+                  {o.value === props.value && <Icon icon={Check} size={12} />}
+                </button>
+              ))}
+              {!shown.length && <div className="search-select-empty">No match for “{q.trim()}”</div>}
+            </div>
+            {hidden > 0 && <div className="search-select-more">+{hidden} more — keep typing to narrow</div>}
+          </div>,
+          document.body,
+        )
+      : null
+
+  if (!props.label)
+    return (
+      <>
+        {control}
+        {pop}
+      </>
+    )
+  return (
+    <label className="field">
+      <span>{props.label}</span>
+      {control}
+      {pop}
+    </label>
+  )
+}
+
 // ---- ColorField (unifies color editing on Swatches: palette + eyedropper) ---
 export function ColorField(props: { label: string; value?: string; onChange: (c: string | undefined) => void; allowNone?: boolean }): JSX.Element {
   return <Swatches label={props.label} value={props.value} onChange={props.onChange} allowNone={props.allowNone} />
