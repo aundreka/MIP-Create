@@ -537,6 +537,10 @@ export interface HandguideConfig {
   // 'tapremove' taps the next obstacle a Tap to remove board still has standing, and
   // moves to the following one as they go.
   // 'tapreveal' does the same for the next cover a Tap to reveal board has not opened.
+  // 'pinch' is TWO hands closing on that same target: the placed hand, plus a mirrored
+  // duplicate of it. Cloning the node rather than asking for a second element keeps the
+  // pair guaranteed identical — same art, same size, same idle behaviour — and a
+  // swapped hand image updates both at once.
   mode:
     | 'smart'
     | 'tap'
@@ -551,6 +555,7 @@ export interface HandguideConfig {
     | 'dragclean'
     | 'tapremove'
     | 'tapreveal'
+    | 'pinch'
     | 'brush'
     | 'still'
     | 'hold'
@@ -570,6 +575,11 @@ export interface HandguideConfig {
   // How far the rings spread, in DESIGN px (like every other authored size), so the
   // ping keeps its proportions on any screen. Absent = sized off the hand itself.
   rippleRadius?: number
+  // 'pinch' only: swap which side each hand closes from. The pair points INWARD when
+  // the hand art has its body to the right of its fingertip (which the built-in hand,
+  // and most pointing-hand art, does). Art drawn the other way round points the pair
+  // outward, and this puts it right without editing the image.
+  pinchFlip?: boolean
   // 'brush' mode only: extra offset of the hand from the brush (screen px; the hand already sits
   // BELOW the brush by default), and a rotation. The hand mimes a drag across the card.
   brushOffsetX?: number

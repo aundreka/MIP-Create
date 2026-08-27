@@ -1,4 +1,7 @@
-// Tap to reveal: covers the player taps, and the art that comes up under them.
+// Tap to reveal: the elements a board brings up, and the taps that bring them.
+//
+// The load-bearing case is the one with NO covers at all — a list of hidden elements,
+// one per tap — since that is the plain board and the one an author reaches for first.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { on } from './emitter'
@@ -74,7 +77,7 @@ function prize(id: string, ofId: string, n: number, showOnCanvas?: boolean): Sce
     anchor: 'center',
     zIndex: 4,
     mode: 'fit',
-    revealRole: { gameId: 'reveal-game', role: 'reveal', ofId, showOnCanvas },
+    revealRole: { gameId: 'reveal-game', role: 'reveal', ofId: ofId || undefined, showOnCanvas },
   } as SceneElement
 }
 
@@ -149,6 +152,93 @@ describe('tap to reveal', () => {
     expect(hidden(q(stage, 'p1b'))).toBe(false)
   })
 
+  it('reveals an element with no cover at all, one per tap anywhere', () => {
+    // The plain board: nothing to tap ON, just things to bring up. Each tap in the
+    // scene takes the next one, in the order the author stacked them.
+    const stage = build([game(), prize('p1', '', 1), prize('p2', '', 2)])
+    stage.layoutAll()
+    stage.startGames(true)
+    const root = stage.root
+
+    expect(hidden(q(stage, 'p1'))).toBe(true)
+    expect(hidden(q(stage, 'p2'))).toBe(true)
+
+    tap(root)
+    expect(hidden(q(stage, 'p1'))).toBe(false)
+    expect(hidden(q(stage, 'p2'))).toBe(true) // one per tap, not all at once
+
+    tap(root)
+    expect(hidden(q(stage, 'p2'))).toBe(false)
+  })
+
+  it('does not spend a free tap when the tap landed on one of its covers', () => {
+    // A board that mixes the two: tapping the cover must open the cover's step ONLY.
+    // Counting the same gesture twice would burn two steps on one tap.
+    const stage = build([game(), cover('c1', 1), prize('p1', 'c1', 1), prize('free', '', 2)])
+    stage.layoutAll()
+    stage.startGames(true)
+
+    tap(q(stage, 'c1'))
+    expect(hidden(q(stage, 'p1'))).toBe(false)
+    expect(hidden(q(stage, 'free'))).toBe(true)
+
+    tap(stage.root)
+    expect(hidden(q(stage, 'free'))).toBe(false)
+  })
+
+  it('does not spend a free tap on a button that navigates away', () => {
+    const cta = {
+      id: 'cta',
+      type: 'cta',
+      name: 'CTA',
+      x: 540,
+      y: 1600,
+      w: 700,
+      h: 170,
+      anchor: 'center',
+      zIndex: 12,
+      mode: 'fit',
+      text: { value: 'PLAY', fontSizePx: 60, color: '#fff' },
+    } as SceneElement
+
+    const stage = build([game(), prize('p1', '', 1), cta])
+    stage.layoutAll()
+    stage.startGames(true)
+
+    tap(stage.root.querySelector<HTMLElement>('.pa-cta')!)
+    // The tap that leaves the scene is the button's gesture; spending a step on it is
+    // invisible to the player and desyncs the bar from what they actually saw.
+    expect(hidden(q(stage, 'p1'))).toBe(true)
+
+    tap(stage.root)
+    expect(hidden(q(stage, 'p1'))).toBe(false)
+  })
+
+  it('counts a shared cover as one step, not one per image', () => {
+    const stage = build([game(), bar(), cover('c1', 1), prize('p1', 'c1', 1), prize('p1b', 'c1', 1), prize('p1c', 'c1', 1)])
+    stage.layoutAll()
+    stage.startGames(true)
+    const track = stage.root.querySelector<HTMLElement>('[data-progress-bar]')!
+
+    // Three images, one tap — a prize plus a glow plus a caption is one beat of play.
+    expect(track.dataset.progressTotal).toBe('1')
+    tap(q(stage, 'c1'))
+    expect(track.dataset.progressValue).toBe('1')
+  })
+
+  it('points the hint at the game’s own box when there is nothing to tap on', () => {
+    const stage = build([game(), prize('p1', '', 1)])
+    stage.layoutAll()
+    stage.startGames(true)
+    // No cover means nothing on screen to aim at, so the marker goes on the mount — an
+    // invisible box, but one the author drew and placed for exactly this.
+    const slot = stage.root.querySelector<HTMLElement>('.pa-game')!
+    expect(slot.dataset.revealHint).toBe('1')
+
+    tap(stage.root)
+    expect(slot.dataset.revealHint).toBeUndefined()
+  })
+
   it('a cover with nothing under it just leaves, showing what is behind', () => {
     const stage = build([game(), cover('c1', 1)])
     stage.layoutAll()
@@ -185,7 +275,7 @@ describe('tap to reveal', () => {
   it('is won when every cover is open, and earlier on a win target', () => {
     const seen: string[] = []
     off = on('game-complete', () => seen.push('win'))
-    const stage = build([game({ winCovers: 2 }), cover('c1', 1), cover('c2', 2), cover('c3', 3)])
+    const stage = build([game({ winSteps: 2 }), cover('c1', 1), cover('c2', 2), cover('c3', 3)])
     stage.layoutAll()
     stage.startGames(true)
 
@@ -200,6 +290,7 @@ describe('tap to reveal', () => {
   })
 
   it('walks the hint to the next cover still up, then goes quiet', () => {
+    // (Covered boards keep the old behaviour: the marker rides the covers.)
     const stage = build([game(), cover('c1', 1), cover('c2', 2)])
     stage.layoutAll()
     stage.startGames(true)

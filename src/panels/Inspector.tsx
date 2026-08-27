@@ -15,7 +15,6 @@ import type {
   ButtonTapEffect,
   CleanRoleConfig,
   ComboRoleConfig,
-  RevealRoleConfig,
   TapRoleConfig,
   ConfettiConfig,
   CountdownConfig,
@@ -136,13 +135,16 @@ import {
 } from '../cleanSlots'
 import {
   assignRevealSlot,
-  releaseCover,
+  ensureCover,
+  releaseCoverOnly,
   revealCandidates,
   revealCovers,
+  revealItems,
   revealOptionLabel,
   revealsOf,
   revealSlotSummary,
   setRevealCanvasVisible,
+  setRevealCover,
   type RevealSlotEdit,
 } from '../revealSlots'
 import {
@@ -1690,12 +1692,16 @@ function TapRemoveSetup({ params, setParam, elementId, siblings }: TapRemoveSetu
 }
 
 // ---- Tap to reveal: role assignment -----------------------------------------
-// A list of covers, and under each one the elements that tap brings up. Both sides are
-// already placed on the canvas; this panel only says which is which.
+// A list of the things this board brings up, and per item, what tap brings it up.
 //
-// A cover with nothing under it is a perfectly good board — it leaves, and whatever the
-// author put BEHIND it is what shows. So the reveal rows are optional, and the empty
-// state says so rather than looking unfinished.
+// REVEALS lead, because that is what the board is: a working one needs nothing but a
+// list of elements to show, each opened by a tap anywhere. A COVER — a lid, a door, a
+// scratch panel — is a per-item option chosen from the "Tapping" dropdown, which tags
+// the chosen element on the spot rather than making the author fill a second list first.
+//
+// Several reveals can name the same cover, which is how a prize plus a glow plus a
+// caption arrive on one tap. That is one STEP, and steps are what the progress bar
+// counts, so three pieces landing together read as one rather than three.
 interface TapRevealSetupProps {
   params: Record<string, unknown>
   setParam: (k: string, v: unknown) => void
@@ -1703,9 +1709,13 @@ interface TapRevealSetupProps {
   siblings: SceneElement[]
 }
 function TapRevealSetup({ params, setParam, elementId, siblings }: TapRevealSetupProps): JSX.Element {
+  const items = revealItems(siblings, elementId)
   const covers = revealCovers(siblings, elementId)
   const candidates = revealCandidates(siblings)
   const bars = siblings.filter((e) => e.type === 'game-mount' && e.game?.templateId === 'progressbar')
+  // One step per cover, plus one per reveal that has no cover — the same count the game
+  // itself plays, so the win number in the panel matches what the player does.
+  const stepCount = covers.length + items.filter((e) => !covers.some((c) => c.id === e.revealRole?.ofId)).length
 
   const apply = (edits: RevealSlotEdit[]): void => {
     if (!edits.length) return
@@ -1713,22 +1723,39 @@ function TapRevealSetup({ params, setParam, elementId, siblings }: TapRevealSetu
     for (const e of edits) patchElement(e.id, e.patch)
     endTransaction()
   }
-  const assign = (nextId: string, current: SceneElement | undefined, role: RevealRoleConfig['role'], ofId?: string): void =>
-    apply(assignRevealSlot({ nextId, current, role, gameId: elementId, ofId, elements: siblings }))
+  const assign = (nextId: string, current: SceneElement | undefined): void =>
+    apply(assignRevealSlot({ nextId, current, role: 'reveal', gameId: elementId, ofId: current?.revealRole?.ofId, elements: siblings }))
+
+  /** Point one reveal at a cover — tagging that element as a cover if it is not one
+   * already — or back at "a tap anywhere". */
+  const setCover = (item: SceneElement, coverId: string): void => {
+    const was = item.revealRole?.ofId
+    const edits = [...ensureCover(siblings, elementId, coverId), setRevealCover(item, coverId)]
+    // A cover nothing points at any more is not a cover; leaving it tagged would put a
+    // dead tap target on the board that opens nothing.
+    if (was && was !== coverId && revealsOf(siblings, elementId, was).every((e) => e.id === item.id)) {
+      edits.push(...releaseCoverOnly(siblings, elementId, was))
+    }
+    apply(edits)
+  }
 
   const choices = (current: SceneElement | undefined): { value: string; label: string }[] => [
     { value: '', label: current ? '— remove —' : '— none —' },
     ...candidates.map((e) => ({ value: e.id, label: revealOptionLabel(e) + (current && e.id === current.id ? ' ✓' : '') })),
   ]
 
-  /** One assignment row. `hides` marks the kind play keeps hidden, which gets the eye
-   * that holds it on the canvas while it is being positioned. */
-  const slot = (label: string, hint: string, current: SceneElement | undefined, role: RevealRoleConfig['role'], ofId?: string, hides = false): JSX.Element => (
-    <div className="combo-slot" key={`${role}-${ofId ?? ''}-${current?.id ?? 'add'}`}>
+  /** What can open this item: nothing (any tap), or an element to tap. */
+  const coverChoices = (item: SceneElement): { value: string; label: string }[] => [
+    { value: '', label: 'A tap anywhere' },
+    ...candidates.filter((e) => e.id !== item.id).map((e) => ({ value: e.id, label: revealOptionLabel(e) })),
+  ]
+
+  const row = (label: string, hint: string, current: SceneElement | undefined, key: string): JSX.Element => (
+    <div className="combo-slot" key={key}>
       <span title={hint}>{label}</span>
-      <Select value={current?.id ?? ''} onChange={(v) => assign(v, current, role, ofId)} options={choices(current)} title={hint} />
+      <Select value={current?.id ?? ''} onChange={(v) => assign(v, current)} options={choices(current)} title={hint} />
       <span className="combo-slot-actions">
-        {current && hides && (
+        {current && (
           <button
             className={'icon-btn' + (current.revealRole?.showOnCanvas ? ' on' : '')}
             title={current.revealRole?.showOnCanvas ? 'Showing on the canvas while you position it (play always hides it)' : 'Hidden — show it on the canvas while you position it'}
@@ -1748,34 +1775,55 @@ function TapRevealSetup({ params, setParam, elementId, siblings }: TapRevealSetu
 
   return (
     <>
-      <div className="group-title2">The board</div>
-      {covers.map((c, i) => (
-        <div key={c.id}>
-          {slot(`Cover ${i + 1}`, 'The thing the player taps. Its art, size and position stay exactly as you placed them.', c, 'cover')}
-          {[...revealsOf(siblings, elementId, c.id), undefined].map((r, n) =>
-            slot(
-              n === 0 ? 'Reveals' : '↳ and',
-              'Optional. An element placed where you want it — hidden until this cover is tapped, then faded up and left there. Leave every row empty and the cover simply leaves, showing whatever you placed behind it.',
-              r,
-              'reveal',
-              c.id,
-              true,
-            ),
-          )}
+      <div className="group-title2">What gets revealed</div>
+      {items.map((item, i) => (
+        <div key={item.id}>
+          {row(`Reveal ${i + 1}`, 'An element placed where you want it — hidden until its turn, then faded up and left there.', item, item.id)}
           <div className="combo-slot">
-            <span />
-            <button className="btn" onClick={() => apply(releaseCover(siblings, elementId, c.id))}>
-              Remove cover {i + 1}
-            </button>
-            <span className="combo-slot-actions" />
+            <span title="What opens it. Leave it on “a tap anywhere” for the plain board; pick an element to put a lid, a door or a panel over it.">Tapping</span>
+            <Select
+              value={item.revealRole?.ofId ?? ''}
+              onChange={(v) => setCover(item, v)}
+              options={coverChoices(item)}
+              title="What opens it. Leave it on “a tap anywhere” for the plain board; pick an element to put a lid, a door or a panel over it."
+            />
+            <span className="combo-slot-actions">
+              {item.revealRole?.ofId && (
+                <button className="icon-btn" title="Select the cover on the canvas" onClick={() => selectOnly(item.revealRole!.ofId!)}>
+                  <Icon icon={ScanSearch} size={13} />
+                </button>
+              )}
+            </span>
           </div>
         </div>
       ))}
-      {slot(`Cover ${covers.length + 1}`, 'Add another thing to tap.', undefined, 'cover')}
+      {row(`Reveal ${items.length + 1}`, 'Add another thing to bring up.', undefined, 'add')}
+      {/* Covers with nothing under them are legitimate — the "peel the panel off the
+          poster" board — but they have no row of their own, so they are listed here. */}
+      {covers.filter((c) => revealsOf(siblings, elementId, c.id).length === 0).length > 0 && (
+        <>
+          <div className="group-title2">Covers that reveal what is behind them</div>
+          {covers
+            .filter((c) => revealsOf(siblings, elementId, c.id).length === 0)
+            .map((c) => (
+              <div className="combo-slot" key={c.id}>
+                <span title="Nothing is assigned under this one, so tapping it just takes it away and shows whatever you placed behind it.">{c.name || c.id}</span>
+                <button className="btn" onClick={() => apply(releaseCoverOnly(siblings, elementId, c.id))}>
+                  Remove
+                </button>
+                <span className="combo-slot-actions">
+                  <button className="icon-btn" title={`Select “${c.name || c.id}” on the canvas`} onClick={() => selectOnly(c.id)}>
+                    <Icon icon={ScanSearch} size={13} />
+                  </button>
+                </span>
+              </div>
+            ))}
+        </>
+      )}
       <div className="hint pad">
-        {covers.length === 0
-          ? 'Pick the elements the player taps. Each one can bring up its own image, or just leave and show whatever you placed behind it.'
-          : `Won when all ${covers.length} are tapped${Number(params.winCovers ?? 0) > 0 ? `, or after ${Number(params.winCovers)} if that is fewer` : ''}. Revealed images stay up for the rest of the game.`}
+        {stepCount === 0
+          ? 'Pick the elements to bring up. Each one appears on a tap — give it a cover only if you want something to tap ON.'
+          : `${stepCount} tap${stepCount === 1 ? '' : 's'} to finish${Number(params.winSteps ?? 0) > 0 ? `, or ${Number(params.winSteps)} if that is fewer` : ''}. Reveals sharing one cover arrive together and count as one. Revealed images stay up for the rest of the game.`}
       </div>
       {bars.length > 0 && (
         <>
@@ -1787,7 +1835,7 @@ function TapRevealSetup({ params, setParam, elementId, siblings }: TapRevealSetu
               options={[{ value: '', label: 'Every bar in this screen' }, ...bars.map((b) => ({ value: b.id, label: b.name || b.id }))]}
             />
           </Row>
-          <div className="hint pad">One step per cover tapped. Leave it on “every bar” unless this screen has more than one.</div>
+          <div className="hint pad">One step per tap. Leave it on “every bar” unless this screen has more than one.</div>
         </>
       )}
       <div className="group-title2">Feel &amp; timing</div>
@@ -2847,7 +2895,22 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
       endTransaction()
     }
     const patchAllPhase = (
-      phase: 'entrance' | 'loop' | 'exit' | 'gameWin' | 'tap' | 'thoughtSpawn' | 'thoughtWhack' | 'comboPick' | 'comboDrop' | 'comboNext' | 'cleanPick' | 'cleanWipe' | 'cleanDrop' | 'tapRemove' | 'tapReveal',
+      phase:
+        | 'entrance'
+        | 'loop'
+        | 'exit'
+        | 'gameWin'
+        | 'tap'
+        | 'thoughtSpawn'
+        | 'thoughtWhack'
+        | 'comboPick'
+        | 'comboDrop'
+        | 'comboNext'
+        | 'cleanPick'
+        | 'cleanWipe'
+        | 'cleanDrop'
+        | 'tapRemove'
+        | 'tapReveal',
       primary: AnimSpec | undefined,
       extra: AnimSpec[],
     ): void => {
@@ -4680,12 +4743,23 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                     { value: 'dragclean', label: 'Drag to clean (carry the tool onto the nearest obstacle)' },
                     { value: 'tapremove', label: 'Tap to remove (tap the next obstacle standing)' },
                     { value: 'tapreveal', label: 'Tap to reveal (tap the next cover still up)' },
+                    { value: 'pinch', label: 'Pinch (two mirrored hands close on the target)' },
                     { value: 'carousel', label: 'Carousel (swipe, then tap the centre)' },
                     { value: 'brush', label: 'Point at the scratch brush (after its intro)' },
                     { value: 'still', label: 'Still (no movement at all)' },
                   ]}
                 />
               </Row>
+              {hg.mode === 'pinch' && (
+                <>
+                  <Toggle label="Hands come from the other side" checked={!!hg.pinchFlip} onChange={(v) => setHg({ pinchFlip: v || undefined })} />
+                  <div className="hint pad">
+                    The second hand is a mirrored copy of this one, so both use the same image — swap it above and both change. They point INWARD when the hand art has its body to
+                    the right of its fingertip, which most pointing-hand art does; turn this on if yours is drawn the other way round and the pair points outward. It follows
+                    whatever the screen&rsquo;s Tap to reveal, Tap to remove or Drag to clean board still has waiting.
+                  </div>
+                </>
+              )}
               {hg.mode === 'radialtap' && (
                 <>
                   <ColorField label="Ring stroke" value={hg.rippleColor ?? RIPPLE_DEFAULT_COLOR} allowNone onChange={(c) => setHg({ rippleColor: c ?? undefined })} />
@@ -5703,8 +5777,8 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               onChange={(primary, ex) => patchElement(id, { animations: { ...(el.animations ?? {}), cleanDrop: primary, cleanDropExtra: ex.length ? ex : undefined } })}
             />
             <div className="hint pad">
-              “On obstacle cleaned” fires while the obstacle is still visible, so an animation here plays before it fades. Put one on the obstacle itself for a per-item wipe, or
-              on a counter, headline or background to react to every clean. Assign the roles in the Drag to clean game&rsquo;s own panel.
+              “On obstacle cleaned” fires while the obstacle is still visible, so an animation here plays before it fades. Put one on the obstacle itself for a per-item wipe, or on
+              a counter, headline or background to react to every clean. Assign the roles in the Drag to clean game&rsquo;s own panel.
             </div>
           </>
         )}
@@ -5739,8 +5813,8 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               onChange={(primary, ex) => patchElement(id, { animations: { ...(el.animations ?? {}), tapReveal: primary, tapRevealExtra: ex.length ? ex : undefined } })}
             />
             <div className="hint pad">
-              Fires while the cover is still visible, so an animation here plays before it leaves. The revealed image has its own fade-in under the game&rsquo;s settings; give it an
-              “Entrance” only if you want something on top of that.
+              Fires while the cover is still visible, so an animation here plays before it leaves. The revealed image has its own fade-in under the game&rsquo;s settings; give it
+              an “Entrance” only if you want something on top of that.
             </div>
           </>
         )}

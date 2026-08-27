@@ -4,12 +4,14 @@
 //
 // The rules:
 //
-//   * covers are a LIST — any number, assigned one at a time.
-//   * a REVEAL belongs to one cover and is named by that cover's element ID, not by a
-//     position in a list. Nothing renumbers, so un-assigning a cover cannot re-point
-//     another one's prize at the wrong spot.
-//   * a cover with no reveal is not a mistake: it just leaves, and whatever the author
-//     placed behind it is what the player sees.
+//   * REVEALS are the list — a board is a list of things to bring up, and that is all a
+//     working board needs.
+//   * a COVER is optional: a thing to tap that brings up specific reveals. A reveal that
+//     names no cover comes up on the next tap anywhere.
+//   * a reveal names its cover by that cover's element ID, not by a position in a list.
+//     Nothing renumbers, so un-assigning a cover cannot re-point another one's prize.
+//   * a cover with no reveal is not a mistake either: it just leaves, and whatever the
+//     author placed behind it is what the player sees.
 //   * an element holds at most one role across every game — they all want the pointer.
 
 import type { RevealRoleConfig, SceneElement } from '../runtime/scene'
@@ -64,10 +66,7 @@ export function assignRevealSlot(args: AssignRevealArgs): RevealSlotEdit[] {
 /** Releasing a cover releases what it was going to reveal, or those pieces are left
  * addressed to an element no longer on the board — inert and invisible in the panel. */
 export function releaseCover(elements: SceneElement[], gameId: string, coverId: string): RevealSlotEdit[] {
-  return [
-    { id: coverId, patch: { revealRole: undefined } },
-    ...revealsOf(elements, gameId, coverId).map((e) => ({ id: e.id, patch: { revealRole: undefined } })),
-  ]
+  return [{ id: coverId, patch: { revealRole: undefined } }, ...revealsOf(elements, gameId, coverId).map((e) => ({ id: e.id, patch: { revealRole: undefined } }))]
 }
 
 /** Elements assigned to this game — including ones tagged with no game named, which a
@@ -79,6 +78,40 @@ export function revealMembers(elements: SceneElement[], gameId: string): SceneEl
 /** The covers, in scene order. */
 export function revealCovers(elements: SceneElement[], gameId: string): SceneElement[] {
   return revealMembers(elements, gameId).filter((e) => e.revealRole?.role === 'cover')
+}
+
+/** Everything this board brings up, in scene order — the list the panel is built on. */
+export function revealItems(elements: SceneElement[], gameId: string): SceneElement[] {
+  return revealMembers(elements, gameId).filter((e) => e.revealRole?.role === 'reveal')
+}
+
+/** Point a reveal at a cover, or at nothing (''), leaving everything else alone. */
+export function setRevealCover(el: SceneElement, coverId: string): RevealSlotEdit {
+  return { id: el.id, patch: { revealRole: { ...(el.revealRole ?? { role: 'reveal' }), role: 'reveal', ofId: coverId || undefined } } }
+}
+
+/**
+ * Make `nextId` a cover of this game, unless it already is one.
+ *
+ * Covers have no list of their own any more — they are picked from the "Tapping"
+ * dropdown on a reveal, so choosing one has to tag it on the spot. An element already
+ * playing another part is moved, exactly as any other assignment does.
+ */
+export function ensureCover(elements: SceneElement[], gameId: string, nextId: string): RevealSlotEdit[] {
+  const el = elements.find((e) => e.id === nextId)
+  if (!el || el.revealRole?.role === 'cover') return []
+  return [
+    {
+      id: nextId,
+      patch: { revealRole: { gameId, role: 'cover' }, comboRole: undefined, cleanRole: undefined, tapRole: undefined, basketItem: undefined, drag: undefined },
+    },
+  ]
+}
+
+/** Drop a cover and un-point whatever was naming it, so those reveals fall back to "tap
+ * anywhere" rather than staying addressed to something no longer on the board. */
+export function releaseCoverOnly(elements: SceneElement[], gameId: string, coverId: string): RevealSlotEdit[] {
+  return [{ id: coverId, patch: { revealRole: undefined } }, ...revealsOf(elements, gameId, coverId).map((e) => setRevealCover(e, ''))]
 }
 
 /** What one cover brings up — a list, since a tap can raise a prize, a glow and a
@@ -110,7 +143,8 @@ export function revealOptionLabel(el: SceneElement): string {
 
 /** Plain-language name for the job an element holds, for its read-only status line. */
 export function revealSlotSummary(role: RevealRoleConfig): string {
-  return role.role === 'cover' ? 'a cover the player taps' : 'an image revealed by a cover'
+  if (role.role === 'cover') return 'a cover the player taps'
+  return role.ofId ? 'an image revealed by tapping its cover' : 'an image revealed by a tap anywhere'
 }
 
 /** Show or hide a reveal on the editor canvas. Authoring-only: play always starts with

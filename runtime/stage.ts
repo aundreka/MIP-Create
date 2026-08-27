@@ -180,6 +180,7 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     | 'dragclean'
     | 'tapremove'
     | 'tapreveal'
+    | 'pinch'
     | 'brush'
     | 'still'
     | 'hold' = 'tap'
@@ -217,6 +218,8 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     kind = 'tapremove'
   } else if (cfg.mode === 'tapreveal') {
     kind = 'tapreveal'
+  } else if (cfg.mode === 'pinch') {
+    kind = 'pinch'
   } else if (cfg.mode === 'brush') {
     kind = 'brush'
   }
@@ -230,13 +233,15 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
           ? 1500
           : kind === 'combo'
             ? 1900
-            : kind === 'dragclean'
-              ? 1800
-              : kind === 'carousel'
-                ? 2600
-                : kind === 'hold'
-                  ? 2000
-                  : 900
+            : kind === 'pinch'
+              ? 1400
+              : kind === 'dragclean'
+                ? 1800
+                : kind === 'carousel'
+                  ? 2600
+                  : kind === 'hold'
+                    ? 2000
+                    : 900
   const cubic = (t: number): number => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
   const EASE: Record<string, (t: number) => number> = {
     linear: (t) => t,
@@ -270,6 +275,36 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     content.style.transformOrigin = '22% 12%'
     content.style.transition = 'opacity 200ms ease'
     rec.outer.style.zIndex = '99999' // Force handguide to be always on top
+  }
+  /**
+   * 'pinch': the SECOND hand. A clone of the placed one rather than a second element
+   * the author has to add, so the pair cannot drift apart — same art, same size, same
+   * idle behaviour, and swapping the hand image updates both at once.
+   *
+   * It is absolutely positioned over the original because .pa-img is a block filling
+   * its box: a second one left in normal flow would stack underneath and push the
+   * element's layout around. Both then occupy the same rect, which is what lets the
+   * frame position them off one measurement.
+   *
+   * The mirroring is `scaleX(-1)` composed onto the SAME transform-origin the hand
+   * already uses (22% 12%, its fingertip). Flipping about that point maps the fingertip
+   * to itself and swings the body to the other side — so the two hands share one
+   * fingertip formula and the press dip anchors on the fingertip for both.
+   */
+  let mirror: HTMLElement | null = null
+  if (kind === 'pinch' && content) {
+    mirror = content.cloneNode(true) as HTMLElement
+    mirror.dataset.pinchMirror = '1'
+    mirror.style.position = 'absolute'
+    mirror.style.left = '0'
+    mirror.style.top = '0'
+    mirror.style.width = '100%'
+    mirror.style.height = '100%'
+    mirror.style.pointerEvents = 'none'
+    mirror.style.transformOrigin = '22% 12%'
+    mirror.style.transition = 'opacity 200ms ease'
+    mirror.style.opacity = '0'
+    content.parentElement?.appendChild(mirror)
   }
   // 'brush' mode: render the hand on the STAGE layer so it sits in front of the brush (the brush is
   // itself above the scene), positioned absolutely. Remember how to put it back on stop().
@@ -328,6 +363,10 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     const s = scale()
     let ox = 0
     let oy = 0
+    // 'pinch' only: where the mirrored second hand goes. Written by that branch and
+    // applied in the shared tail, so both hands get the identical press dip.
+    let mox = 0
+    let moy = 0
     let press = 0
     // The carry modes ('combo', 'dragclean') only: holding something reads as the
     // hand swelling, not shrinking.
@@ -451,6 +490,46 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
       ox = point.x - (guideRect.left + guideRect.width * 0.22)
       oy = point.y - guideRect.height * 0.28 * (1 - dip) - (guideRect.top + guideRect.height * 0.12)
       press = dip
+    } else if (kind === 'pinch') {
+      // Two hands closing on whatever the live board still has waiting. Reveal first,
+      // since that is the board this was built for, then the other two tap/wipe
+      // markers so the same hand is useful on any of them.
+      const targetEl =
+        root.querySelector<HTMLElement>('[data-reveal-hint]') ?? root.querySelector<HTMLElement>('[data-tap-hint]') ?? root.querySelector<HTMLElement>('[data-clean-hint]')
+      if (!targetEl) {
+        content.style.opacity = '0'
+        if (mirror) mirror.style.opacity = '0'
+        raf = requestAnimationFrame(frame)
+        return
+      }
+      content.style.opacity = '1'
+      const t = targetEl.getBoundingClientRect()
+      const guideRect = rec.outer.getBoundingClientRect()
+      const phase = ((now - t0) % travel) / travel
+      // One squeeze per cycle: closing on the way in, opening on the way out.
+      const squeeze = phase < 0.5 ? cubic(phase * 2) : cubic((1 - phase) * 2)
+      press = squeeze
+      const handW = guideRect.width || 1
+      // The fingertips FRAME the target rather than landing on it: closed sits just
+      // outside its edge, open is most of a hand further out again. Both distances are
+      // relative to the hand and the target, so the gesture keeps its proportions at
+      // every stage scale instead of being a fixed pixel gap.
+      const closed = Math.max(t.width * 0.28, handW * 0.1)
+      const open = closed + handW * 0.45
+      const gap = open + (closed - open) * squeeze
+      const cx = t.left + t.width / 2
+      const cy = t.top + t.height / 2
+      // The unmirrored hand carries its body to the RIGHT of its fingertip, so it is
+      // the one that closes from the right; its mirror takes the left. pinchFlip swaps
+      // that, for hand art drawn the other way round.
+      const flip = cfg.pinchFlip === true
+      const own = flip ? cx - gap : cx + gap
+      const other = flip ? cx + gap : cx - gap
+      const tipY = cy - (guideRect.top + guideRect.height * 0.12)
+      ox = own - (guideRect.left + handW * 0.22)
+      oy = tipY
+      mox = other - (guideRect.left + handW * 0.22)
+      moy = tipY
     } else if (kind === 'tapremove' || kind === 'tapreveal') {
       // Tap whatever the board still has waiting — the next obstacle on a Tap to
       // remove board, the next cover on a Tap to reveal one. Each game moves its own
@@ -669,7 +748,14 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     // A drag softens the contact dip to leave room for the carry swell; every other
     // mode keeps the original press-only scale.
     const dip = kind === 'combo' || kind === 'dragclean' ? 0.1 : 0.18
-    content.style.transform = `translate(${Math.round(ox)}px,${Math.round(oy)}px) scale(${(1 - press * dip + swell * 0.14).toFixed(3)})`
+    const squash = (1 - press * dip + swell * 0.14).toFixed(3)
+    content.style.transform = `translate(${Math.round(ox)}px,${Math.round(oy)}px) scale(${squash})`
+    // scaleX(-1) LAST, so it composes about the shared 22%/12% origin and pins the
+    // mirrored hand's fingertip to exactly the point the maths placed it.
+    if (mirror) {
+      mirror.style.transform = `translate(${Math.round(mox)}px,${Math.round(moy)}px) scale(${squash}) scaleX(-1)`
+      mirror.style.opacity = content.style.opacity
+    }
     raf = requestAnimationFrame(frame)
   }
   const show = (): void => {
@@ -679,6 +765,7 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     // 'brush' mode reveals itself inside the frame, AFTER it's sized + positioned — otherwise it
     // would flash at its initial top-left (0,0) for a frame. All other modes reveal immediately.
     if (kind !== 'brush') content.style.opacity = '1'
+    if (mirror) mirror.style.opacity = content.style.opacity
     // 'still': show it and stop there. No frame loop at all, so nothing ever writes a
     // transform and the hand sits exactly where it was placed.
     if (kind === 'still') return
@@ -689,6 +776,8 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     if (raf) cancelAnimationFrame(raf)
     raf = 0
     if (content) content.style.opacity = '0'
+    // The loop is what normally keeps the two in step, and it has just stopped.
+    if (mirror) mirror.style.opacity = '0'
     // The loop stops here, so without this the last painted rings would freeze on
     // screen with no hand behind them.
     ripple?.hide()
@@ -728,6 +817,7 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
   }
   if (idleCfg.showInitially === false) {
     if (content) content.style.opacity = '0'
+    if (mirror) mirror.style.opacity = '0'
     scheduleShow()
   } else {
     show()
@@ -748,6 +838,9 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
         content.style.transform = ''
         content.style.opacity = ''
       }
+      // The second hand was ours to create, so it is ours to take away.
+      mirror?.remove()
+      mirror = null
       // Restore a 'brush'-mode hand that was reparented onto the stage layer.
       if (brushRestore && content) {
         content.style.cssText = brushRestore.cssText
