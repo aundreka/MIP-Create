@@ -56,6 +56,7 @@ export function assignCleanSlot(args: AssignCleanArgs): CleanSlotEdit[] {
       tapRole: undefined,
       revealRole: undefined,
       basketItem: undefined,
+      catchRole: undefined,
       drag: undefined,
     },
   })
@@ -110,6 +111,7 @@ export function cleanOptionLabel(el: SceneElement): string {
   if (el.tapRole) return `${base} — in the tap-to-remove board`
   if (el.revealRole) return `${base} — in the tap-to-reveal board`
   if (el.comboRole) return `${base} — in the combo board`
+  if (el.catchRole) return `${base} — in the catch board`
   if (el.basketItem) return `${base} — a basket item`
   if (el.drag) return `${base} — draggable`
   return base

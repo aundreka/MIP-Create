@@ -57,6 +57,7 @@ export function assignRevealSlot(args: AssignRevealArgs): RevealSlotEdit[] {
       cleanRole: undefined,
       tapRole: undefined,
       basketItem: undefined,
+      catchRole: undefined,
       drag: undefined,
     },
   })
@@ -103,7 +104,7 @@ export function ensureCover(elements: SceneElement[], gameId: string, nextId: st
   return [
     {
       id: nextId,
-      patch: { revealRole: { gameId, role: 'cover' }, comboRole: undefined, cleanRole: undefined, tapRole: undefined, basketItem: undefined, drag: undefined },
+      patch: { revealRole: { gameId, role: 'cover' }, comboRole: undefined, cleanRole: undefined, tapRole: undefined, basketItem: undefined, catchRole: undefined, drag: undefined },
     },
   ]
 }
@@ -136,6 +137,7 @@ export function revealOptionLabel(el: SceneElement): string {
   if (el.tapRole) return `${base} — in the tap-to-remove board`
   if (el.cleanRole) return `${base} — in the drag-to-clean board`
   if (el.comboRole) return `${base} — in the combo board`
+  if (el.catchRole) return `${base} — in the catch board`
   if (el.basketItem) return `${base} — a basket item`
   if (el.drag) return `${base} — draggable`
   return base

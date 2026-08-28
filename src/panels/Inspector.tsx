@@ -159,6 +159,18 @@ import {
   tapSlotSummary,
   type TapSlotEdit,
 } from '../tapSlots'
+import {
+  assignCatchSlot,
+  catchCandidates,
+  catchCheck,
+  catchItems,
+  catchOptionLabel,
+  catchSlotCount,
+  catchSlotSummary,
+  releaseItem,
+  setCatchCanvasVisible,
+  type CatchSlotEdit,
+} from '../catchSlots'
 import { DATE_LOCALE_OPTIONS } from '../dateLocales'
 
 // Tap feedback options, shared by the button element and images marked as buttons.
@@ -2547,6 +2559,8 @@ function ScratchGridCells({ params, setParam, setParams, elementId, cardAspect }
 interface CatchInspectorProps {
   params: Record<string, unknown>
   setParam: (k: string, v: unknown) => void
+  elementId: string
+  siblings: SceneElement[]
 }
 
 const numList = (value: unknown): number[] =>
@@ -2635,7 +2649,127 @@ function CatchAssetList(props: { params: Record<string, unknown>; setParam: (k: 
   )
 }
 
-function CatchTemplateInspector({ params, setParam }: CatchInspectorProps): JSX.Element {
+// ---- Catch: the board of placed elements ------------------------------------
+// The row of shoes along the top of the screen, assigned here rather than uploaded as
+// image slots. Each one plays two parts at once, which is the point of assigning an
+// ELEMENT: its art is what falls, and it is that item's tick in the row — sitting at
+// whatever opacity it was given on the canvas until one of its copies is caught, then
+// coming up to full opacity and taking the check mark.
+//
+// The check mark is ONE slot for the whole board, not one per item: the game stamps a
+// copy of it over each item as that item is caught, so five items still cost one
+// placement. It is hidden in play — only the stamps are ever on screen.
+interface CatchBoardSetupProps {
+  params: Record<string, unknown>
+  setParam: (k: string, v: unknown) => void
+  elementId: string
+  siblings: SceneElement[]
+}
+function CatchBoardSetup({ params, setParam, elementId, siblings }: CatchBoardSetupProps): JSX.Element {
+  const items = catchItems(siblings, elementId)
+  const check = catchCheck(siblings, elementId)
+  // Always one empty slot past the end, so the board grows by filling rather than by
+  // pressing an "add" button first.
+  const slots = Math.max(catchSlotCount(siblings, elementId), items.length) + 1
+  const candidates = catchCandidates(siblings)
+
+  const apply = (edits: CatchSlotEdit[]): void => {
+    if (!edits.length) return
+    beginTransaction()
+    for (const e of edits) patchElement(e.id, e.patch)
+    endTransaction()
+  }
+  const assign = (nextId: string, current: SceneElement | undefined, role: 'item' | 'check', index?: number): void => {
+    apply(assignCatchSlot({ nextId, current, role, gameId: elementId, index, elements: siblings }))
+    // The unique-item count is what the older image-slot path counts by, and the catch
+    // effects panel is built on it; keeping it level with the row means the two can't
+    // drift apart while the board is being wired up.
+    if (role === 'item') {
+      const next = nextId ? Math.max(items.length, index ?? 1) : Math.max(1, items.length - 1)
+      setParam('itemTypes', next)
+    }
+  }
+
+  const choices = (current: SceneElement | undefined): { value: string; label: string }[] => [
+    { value: '', label: current ? '— remove —' : '— none —' },
+    ...candidates.map((e) => ({ value: e.id, label: catchOptionLabel(e) + (current && e.id === current.id ? ' ✓' : '') })),
+  ]
+
+  /** One assignment row. `hides` marks the kind play keeps hidden — the check mark —
+   * which gets the eye that holds it on the canvas while it is being positioned. */
+  const slot = (label: string, hint: string, current: SceneElement | undefined, role: 'item' | 'check', index?: number, hides = false): JSX.Element => (
+    <div className="combo-slot" key={`${role}${index ?? 0}-${current?.id ?? 'add'}`}>
+      <span title={hint}>{label}</span>
+      <Select value={current?.id ?? ''} onChange={(v) => assign(v, current, role, index)} options={choices(current)} title={hint} />
+      <span className="combo-slot-actions">
+        {current && hides && (
+          <button
+            className={'icon-btn' + (current.catchRole?.showOnCanvas ? ' on' : '')}
+            title={current.catchRole?.showOnCanvas ? 'Showing on the canvas while you position it (play always hides it)' : 'Hidden — show it on the canvas while you position it'}
+            onClick={() => apply([setCatchCanvasVisible(current, !current.catchRole?.showOnCanvas)])}
+          >
+            <Icon icon={current.catchRole?.showOnCanvas ? Eye : EyeOff} size={13} />
+          </button>
+        )}
+        {current && (
+          <button className="icon-btn" title={`Select “${current.name || current.id}” on the canvas`} onClick={() => selectOnly(current.id)}>
+            <Icon icon={ScanSearch} size={13} />
+          </button>
+        )}
+      </span>
+    </div>
+  )
+
+  return (
+    <>
+      <div className="group-title2">Placed items</div>
+      {Array.from({ length: slots }, (_, i) => {
+        const index = i + 1
+        const item = items.find((e) => (e.catchRole?.index ?? 1) === index)
+        return (
+          <div key={index}>
+            {slot(
+              `Item ${index}`,
+              'An element you placed on the canvas. Its art is what falls, and it stays where it is as this item’s tick in the row — at the opacity you gave it until one is caught.',
+              item,
+              'item',
+              index,
+            )}
+            {item && (
+              <div className="combo-slot">
+                <span />
+                <button className="btn" onClick={() => apply(releaseItem(siblings, elementId, index))}>
+                  Remove item {index}
+                </button>
+                <span className="combo-slot-actions" />
+              </div>
+            )}
+          </div>
+        )
+      })}
+      {items.length > 0 && (
+        <>
+          <div className="group-title2">Check mark</div>
+          {slot(
+            'Mark',
+            'Optional. One element, copied over the centre of each item as that item is caught. It is never shown itself in play — only the copies.',
+            check,
+            'check',
+            undefined,
+            true,
+          )}
+        </>
+      )}
+      <div className="hint pad">
+        {items.length === 0
+          ? 'Optional. Assign elements you have placed on the canvas and they become the falling items — each one dimmed until it is caught. Leave this empty to use the uploaded images below instead.'
+          : `The board is these ${items.length} elements${params.requireUnique === false ? '' : ', won when one of each has been caught'}. Each falls at its own size on the canvas times the scale below.`}
+      </div>
+    </>
+  )
+}
+
+function CatchTemplateInspector({ params, setParam, elementId, siblings }: CatchInspectorProps): JSX.Element {
   const uniqueMode = params.requireUnique !== false
   return (
     <>
@@ -2696,8 +2830,40 @@ function CatchTemplateInspector({ params, setParam }: CatchInspectorProps): JSX.
       </Accordion>
 
       <Accordion id="inspector.catch.items" title="Falling Items">
-        <CatchAssetList params={params} setParam={setParam} />
-        <NumberListEditor label="Item sizes" value={params.itemSizes} defaultValue={120} step={5} min={1} onChange={(v) => setParam('itemSizes', v)} />
+        <CatchBoardSetup params={params} setParam={setParam} elementId={elementId} siblings={siblings} />
+        {catchItems(siblings, elementId).length > 0 ? (
+          <>
+            <div className="group-title2">Falling copies</div>
+            <NumField
+              label="Size vs placed"
+              value={Number(params.itemFallScale ?? 2)}
+              step={0.1}
+              min={0.05}
+              max={20}
+              onChange={(n) => setParam('itemFallScale', n)}
+            />
+            <NumField label="Fade to full (ms)" value={Number(params.caughtFadeMs ?? 260)} step={20} min={0} max={3000} onChange={(n) => setParam('caughtFadeMs', n)} />
+            {catchCheck(siblings, elementId) && (
+              <>
+                <div className="group-title2">Check mark</div>
+                <div className="grid2">
+                  <NumField label="Offset X" value={Number(params.checkOffsetX ?? 0)} step={5} min={-2000} max={2000} onChange={(n) => setParam('checkOffsetX', n)} />
+                  <NumField label="Offset Y" value={Number(params.checkOffsetY ?? 0)} step={5} min={-2000} max={2000} onChange={(n) => setParam('checkOffsetY', n)} />
+                </div>
+                <div className="grid2">
+                  <NumField label="Scale" value={Number(params.checkScale ?? 1)} step={0.05} min={0.05} max={10} onChange={(n) => setParam('checkScale', n)} />
+                  <NumField label="Appears over (ms)" value={Number(params.checkFadeMs ?? 260)} step={20} min={0} max={3000} onChange={(n) => setParam('checkFadeMs', n)} />
+                </div>
+                <NumField label="Grows from" value={Number(params.checkFrom ?? 0.5)} step={0.05} min={0} max={3} onChange={(n) => setParam('checkFrom', n)} />
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            <CatchAssetList params={params} setParam={setParam} />
+            <NumberListEditor label="Item sizes" value={params.itemSizes} defaultValue={120} step={5} min={1} onChange={(v) => setParam('itemSizes', v)} />
+          </>
+        )}
       </Accordion>
 
       <Accordion id="inspector.catch.basketImages" title="Basket Images" defaultOpen={false}>
@@ -3182,9 +3348,10 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               <Row label="Type">
                 <Select
                   value={(sd.kind as string) === 'win' || (sd.kind as string) === 'custom' ? 'overlay' : (sd.kind ?? 'overlay')}
-                  // asEndscene only means anything on an overlay — drop it on the way out so a
-                  // scene switched to game/endscene and back doesn't silently come back terminal.
-                  onChange={(v) => patchSceneDef(sd.id, { kind: v as SceneKind, ...(v === 'overlay' ? {} : { asEndscene: undefined }) })}
+                  // asEndscene / overlayBase only mean anything on an overlay — drop them on the way
+                  // out so a scene switched to game/endscene and back doesn't silently come back
+                  // terminal, or still pointing at a backdrop.
+                  onChange={(v) => patchSceneDef(sd.id, { kind: v as SceneKind, ...(v === 'overlay' ? {} : { asEndscene: undefined, overlayBase: undefined }) })}
                   options={[
                     { value: 'game', label: 'game scene' },
                     { value: 'overlay', label: 'overlay scene' },
@@ -3195,6 +3362,23 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               <ColorField label={landscape ? 'BG left' : 'BG top'} value={sd.bgColor || undefined} allowNone onChange={(c) => setSceneBg(c ?? '')} />
               <ColorField label={landscape ? 'BG right' : 'BG bottom'} value={sd.bgColor2 || undefined} allowNone onChange={(c) => setSceneBg2(c)} />
             </div>
+            {isOverlayKind && !!others.length && (
+              <>
+                <Row label="Floats over">
+                  <Select
+                    value={others.some((s) => s.id === sd.overlayBase) ? sd.overlayBase! : ''}
+                    onChange={(v) => patchSceneDef(sd.id, { overlayBase: v || undefined })}
+                    options={[{ value: '', label: '(previous scene)' }, ...others.map((s) => ({ value: s.id, label: s.name || s.id }))]}
+                  />
+                </Row>
+                {sd.overlayBase && (
+                  <div className="hint pad">
+                    This overlay brings <b>{others.find((s) => s.id === sd.overlayBase)?.name ?? sd.overlayBase}</b> up underneath itself before it floats in — needed when the
+                    overlay runs <b>first</b> in the flow and has no previous scene to dim. Leave it on <b>(previous scene)</b> and it dims whatever is already on screen.
+                  </div>
+                )}
+              </>
+            )}
             {isOverlayKind && <Toggle label="Also the MRAID end card" checked={!!sd.asEndscene} onChange={(v) => patchSceneDef(sd.id, { asEndscene: v || undefined })} />}
             {isOverlayKind && sd.asEndscene && (
               <div className="hint pad">
@@ -3982,7 +4166,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                     />
                   )}
                   {tpl.id === 'catch' ? (
-                    <CatchTemplateInspector params={params} setParam={setParam} />
+                    <CatchTemplateInspector params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />
                   ) : (
                     tpl.paramFields
                       .filter(
@@ -4285,6 +4469,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 <div className="hint pad">The shape"s transparency masks the image; works on any shape (heart, star, etc.). The inside image is clipped to the shape.</div>
               </>
             )}
+            <Slider label="Opacity" value={(el.opacity ?? 1) * 100} min={0} max={100} suffix="%" onChange={(n) => patchElement(id, { opacity: n === 100 ? undefined : n / 100 })} />
           </Accordion>
           {!el.container && el.assetId && (
             <>
@@ -4429,6 +4614,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                         cleanRole: v ? undefined : el.cleanRole,
                         tapRole: v ? undefined : el.tapRole,
                         revealRole: v ? undefined : el.revealRole,
+                        catchRole: v ? undefined : el.catchRole,
                       })
                     }
                   />
@@ -4482,6 +4668,25 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                   <>
                     <div className="hint pad">
                       Tap to reveal: this element is <b>{where}</b>.
+                    </div>
+                    {game && (
+                      <button className="btn" style={{ width: '100%', marginTop: 4 }} onClick={() => selectOnly(game.id)}>
+                        Edit in “{game.name || game.id}”
+                      </button>
+                    )}
+                  </>
+                )
+              })()}
+            {el.catchRole &&
+              (() => {
+                // Read-only on purpose: which element plays which part is chosen in the
+                // Catch game's own panel, so one screen owns the whole wiring.
+                const where = catchSlotSummary(el.catchRole)
+                const game = activeSceneDef(state)?.elements.find((c) => c.id === el.catchRole?.gameId)
+                return (
+                  <>
+                    <div className="hint pad">
+                      Catch: this element is <b>{where}</b>.
                     </div>
                     {game && (
                       <button className="btn" style={{ width: '100%', marginTop: 4 }} onClick={() => selectOnly(game.id)}>

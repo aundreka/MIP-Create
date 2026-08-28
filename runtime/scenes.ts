@@ -457,6 +457,17 @@ export function playProject(project: Project, assets: AssetMap, opts: { mount: H
 
   const afterOverlay = (ov: SceneDef): string | null => (isEndscene(ov) ? null : nextId(ov))
 
+  // The scene an overlay floats OVER. Default (no overlayBase) = whatever is on screen, so
+  // an overlay reached mid-flow keeps dimming the scene before it. An explicit overlayBase
+  // names its own backdrop — the flow mounts that scene underneath before floating. Mainly
+  // for an overlay placed FIRST in the flow: without a base it has nothing to dim and plays
+  // as a plain full-screen scene. A base that no longer exists (or points at the overlay
+  // itself) falls back to the default.
+  const overlayBaseDef = (ov: SceneDef): SceneDef | null => {
+    if (ov.kind !== 'overlay' || !ov.overlayBase || ov.overlayBase === ov.id) return null
+    return project.scenes.find((s) => s.id === ov.overlayBase) ?? null
+  }
+
   const clearTriggers = (): void => {
     window.clearTimeout(advanceTimer)
     if (tapHandler) {
@@ -710,6 +721,22 @@ export function playProject(project: Project, assets: AssetMap, opts: { mount: H
         return
       }
       const def = localizeSceneDef(masterDef)
+      // An overlay authored with its own backdrop (overlayBase) brings that scene up
+      // underneath itself when it isn't already the one on screen. A hard cut, no
+      // transition: the overlay floating in IS the screen change the player sees. Skipped
+      // mid-transition, where a swap would fight the fade already running, and skipped
+      // when the base is already current (the default, every overlay without overlayBase).
+      const baseDef = overlayBaseDef(masterDef)
+      if (baseDef && baseDef.id !== current.def.id && !transitioning) {
+        const outgoing = current
+        clearTriggers()
+        landMorph()
+        unparkInto(outgoing.stage) // parked header leaves with the scene it was mounted for
+        current = { def: baseDef, stage: mountScene(baseDef) }
+        syncHeaderClip()
+        outgoing.stage.destroy()
+        armAdvance(baseDef)
+      }
       // Per-scene header hide applies to floated overlay scenes too — they never pass through
       // mountScene. Restored to the underlying scene's setting on dismiss (see restoreImmune);
       // a redirect's mountScene sets it for the destination scene.
@@ -934,9 +961,25 @@ export function playProject(project: Project, assets: AssetMap, opts: { mount: H
     // Built before the first scene mounts so mountScene's syncPersist has a stage to
     // talk to — the layer then outlives every scene until destroy().
     buildPersist()
-    current = { def: startDef, stage: mountScene(startDef) }
-    syncHeaderClip()
-    armAdvance(startDef)
+    // An overlay that STARTS the flow has no previous scene to dim, so on its own it would
+    // play as a plain full-screen scene. Authored with an overlayBase it opens the way it
+    // does mid-flow: the base scene mounts first and the overlay floats over it, dismissing
+    // (or redirecting) on its own advance rule. Interactive only — a static render has no
+    // 'scene-overlay' listener, so there the overlay still mounts outright.
+    const startBase = opts.interactive ? overlayBaseDef(startDef) : null
+    if (startBase) {
+      current = { def: startBase, stage: mountScene(startBase) }
+      syncHeaderClip()
+      armAdvance(startBase)
+      // Continue onward only when the overlay leads somewhere OTHER than its own backdrop;
+      // when its next scene IS the base, dismissing already hands the screen back to it.
+      const after = afterOverlay(startDef)
+      emit('scene-overlay', { sceneId: startDef.id, ...(after && after !== startBase.id ? { redirectTo: after } : {}) })
+    } else {
+      current = { def: startDef, stage: mountScene(startDef) }
+      syncHeaderClip()
+      armAdvance(startDef)
+    }
   }
 
   return {

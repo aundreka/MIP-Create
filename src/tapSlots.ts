@@ -59,6 +59,7 @@ export function assignTapSlot(args: AssignTapArgs): TapSlotEdit[] {
       cleanRole: undefined,
       revealRole: undefined,
       basketItem: undefined,
+      catchRole: undefined,
       drag: undefined,
     },
   })
@@ -131,6 +132,7 @@ export function tapOptionLabel(el: SceneElement): string {
   if (el.revealRole) return `${base} — in the tap-to-reveal board`
   if (el.cleanRole) return `${base} — in the drag-to-clean board`
   if (el.comboRole) return `${base} — in the combo board`
+  if (el.catchRole) return `${base} — in the catch board`
   if (el.basketItem) return `${base} — a basket item`
   if (el.drag) return `${base} — draggable`
   return base

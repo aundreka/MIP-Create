@@ -1007,6 +1007,13 @@ html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;overscroll-b
    every layout pass, so an inline hide would be dropped by the next resize.
    visibility keeps the box measurable, which the fly-to-layer maths needs. */
 .pa-combo-off{opacity:0 !important;visibility:hidden !important;pointer-events:none !important;}
+/* A Catch item whose copy has been caught. A CLASS with !important for the same reason
+   as .pa-el--t-off — layoutRec rewrites outer.style.opacity from el.opacity on every
+   layout pass — and because the point is to OVERRIDE the author's resting opacity: the
+   row of items sits dimmed at whatever opacity they were given until one is caught, and
+   an inline value could only ever be dropped by the next resize. The transition is set
+   inline by the game so the fade length stays a game param. */
+.pa-catch-caught{opacity:1 !important;}
 /* One end of a cross-scene morph, hidden while its frozen copy is in flight (see morph.ts).
    A CLASS for the same reason as .pa-el--t-off: layoutRec rewrites inline opacity from the
    element on every layout pass, so an inline hide would be dropped by the next resize. */
@@ -1608,6 +1615,23 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       // play hides them all regardless, so this never reaches the player.
       if (el.tapRole.role === 'after') {
         if (el.tapRole.showOnCanvas) outer.dataset.tapCanvasShow = '1'
+        else outer.classList.add(COMBO_OFF_CLASS)
+      }
+    }
+    if (el.catchRole) {
+      outer.dataset.catchRole = el.catchRole.role
+      if (el.catchRole.gameId) outer.dataset.catchGameId = el.catchRole.gameId
+      if (el.catchRole.index) outer.dataset.catchIndex = String(el.catchRole.index)
+      // An ITEM is part of the board the author is arranging — it stays visible and
+      // placeable, at whatever opacity they gave it, and the game only brings it to
+      // full opacity once one of its copies has actually been caught.
+      //
+      // The CHECK is the one exception: what the player sees are the copies the game
+      // stamps on caught items, never the element itself, so it starts hidden. The
+      // author can keep it up on the editor canvas while positioning it; play hides it
+      // regardless, so this never reaches the player.
+      if (el.catchRole.role === 'check') {
+        if (el.catchRole.showOnCanvas) outer.dataset.catchCanvasShow = '1'
         else outer.classList.add(COMBO_OFF_CLASS)
       }
     }

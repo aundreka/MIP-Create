@@ -1114,6 +1114,9 @@ export function removeScene(id: string): void {
   const scenes = state.project.scenes
     .filter((s) => s.id !== id)
     .map((s) => (s.elements.some((e) => e.morph?.toSceneId === id) ? { ...s, elements: s.elements.map((e) => (e.morph?.toSceneId === id ? { ...e, morph: undefined } : e)) } : s))
+    // An overlay that floated over the deleted scene goes back to dimming whatever is on
+    // screen, rather than keeping a dangling backdrop id.
+    .map((s) => (s.overlayBase === id ? { ...s, overlayBase: undefined } : s))
   const startSceneId = state.project.startSceneId === id ? scenes[0].id : state.project.startSceneId
   const activeSceneId = state.activeSceneId === id ? scenes[0].id : state.activeSceneId
   set({ dirty: true, activeSceneId, selectedIds: [], project: { ...state.project, scenes, startSceneId } })

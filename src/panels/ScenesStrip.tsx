@@ -282,8 +282,8 @@ export function ScenesStrip(props: { onPreviewScene: (id: string) => void; verti
                 key={k}
                 className={'scene-picker-item' + (k === current ? ' active' : '')}
                 onClick={() => {
-                  // asEndscene is overlay-only — clear it when leaving that kind (see Inspector).
-                  patchSceneDef(kindPicker.id, { kind: k, ...(k === 'overlay' ? {} : { asEndscene: undefined }) })
+                  // asEndscene / overlayBase are overlay-only — clear them when leaving that kind (see Inspector).
+                  patchSceneDef(kindPicker.id, { kind: k, ...(k === 'overlay' ? {} : { asEndscene: undefined, overlayBase: undefined }) })
                   setKindPicker(null)
                 }}
               >

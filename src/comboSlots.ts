@@ -65,6 +65,7 @@ export function assignComboSlot(args: AssignArgs): ComboSlotEdit[] {
       cleanRole: undefined,
       tapRole: undefined,
       revealRole: undefined,
+      catchRole: undefined,
       drag: undefined,
     },
   })

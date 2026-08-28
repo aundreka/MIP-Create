@@ -833,6 +833,32 @@ export interface RevealRoleConfig {
   showOnCanvas?: boolean
 }
 
+// Catch: which part an ordinary placed element plays in a Catch game. Assigned from
+// the GAME's panel (see src/catchSlots.ts), the same way the combo board, tap-to-remove
+// and tap-to-reveal are, so one screen owns the whole wiring.
+//
+// An ITEM is a shoe in the row at the top of the screen: it stays exactly where the
+// author placed it for the whole game and plays two parts at once — its art is what
+// falls, and it is the tick-list entry for that item. It sits at whatever opacity the
+// author gave it until one of its copies is caught, and then it goes to full opacity.
+//
+// The CHECK is a single mark — one element, assigned once — copied over the centre of
+// each item as that item is caught, so a five-item board needs one check mark rather
+// than five.
+export interface CatchRoleConfig {
+  gameId?: string
+  /** 'item' is one of the things that fall (and its own tick-list entry); 'check' is
+   * the one mark stamped over each item as it is caught. */
+  role: 'item' | 'check'
+  /** 'item' only, 1-based. Which falling item this is — the index the caught-item
+   * layout lists (position, angle, scale in the basket) are addressed by. */
+  index?: number
+  /** 'check' only, authoring-only: keep it visible on the editor canvas while it is
+   * being positioned. Play always starts with it hidden — what the player sees are the
+   * copies stamped on caught items — so this can never leak into the playable. */
+  showOnCanvas?: boolean
+}
+
 export interface SlotConfig {
   group?: string
   key?: string
@@ -1159,6 +1185,7 @@ export interface SceneElement {
   cleanRole?: CleanRoleConfig
   tapRole?: TapRoleConfig
   revealRole?: RevealRoleConfig
+  catchRole?: CatchRoleConfig
   slot?: SlotConfig
   pick?: PickConfig
   fill?: FillConfig
@@ -1416,6 +1443,14 @@ export interface SceneDef {
   // an end card that keeps the finished game board visible behind the dim, instead of
   // cutting to a separate full-screen endscene. Ignored unless kind === 'overlay'.
   asEndscene?: boolean
+  // Overlay scenes only: which scene this one floats OVER. Absent (the default) = whatever
+  // is on screen when the overlay fires — the scene before it. Set it to pick the backdrop
+  // explicitly; the flow mounts that scene underneath first if it isn't already current.
+  // The case that needs it: an overlay placed FIRST in the flow (an intro card over the
+  // game board), which otherwise has nothing beneath it and plays as a full-screen scene.
+  // A dangling id (its scene was deleted) falls back to the default. Ignored unless
+  // kind === 'overlay'.
+  overlayBase?: string
   elements: SceneElement[]
   advance: AdvanceRule
   transition?: Transition // how THIS scene ENTERS
