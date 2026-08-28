@@ -83,6 +83,7 @@ export function createCatch(): GameModule {
   let rafRef = 0
   let spawnTimer = 0
   let completeCb: (() => void) | null = null
+  let winCb: (() => void) | null = null
   let gameActive = true
   let spawnOnMove = false
   let hasMoved = false
@@ -640,14 +641,22 @@ export function createCatch(): GameModule {
 
     if (caughtThisFrame > 0) {
       caught += caughtThisFrame
-      // One sound per frame however many landed together, so a double catch is a catch
-      // rather than a flam.
+      // Two beats, because they are two different events for the player. 'catch' is ANY
+      // catch — it fires for a duplicate too, from the branch above, so a thud can play
+      // whenever something lands. 'correct' is a catch that COUNTS: a new item on a
+      // collect-one-of-each board, every catch on a count-total one. Bind one, the other
+      // or both. One sound per frame however many landed together, so a double catch is
+      // a catch rather than a flam.
       ctx.sfx.play('catch')
+      ctx.sfx.play('correct')
       updateScoreUI()
       if (caught >= need) {
         done = true
         stopSpawning()
-        ctx.sfx.play('win')
+        // Swallowed by the host on purpose: the win sound is timed centrally so it can
+        // line up with the win ANIMATION, the same as every other template.
+        ctx.sfx.play('gameWin')
+        winCb?.()
         completeCb?.()
       }
     }
@@ -1161,6 +1170,9 @@ export function createCatch(): GameModule {
     },
     onComplete(cb) {
       completeCb = cb
+    },
+    onWin(cb) {
+      winCb = cb
     },
     destroy() {
       stopSpawning()

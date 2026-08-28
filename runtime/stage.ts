@@ -1776,7 +1776,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
   }
   /** Templates whose win IS the player's own action, so their win sound plays at once
    * instead of waiting for the win animation's lead-in. */
-  const WIN_SFX_ON_THE_BEAT = new Set(['basket', 'carousel', 'dragclean', 'tapremove', 'tapreveal'])
+  const WIN_SFX_ON_THE_BEAT = new Set(['basket', 'carousel', 'catch', 'dragclean', 'tapremove', 'tapreveal'])
   const GAME_WIN_SFX_BIAS_MS = 500
   const gameWinSoundDelayMs = (rec?: Rec): number => {
     const phaseDelay = rec ? phaseLeadDelayMs(rec.el, 'gameWin') : 0

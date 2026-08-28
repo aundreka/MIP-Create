@@ -79,6 +79,7 @@ import {
   setLocaleAsset,
   setSceneBg,
   setSceneBg2,
+  setStartScene,
   setSyncScope,
   setTrace,
   singleSelected,
@@ -608,6 +609,8 @@ function ElementSound(props: { el: SceneElement }): JSX.Element {
       ? [
           { value: 'basketStart', label: 'When basket first tap / drag starts' },
           { value: 'catch', label: 'When basket catches a falling item' },
+          { value: 'correct', label: 'When a caught item counts (a new one collected)' },
+          { value: 'onReveal', label: 'When the game is won' },
         ]
       : []),
     ...(isBasketDrop
@@ -3373,6 +3376,19 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
       <div className="panel inspector">
         {variantBanner}
         <div className="panel-title">Scene: {sd.name}</div>
+        {/* The flow plays from the STARRED scene, so a scene sitting first in the strip that
+            isn't the start scene never plays at all — the preview opens on whatever IS starred.
+            Reordering carries the star now (see reorderScenes), but a project that was already
+            arranged this way needs the one click. */}
+        {state.project.scenes[0]?.id === sd.id && state.project.startSceneId !== sd.id && (
+          <div className="hint pad">
+            This scene is first in the strip, but the flow starts at <b>{state.project.scenes.find((s) => s.id === state.project.startSceneId)?.name ?? '?'}</b> — so preview and
+            export never play it.
+            <button className="wide" onClick={() => setStartScene(sd.id)}>
+              Start the flow here
+            </button>
+          </div>
+        )}
         {activeVariant ? (
           <div className="hint pad">
             Scene settings (name, type, background, advance, transition) are <b>base-only</b>; they can"t differ per variant. Click <b>Done</b> above to exit variant mode and edit

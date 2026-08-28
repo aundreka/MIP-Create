@@ -43,6 +43,8 @@ interface Mounted {
   frame: (ms?: number) => void
   spawn: (n?: number) => void
   completed: () => boolean
+  won: () => boolean
+  played: string[]
 }
 
 function mount(params: Record<string, unknown> = {}, itemCount = 3, withBox = false): Mounted {
@@ -71,10 +73,11 @@ function mount(params: Record<string, unknown> = {}, itemCount = 3, withBox = fa
     raf = null
   })
 
+  const played: string[] = []
   const ctx: GameContext = {
     root,
     assets: { src: (id) => (id ? `asset:${id}` : ''), size: () => ({ w: 100, h: 100 }) },
-    sfx: { play: () => {} },
+    sfx: { play: (event) => played.push(event) },
     rng: mulberry32(42),
     scale: () => 1,
     elementId: 'catch-game',
@@ -85,7 +88,9 @@ function mount(params: Record<string, unknown> = {}, itemCount = 3, withBox = fa
   // examination is what happens ON a catch, not whether one lands.
   mod.mount(ctx, { speed: 3, spawnMs: 100, frontBasketWidth: 2000, frontBasketHeight: 150, checkFadeMs: 0, caughtFadeMs: 0, ...params })
   let complete = false
+  let win = false
   mod.onComplete(() => (complete = true))
+  mod.onWin?.(() => (win = true))
   mod.start()
   mod.relayout?.()
 
@@ -102,6 +107,8 @@ function mount(params: Record<string, unknown> = {}, itemCount = 3, withBox = fa
     },
     spawn: (n = 1) => vi.advanceTimersByTime(100 * n),
     completed: () => complete,
+    won: () => win,
+    played,
   }
 }
 
@@ -216,6 +223,24 @@ describe('catch with placed item elements', () => {
     // Weighted, not forced: the ones already in still turn up, just far less often.
     expect(missing).toBeGreaterThan(thrown.length * 0.6)
     expect(missing).toBeLessThan(thrown.length)
+  })
+
+  it('sounds a counting catch apart from any catch, and reports the win', () => {
+    vi.useFakeTimers()
+    const game = mount()
+    play(game)
+    expect(game.completed()).toBe(true)
+    // A duplicate still lands with a thud ('catch') but does not count ('correct'), so
+    // the counting beat can never outnumber the landing one. Both are one per frame
+    // however many arrived together, which is why this is a comparison and not a count.
+    const correct = game.played.filter((e) => e === 'correct').length
+    const anyCatch = game.played.filter((e) => e === 'catch').length
+    expect(correct).toBeGreaterThan(0)
+    expect(anyCatch).toBeGreaterThan(correct)
+    // The element-level "when the game is won" binding needs this callback; the win
+    // sound itself is left to the host, which times it against the win animation.
+    expect(game.won()).toBe(true)
+    expect(game.played).toContain('gameWin')
   })
 
   it('hands the canvas back exactly as it found it', () => {

@@ -1105,7 +1105,14 @@ export function removeSceneLocaleSource(id: string, locale: string): void {
 export function reorderScenes(ids: string[]): void {
   const byId = new Map(state.project.scenes.map((s) => [s.id, s]))
   const scenes = ids.map((id) => byId.get(id)!).filter(Boolean)
-  set({ dirty: true, project: { ...state.project, scenes } })
+  // The flow plays from the STARRED scene, not from position 1. A star that was simply
+  // sitting on the first scene means "the flow starts here", though — so dragging a new
+  // opener in front of it (an intro overlay, say) has to take the star along, or the new
+  // first scene is silently never played. A star deliberately parked on a LATER scene is
+  // left exactly where the author put it.
+  const wasFirst = state.project.scenes[0]?.id === state.project.startSceneId
+  const startSceneId = wasFirst && scenes[0] ? scenes[0].id : state.project.startSceneId
+  set({ dirty: true, project: { ...state.project, scenes, startSceneId } })
 }
 export function removeScene(id: string): void {
   if (state.project.scenes.length <= 1) return
