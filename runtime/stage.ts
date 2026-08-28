@@ -1689,6 +1689,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       el.comboRole?.role !== 'option' &&
       el.cleanRole?.role !== 'draggable' &&
       el.tapRole?.role !== 'obstacle' &&
+      el.catchRole?.role !== 'box' &&
       el.revealRole?.role !== 'cover' &&
       !hasTapAnim(el)
     if (nonInteractive) {

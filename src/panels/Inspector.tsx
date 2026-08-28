@@ -161,6 +161,7 @@ import {
 } from '../tapSlots'
 import {
   assignCatchSlot,
+  catchBox,
   catchCandidates,
   catchCheck,
   catchItems,
@@ -2668,6 +2669,7 @@ interface CatchBoardSetupProps {
 function CatchBoardSetup({ params, setParam, elementId, siblings }: CatchBoardSetupProps): JSX.Element {
   const items = catchItems(siblings, elementId)
   const check = catchCheck(siblings, elementId)
+  const box = catchBox(siblings, elementId)
   // Always one empty slot past the end, so the board grows by filling rather than by
   // pressing an "add" button first.
   const slots = Math.max(catchSlotCount(siblings, elementId), items.length) + 1
@@ -2679,7 +2681,7 @@ function CatchBoardSetup({ params, setParam, elementId, siblings }: CatchBoardSe
     for (const e of edits) patchElement(e.id, e.patch)
     endTransaction()
   }
-  const assign = (nextId: string, current: SceneElement | undefined, role: 'item' | 'check', index?: number): void => {
+  const assign = (nextId: string, current: SceneElement | undefined, role: 'item' | 'check' | 'box', index?: number): void => {
     apply(assignCatchSlot({ nextId, current, role, gameId: elementId, index, elements: siblings }))
     // The unique-item count is what the older image-slot path counts by, and the catch
     // effects panel is built on it; keeping it level with the row means the two can't
@@ -2697,7 +2699,7 @@ function CatchBoardSetup({ params, setParam, elementId, siblings }: CatchBoardSe
 
   /** One assignment row. `hides` marks the kind play keeps hidden — the check mark —
    * which gets the eye that holds it on the canvas while it is being positioned. */
-  const slot = (label: string, hint: string, current: SceneElement | undefined, role: 'item' | 'check', index?: number, hides = false): JSX.Element => (
+  const slot = (label: string, hint: string, current: SceneElement | undefined, role: 'item' | 'check' | 'box', index?: number, hides = false): JSX.Element => (
     <div className="combo-slot" key={`${role}${index ?? 0}-${current?.id ?? 'add'}`}>
       <span title={hint}>{label}</span>
       <Select value={current?.id ?? ''} onChange={(v) => assign(v, current, role, index)} options={choices(current)} title={hint} />
@@ -2722,6 +2724,18 @@ function CatchBoardSetup({ params, setParam, elementId, siblings }: CatchBoardSe
 
   return (
     <>
+      <div className="group-title2">The box</div>
+      {slot(
+        'Box',
+        'Optional. An element you placed on the canvas. Where you put it is where it catches: it holds that height for the whole game and only ever slides sideways under the finger. Its width on the canvas is what the player has to aim at.',
+        box,
+        'box',
+      )}
+      <div className="hint pad">
+        {box
+          ? 'The catch line is the top of this element, where you placed it. Move it on the canvas to move the line — the Basket section below no longer applies.'
+          : 'Leave this empty to use the uploaded basket images and the Basket settings below instead.'}
+      </div>
       <div className="group-title2">Placed items</div>
       {Array.from({ length: slots }, (_, i) => {
         const index = i + 1
@@ -2771,6 +2785,9 @@ function CatchBoardSetup({ params, setParam, elementId, siblings }: CatchBoardSe
 
 function CatchTemplateInspector({ params, setParam, elementId, siblings }: CatchInspectorProps): JSX.Element {
   const uniqueMode = params.requireUnique !== false
+  // A placed box replaces the internal basket rig, so its front layer's image and
+  // geometry stop meaning anything — the element's own position and size say it all.
+  const placedBox = catchBox(siblings, elementId)
   return (
     <>
       <Accordion id="inspector.catch.gameplay" title="Gameplay">
@@ -2823,7 +2840,20 @@ function CatchTemplateInspector({ params, setParam, elementId, siblings }: Catch
         </Row>
         <NumField label="Unique item types" value={Number(params.itemTypes ?? 3)} step={1} min={1} max={20} onChange={(n) => setParam('itemTypes', n)} />
         {uniqueMode ? (
-          <div className="hint pad">The player wins after collecting one of each unique item. Total catches is ignored in this mode.</div>
+          <>
+            <NumField
+              label="Favour uncollected"
+              value={Number(params.uncaughtBias ?? 4)}
+              step={1}
+              min={1}
+              max={20}
+              onChange={(n) => setParam('uncaughtBias', n)}
+            />
+            <div className="hint pad">
+              The player wins after collecting one of each unique item. Total catches is ignored in this mode. An item still missing is thrown this many times as often as one
+              already collected, so the last of a set turns up quickly — 1 is a flat random draw.
+            </div>
+          </>
         ) : (
           <NumField label="Catches to win" value={Number(params.catches ?? 5)} step={1} min={1} max={50} onChange={(n) => setParam('catches', n)} />
         )}
@@ -2867,20 +2897,33 @@ function CatchTemplateInspector({ params, setParam, elementId, siblings }: Catch
       </Accordion>
 
       <Accordion id="inspector.catch.basketImages" title="Basket Images" defaultOpen={false}>
-        <AssetPicker label="Front image" value={(params.frontBasketImage as string) || undefined} allowNone onChange={(aid) => setParam('frontBasketImage', aid ?? '')} />
+        {placedBox ? (
+          <div className="hint pad">“{placedBox.name || placedBox.id}” is the box, so there is no front image to upload. A back layer still sits behind it.</div>
+        ) : (
+          <AssetPicker label="Front image" value={(params.frontBasketImage as string) || undefined} allowNone onChange={(aid) => setParam('frontBasketImage', aid ?? '')} />
+        )}
         <AssetPicker label="Back image" value={(params.backBasketImage as string) || undefined} allowNone onChange={(aid) => setParam('backBasketImage', aid ?? '')} />
       </Accordion>
 
       <Accordion id="inspector.catch.basket" title="Basket" defaultOpen={false}>
-        <div className="group-title2">Front layer</div>
-        <div className="grid2">
-          <NumField label="Width" value={Number(params.frontBasketWidth ?? 300)} step={10} min={50} max={3000} onChange={(n) => setParam('frontBasketWidth', n)} />
-          <NumField label="Height" value={Number(params.frontBasketHeight ?? 150)} step={10} min={50} max={3000} onChange={(n) => setParam('frontBasketHeight', n)} />
-        </div>
-        <div className="grid2">
-          <NumField label="Offset X" value={Number(params.frontBasketOffsetX ?? 0)} step={10} min={-2000} max={2000} onChange={(n) => setParam('frontBasketOffsetX', n)} />
-          <NumField label="Offset Y" value={Number(params.frontBasketOffsetY ?? 0)} step={10} min={-2000} max={2000} onChange={(n) => setParam('frontBasketOffsetY', n)} />
-        </div>
+        {placedBox ? (
+          <div className="hint pad">
+            The box is “{placedBox.name || placedBox.id}”. Its size and its catch height are its own, set by dragging it on the canvas — resize or move it there rather than
+            here.
+          </div>
+        ) : (
+          <>
+            <div className="group-title2">Front layer</div>
+            <div className="grid2">
+              <NumField label="Width" value={Number(params.frontBasketWidth ?? 300)} step={10} min={50} max={3000} onChange={(n) => setParam('frontBasketWidth', n)} />
+              <NumField label="Height" value={Number(params.frontBasketHeight ?? 150)} step={10} min={50} max={3000} onChange={(n) => setParam('frontBasketHeight', n)} />
+            </div>
+            <div className="grid2">
+              <NumField label="Offset X" value={Number(params.frontBasketOffsetX ?? 0)} step={10} min={-2000} max={2000} onChange={(n) => setParam('frontBasketOffsetX', n)} />
+              <NumField label="Offset Y" value={Number(params.frontBasketOffsetY ?? 0)} step={10} min={-2000} max={2000} onChange={(n) => setParam('frontBasketOffsetY', n)} />
+            </div>
+          </>
+        )}
         <div className="group-title2">Back layer</div>
         <div className="grid2">
           <NumField label="Width" value={Number(params.backBasketWidth ?? 300)} step={10} min={50} max={3000} onChange={(n) => setParam('backBasketWidth', n)} />
@@ -2908,6 +2951,7 @@ function CatchTemplateInspector({ params, setParam, elementId, siblings }: Catch
         <NumberListEditor label="Rotations" value={params.caughtItemAngles} defaultValue={0} step={5} onChange={(v) => setParam('caughtItemAngles', v)} />
         <NumberListEditor label="Scales" value={params.caughtItemScales} defaultValue={0.7} step={0.05} min={0.05} max={5} onChange={(v) => setParam('caughtItemScales', v)} />
         <NumField label="Layer" value={Number(params.caughtItemZIndex ?? 1)} step={1} min={-10} max={10} onChange={(n) => setParam('caughtItemZIndex', n)} />
+        {placedBox && <div className="hint pad">Above 0 stacks caught items in front of the box’s picture; 0 or less tucks them behind it, which is what puts a shoe inside an open box.</div>}
       </Accordion>
 
       <CatchPopupControls params={params} setParam={setParam} />

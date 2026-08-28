@@ -845,11 +845,17 @@ export interface RevealRoleConfig {
 // The CHECK is a single mark — one element, assigned once — copied over the centre of
 // each item as that item is caught, so a five-item board needs one check mark rather
 // than five.
+//
+// The BOX is what catches them, and assigning one replaces the game's own basket rig
+// entirely: where the author dropped it on the canvas is where it sits, and the height
+// it sits at IS the catch line — it only ever moves sideways, under the finger, never
+// up or down. Its size on the canvas is the width the player has to aim at.
 export interface CatchRoleConfig {
   gameId?: string
   /** 'item' is one of the things that fall (and its own tick-list entry); 'check' is
-   * the one mark stamped over each item as it is caught. */
-  role: 'item' | 'check'
+   * the one mark stamped over each item as it is caught; 'box' is the thing that
+   * catches them — placed on the canvas, and its placed position IS the catch line. */
+  role: 'item' | 'check' | 'box'
   /** 'item' only, 1-based. Which falling item this is — the index the caught-item
    * layout lists (position, angle, scale in the basket) are addressed by. */
   index?: number

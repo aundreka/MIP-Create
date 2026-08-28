@@ -9,6 +9,9 @@
 //     being changed as `current` rather than the group. An item plays two parts at once:
 //     its art is what falls, and it is that item's tick-list entry, sitting at whatever
 //     opacity the author gave it until one of its copies is caught.
+//   * the BOX is a single slot too, and assigning one replaces the game's own basket
+//     rig: where it was dropped on the canvas is where it stays, the height it sits at
+//     IS the catch line, and it only ever moves sideways.
 //   * the CHECK MARK is a single slot for the whole game. It is copied onto each item as
 //     that item is caught, so a five-item board needs one assignment rather than five.
 //   * an element holds at most one role: naming an item as the check mark MOVES it.
@@ -34,7 +37,7 @@ export interface AssignCatchArgs {
   current: SceneElement | undefined
   role: CatchRoleConfig['role']
   gameId: string
-  /** 1-based. Which falling item this is. Ignored for the check mark. */
+  /** 1-based. Which falling item this is. Ignored for the box and the check mark. */
   index?: number
   elements: SceneElement[]
 }
@@ -101,6 +104,11 @@ export function catchItems(elements: SceneElement[], gameId: string): SceneEleme
     .sort((a, b) => (a.catchRole?.index ?? 1) - (b.catchRole?.index ?? 1))
 }
 
+/** The one box, if the board has one. */
+export function catchBox(elements: SceneElement[], gameId: string): SceneElement | undefined {
+  return catchMembers(elements, gameId).find((e) => e.catchRole?.role === 'box')
+}
+
 /** The one check mark, if the board has one. */
 export function catchCheck(elements: SceneElement[], gameId: string): SceneElement | undefined {
   return catchMembers(elements, gameId).find((e) => e.catchRole?.role === 'check')
@@ -125,6 +133,7 @@ export function catchOptionLabel(el: SceneElement): string {
   const r = el.catchRole
   if (r?.role === 'item') return `${base} — falling item ${r.index ?? 1}`
   if (r?.role === 'check') return `${base} — the check mark`
+  if (r?.role === 'box') return `${base} — the box`
   if (el.tapRole) return `${base} — in the tap-to-remove board`
   if (el.revealRole) return `${base} — in the tap-to-reveal board`
   if (el.cleanRole) return `${base} — in the drag-to-clean board`
@@ -136,7 +145,9 @@ export function catchOptionLabel(el: SceneElement): string {
 
 /** Plain-language name for the job an element holds, for its read-only status line. */
 export function catchSlotSummary(role: CatchRoleConfig): string {
-  return role.role === 'item' ? `falling item ${role.index ?? 1}, and its tick in the row` : 'the check mark stamped on each item as it is caught'
+  if (role.role === 'item') return `falling item ${role.index ?? 1}, and its tick in the row`
+  if (role.role === 'box') return 'the box — it catches at the height you placed it, and only moves sideways'
+  return 'the check mark stamped on each item as it is caught'
 }
 
 /** Show or hide the check mark on the editor canvas. Authoring-only: play always keeps

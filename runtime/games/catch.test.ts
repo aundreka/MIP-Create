@@ -11,13 +11,14 @@ const rect = (left: number, top: number, width: number, height: number): DOMRect
 
 /** A placed element as stage.ts builds one: an outer .pa-el carrying the role tags, with
  * the element's real <img> inside it. */
-function placed(id: string, role: 'item' | 'check', opts: { index?: number; src?: string; x?: number; size?: number } = {}): HTMLElement {
+function placed(id: string, role: 'item' | 'check' | 'box', opts: { index?: number; src?: string; x?: number; y?: number; w?: number; size?: number } = {}): HTMLElement {
   const el = document.createElement('div')
   el.className = 'pa-el'
   el.dataset.id = id
   el.dataset.catchRole = role
   if (opts.index) el.dataset.catchIndex = String(opts.index)
   const size = opts.size ?? 100
+  const width = opts.w ?? size
   const anim = document.createElement('div')
   anim.className = 'pa-el-anim'
   const img = document.createElement('img')
@@ -25,10 +26,11 @@ function placed(id: string, role: 'item' | 'check', opts: { index?: number; src?
   anim.appendChild(img)
   el.appendChild(anim)
   Object.defineProperties(el, {
-    offsetWidth: { value: size, configurable: true },
+    offsetWidth: { value: width, configurable: true },
     offsetHeight: { value: size, configurable: true },
   })
-  el.getBoundingClientRect = () => rect(opts.x ?? 0, 200, size, size)
+  // A dragged box reports where its `translate` has taken it, the way a real one does.
+  el.getBoundingClientRect = () => rect((opts.x ?? 0) + (parseFloat(el.style.translate) || 0), opts.y ?? 200, width, size)
   return el
 }
 
@@ -37,12 +39,13 @@ interface Mounted {
   paRoot: HTMLElement
   items: HTMLElement[]
   check: HTMLElement
+  box: HTMLElement | null
   frame: (ms?: number) => void
   spawn: (n?: number) => void
   completed: () => boolean
 }
 
-function mount(params: Record<string, unknown> = {}, itemCount = 3): Mounted {
+function mount(params: Record<string, unknown> = {}, itemCount = 3, withBox = false): Mounted {
   const paRoot = document.createElement('div')
   paRoot.className = 'pa-root'
   Object.defineProperty(paRoot, 'offsetWidth', { value: 1080, configurable: true })
@@ -51,7 +54,10 @@ function mount(params: Record<string, unknown> = {}, itemCount = 3): Mounted {
 
   const items = Array.from({ length: itemCount }, (_, i) => placed(`shoe${i + 1}`, 'item', { index: i + 1, x: 100 + i * 200 }))
   const check = placed('tick', 'check', { size: 60 })
-  for (const el of [...items, check]) paRoot.appendChild(el)
+  // A box placed high up the screen, to prove the catch line is ITS height and not the
+  // bottom of the screen: 1200..1500 down, 900 wide, centred on 540.
+  const box = withBox ? placed('box', 'box', { x: 90, y: 1200, w: 900, size: 300 }) : null
+  for (const el of [...items, check, ...(box ? [box] : [])]) paRoot.appendChild(el)
 
   const root = document.createElement('div')
   paRoot.appendChild(root)
@@ -89,6 +95,7 @@ function mount(params: Record<string, unknown> = {}, itemCount = 3): Mounted {
     paRoot,
     items,
     check,
+    box,
     frame: (ms = 32) => {
       now += ms
       raf?.(now)
@@ -158,6 +165,57 @@ describe('catch with placed item elements', () => {
     play(game)
     expect(game.completed()).toBe(true)
     expect(game.items.filter((el) => el.classList.contains('pa-catch-caught')).length).toBe(3)
+  })
+
+  it('catches at the height the box was placed at, and only slides it sideways', () => {
+    vi.useFakeTimers()
+    // The default rig would catch at the bottom of the screen; this box sits at 1200.
+    const game = mount({ frontBasketWidth: 300 }, 3, true)
+    const box = game.box as HTMLElement
+    const top = box.style.top
+    game.spawn()
+
+    // Falling, but not yet down to the box: nothing caught.
+    for (let i = 0; i < 3; i++) game.frame(16)
+    expect(game.paRoot.querySelectorAll('[data-id^="catch_check_"]').length).toBe(0)
+
+    play(game)
+    expect(game.completed()).toBe(true)
+    // Dragged sideways, never up or down: only the translate property was written, and
+    // it carries no vertical component.
+    expect(box.style.top).toBe(top)
+    expect(box.style.translate === '' || /^-?[\d.]+px$/.test(box.style.translate)).toBe(true)
+    // The caught items hang inside the box element itself, not in a basket of the
+    // game's own making.
+    expect(box.querySelector('div[style*="position: absolute"]')).toBeTruthy()
+    expect(game.paRoot.querySelector('[data-id="basket"]')).toBeNull()
+  })
+
+  it('throws the items still missing more often than the ones already collected', () => {
+    vi.useFakeTimers()
+    const game = mount({ uncaughtBias: 8 }, 4)
+    // Stop as soon as half the set is in, then count what the next hundred throws are.
+    const caughtIds = (): string[] => game.items.filter((el) => el.classList.contains('pa-catch-caught')).map((el) => el.dataset.id as string)
+    for (let i = 0; i < 400 && caughtIds().length < 2; i++) {
+      game.spawn()
+      game.frame()
+    }
+    const collected = caughtIds()
+    expect(collected.length).toBe(2)
+    expect(game.completed()).toBe(false)
+
+    const thrown: string[] = []
+    for (let i = 0; i < 100; i++) {
+      game.spawn()
+      const drops = Array.from(game.paRoot.querySelectorAll('img')).filter((img) => !img.closest('.pa-el'))
+      const last = drops[drops.length - 1]?.getAttribute('src')
+      if (last) thrown.push(last.replace('asset:', ''))
+      game.frame(1)
+    }
+    const missing = thrown.filter((id) => !collected.includes(id)).length
+    // Weighted, not forced: the ones already in still turn up, just far less often.
+    expect(missing).toBeGreaterThan(thrown.length * 0.6)
+    expect(missing).toBeLessThan(thrown.length)
   })
 
   it('hands the canvas back exactly as it found it', () => {

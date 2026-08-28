@@ -72,6 +72,9 @@ export function createCatch(): GameModule {
   let popupImages: string[] = []
   let popupConfigs: any[] = []
   let requireUnique: boolean = true
+  /** How many times more likely a still-missing item is to be thrown than one already
+   * collected. 1 = a flat random draw. */
+  let uncaughtBias: number = 4
 
   let done = false
   let caught = 0
@@ -113,6 +116,23 @@ export function createCatch(): GameModule {
   let itemEls: ItemEl[] = []
   let checkEl: HTMLElement | null = null
   let checkCanvasShown = false
+  /**
+   * A placed element used as the box, instead of the game's own basket rig.
+   *
+   * Where the author dropped it is where it stays: the game only ever moves it
+   * sideways, and the height it was placed at IS the catch line — so the line is set by
+   * dragging a picture around the canvas rather than by an offset measured from the
+   * footer. Its measured box is cached rather than read every frame; `basketHomeX` is
+   * its resting centre in logical units, which the sideways drag is an offset from.
+   */
+  let basketEl: HTMLElement | null = null
+  let basketHomeX = 540
+  let basketHomeSet = false
+  /** The box's measured geometry in pa-root px: top edge, and size. */
+  let basketTopPx = 0
+  let basketWPx = 0
+  let basketHPx = 0
+  let basketRestPointer = ''
   /** How much bigger a falling copy is than the placed element it comes from. The row
    * entries are tick-list sized; the things that fall are not. */
   let itemFallScale = 2
@@ -226,6 +246,12 @@ export function createCatch(): GameModule {
           restTransition: el.style.transition,
           check: null,
         })
+      } else if (el.dataset.catchRole === 'box' && !basketEl) {
+        // One box per game — a second assignment would be two things to drag with one
+        // finger. The first one tagged wins, as everywhere else in this family.
+        el.dataset.catchClaimedBy = ctx.elementId ?? 'catch'
+        basketEl = el
+        basketRestPointer = el.style.pointerEvents
       } else if (el.dataset.catchRole === 'check' && !checkEl) {
         // One check mark for the whole board — it is copied onto each item as that item
         // is caught, so a five-item board needs one assignment rather than five.
@@ -256,6 +282,46 @@ export function createCatch(): GameModule {
     }
     const sz = itemSizes[idx % itemSizes.length] || 120
     return { w: sz, h: sz }
+  }
+
+  /** The box's catching width in logical units — the placed element's own width when
+   * there is one, else the basket rig's number. */
+  const basketW = (): number => (basketEl ? basketWPx / (s() || 1) : frontBasketLogicalW)
+
+  /**
+   * Re-measure the placed box.
+   *
+   * The sideways drag rides on the CSS `translate` PROPERTY, which composes before the
+   * positional `transform` layoutRec owns — so it has to be lifted for the measurement
+   * or the box's resting place would drift by however far it has been dragged. Its
+   * resting centre is sampled once, in logical units, which do not change with the
+   * viewport; the pixel geometry is re-read on every layout pass, which does.
+   */
+  const measureBasket = (): void => {
+    if (!basketEl || !paRoot) return
+    const held = basketEl.style.translate
+    basketEl.style.translate = ''
+    const rootRect = paRoot.getBoundingClientRect()
+    const zoom = rootRect.width > 0 && paRoot.offsetWidth > 0 ? rootRect.width / paRoot.offsetWidth : 1
+    const br = basketEl.getBoundingClientRect()
+    basketEl.style.translate = held
+    if (br.width <= 0 || br.height <= 0) return
+    basketWPx = br.width / zoom
+    basketHPx = br.height / zoom
+    basketTopPx = (br.top - rootRect.top) / zoom
+    if (!basketHomeSet) {
+      basketHomeSet = true
+      basketHomeX = (br.left + br.width / 2 - rootRect.left) / zoom / (s() || 1)
+      basketX = basketHomeX
+    }
+  }
+
+  /** Slide the box to wherever the finger has taken it — sideways only. The `translate`
+   * property, not `transform`: layoutRec rewrites the element's transform on every
+   * layout pass, and translate composes with it instead of fighting it. */
+  const moveBasketEl = (currentScale: number): void => {
+    if (!basketEl) return
+    basketEl.style.translate = `${(basketX - basketHomeX) * currentScale}px`
   }
 
   /** Where a stamped check mark sits: over the centre of its item, plus the authored
@@ -362,11 +428,44 @@ export function createCatch(): GameModule {
     drops.push(drop)
   }
 
+  /**
+   * Which item to drop next.
+   *
+   * Uniformly at random, the end of a collect-one-of-each board drags: with four of five
+   * collected the missing one comes up one throw in five, and the player spends the last
+   * third of the game watching shoes they already have. So an item still missing is
+   * weighted `uncaughtBias` times as heavily as one already collected — with four of
+   * five in, at the default the missing one comes up half the time instead of a fifth.
+   *
+   * Weighted, not forced: collected items keep a weight of 1 rather than dropping to
+   * zero, so the board stays unpredictable and never turns into a queue. `uncaughtBias`
+   * of 1 is the old uniform draw, and a count-total board (where nothing is ever
+   * "missing") is uniform either way.
+   */
+  const pickItemIdx = (): number => {
+    const n = itemImages.length
+    if (n <= 0) return 0
+    if (!requireUnique || itemTypes <= 0 || uncaughtBias <= 1) return Math.floor(ctx.rng() * n)
+    const weights: number[] = []
+    let total = 0
+    for (let i = 0; i < n; i++) {
+      const w = uniqueItemSpots.has(String(i)) ? 1 : uncaughtBias
+      weights.push(w)
+      total += w
+    }
+    let r = ctx.rng() * total
+    for (let i = 0; i < n; i++) {
+      r -= weights[i]
+      if (r < 0) return i
+    }
+    return n - 1
+  }
+
   const spawn = () => {
     if (done || (!gameActive && !visibleFirstRender)) return
     
-    // Pick an image and a size (using the same random index if sizes array matches length, or just random)
-    let imgIdx = itemImages.length > 0 ? Math.floor(ctx.rng() * itemImages.length) : 0
+    // Pick an image (favouring the ones still missing) and the size that goes with it.
+    const imgIdx = itemImages.length > 0 ? pickItemIdx() : 0
     const imgSrc = itemImages.length > 0 ? itemImages[imgIdx] : ''
     const { w, h } = fallSize(imgIdx)
 
@@ -420,10 +519,16 @@ export function createCatch(): GameModule {
     const footerTop = footerBar ? footerBar.getBoundingClientRect().top : paRootRect.bottom
     const paRootCenterX = paRootRect.left + paRootRect.width / 2
 
-    // Hit detection line (the rim of the basket). 
-    // The bottom of the basket is at footerTop, so we subtract height to get the rim.
+    // Where the box's bottom edge sits, in pa-root px. A placed box keeps the height it
+    // was dropped at on the canvas; the built-in rig stands on the footer bar.
+    const basketBottom = basketEl ? basketTopPx + basketHPx : footerTop - paRootRect.top
+
+    // Hit detection line (the rim of the basket).
+    // The bottom of the basket is at basketBottom, so we subtract height to get the rim.
     // We catch when it's about 20% deep into the basket, so we subtract 0.8 * height.
-    const basketScreenY = footerTop - paRootRect.top - (frontBasketLogicalH * 0.8 * currentScale) - (frontBasketOffsetY * currentScale)
+    const basketScreenY = basketEl
+      ? basketTopPx + basketHPx * 0.2
+      : basketBottom - (frontBasketLogicalH * 0.8 * currentScale) - (frontBasketOffsetY * currentScale)
 
     // Counted per CATCH, not per frame: two items can cross the rim on the same frame
     // (they do routinely once the spawn interval is short), and scoring that as one
@@ -440,13 +545,15 @@ export function createCatch(): GameModule {
       d.y += d.speed * dt
       const newY = d.y * currentScale
       
-      // Hit detection: item crossed the basket line this frame
-      if (gameActive && prevY < basketScreenY && newY >= basketScreenY) {
+      // Hit detection: item crossed the basket line this frame. A placed box that has
+      // not been measured yet has no line to cross — catching against it would score
+      // items off the top of the screen.
+      if (gameActive && (!basketEl || basketHPx > 0) && prevY < basketScreenY && newY >= basketScreenY) {
         // item screen X relative to pa-root center
         const item_screen_x = (d.x - 540) * currentScale
-        const basket_screen_x = (basketX + frontBasketOffsetX - 540) * currentScale
-        
-        const hit = Math.abs(item_screen_x - basket_screen_x) < (frontBasketLogicalW / 2 + d.w * 0.3) * currentScale
+        const basket_screen_x = (basketX + (basketEl ? 0 : frontBasketOffsetX) - 540) * currentScale
+
+        const hit = Math.abs(item_screen_x - basket_screen_x) < (basketW() / 2 + d.w * 0.3) * currentScale
         if (hit) {
           d.captured = true
           
@@ -484,7 +591,7 @@ export function createCatch(): GameModule {
             const angle = caughtItemAngles.length > 0 ? (caughtItemAngles[cIdx % caughtItemAngles.length] ?? d.angle) : d.angle
             const scale = caughtItemScales.length > 0 ? (caughtItemScales[cIdx % caughtItemScales.length] ?? 0.7) : 0.7
 
-            d.el.style.left = `${(frontBasketLogicalW / 2) * currentScale + offsetX * currentScale - physW / 2}px`
+            d.el.style.left = `${(basketW() / 2) * currentScale + offsetX * currentScale - physW / 2}px`
             d.el.style.top = `${offsetY * currentScale}px`
             d.el.style.transform = `rotate(${angle}deg) scale(${scale})`
             d.el.style.transformOrigin = 'bottom center'
@@ -544,6 +651,7 @@ export function createCatch(): GameModule {
         completeCb?.()
       }
     }
+    moveBasketEl(currentScale)
     if (frontBasket) {
       frontBasket.style.width = (frontBasketLogicalW * currentScale) + 'px'
       frontBasket.style.height = (frontBasketLogicalH * currentScale) + 'px'
@@ -559,7 +667,7 @@ export function createCatch(): GameModule {
       backBasket.style.width = (backBasketLogicalW * currentScale) + 'px'
       backBasket.style.height = (backBasketLogicalH * currentScale) + 'px'
       const backBasketPhysicalH = backBasketLogicalH * currentScale
-      backBasket.style.top = `${footerTop - paRootRect.top - backBasketPhysicalH - (backBasketOffsetY * currentScale)}px`
+      backBasket.style.top = `${basketBottom - backBasketPhysicalH - (backBasketOffsetY * currentScale)}px`
       backBasket.style.bottom = ''
       backBasket.style.marginLeft = `-${(backBasketLogicalW / 2) * currentScale}px`
       const bx = basketLocked ? basketX + backBasketOffsetX : 540 + backBasketOffsetX
@@ -582,8 +690,12 @@ export function createCatch(): GameModule {
       const currentScale = s()
       const physicalOffsetFromCenter = e.clientX - window.innerWidth / 2
       let lx = 540 + (physicalOffsetFromCenter / currentScale)
-      // Constrain basketX based on frontBasket width
-      basketX = Math.max(frontBasketLogicalW / 2, Math.min(1080 - frontBasketLogicalW / 2, lx))
+      // Keep the box on screen, whichever kind it is.
+      const halfW = basketW() / 2
+      basketX = Math.max(halfW, Math.min(1080 - halfW, lx))
+      // Follow the finger on the same frame rather than waiting for the next tick: a
+      // placed box is an ordinary element, and a frame of lag on it is visible.
+      moveBasketEl(currentScale)
     }
     const end = () => {
       active = false
@@ -680,6 +792,7 @@ export function createCatch(): GameModule {
 
       itemTypes = Number(params.itemTypes ?? 3)
       requireUnique = params.requireUnique !== false
+      uncaughtBias = Math.max(1, Math.min(20, Number(params.uncaughtBias ?? 4)))
       need = (requireUnique && itemTypes > 0) ? itemTypes : Number(params.catches ?? 5)
       itemFallScale = Math.max(0.05, Math.min(20, Number(params.itemFallScale ?? 2)))
       caughtFadeMs = Math.max(0, Math.min(3000, Number(params.caughtFadeMs ?? 260)))
@@ -774,8 +887,19 @@ export function createCatch(): GameModule {
         dropsContainer.style.overflow = 'visible'
         dropsContainer.style.pointerEvents = 'none'
         dropsContainer.style.zIndex = '31'
+        // With a PLACED box, the layer order is the author's: the drops sit just under
+        // it, so a falling item passes behind the box and lands inside it rather than
+        // sliding across its front. Raising the box's layer in the editor raises the
+        // falling items with it.
+        if (basketEl) {
+          const z = Number(getComputedStyle(basketEl).zIndex)
+          dropsContainer.style.zIndex = String(Math.max(0, (Number.isFinite(z) ? z : 32) - 1))
+        }
         paRoot.appendChild(dropsContainer)
       }
+      // Before the first frame, so the catch line is the box's real height and not the
+      // top of the screen — relayout() may not have run yet.
+      measureBasket()
       
       
       hasMoved = false
@@ -791,8 +915,31 @@ export function createCatch(): GameModule {
       if (!paRoot) paRoot = root.closest('.pa-root') as HTMLElement | null
       if (!paRoot) paRoot = root.parentElement
 
+      // A placed box replaces the whole internal rig: no basket div is built, the caught
+      // items hang inside the element itself, and it is the element the finger drags.
+      if (paRoot && basketEl) {
+        measureBasket()
+        if (!caughtItemsContainer) {
+          caughtItemsContainer = document.createElement('div')
+          caughtItemsContainer.style.position = 'absolute'
+          caughtItemsContainer.style.left = '0'
+          caughtItemsContainer.style.top = '0'
+          caughtItemsContainer.style.width = '100%'
+          caughtItemsContainer.style.height = '100%'
+          caughtItemsContainer.style.pointerEvents = 'none'
+          // Relative to the box's own art, which sits at z-index auto inside it: a
+          // positive number stacks the caught items in FRONT of the picture, zero or
+          // less tucks them BEHIND it, which is what puts a shoe inside an open box.
+          caughtItemsContainer.style.zIndex = `${caughtItemZIndex}`
+          basketEl.appendChild(caughtItemsContainer)
+        }
+        basketDragTarget = basketEl as HTMLDivElement
+        attachDrag()
+        moveBasketEl(s())
+      }
+
       // Create baskets if needed
-      if (paRoot && !frontBasket) {
+      if (paRoot && !frontBasket && !basketEl) {
         frontBasket = document.createElement('div')
         frontBasket.dataset.id = 'basket'
         frontBasket.style.position = 'fixed'
@@ -864,22 +1011,25 @@ export function createCatch(): GameModule {
         backBasket.appendChild(backImgLayer)
       }
 
-      if (paRoot && frontBasket) {
+      if (paRoot && (frontBasket || basketEl)) {
         const currentScale = s()
-        frontBasket.style.left = '50%'
-        frontBasket.style.width = (frontBasketLogicalW * currentScale) + 'px'
-        frontBasket.style.height = (frontBasketLogicalH * currentScale) + 'px'
-        frontBasket.style.marginLeft = `-${(frontBasketLogicalW / 2) * currentScale}px`
-        const fx = basketX + frontBasketOffsetX
-        frontBasket.style.transform = `translateX(${(fx - 540) * currentScale}px)`
-        
-        // Compute vertical position now that elements are injected in the DOM
+        // Compute vertical position now that elements are injected in the DOM.
+        // A placed box stands where it was placed; the internal rig stands on the footer.
         const footerBar = paRoot.querySelector('[data-id="basket_bar"]') as HTMLElement | null
         const paRootRect = paRoot.getBoundingClientRect()
-        const footerTop = footerBar ? footerBar.getBoundingClientRect().top : paRootRect.bottom
-        const frontBasketPhysicalH = frontBasketLogicalH * currentScale
-        frontBasket.style.top = `${footerTop - paRootRect.top - frontBasketPhysicalH - (frontBasketOffsetY * currentScale)}px`
-        frontBasket.style.bottom = ''
+        const basketBottom = basketEl ? basketTopPx + basketHPx : (footerBar ? footerBar.getBoundingClientRect().top : paRootRect.bottom) - paRootRect.top
+
+        if (frontBasket) {
+          frontBasket.style.left = '50%'
+          frontBasket.style.width = (frontBasketLogicalW * currentScale) + 'px'
+          frontBasket.style.height = (frontBasketLogicalH * currentScale) + 'px'
+          frontBasket.style.marginLeft = `-${(frontBasketLogicalW / 2) * currentScale}px`
+          const fx = basketX + frontBasketOffsetX
+          frontBasket.style.transform = `translateX(${(fx - 540) * currentScale}px)`
+          const frontBasketPhysicalH = frontBasketLogicalH * currentScale
+          frontBasket.style.top = `${basketBottom - frontBasketPhysicalH - (frontBasketOffsetY * currentScale)}px`
+          frontBasket.style.bottom = ''
+        }
         
         if (backBasket) {
           backBasket.style.left = '50%'
@@ -889,7 +1039,7 @@ export function createCatch(): GameModule {
           const bx = basketLocked ? basketX + backBasketOffsetX : 540 + backBasketOffsetX
           backBasket.style.transform = `translateX(${(bx - 540) * currentScale}px)`
           const backBasketPhysicalH = backBasketLogicalH * currentScale
-          backBasket.style.top = `${footerTop - paRootRect.top - backBasketPhysicalH - (backBasketOffsetY * currentScale)}px`
+          backBasket.style.top = `${basketBottom - backBasketPhysicalH - (backBasketOffsetY * currentScale)}px`
           backBasket.style.bottom = ''
         }
         
@@ -990,13 +1140,14 @@ export function createCatch(): GameModule {
       updateScoreUI()
     },
     getHint(): HintMove | null {
-      if (done || !drops.length || !frontBasket || !paRoot) return null
+      const box = basketEl ?? frontBasket
+      if (done || !drops.length || !box || !paRoot) return null
       // Get the lowest uncaptured drop
       const lowest = drops.reduce((a, b) => (!b.captured && b.y > a.y ? b : a))
       if (lowest.captured) return null
       
       const from: Pt = { x: 0, y: 0 }
-      const r = frontBasket.getBoundingClientRect()
+      const r = box.getBoundingClientRect()
       const paRootRect = paRoot.getBoundingClientRect()
       
       from.x = r.left + r.width / 2
@@ -1044,6 +1195,18 @@ export function createCatch(): GameModule {
         delete item.el.dataset.catchClaimedBy
       }
       itemEls = []
+      if (basketEl) {
+        // The box is an ordinary placed element: hand back everything play wrote on it
+        // and it is exactly where the author left it.
+        caughtItemsContainer?.remove()
+        basketEl.style.translate = ''
+        basketEl.style.pointerEvents = basketRestPointer
+        basketEl.style.touchAction = ''
+        delete basketEl.dataset.catchClaimedBy
+        basketEl = null
+        basketHomeSet = false
+      }
+      caughtItemsContainer = null
       if (checkEl) {
         // Put the canvas back as it was found: a check the author had shown stays shown,
         // one they had hidden stays hidden.
@@ -1071,6 +1234,7 @@ export const CATCH_TEMPLATE: GameTemplate = {
     { key: 'scoreMode', label: 'Scoring Mode', type: 'select', options: ['Increment', 'Decrement'] },
     { key: 'requireUnique', label: 'Require 1 of each unique item', type: 'boolean' },
     { key: 'itemTypes', label: 'Unique item types', type: 'number', min: 1, max: 20, step: 1 },
+    { key: 'uncaughtBias', label: 'Favour uncollected items (1 = pure random)', type: 'number', min: 1, max: 20, step: 1 },
     { key: 'itemSizes', label: 'Item Sizes (comma separated px)', type: 'text' },
     { key: 'itemFallScale', label: 'Falling size vs placed size', type: 'number', min: 0.05, max: 20, step: 0.1 },
     { key: 'caughtFadeMs', label: 'Caught item fades to full over (ms)', type: 'number', min: 0, max: 3000, step: 20 },
@@ -1106,6 +1270,9 @@ export const CATCH_TEMPLATE: GameTemplate = {
     catches: 5, speed: 0.55, spawnMs: 900,
     randomizeAngle: false, randomAngles: '0, 45, -45, 90', visibleFirstRender: false, spawnOnMove: false,
     scoreMode: 'Increment', requireUnique: true, itemTypes: 3,
+    // An item still missing is thrown this many times as often as one already collected,
+    // so the last of a set doesn't take a dozen throws to turn up. 1 = a flat draw.
+    uncaughtBias: 4,
     itemSizes: '120',
     // Placed-element items (assigned on the canvas, see CatchRoleConfig). A falling copy
     // is this many times the size of the row entry it comes from; the entry itself sits
