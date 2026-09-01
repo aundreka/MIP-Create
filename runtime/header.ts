@@ -3,7 +3,7 @@
 
 import { cssFontFamily } from './font'
 import { isLandscape, scale, viewW } from './responsive'
-import { braceBareTokens, formatTickerIntervalMs, renderCountdownFormat } from './elements/countdown'
+import { braceBareTokens, formatTickerIntervalMs, needsMidnightRefresh, nextMidnight, renderCountdownFormat, runtimeNow } from './elements/countdown'
 import { injectAnimStyles, loopAnimationCss, oneShotAnimationCss } from './anim'
 import type { AnimSpec } from './scene'
 
@@ -105,14 +105,10 @@ const LEGACY_DATE_OPTS: Intl.DateTimeFormatOptions = { month: 'long', day: 'nume
 const HEADER_OVERLAY_Z = 20000
 const FIRST_INTERACTION_EVENTS = ['pointerdown', 'touchstart', 'mousedown', 'click'] as const
 
-/** Start of the next local day (tonight's 12am). setHours(24,…) rolls the date over
- * through month/year ends and follows the device's own DST rules, so the remaining
- * time is whatever the viewer's clock says is left in the day. */
-export function nextMidnight(now: number): number {
-  const d = new Date(now)
-  d.setHours(24, 0, 0, 0)
-  return d.getTime()
-}
+// nextMidnight now lives beside the shared formatter (elements/countdown.ts), since
+// the band and a dynamic-date ELEMENT both need it. Re-exported so nothing that
+// imported it from the header has to move.
+export { nextMidnight } from './elements/countdown'
 
 function formatHeaderDate(d = new Date(), locale = 'en-US'): string {
   try {
@@ -247,6 +243,7 @@ export function mountHeader(container: HTMLElement, opts: HeaderConfig, clip?: (
   // ("only 7 hours left" at 5pm); 'date' (default) renders once. Both wrap the
   // value in the shared prefix/suffix literals.
   let timer = 0
+  let dateTimer = 0 // 'date' mode: one rollover timer per local day (see renderDate)
   let removeStartListeners = (): void => {}
   let freezeCountdown = (): void => {}
   if (opts.mode === 'countdown') {
@@ -325,9 +322,30 @@ export function mountHeader(container: HTMLElement, opts: HeaderConfig, clip?: (
   } else {
     // Custom layouts render today via the shared token formatter (deadline=now
     // makes the date tokens target today); empty keeps the legacy fixed style.
-    const now = Date.now()
-    const date = opts.dateFormat ? renderCountdownFormat(braceBareTokens(opts.dateFormat), now, now, opts) : formatHeaderDate(new Date(now), opts.dateLocale)
-    text.textContent = (opts.prefix ?? '') + date + (opts.suffix ?? '')
+    // runtimeNow() is the real clock unless the editor has a preview date on, which
+    // is how a designer sees a {holiday} band on another day.
+    const renderDate = (): void => {
+      const now = runtimeNow()
+      const date = opts.dateFormat ? renderCountdownFormat(braceBareTokens(opts.dateFormat), now, now, opts) : formatHeaderDate(new Date(now), opts.dateLocale)
+      text.textContent = (opts.prefix ?? '') + date + (opts.suffix ?? '')
+    }
+    renderDate()
+    // A date band renders ONCE — so an ad left open across local midnight (or a
+    // {holiday} band on the day a promo period ends) would keep showing yesterday.
+    // One timer per day, rescheduled after each rollover; visibilitychange covers the
+    // frozen-then-resumed case containers and dev previews put creatives through.
+    if (!opts.dateFormat || needsMidnightRefresh(opts.dateFormat)) {
+      const atMidnight = (): void => {
+        renderDate()
+        dateTimer = window.setTimeout(atMidnight, Math.max(1000, nextMidnight(Date.now()) - Date.now() + 1000))
+      }
+      dateTimer = window.setTimeout(atMidnight, Math.max(1000, nextMidnight(Date.now()) - Date.now() + 1000))
+      const onVisible = (): void => {
+        if (document.visibilityState === 'visible') renderDate()
+      }
+      document.addEventListener('visibilitychange', onVisible)
+      removeStartListeners = (): void => document.removeEventListener('visibilitychange', onVisible)
+    }
   }
 
   container.appendChild(band)
@@ -384,6 +402,7 @@ export function mountHeader(container: HTMLElement, opts: HeaderConfig, clip?: (
     destroy() {
       removeStartListeners()
       if (timer) window.clearInterval(timer)
+      if (dateTimer) window.clearTimeout(dateTimer)
       band.remove()
     },
   }

@@ -21,9 +21,12 @@ export interface FrameMetrics {
   vh: number
 }
 
+// `previewNow` is the editor's preview date (ms epoch, local noon of the chosen
+// day) — it makes the runtime RENDER dates as if it were that day so a designer can see
+// both states of a dynamic holiday. null/omitted = the real clock. Never sent by export.
 export type ParentToFrame =
-  | { type: 'pa:render'; scene: Scene; assets?: AssetMap | null; interactive?: boolean; locale?: string | null } // single scene (editor canvas); assets omitted when unchanged
-  | { type: 'pa:play'; project: Project; assets: AssetMap; locale?: string | null } // full flow (preview)
+  | { type: 'pa:render'; scene: Scene; assets?: AssetMap | null; interactive?: boolean; locale?: string | null; previewNow?: number | null } // single scene (editor canvas); assets omitted when unchanged
+  | { type: 'pa:play'; project: Project; assets: AssetMap; locale?: string | null; previewNow?: number | null } // full flow (preview)
   | { type: 'pa:setHidden'; id: string; hidden: boolean }
   // Timeline panel → canvas frame. ms=null clears the preview (show everything);
   // playing=true runs the timeline for real from `ms`, false freezes that frame.

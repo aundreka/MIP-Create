@@ -8,11 +8,15 @@ import { addVariant, assignProjectGroup, patchMeta, removeVariant, renameVariant
 import { setActiveVariant } from '../variantMode'
 import { listGroups } from '../projectGroups'
 import { projectsInGroup } from '../projects'
-import { fileBaseName, isSip, mipName, todayLabel } from '../mipName'
+import { fileBaseName, isSip, mipName, subconceptToken, todayLabel } from '../mipName'
+import type { Subconcept } from '../mipName'
 import { Checkbox, Chips, ColorField, Drawer, NumField, Row, Select, Slider } from '../ui'
 import { Check, Icon, Play, X } from '../icons'
 import { AssetPicker } from './AssetPicker'
 import { getEditLocale, setEditLocale } from '../locale'
+import { importCsv } from '../bridge'
+import { DEFAULT_PROMO_CALENDAR, calendarRange, labelForDate, parsePromoCsv, validatePromoCalendar } from '../promoCalendar'
+import { setPreviewDate, todayKey, usePreviewDate } from '../uiState'
 
 // Events the runtime fires are marked ✓; the rest await game templates that emit them.
 const EVENTS: { key: string; label: string; wired?: boolean }[] = [
@@ -37,6 +41,9 @@ const EVENTS: { key: string; label: string; wired?: boolean }[] = [
 export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
   const { project, assets } = useEditorState()
   const m = project.meta
+  const previewDate = usePreviewDate()
+  // Last CSV import result — how many rows landed and which lines were unreadable.
+  const [csvNote, setCsvNote] = useState<string | null>(null)
   const bgm = project.bgm
   const [localeDraft, setLocaleDraft] = useState(() => (project.meta.locales ?? []).join(', '))
   const bindingFor = (event: string): string | undefined => project.sfx?.find((b) => b.event === event)?.assetId
@@ -118,15 +125,17 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
       <Row label="MIP name">
         <input value={mipName(m)} readOnly title="Auto-named from Client + MIP + Date" />
       </Row>
-      <Row label="Dynamic date">
+      <Row label="Subconcept">
         <Select
-          value={m.dynamicDate ?? 'none'}
+          value={subconceptToken(m)}
           options={[
-            { value: 'none', label: 'None — no dynamic date (…_human_none_…)' },
+            { value: 'none', label: 'none — no dynamic element (…_human_none_…)' },
             { value: 'dd', label: 'dd — dynamic date (…_human_dd_…)' },
-            { value: 'dt', label: 'dt — dynamic date + time (…_human_dt_…)' },
+            { value: 'dt', label: 'dt — dynamic time (…_human_dt_…)' },
+            { value: 'dh', label: 'dh — dynamic holiday (…_human_dh_…)' },
+            { value: 'dtd', label: 'dtd — dynamic date and time (…_human_dtd_…)' },
           ]}
-          onChange={(v) => patchMeta({ dynamicDate: v as 'dd' | 'dt' | 'none' })}
+          onChange={(v) => patchMeta({ subconcept: v as Subconcept })}
         />
       </Row>
       <Checkbox
@@ -150,7 +159,7 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
       <Row label="Export file">
         <input value={fileBaseName(project)} readOnly title="Export filename stem" />
       </Row>
-      <div className="hint pad">Auto-named <b>Client + MIP + Date</b>. Export files use <b>client_acslanot_mip_date_mip_emily_game_mechanic_human_dynamicdate_unique</b>. A MIP with no minigame names the mechanic slot <b>unknown</b>; <b>Dynamic date</b> sets the second-to-last slot (<b>dd</b> / <b>dt</b> / <b>none</b>) and clearing <b>Unique creative</b> ends the name in <b>none</b> — so no dynamic date and no promo ends <b>…_none_none</b>, and a dynamic date with a promo ends <b>…_dd_unique</b>. A <b>SIP</b> — one scene, and that scene is an end card — names itself <b>client_acslanot_sip_date_mip_emily_product_carousel_human_none_unique</b>, with <b>SIP format</b> switching <b>carousel</b> ↔ <b>card</b>.</div>
+      <div className="hint pad">Auto-named <b>Client + MIP + Date</b>. Export files use <b>client_acslanot_mip_date_mip_emily_game_mechanic_human_subconcept_unique</b>. A MIP with no minigame names the mechanic slot <b>unknown</b>; <b>Subconcept</b> sets the second-to-last slot (<b>dd</b> dynamic date / <b>dt</b> dynamic time / <b>dh</b> dynamic holiday / <b>dtd</b> dynamic date and time / <b>none</b>) and clearing <b>Unique creative</b> ends the name in <b>none</b> — so no dynamic date and no promo ends <b>…_none_none</b>, and a dynamic date with a promo ends <b>…_dd_unique</b>. A <b>SIP</b> — one scene, and that scene is an end card — names itself <b>client_acslanot_sip_date_mip_emily_product_carousel_human_none_unique</b>, with <b>SIP format</b> switching <b>carousel</b> ↔ <b>card</b>.</div>
       <div className="grid2">
         <NumField label="Base W" value={m.baseW} suffix="px" onChange={(n) => patchMeta({ baseW: n })} />
         <NumField label="Base H" value={m.baseH} suffix="px" onChange={(n) => patchMeta({ baseH: n })} />
@@ -274,6 +283,62 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
         Pick common languages above or type any BCP-47 codes. Each selected element exposes language-specific text, assets, and
         portrait/landscape layouts. The exported playable detects the browser language and falls back to the default for anything unset.
       </div>
+
+      <div className="group-title">Promo calendar</div>
+      {(() => {
+        const calendar = m.promoCalendar ?? []
+        const range = calendarRange(calendar)
+        const problems = calendar.length ? validatePromoCalendar(calendar) : []
+        const shownDay = previewDate ?? todayKey()
+        const usesHoliday =
+          project.scenes.some((s) => s.elements.some((e) => /\{holiday\}|\{promo\}/.test(e.countdown?.format ?? ''))) ||
+          /\{holiday\}|\{promo\}/.test(m.header?.dateFormat ?? '')
+        const importCalendar = async (): Promise<void> => {
+          const picked = await importCsv()
+          if (!picked) return
+          const { entries, skipped } = parsePromoCsv(picked.text)
+          if (!entries.length) {
+            setCsvNote(`${picked.name}: no readable rows — the sheet needs Start Date, End Date and Promo columns.`)
+            return
+          }
+          patchMeta({ promoCalendar: entries })
+          setCsvNote(`${picked.name}: ${entries.length} periods imported` + (skipped.length ? `, ${skipped.length} row(s) skipped (line ${skipped.map((k) => k.line).join(', ')}).` : '.'))
+        }
+        return (
+          <>
+            <Row label="Periods">
+              <input value={range ? `${calendar.length} · ${range.first} → ${range.last}` : 'none'} readOnly title="Rows in this MIP's promo calendar" />
+            </Row>
+            <Row label={`On ${shownDay}`}>
+              <input value={labelForDate(calendar, shownDay) || '(no promo)'} readOnly title="What {holiday} renders on the previewed day" />
+            </Row>
+            <Row label="Preview date">
+              <input type="date" value={previewDate ?? ''} onChange={(e) => setPreviewDate(e.target.value || null)} />
+            </Row>
+            <div className="grid3">
+              <button onClick={() => void importCalendar()}>Import CSV…</button>
+              <button onClick={() => patchMeta({ promoCalendar: DEFAULT_PROMO_CALENDAR.map((e) => ({ ...e })) })}>Load default</button>
+              <button disabled={!calendar.length} onClick={() => { patchMeta({ promoCalendar: undefined }); setCsvNote(null) }}>Clear</button>
+            </div>
+            {csvNote && <div className="hint pad">{csvNote}</div>}
+            {problems.map((pb, i) => (
+              <div key={i} className={'hint pad ' + (pb.level === 'error' ? 'bad' : 'warn')}>
+                {pb.message}
+              </div>
+            ))}
+            {usesHoliday && !calendar.length && (
+              <div className="hint pad bad">This MIP renders <b>{'{holiday}'}</b> but has no calendar — the label will be empty everywhere. Load the default or import the client's CSV.</div>
+            )}
+            <div className="hint pad">
+              Which sale is running on any given day. A <b>Dynamic holiday</b> element (or a <b>{'{holiday}'}</b> token in any date format, the pinned header included) renders the
+              row covering the <b>viewer's own</b> date and re-reads it at local midnight; outside the calendar the label is empty, which is what a “only when there is NO promo”
+              element covers. <b>Load default</b> is the 2026–2027 US retail calendar. <b>Import CSV…</b> takes the delivered sheet —{' '}
+              <b>Year, Start Date, End Date, Promo, Key Holiday Dates</b> — reading Start/End/Promo. Dates are inclusive <b>YYYY-MM-DD</b>. The calendar is stripped from exports
+              that never use the token.
+            </div>
+          </>
+        )
+      })()}
 
       <div className="group-title">Variants</div>
       {(m.variants ?? []).map((v) => (

@@ -8,6 +8,7 @@ import { Fragment, useEffect, useRef, useState } from 'react'
 import type { Project, Scene, SceneDef, Transition } from '../../runtime/scene'
 import type { AssetMap } from '../../runtime/types'
 import { ChevronRight, Icon, LayoutGrid, Play, RotateCcw, SCENE_KIND_ICON, Star, X } from '../icons'
+import { previewNowMs } from '../uiState'
 
 function toScene(project: Project, def: SceneDef): Scene {
   return {
@@ -50,7 +51,7 @@ function SceneThumb(props: { project: Project; def: SceneDef; assets: AssetMap; 
   const IW = Math.round(IH * aspect)
   const scale = h / IH
   const post = (): void => {
-    ref.current?.contentWindow?.postMessage({ type: 'pa:render', scene: toScene(project, def), assets, interactive: false }, '*')
+    ref.current?.contentWindow?.postMessage({ type: 'pa:render', scene: toScene(project, def), assets, interactive: false, previewNow: previewNowMs() }, '*')
   }
   useEffect(() => {
     if (ready.current) post()
@@ -86,7 +87,7 @@ function FlowPlayer(props: { project: Project; assets: AssetMap; replayKey: numb
   const ref = useRef<HTMLIFrameElement>(null)
   const ready = useRef(false)
   const post = (): void => {
-    ref.current?.contentWindow?.postMessage({ type: 'pa:play', project, assets }, '*')
+    ref.current?.contentWindow?.postMessage({ type: 'pa:play', project, assets, previewNow: previewNowMs() }, '*')
   }
   useEffect(() => {
     if (ready.current) post()

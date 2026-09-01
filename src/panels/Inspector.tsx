@@ -92,6 +92,9 @@ import {
   type ConvertTo,
 } from '../store'
 import { Accordion, Chips, ColorField, NumField, Row, SearchSelect, Select, Slider, Swatches, Toggle } from '../ui'
+import { calendarRange, labelForDate, validatePromoCalendar } from '../promoCalendar'
+import { ensurePromoCalendar } from '../factories'
+import { setPreviewDate, todayKey, usePreviewDate } from '../uiState'
 import {
   AlignCenterHorizontal,
   Eye,
@@ -3147,6 +3150,9 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
   // Which image element the background remover is open for (null = closed).
   const [removeBg, setRemoveBg] = useState<{ elementId: string; assetId: string } | null>(null)
   const editLocale = useEditLocale()
+  // Dynamic holiday: the day the canvas is pretending it is. A hook, so it has to live
+  // at the top of the component even though only the countdown section reads it.
+  const previewDate = usePreviewDate()
   const activeVariant = useActiveVariant()
   const variantName = state.project.meta.variants?.find((v) => v.id === activeVariant)?.name
   const variantBanner = activeVariant ? (
@@ -5250,7 +5256,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
           const cfg: CountdownConfig = el.countdown ?? { mode: 'dynamic', dynamicDays: 1, format: '{hh}:{mm}:{ss}' }
           const setCd = (patch: Partial<CountdownConfig>): void => patchElement(id, { countdown: { ...cfg, ...patch } })
           return (
-            <Accordion id="inspector.countdown" title="Countdown / dynamic date">
+            <Accordion id="inspector.countdown" title="Countdown / dynamic date / holiday">
               <Row label="Mode">
                 <Select
                   value={cfg.mode}
@@ -5368,11 +5374,114 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                   where you want it relative to the image — the offset sticks.
                 </div>
               )}
+              {!cfg.attachToId && (
+                <Row label="Header scaling">
+                  <Toggle label="Scale like the date band" checked={!!el.headerScale} onChange={(v) => patchElement(id, { headerScale: v || undefined })} />
+                </Row>
+              )}
+              {!cfg.attachToId && el.headerScale && (
+                <div className="hint pad">
+                  Sizes this label with a single transform, the way the pinned date band does, instead of multiplying font size, spacing and padding by the layout scale one at a
+                  time. Nothing lands on a rounded pixel, so it holds its exact design position and size at every screen — the recommended setting for a holiday label sitting
+                  inside artwork.
+                </div>
+              )}
+
+              {/* ---- Dynamic holiday ------------------------------------------------ */}
+              {(() => {
+                const calendar = state.project.meta.promoCalendar ?? []
+                const range = calendarRange(calendar)
+                const problems = validatePromoCalendar(calendar)
+                const usesHoliday = /\{holiday\}|\{promo\}/.test(cfg.format || '')
+                const shownDay = previewDate ?? todayKey()
+                const todayLabel = labelForDate(calendar, shownDay)
+                const insertHoliday = (): void => {
+                  ensurePromoCalendar()
+                  // Append rather than replace: "Shop the {holiday}" is a legal format, so
+                  // an author who has already typed copy keeps it.
+                  setCd({ format: cfg.format ? `${cfg.format}{holiday}` : '{holiday}' })
+                }
+                return (
+                  <>
+                    <Row label="Holiday">
+                      <button onClick={insertHoliday}>Insert {'{holiday}'}</button>
+                    </Row>
+                    <div className="hint pad">
+                      {'{holiday}'} renders the promo calendar's copy for the viewer's own date — “Labor Day Sale” from Aug 31, “Winter Sale” in between — and re-reads it at local
+                      midnight. Outside the calendar it is empty.{' '}
+                      {range ? (
+                        <>
+                          <b>
+                            {calendar.length} periods · {range.first} → {range.last}
+                          </b>
+                          . On {shownDay}: <b>{todayLabel || 'no promo'}</b>.
+                        </>
+                      ) : (
+                        <b>No promo calendar on this MIP yet — “Insert {'{holiday}'}” adds the default one.</b>
+                      )}{' '}
+                      <button className="link-btn" onClick={props.onProjectSettings}>
+                        Promo calendar in Project settings
+                      </button>
+                    </div>
+                    {problems.map((pb, i) => (
+                      <div key={i} className={'hint pad ' + (pb.level === 'error' ? 'bad' : 'warn')}>
+                        {pb.message}
+                      </div>
+                    ))}
+                    <Row label="Show this element">
+                      <Select
+                        value={cfg.showWhen ?? 'always'}
+                        onChange={(v) => setCd({ showWhen: v === 'always' ? undefined : (v as CountdownConfig['showWhen']) })}
+                        options={[
+                          { value: 'always', label: 'Always' },
+                          { value: 'holiday', label: 'Only when there IS a promo' },
+                          { value: 'noHoliday', label: 'Only when there is NO promo' },
+                        ]}
+                      />
+                    </Row>
+                    {cfg.showWhen && cfg.showWhen !== 'always' && (
+                      <div className="hint pad">
+                        Hidden on the days the calendar {cfg.showWhen === 'holiday' ? 'has nothing to say' : 'names a promo'}. Compose both states by pairing this with a second
+                        element set to the opposite rule — flip the <b>Preview date</b> below to see each one.
+                      </div>
+                    )}
+                    <NumField
+                      label="Shrink to fit"
+                      value={cfg.fitWidthPx ?? 0}
+                      step={10}
+                      min={0}
+                      suffix="px"
+                      onChange={(n) => setCd({ fitWidthPx: n > 0 ? Math.round(n) : undefined })}
+                    />
+                    <div className="hint pad">
+                      Maximum width in design px; a longer label scales its font DOWN to fit (never up). The shrink is the same fraction at every screen, so the label keeps one
+                      size relative to the artwork. 0 = off. The calendar's longest row is “Thanksgiving, Black Friday &amp; Cyber Monday Sale”.
+                    </div>
+                    <Row label="Preview date">
+                      <input type="date" value={previewDate ?? ''} onChange={(e) => setPreviewDate(e.target.value || null)} />
+                    </Row>
+                    {previewDate && (
+                      <div className="hint pad warn">
+                        Canvas, thumbnails and Preview are rendering <b>{previewDate}</b>, not today. It is an editor view setting — exports always read the viewer's real date.{' '}
+                        <button className="link-btn" onClick={() => setPreviewDate(null)}>
+                          Back to today
+                        </button>
+                      </div>
+                    )}
+                    {usesHoliday && !calendar.length && (
+                      <div className="hint pad bad">
+                        This element renders {'{holiday}'} but the MIP has no promo calendar, so the label is empty. Load one in Project settings.
+                      </div>
+                    )}
+                  </>
+                )
+              })()}
+
               <div className="hint pad">
                 <b>Timer</b> tokens (live): <b>{'{hh}:{mm}:{ss}'}</b> / <b>{'{d} {h} {m} {s}'}</b>; <b>{'{ss}:{ms}'}</b> shows “06:99” for 6.99 seconds. <b>Date</b> label (no
                 ticking): <b>{'{date}'}</b>, e.g. "Order by {'{date}'}", or build your own from parts: <b>MMMM</b> July, <b>MMM</b> Jul, <b>MM/M</b> 07/7, <b>DD/D</b> day,{' '}
-                <b>Do</b> 21st, <b>YYYY/YY</b> year (braces optional — "MM.D" → "07.16") — e.g. "Ends MMMM Do" → "Ends July 21st". "Dynamic" recomputes from today whenever the ad
-                runs.
+                <b>Do</b> 21st, <b>YYYY/YY</b> year (braces optional — "MM.D" → "07.16") — e.g. "Ends MMMM Do" → "Ends July 21st". <b>{'{holiday}'}</b> is the promo calendar's copy
+                for today. "Dynamic" recomputes from today whenever the ad runs.
               </div>
             </Accordion>
           )

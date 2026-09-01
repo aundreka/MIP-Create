@@ -116,3 +116,50 @@ describe('preflightNetwork', () => {
     }
   })
 })
+
+// Dynamic holiday. The failure being guarded against is silent: a {holiday} label whose
+// calendar has run out renders an EMPTY string, so the creative looks right on the day
+// it was built and blank months into its flight.
+describe('preflight — dynamic holiday', () => {
+  const HTML = `<html><head>${MRAID_OK}</head><body>ok</body></html>`
+  const CALENDAR = [
+    { start: '2026-01-01', end: '2026-12-31', label: 'Winter Sale' },
+    { start: '2027-01-01', end: '2027-12-31', label: 'Winter Sale' },
+  ]
+  const holidayProject = (over: Partial<Project['meta']> = {}): Project => {
+    const p = baseProject({ subconcept: 'dh', exportDate: '2026-09-01', promoCalendar: CALENDAR, ...over })
+    p.scenes[0].elements.push({ id: 'h', type: 'countdown', name: 'H', x: 0, y: 0, anchor: 'center', zIndex: 1, mode: 'fit', countdown: { mode: 'dynamic', format: '{holiday}' } })
+    return p
+  }
+  const messages = (p: Project): string => preflightNetwork(NET, HTML, 1000, p).findings.map((f) => f.message).join('\n')
+
+  it('says nothing about the calendar on a MIP that never uses it', () => {
+    expect(messages(baseProject())).not.toMatch(/promo calendar|Promo calendar/i)
+  })
+  it('is clean on a well-formed dh build', () => {
+    expect(messages(holidayProject())).not.toMatch(/promo calendar|Promo calendar|Subconcept/i)
+  })
+  it('warns when the token is used with no calendar behind it', () => {
+    const r = preflightNetwork(NET, HTML, 1000, holidayProject({ promoCalendar: undefined }))
+    expect(r.warns).toBeGreaterThan(0)
+    expect(messages(holidayProject({ promoCalendar: undefined }))).toMatch(/No promo calendar/)
+  })
+  it('warns when the calendar runs out inside the next 12 months', () => {
+    expect(messages(holidayProject({ exportDate: '2027-06-01' }))).toMatch(/does not cover the 12 months/)
+  })
+  it('reports gaps and overlaps in the calendar', () => {
+    expect(messages(holidayProject({ promoCalendar: [{ start: '2026-01-01', end: '2026-06-30', label: 'A' }, { start: '2026-08-01', end: '2027-12-31', label: 'B' }] }))).toMatch(/Promo calendar: Gap/)
+    expect(messages(holidayProject({ promoCalendar: [{ start: '2026-01-01', end: '2026-08-30', label: 'A' }, { start: '2026-08-01', end: '2027-12-31', label: 'B' }] }))).toMatch(/Promo calendar:.*overlaps/)
+  })
+  it('notes a delivery name that is not dh', () => {
+    expect(messages(holidayProject({ subconcept: 'dd' }))).toMatch(/Subconcept is “dd”/)
+    expect(messages(holidayProject({ subconcept: 'dtd' }))).not.toMatch(/Subconcept is/)
+  })
+  // showWhen alone is enough: the "no promo" fallback carries literal copy, so nothing
+  // in its format hints that it depends on the calendar.
+  it('checks a MIP whose only tie to the calendar is a showWhen rule', () => {
+    const p = baseProject({ subconcept: 'dh' })
+    p.scenes[0].elements.push({ id: 'f', type: 'countdown', name: 'F', x: 0, y: 0, anchor: 'center', zIndex: 1, mode: 'fit', countdown: { mode: 'dynamic', format: 'Buy 1 Get 1 Free', showWhen: 'noHoliday' } })
+    expect(messages(p)).toMatch(/No promo calendar/)
+  })
+})

@@ -9,6 +9,8 @@ import { mountHeader } from './header'
 import { headerAllowedFor } from './scene'
 import { buildScene, type StageHandle } from './stage'
 import { setActiveLocale } from './i18n'
+import { setPromoCalendar } from './elements/promoCalendar'
+import { setNowOverride } from './elements/countdown'
 import { playProject, type SceneManager } from './scenes'
 import type { Project, Scene } from './scene'
 import type { AssetMap } from './types'
@@ -91,6 +93,7 @@ function render(next: Scene, assets: AssetMap, interactive: boolean): void {
   scene = next
   setDesign(next.meta.baseW || 1080, next.meta.baseH || 1920)
   setVAlign(next.meta.vAlign)
+  setPromoCalendar(next.meta.promoCalendar)
   computeMetrics(size().w, size().h)
   syncHeader(next)
   if (stage && stage.update(next, assets)) {
@@ -123,6 +126,7 @@ function play(project: Project, assets: AssetMap): void {
   headerKey = ''
   setDesign(project.meta.baseW || 1080, project.meta.baseH || 1920)
   setVAlign(project.meta.vAlign)
+  setPromoCalendar(project.meta.promoCalendar)
   computeMetrics(size().w, size().h)
   manager = playProject(project, assets, { mount: document.body, interactive: true })
 }
@@ -143,9 +147,12 @@ window.addEventListener('message', (e: MessageEvent) => {
   if (d.type === 'pa:render') {
     if (d.assets != null) cachedAssets = d.assets
     setActiveLocale(d.locale ?? null)
+    // Set BEFORE the render so the first paint already reads the preview day.
+    setNowOverride(d.previewNow ?? null)
     render(d.scene, cachedAssets, d.interactive ?? false)
   } else if (d.type === 'pa:play') {
     setActiveLocale(d.locale ?? null)
+    setNowOverride(d.previewNow ?? null)
     play(d.project, d.assets || {})
   }
   else if (d.type === 'pa:setHidden' && stage) {

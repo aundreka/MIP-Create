@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from 'react'
 import { canCapture, captureRect, htmlToDataUrl, importHtml, importImage, readImageFile } from '../bridge'
 import type { Device } from '../devices'
 import { getEditLocale } from '../locale'
+import { previewNowMs } from '../uiState'
 import { diffImages, motionMask, samplePixel, colorDelta, type Bitmap, type DiffRegion, type DiffResult } from '../qa/imageDiff'
 import { useEditorState } from '../store'
 import { Checkbox } from '../ui'
@@ -108,7 +109,7 @@ function ProjectFrame(props: { w: number; h: number; playKey: number; iframeRef:
   const { project, assets } = useEditorState()
   const ready = useRef(false)
   const post = (): void => {
-    props.iframeRef.current?.contentWindow?.postMessage({ type: 'pa:play', project, assets, locale: getEditLocale() }, '*')
+    props.iframeRef.current?.contentWindow?.postMessage({ type: 'pa:play', project, assets, locale: getEditLocale(), previewNow: previewNowMs() }, '*')
   }
   useEffect(() => {
     if (ready.current) post()

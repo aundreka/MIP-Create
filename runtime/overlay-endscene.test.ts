@@ -90,10 +90,14 @@ describe('overlay scene doubling as the MRAID end card', () => {
   })
 
   // Win the game and let the gameWin advance fire, landing us on `card`.
+  // advanceTimersByTime, not runOnlyPendingTimers: the pinned band schedules its
+  // date rollover for the next local MIDNIGHT, and running "everything pending"
+  // would jump the fake clock hours forward — dismissing the card's own 10ms
+  // advance along the way, which is the very thing these tests measure.
   const playToCard = (asEndscene: boolean, showHeader = false): void => {
     mgr = playProject(makeProject(asEndscene, showHeader), {}, { mount, interactive: true })
     emit('game-complete')
-    vi.runOnlyPendingTimers()
+    vi.advanceTimersByTime(1)
   }
 
   const headerBand = (): HTMLElement | null => mount.querySelector<HTMLElement>('.pa-header')

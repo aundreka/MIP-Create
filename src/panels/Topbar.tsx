@@ -8,10 +8,11 @@ import { getState, joinProjectGroup, loadProject as storeLoad, markSaved, redo, 
 import { createProject, currentProjectId, openProject, projectsInGroup, saveCurrent } from '../projects'
 import { ContextMenu, type MenuItem } from './ContextMenu'
 import { HeaderPopover } from './HeaderPopover'
-import { CalendarDays, ChevronDown, FolderOpen, Frame, Icon, Menu, Minus, Play, Plus, Redo2, Undo2, Upload } from '../icons'
+import { CalendarDays, ChevronDown, FolderOpen, Frame, Icon, Menu, Minus, Play, Plus, Redo2, Undo2, Upload, X } from '../icons'
 import { toggleTheme, useTheme } from '../theme'
 import { setEditLocale, useEditLocale } from '../locale'
 import { setActiveVariant, useActiveVariant } from '../variantMode'
+import { setPreviewDate, usePreviewDate } from '../uiState'
 
 async function doSave(): Promise<void> {
   const s = getState()
@@ -49,6 +50,7 @@ export function Topbar(props: {
   onShare: () => void
 }): JSX.Element {
   const { orientation, dirty, projectPath, canUndo, canRedo, scene } = useEditorState()
+  const previewDate = usePreviewDate()
   const theme = useTheme()
   const editLocale = useEditLocale()
   const locales = scene.meta.locales ?? []
@@ -123,6 +125,14 @@ export function Topbar(props: {
         </button>
       )}
       {dirty && <span className="dot" title="Unsaved changes" />}
+      {/* A preview date silently changes what every canvas, thumbnail and Preview shows
+          — including which holiday label is on screen — so it gets a chip nobody can miss
+          and a one-click way back to today. Export is never affected. */}
+      {previewDate && (
+        <button className="preview-date-chip" title="The editor is rendering another day (dynamic holiday preview). Click to go back to today." onClick={() => setPreviewDate(null)}>
+          <Icon icon={CalendarDays} size={12} /> {previewDate} <Icon icon={X} size={11} />
+        </button>
+      )}
 
       <span className="seg">
         <button className={orientation === 'portrait' ? 'on' : ''} onClick={() => setOrientation('portrait')}>

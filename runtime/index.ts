@@ -7,6 +7,7 @@ import type { AssetMap } from './types'
 import { computeMetrics, setDesign, setVAlign } from './responsive'
 import { bindLifecycle, initMraid, notifyGameStart, setStoreUrl } from './networks'
 import { resolveLocale, setActiveLocale } from './i18n'
+import { setPromoCalendar } from './elements/promoCalendar'
 import { playProject, type SceneManager } from './scenes'
 
 const W = window as unknown as Record<string, any>
@@ -36,6 +37,9 @@ export async function boot(project: Project, assets: AssetMap, opts: { mount?: H
   installLifecycleStubs()
   setDesign(project.meta.baseW || 1080, project.meta.baseH || 1920)
   setVAlign(project.meta.vAlign)
+  // The {holiday} token's data. Export never sets a preview date, so the label always
+  // resolves against the viewer's own local date.
+  setPromoCalendar(project.meta.promoCalendar)
   const _ctaMode = project.meta.clickUrlMode ?? 'store'
   if (_ctaMode === 'none') {
     setStoreUrl({ ios: '', android: '' })

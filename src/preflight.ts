@@ -5,6 +5,8 @@
 
 import type { Project } from '../runtime/scene'
 import { fmtBytes, type Network } from './export'
+import { coversYearFrom, usesHolidayToken, validatePromoCalendar } from './promoCalendar'
+import { subconceptToken } from './mipName'
 
 export type Level = 'error' | 'warn' | 'info'
 export interface Finding {
@@ -35,6 +37,37 @@ const DEFAULT_MAX = 5 * 1024 * 1024
 const RESOURCE_URL = /(?:\b(?:src|href)\s*=\s*["']\s*https?:)|(?:url\(\s*['"]?\s*https?:)|(?:@import\s+["']\s*https?:)|(?:fetch\(\s*["'`]\s*https?:)/gi
 const PLACEHOLDER = /id000000000|com\.example\.app/i
 
+/**
+ * Dynamic-holiday checks. The failure this exists to catch is silent: a {holiday} label
+ * whose calendar has run out renders an EMPTY string, so the creative ships looking fine
+ * on the day it was built and blank three months into its flight.
+ */
+function holidayFindings(project: Project): Finding[] {
+  const out: Finding[] = []
+  const calendar = project.meta.promoCalendar ?? []
+  const uses = usesHolidayToken(project)
+  const hidesOnHoliday = project.scenes.some((s) => s.elements.some((e) => e.countdown?.showWhen && e.countdown.showWhen !== 'always'))
+  if (!uses && !hidesOnHoliday) return out
+
+  const subconcept = subconceptToken(project.meta)
+  if (subconcept !== 'dh' && subconcept !== 'dtd') {
+    out.push({ level: 'info', message: `This MIP uses the promo calendar but its Subconcept is “${subconcept}” — dynamic-holiday builds are usually delivered as “dh”.` })
+  }
+  if (!calendar.length) {
+    out.push({ level: 'warn', message: 'No promo calendar on this MIP: {holiday} renders an empty label and every “only when there IS a promo” element stays hidden.' })
+    return out
+  }
+  // Twelve months from the delivery date, since a MIP flights long after it is built.
+  const from = project.meta.exportDate || project.meta.mipDate
+  if (from && !coversYearFrom(calendar, from)) {
+    out.push({ level: 'warn', message: `The promo calendar does not cover the 12 months from ${from} — the label goes empty part-way through the flight.` })
+  }
+  for (const problem of validatePromoCalendar(calendar)) {
+    out.push({ level: problem.level === 'error' ? 'warn' : 'info', message: `Promo calendar: ${problem.message}` })
+  }
+  return out
+}
+
 export function preflightNetwork(net: Network, html: string, bytes: number, project: Project): PreflightResult {
   const findings: Finding[] = []
   const max = NET_MAX[net.tag] ?? DEFAULT_MAX
@@ -54,6 +87,8 @@ export function preflightNetwork(net: Network, html: string, bytes: number, proj
 
   const hasCta = project.scenes.some((s) => s.elements.some((e) => e.type === 'cta' || e.type === 'endscene'))
   if (!hasCta) findings.push({ level: 'warn', message: 'No CTA or endscene element; players have no obvious click-to-store.' })
+
+  findings.push(...holidayFindings(project))
 
   const interactive = project.scenes.some((s) => s.advance?.on === 'tap' || s.elements.some((e) => e.type === 'game-mount' || e.type === 'cta' || e.type === 'choice'))
   if (!interactive) findings.push({ level: 'warn', message: 'No interaction (game, CTA, choice or tap-to-advance); many networks reject static playables.' })

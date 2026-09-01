@@ -9,6 +9,7 @@ import type { AssetMap } from '../runtime/types'
 import { getTemplate } from '../runtime/games/registry'
 import { nextId } from './store'
 import { svgBackground, svgBadge, svgCard, svgTile, type BgStyle, type Theme } from './svgAssets'
+import { DEFAULT_PROMO_CALENDAR } from './promoCalendar'
 
 export interface UploadAsset {
   src: string
@@ -23,7 +24,9 @@ export interface MipGenOptions {
   logo?: UploadAsset
   product?: UploadAsset
   decor: boolean
-  endscene: { dynamicDate: boolean; timer: boolean; badge: boolean }
+  // dynamicHoliday seeds BOTH states of the promo label (and the calendar behind
+  // them), so the generated card is complete on the days the calendar is silent too.
+  endscene: { dynamicDate: boolean; timer: boolean; badge: boolean; dynamicHoliday?: boolean }
 }
 
 const PRODUCT_SLOT = /prize|product|reward|win|gift|item|hero|character|object/i
@@ -93,6 +96,17 @@ export function buildMip(opts: MipGenOptions): { project: Project; assets: Asset
   if (opts.endscene.dynamicDate) {
     endEls.push({ id: nextId('date'), type: 'countdown', name: 'Dynamic date', x: cx, y: Math.round(baseH * 0.2), anchor: 'center', zIndex: 30, mode: 'fit', text: { value: '', fontSizePx: 52, fontWeight: 700, color: theme.ink, align: 'center' }, countdown: { mode: 'dynamic', dynamicDays: 3, format: 'Offer ends {date}', dateStyle: 'short' } })
   }
+  if (opts.endscene.dynamicHoliday) {
+    // The promo label and its fallback share a spot: exactly one is ever on screen, so
+    // the card reads the same on a Labor Day as on an ordinary Tuesday.
+    const holidayBase = {
+      type: 'countdown' as const, x: cx, y: Math.round(baseH * 0.24), anchor: 'center' as const, zIndex: 31, mode: 'fit' as const, headerScale: true,
+      text: { value: '', fontSizePx: 58, fontWeight: 800, color: theme.primary, align: 'center' as const },
+    }
+    const holidayCd = { mode: 'dynamic' as const, dynamicDays: 3, fitWidthPx: Math.round(baseW * 0.86) }
+    endEls.push({ ...holidayBase, id: nextId('holiday'), name: 'Dynamic holiday', countdown: { ...holidayCd, format: '{holiday}', showWhen: 'holiday' } })
+    endEls.push({ ...holidayBase, id: nextId('holiday'), name: 'Holiday fallback', zIndex: 32, countdown: { ...holidayCd, format: 'Buy 1 Get 1 Free', showWhen: 'noHoliday' } })
+  }
   if (opts.endscene.timer) {
     endEls.push({ id: nextId('timer'), type: 'countdown', name: 'Countdown', x: cx, y: Math.round(baseH * 0.27), anchor: 'center', zIndex: 30, mode: 'fit', text: { value: '', fontSizePx: 84, fontWeight: 800, color: theme.primary, align: 'center' }, countdown: { mode: 'dynamic', dynamicDays: 1, format: '{hh}:{mm}:{ss}' } })
   }
@@ -126,6 +140,9 @@ export function buildMip(opts: MipGenOptions): { project: Project; assets: Asset
       baseW,
       baseH,
       bgMatchColor: theme.bg1,
+      // Only a MIP that actually uses {holiday} carries the rows (~3 KB).
+      ...(opts.endscene.dynamicHoliday ? { promoCalendar: DEFAULT_PROMO_CALENDAR.map((e) => ({ ...e })) } : {}),
+      ...(opts.endscene.dynamicHoliday ? { subconcept: 'dh' as const } : {}),
     },
     scenes: [gameScene, endScene],
     startSceneId: gameScene.id,

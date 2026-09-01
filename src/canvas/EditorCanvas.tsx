@@ -17,6 +17,7 @@ import { isSceneHidden, useCanvasView } from '../canvasView'
 import { useActiveVariant } from '../variantMode'
 import { endPathDraw, pathDrawTarget, usePathDraw } from '../drawMode'
 import { useEditLocale } from '../locale'
+import { previewNowMs, usePreviewDate } from '../uiState'
 import { localizeElement, localizeSceneDef } from '../../runtime/i18n'
 import { setSceneMediaMs, useTimeline } from '../timeline'
 import { sceneAssetIds } from '../export'
@@ -136,6 +137,9 @@ function CanvasFrame(props: {
 }): JSX.Element {
   const { sceneId, def, meta, assets, renderKey, locale, onLayout, iframeRef } = props
   const displayDef = useMemo(() => localizeSceneDef(def, locale), [def, locale])
+  // Re-post the scene whenever the preview date changes, so a {holiday} label flips to
+  // the previewed day's copy (or hides) on the canvas as soon as the date is picked.
+  const previewDate = usePreviewDate()
   const ref = useRef<HTMLIFrameElement>(null)
   const ready = useRef(false)
   // Track the last assets reference sent — only include assets in the message when
@@ -168,8 +172,8 @@ function CanvasFrame(props: {
     }
     const changed = lastSentAssets.current !== frameAssets
     lastSentAssets.current = frameAssets
-    ref.current?.contentWindow?.postMessage({ type: 'pa:render', scene, assets: changed ? frameAssets : undefined, interactive: false, locale }, '*')
-  }, [displayDef, meta, frameAssets, locale])
+    ref.current?.contentWindow?.postMessage({ type: 'pa:render', scene, assets: changed ? frameAssets : undefined, interactive: false, locale, previewNow: previewNowMs() }, '*')
+  }, [displayDef, meta, frameAssets, locale, previewDate])
   useEffect(() => {
     if (ready.current) post()
   }, [post, renderKey])
@@ -437,7 +441,7 @@ export function EditorCanvas(props: Props): JSX.Element {
       headerOverride: sd.header,
     }
     // Assets are not included here — the iframe caches them from the last full render.
-    iw.postMessage({ type: 'pa:render', scene, interactive: false, locale: editLocaleRef.current }, '*')
+    iw.postMessage({ type: 'pa:render', scene, interactive: false, locale: editLocaleRef.current, previewNow: previewNowMs() }, '*')
   }, [])
 
   // Timeline playhead → active scene iframe. While playback is RUNNING the runtime

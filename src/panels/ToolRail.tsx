@@ -3,11 +3,12 @@
 // so they're easy to tell apart at a glance.
 
 import { importImage, importImages } from '../bridge'
-import { makeBackground, makeBar, makeButton, makeChoice, makeConfetti, makeCountdownTimer, makeCta, makeDynamicDate, makeEndcardBlock, makeEndsceneVideo, makeGame, makeHeaderBlock, makeImage, makeRect, makeText, makeUnboxing } from '../factories'
+import { insertDynamicHoliday, makeBackground, makeBar, makeButton, makeChoice, makeConfetti, makeCountdownTimer, makeCta, makeDynamicDate, makeEndcardBlock, makeEndsceneVideo, makeGame, makeHeaderBlock, makeImage, makeRect, makeText, makeUnboxing } from '../factories'
 import { addAsset, addElement, addElements, addGameHint, clearSelection, getState, nextId } from '../store'
 import { Tooltip } from '../ui'
 import {
   CalendarDays,
+  CalendarHeart,
   Film,
   Frame,
   Gamepad2,
@@ -86,6 +87,9 @@ export function ToolRail(props: { onFigma: () => void }): JSX.Element {
       <Tool title="Video endscene" icon={Film} onClick={() => addElement(makeEndsceneVideo())} />
       <Tool title="Countdown" icon={Timer} onClick={() => addElement(makeCountdownTimer())} />
       <Tool title="Dynamic date" icon={CalendarDays} onClick={() => addElement(makeDynamicDate())} />
+      {/* Drops BOTH states — the promo label and its no-promo fallback — and seeds the
+          project's promo calendar, so the element has something to read on day one. */}
+      <Tool title="Dynamic holiday" icon={CalendarHeart} onClick={() => insertDynamicHoliday(addElements)} />
 
       <div className="rail-sep" />
 

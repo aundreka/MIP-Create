@@ -8,6 +8,7 @@ import { headerAllowedFor } from '../../runtime/scene'
 import type { Project, Scene, SceneDef } from '../../runtime/scene'
 import type { AssetMap } from '../../runtime/types'
 import { sceneAssets } from '../export'
+import { previewNowMs } from '../uiState'
 
 function toScene(project: Project, def: SceneDef): Scene {
   return {
@@ -32,7 +33,7 @@ export function SceneThumb(props: { project: Project; def: SceneDef; assets: Ass
   // image/video in the whole project (multiplied across every card = OOM).
   const thumbAssets = useMemo(() => sceneAssets(def, assets), [def, assets])
   const post = (): void => {
-    ref.current?.contentWindow?.postMessage({ type: 'pa:render', scene: toScene(project, def), assets: thumbAssets, interactive: false }, '*')
+    ref.current?.contentWindow?.postMessage({ type: 'pa:render', scene: toScene(project, def), assets: thumbAssets, interactive: false, previewNow: previewNowMs() }, '*')
   }
   useEffect(() => {
     if (ready.current) post()

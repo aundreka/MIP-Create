@@ -161,10 +161,15 @@ export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): 
                 <Row label="Format">
                   <input
                     value={h.dateFormat ?? ''}
-                    placeholder="e.g. {date} or MMMM D, YYYY"
+                    placeholder="e.g. {date}, MMMM D, YYYY or {holiday}"
                     onChange={(e) => set({ dateFormat: e.target.value || undefined })}
                   />
                 </Row>
+                <div className="hint pad">
+                  Date parts: <b>MMMM</b> July, <b>MMM</b> Jul, <b>D</b>/<b>DD</b> day, <b>Do</b> 21st, <b>YYYY</b> year, or <b>{'{date}'}</b> for the whole localized date (braces
+                  optional). <b>{'{holiday}'}</b> bands the promo calendar's copy for the viewer's own day — “Labor Day Sale” — and re-reads it at local midnight; set the calendar
+                  up in Project settings.
+                </div>
                 <Row label="Date language">
                   <Select
                     value={h.dateLocale ?? 'en-US'}

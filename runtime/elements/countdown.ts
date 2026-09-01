@@ -4,8 +4,35 @@
 // is always relative to when the ad actually runs.
 
 import type { SceneElement } from '../scene'
+import { promoLabelFor } from './promoCalendar'
 
 const DAY = 86400000
+
+// ---------------------------------------------------------------------------
+// Preview date (editor only). The editor can force the runtime to render as if
+// it were another day, so a designer can see both states of a dynamic holiday
+// without changing the machine clock. It shifts ONLY what is drawn — timers,
+// intervals and deadlines keep real time, so nothing else in the runtime changes
+// behaviour while a preview date is on. Export never sets it.
+// ---------------------------------------------------------------------------
+let nowOverride: number | null = null
+
+export function setNowOverride(ms: number | null | undefined): void {
+  nowOverride = typeof ms === 'number' && isFinite(ms) ? ms : null
+}
+
+/** The instant DATE rendering should describe: the preview date when one is set,
+ * otherwise the real clock. */
+export function runtimeNow(): number {
+  return nowOverride ?? Date.now()
+}
+
+/** How far the rendered date is displaced from the real clock. Added to both `now`
+ * and `deadline` so the REMAINING time (deadline - now) is untouched: a timer still
+ * counts what it really has left while its date tokens read the preview day. */
+export function nowShift(): number {
+  return nowOverride == null ? 0 : nowOverride - Date.now()
+}
 
 /** Resolve the target instant (ms epoch) for the element, given the load time. */
 export function computeDeadline(el: SceneElement, now: number): number {
@@ -33,6 +60,22 @@ const DATE_OPTS: Record<string, Intl.DateTimeFormatOptions> = {
  * minute/hour (a pure {date} or {d} label doesn't tick). */
 export function formatTicks(fmt: string): boolean {
   return /\{ms\}|\{s\}|\{ss\}|\{m\}|\{mm\}|\{h\}|\{hh\}/.test(fmt)
+}
+
+/** Tokens whose value changes when the LOCAL DATE rolls over, but not second to
+ * second: the holiday label and every date part. A format holding one of these
+ * needs a single timer at midnight rather than a ticker (see startTicker). */
+export function needsMidnightRefresh(fmt: string): boolean {
+  return /\{holiday\}|\{promo\}|\{date\}|\{MMMM\}|\{MMM\}|\{MM\}|\{M\}|\{Do\}|\{o\}|\{DD\}|\{D\}|\{YYYY\}|\{YY\}/.test(braceBareTokens(fmt))
+}
+
+/** Start of the next local day (tonight's 12am). setHours(24,…) rolls the date over
+ * through month/year ends and follows the device's own DST rules, so the remaining
+ * time is whatever the viewer's clock says is left in the day. */
+export function nextMidnight(now: number): number {
+  const d = new Date(now)
+  d.setHours(24, 0, 0, 0)
+  return d.getTime()
 }
 
 /** How often a formatted timer needs repainting. `{ms}` intentionally represents
@@ -109,7 +152,10 @@ export function braceBareTokens(fmt: string): string {
 export function formatCountdown(el: SceneElement, deadline: number, now: number): string {
   const cd = el.countdown
   const fallback = cd?.mode === 'clock' ? '{hh}:{mm}' : '{d}d {hh}:{mm}:{ss}'
-  return renderCountdownFormat(braceBareTokens(cd?.format || fallback), deadline, now, {
+  // Both instants move together under a preview date, so the duration between them —
+  // what a timer actually displays — is exactly what it would be on the real clock.
+  const shift = nowShift()
+  return renderCountdownFormat(braceBareTokens(cd?.format || fallback), deadline + shift, now + shift, {
     ...(cd ?? {}),
     clock: cd?.mode === 'clock',
   })
@@ -154,7 +200,14 @@ export function renderCountdownFormat(fmt: string, deadline: number, now: number
   // target otherwise). Braces are required — a bare "A" would collide with ordinary
   // copy like "A GREAT DEAL".
   const meridiem = target.getHours() < 12 ? 'AM' : 'PM'
+  // {holiday} / {promo} resolve against TODAY (the viewer's local date), never the
+  // countdown's target: a "3 days from now" offer still announces today's promo.
+  // Outside the calendar the label is empty, which is what a showWhen:'holiday'
+  // element hides on.
+  const holiday = /\{holiday\}|\{promo\}/.test(fmt) ? promoLabelFor(now) : ''
   const out = fmt
+    .replace(/\{holiday\}/g, holiday)
+    .replace(/\{promo\}/g, holiday)
     .replace(/\{A\}/g, meridiem)
     .replace(/\{a\}/g, meridiem.toLowerCase())
     .replace(/\{date\}/g, dateStr)

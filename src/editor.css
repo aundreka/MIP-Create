@@ -335,6 +335,24 @@ button:active:not(:disabled),
 .topbar .spacer {
   flex: 1;
 }
+/* Dynamic-holiday preview date: the editor is rendering a day that is not today.
+   Loud on purpose — nobody should ship a MIP while forgetting it is on. */
+.preview-date-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(180, 84, 10, 0.22);
+  border: 1px solid rgba(245, 158, 11, 0.55);
+  color: var(--text);
+  border-radius: var(--r-sm);
+  padding: 3px 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.preview-date-chip:hover {
+  background: rgba(180, 84, 10, 0.34);
+}
+
 .topbar .hint {
   color: var(--muted);
   font-size: 12px;
@@ -1705,6 +1723,16 @@ button.frame-chip:hover {
 .grid2 button {
   width: 100%;
 }
+/* Three equal actions on one line (Import / Load default / Clear). */
+.grid3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 4px;
+  padding: 0 10px;
+}
+.grid3 button {
+  width: 100%;
+}
 .scene-meta-row {
   display: grid;
   grid-template-columns: 1fr auto auto;
@@ -1748,6 +1776,18 @@ button.frame-chip:hover {
   margin: 6px 10px;
 }
 .hint.pad.warn {
+  padding: 8px 10px;
+}
+/* Stronger than .warn: something is actually broken and will ship broken (a
+   {holiday} label with no promo calendar behind it). */
+.hint.bad {
+  color: var(--text);
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--line));
+  border-radius: var(--r-sm);
+  margin: 6px 10px;
+}
+.hint.pad.bad {
   padding: 8px 10px;
 }
 

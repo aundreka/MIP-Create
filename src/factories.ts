@@ -1,7 +1,8 @@
 // Element factory helpers used by the tool rail.
 
 import type { SceneElement } from '../runtime/scene'
-import { getState, nextId } from './store'
+import { beginTransaction, endTransaction, getState, nextId, patchMeta } from './store'
+import { DEFAULT_PROMO_CALENDAR } from './promoCalendar'
 
 function topZ(): number {
   const zs = getState().scene.elements.map((e) => e.zIndex)
@@ -199,6 +200,67 @@ export function makeDynamicDate(): SceneElement {
     mode: 'fit',
     text: { value: '', fontSizePx: 64, fontWeight: 800, color: '#ffffff', align: 'center' },
     countdown: { mode: 'dynamic', dynamicDays: 3, format: 'Order by {date}', dateStyle: 'short' },
+  }
+}
+
+/**
+ * The dynamic-holiday label: the SAME countdown element, with the {holiday} token and
+ * a visibility rule tied to the promo calendar. Defaults chosen from the peakfootwear
+ * build: header-style scaling (one transform, nothing rounded — the path a label glued
+ * inside artwork wants), and an auto-shrink at 86% of the design width so the longest
+ * row in the calendar ("Thanksgiving, Black Friday & Cyber Monday Sale") still fits the
+ * composition instead of running off it.
+ *
+ * Pair it with a second element carrying `showWhen: 'noHoliday'` to cover the days the
+ * calendar says nothing about — see makeDynamicHolidayPair.
+ */
+export function makeDynamicHoliday(): SceneElement {
+  const m = meta()
+  return {
+    id: nextId('holiday'),
+    type: 'countdown',
+    name: 'Dynamic holiday',
+    x: cx(),
+    y: Math.round(m.baseH * 0.2),
+    anchor: 'center',
+    zIndex: topZ(),
+    mode: 'fit',
+    headerScale: true,
+    text: { value: '', fontSizePx: 64, fontWeight: 800, color: '#ffffff', align: 'center' },
+    countdown: { mode: 'dynamic', dynamicDays: 3, format: '{holiday}', showWhen: 'holiday', fitWidthPx: Math.round(m.baseW * 0.86), textCase: 'none' },
+  }
+}
+
+/** The holiday label plus its fallback, stacked in the same spot: exactly one of the
+ * two is ever on screen, so the composition never has a hole in it. */
+export function makeDynamicHolidayPair(): SceneElement[] {
+  const promo = makeDynamicHoliday()
+  const fallback: SceneElement = {
+    ...makeDynamicHoliday(),
+    id: nextId('holiday'),
+    name: 'Holiday fallback',
+    zIndex: promo.zIndex + 1,
+    countdown: { ...promo.countdown!, format: 'Buy 1 Get 1 Free', showWhen: 'noHoliday' },
+  }
+  return [promo, fallback]
+}
+
+/** Give the project a promo calendar if it has none — the runtime carries no rows, so
+ * a holiday element without this renders nothing. Only projects using the feature pay
+ * the bytes. Existing rows (an imported client calendar) are never overwritten. */
+export function ensurePromoCalendar(): void {
+  if (meta().promoCalendar?.length) return
+  patchMeta({ promoCalendar: DEFAULT_PROMO_CALENDAR.map((e) => ({ ...e })) })
+}
+
+/** Insert the holiday pair AND seed the calendar as one undo step. */
+export function insertDynamicHoliday(add: (els: SceneElement[]) => void): void {
+  beginTransaction()
+  try {
+    ensurePromoCalendar()
+    add(makeDynamicHolidayPair())
+  } finally {
+    endTransaction()
   }
 }
 

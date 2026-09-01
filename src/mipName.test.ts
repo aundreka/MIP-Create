@@ -42,15 +42,14 @@ describe('fileBaseName', () => {
       .toBe('laura_geller_acslanot_mip_20260817_02_emily_game_unknown_human_none_unique')
   })
 
-  it('names the dynamic date slot before the unique slot', () => {
-    expect(fileBaseName(project({ dynamicDate: 'dd' })))
-      .toBe('the_loaded_tea_shop_acslanot_mip_20260730_04_emily_game_scratch_human_dd_unique')
-    expect(fileBaseName(project({ dynamicDate: 'dt' })))
-      .toBe('the_loaded_tea_shop_acslanot_mip_20260730_04_emily_game_scratch_human_dt_unique')
-    expect(fileBaseName(project({ dynamicDate: 'none', unique: false })))
-      .toBe('the_loaded_tea_shop_acslanot_mip_20260730_04_emily_game_scratch_human_none_none')
-    expect(fileBaseName(project({ dynamicDate: 'dd', unique: true })))
-      .toBe('the_loaded_tea_shop_acslanot_mip_20260730_04_emily_game_scratch_human_dd_unique')
+  it('names the subconcept slot before the unique slot', () => {
+    const stem = 'the_loaded_tea_shop_acslanot_mip_20260730_04_emily_game_scratch_human'
+    for (const subconcept of ['dd', 'dt', 'dh', 'dtd', 'none'] as const) {
+      expect(fileBaseName(project({ subconcept }))).toBe(`${stem}_${subconcept}_unique`)
+    }
+    expect(fileBaseName(project({ subconcept: 'none', unique: false }))).toBe(`${stem}_none_none`)
+    expect(fileBaseName(project({ subconcept: 'dd', unique: true }))).toBe(`${stem}_dd_unique`)
+    expect(fileBaseName(project({ subconcept: 'dtd', unique: false }))).toBe(`${stem}_dtd_none`)
   })
 
   it('ends in none when the MIP is marked non-unique', () => {

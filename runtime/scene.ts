@@ -466,6 +466,8 @@ export interface BoxStyle {
 // date parts of the target date: {MMMM} July, {MMM} Jul, {M}/{MM} 7/07,
 // {D}/{DD} 12/12, {Do} 21st (ordinal day), {o} the bare suffix, {YYYY}/{YY} —
 // month names follow dateLocale; the ordinal suffix is English-only.
+// {holiday} (alias {promo}) renders the promo calendar's copy for the VIEWER's local
+// date (see meta.promoCalendar) — "Labor Day Sale" — and is empty outside it.
 export interface CountdownConfig {
   // 'clock' shows the CURRENT wall-clock time (default format '{hh}:{mm}' → "14:05"),
   // re-rendered every second; the other modes count toward a target instant.
@@ -492,6 +494,27 @@ export interface CountdownConfig {
   // (extend bars, pinned headers). x/y stay authored in design px; they become
   // an offset from the target's design position.
   attachToId?: string
+  // Dynamic holiday: show this element only when the promo calendar does (or does
+  // not) have a label for the viewer's local date. 'holiday' is the label itself;
+  // 'noHoliday' is the fallback copy that takes over outside the calendar, so a
+  // designer composes both states as two elements in the same spot. Undefined
+  // reads as 'always'. Re-evaluated at local midnight, like the label itself.
+  showWhen?: 'always' | 'holiday' | 'noHoliday'
+  // Auto-shrink: the maximum rendered width in DESIGN px. The font (and letter
+  // spacing) scale DOWN — never up — until the text fits. Text width is linear in
+  // font size, so the shrink factor is identical at every viewport: the label keeps
+  // a constant size relative to the composition instead of re-fitting per screen.
+  // Combines with text.maxWidthPx, which wraps first; this then shrinks what's left.
+  fitWidthPx?: number
+}
+
+/** One row of the promo calendar: an INCLUSIVE local-date range and the copy the
+ * {holiday} token renders while today falls inside it. Dates are 'YYYY-MM-DD' and
+ * are compared against the viewer's own local date, never UTC. */
+export interface PromoCalendarEntry {
+  start: string
+  end: string
+  label: string
 }
 
 export interface DimConfig {
@@ -1347,11 +1370,12 @@ export interface ProjectMeta {
   // token of the export filename ('unique' vs 'none'). Undefined reads as true
   // so existing MIPs keep the name they already ship with.
   unique?: boolean
-  // Delivery naming: the dynamic-date slot, the token immediately before the
-  // unique/none slot. 'dd' = dynamic date, 'dt' = dynamic date + time, 'none' =
-  // no dynamic date. Undefined reads as 'none'. e.g. '..._human_dd_unique'
-  // (dynamic date + promo) vs '..._human_none_none' (neither).
-  dynamicDate?: 'dd' | 'dt' | 'none'
+  // Delivery naming: the subconcept slot, the token immediately before the
+  // unique/none promo slot. 'dd' = dynamic date, 'dt' = dynamic time,
+  // 'dh' = dynamic holiday, 'dtd' = dynamic date and time, 'none' = no dynamic
+  // element. Undefined reads as 'none'. e.g. '..._human_dd_unique' (dynamic
+  // date + promo) vs '..._human_none_none' (neither).
+  subconcept?: 'dd' | 'dt' | 'dh' | 'dtd' | 'none'
   // Delivery naming for a SIP (a single-scene endscene build): whether the end
   // card reads as a product 'carousel' or a product 'card'. Drives the mechanic
   // slot of the export filename ('product_carousel' vs 'product_card').
@@ -1374,6 +1398,11 @@ export interface ProjectMeta {
   // bottom; 'center' splits the spare height top/bottom so the composition sits in
   // the middle. Top-pinned headers/bars stay pinned regardless.
   vAlign?: 'top' | 'center'
+  // The promo calendar the {holiday} token reads (dynamic holiday). Seeded per
+  // project by the editor — the runtime ships no rows of its own — and stripped at
+  // export when nothing in the project actually uses the token. Undefined means the
+  // token renders empty, which hides a showWhen:'holiday' element.
+  promoCalendar?: PromoCalendarEntry[]
   // Export-time variants — slightly different mechanics/win-conditions of the same
   // MIP. Each is a set of element patches applied on top of the base; export emits
   // one playable per variant. Editor-only field (stripped from the rendered scene).

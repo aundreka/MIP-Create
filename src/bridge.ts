@@ -347,6 +347,20 @@ export function importHtml(): Promise<{ id: string; name: string; src: string; w
   })
 }
 
+/** Read a user-picked text file (the promo-calendar CSV) as plain text. Returns the
+ * file name alongside the contents so the caller can report which sheet it read. */
+export function importCsv(): Promise<{ name: string; text: string } | null> {
+  return new Promise((resolve) => {
+    void pickFiles('.csv,text/csv,text/plain').then((file) => {
+      if (!file) return resolve(null)
+      const reader = new FileReader()
+      reader.onload = () => resolve({ name: file.name, text: String(reader.result ?? '') })
+      reader.onerror = () => resolve(null)
+      reader.readAsText(file)
+    })
+  })
+}
+
 /** Read a user-picked font file into an AssetEntry (data URL; no dimensions).
  * The asset id becomes the CSS font-family name used in TextConfig.fontFamily. */
 export function importFont(): Promise<{ id: string; name: string; src: string; w: number; h: number; kind: 'font' } | null> {

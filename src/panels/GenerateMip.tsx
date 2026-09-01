@@ -23,6 +23,7 @@ export function GenerateMip(props: { onClose: () => void; onQaCheck?: () => void
   const [decor, setDecor] = useState(true)
   const [endDate, setEndDate] = useState(false)
   const [endTimer, setEndTimer] = useState(true)
+  const [endHoliday, setEndHoliday] = useState(false)
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState(false)
   const set = (patch: Partial<Theme>): void => setTheme((t) => ({ ...t, ...patch }))
@@ -49,7 +50,7 @@ export function GenerateMip(props: { onClose: () => void; onQaCheck?: () => void
         logo: logo && { src: logo.src, w: logo.w, h: logo.h },
         product: product && { src: product.src, w: product.w, h: product.h },
         decor,
-        endscene: { dynamicDate: endDate, timer: endTimer, badge: decor },
+        endscene: { dynamicDate: endDate, timer: endTimer, badge: decor, dynamicHoliday: endHoliday },
       })
       await createProject({ project, assets })
       // Last step: offer the QA checker so the fresh MIP can be lined up
@@ -116,6 +117,13 @@ export function GenerateMip(props: { onClose: () => void; onQaCheck?: () => void
           <div className="hint pad">Always: product (animated) + pulsing CTA, wrapped as an MRAID end card.</div>
           <Toggle label="Countdown timer" checked={endTimer} onChange={setEndTimer} />
           <Toggle label="Dynamic date (“Offer ends …”)" checked={endDate} onChange={setEndDate} />
+          <Toggle label="Dynamic holiday (“Labor Day Sale”)" checked={endHoliday} onChange={setEndHoliday} />
+          {endHoliday && (
+            <div className="hint pad">
+              Adds the promo label and its no-promo fallback in one spot, seeds the 2026–2027 promo calendar, and names the MIP’s subconcept <b>dh</b>. Edit the calendar in
+              Project settings.
+            </div>
+          )}
           <Toggle label="Decorative WIN badge" checked={decor} onChange={setDecor} />
         </div>
       </div>

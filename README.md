@@ -27,6 +27,12 @@ Three tiers with strict, one-directional boundaries:
 - **`src/`** — the editor (React 18 + Vite + TypeScript). Custom store via `useSyncExternalStore` (`src/store.ts`). The canvas renders each scene in its own `<iframe>` and communicates only through the typed protocol in `runtime/frame-protocol.ts` — the editor's CSS can never leak into the ad.
 - **`electron/`** — desktop shell (`main.cjs` + `preload.cjs`): native save/load, ffmpeg media transcode, and the AppLovin upload automation. The renderer reaches it through a minimal `contextBridge` surface (`window.editorAPI`).
 
+### Dynamic holiday
+
+A **Dynamic holiday** element (tool rail) is the same `countdown` element as the dynamic date, reading the project's **promo calendar** (`meta.promoCalendar` — the 2026–2027 US retail schedule ships as the editor default in `src/promoCalendar.ts`, or import a client's CSV in Project settings). The `{holiday}` token renders the row covering the **viewer's own local date** — "Labor Day Sale", "Winter Sale" in between — in every format the shared countdown formatter drives: elements, the pinned header band, the countdown-ring label and the scratch-grid cell date. It re-reads at local midnight, so an ad left open across a day boundary updates itself.
+
+Two per-element options complete it: `showWhen` (`holiday` / `noHoliday`) so the promo label and its fallback copy compose both states in one spot, and `fitWidthPx`, a design-px width the font shrinks to fit — by the same factor at every viewport, so the label keeps one size relative to the artwork. The feature changes only the *string* an element renders; it adds no layout path, so a holiday label sits and scales exactly like everything else in game scenes, floated overlays and endscene cards (`runtime/holiday-scale.test.ts` pins that). The editor's **preview date** (Project settings or the countdown inspector; a chip in the top bar while it's on) renders the canvas and Preview as another day so both states can be composed — it is never sent to an export.
+
 **Export** (`src/export.ts`) assembles one HTML file: it inlines `runtime-dist/playable-runtime.js` (imported with `?raw`) + the project/assets as base64, applies per-network transforms (MRAID / ExitAPI / zip), and enforces the 5 MB budget.
 
 ## Project layout

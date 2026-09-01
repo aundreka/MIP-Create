@@ -47,7 +47,8 @@ import { getPicks, isPicked, onPicksChanged, togglePick } from './selection'
 import { createEndsceneContent, updateEndsceneMedia, htmlEndsceneMediaEl, mediaNaturalSize, endsceneCoverFrame } from './elements/endscene'
 import { applyUnboxingImages, createUnboxingContent } from './elements/unboxing'
 import { createConfetti, createConfettiContent, type ConfettiController } from './elements/confetti'
-import { computeDeadline, formatCountdown, formatTickerIntervalMs, needsTicker } from './elements/countdown'
+import { computeDeadline, formatCountdown, formatTickerIntervalMs, needsMidnightRefresh, needsTicker, nextMidnight, runtimeNow } from './elements/countdown'
+import { promoLabelFor } from './elements/promoCalendar'
 import { createGameHost, type GameHost } from './gameHost'
 import { mulberry32 } from './games/types'
 import { COMBO_OFF_CLASS } from './games/combo'
@@ -81,6 +82,14 @@ interface Rec {
   host?: GameHost | null
   deadline?: number // countdown target (ms epoch)
   ticker?: number // countdown setInterval id
+  // Dynamic date / holiday: one setTimeout at the next LOCAL midnight, rescheduled
+  // after each rollover. A date or {holiday} label renders once and would otherwise
+  // still say yesterday on an ad left open across the day boundary.
+  dayTimer?: number
+  // Re-applies countdown.fitWidthPx to the CURRENT string, using the font size and
+  // scale the last layout pass computed. Set by layoutText; called again whenever the
+  // ticker rewrites the text, since a longer label has to shrink further.
+  refit?: () => void
   hg?: { stop(): void } // handguide animator
   confetti?: ConfettiController // confetti particle system
   idle?: { stop(): void } // generic idle visibility animator
@@ -877,11 +886,45 @@ function tickCountdown(rec: Rec): void {
   // A type-out in progress owns the visible string; the ticker still refreshes the
   // underlying value so the reveal keeps typing the CURRENT time, not a stale one.
   inner.textContent = rec.typeShown != null ? sliceText(full, rec.typeShown) : full
+  // The string just changed length, so an auto-shrunk label has to be re-measured
+  // (a holiday label can go from "July 4 Sale" to the Thanksgiving row overnight).
+  rec.refit?.()
 }
+
+/** Does this countdown's display depend on the LOCAL DATE — a date/{holiday} token,
+ * or a holiday-driven visibility rule? Those need one timer a day, not a ticker. */
+function needsDayTimer(el: SceneElement): boolean {
+  const cd = el.countdown
+  if (!cd) return false
+  return needsMidnightRefresh(cd.format || '') || (!!cd.showWhen && cd.showWhen !== 'always')
+}
+
+/** Roll a date-driven element over into the new local day: a 'dynamic' target moves
+ * with today, the label is re-rendered, and layoutRec re-evaluates `showWhen` (and
+ * re-fits the width) so a holiday element can appear or disappear without a rebuild. */
+function refreshDay(rec: Rec): void {
+  if (rec.el.countdown?.mode === 'dynamic') rec.deadline = computeDeadline(rec.el, Date.now())
+  tickCountdown(rec)
+  layoutRec(rec)
+}
+
+function scheduleDayTimer(rec: Rec): void {
+  if (rec.dayTimer) window.clearTimeout(rec.dayTimer)
+  // +1s past midnight so a clock that fires a hair early still reads the new date.
+  rec.dayTimer = window.setTimeout(() => {
+    refreshDay(rec)
+    scheduleDayTimer(rec)
+  }, Math.max(1000, nextMidnight(Date.now()) - Date.now() + 1000))
+}
+
 function startTicker(rec: Rec): void {
   if (rec.ticker) {
     window.clearInterval(rec.ticker)
     rec.ticker = 0
+  }
+  if (rec.dayTimer) {
+    window.clearTimeout(rec.dayTimer)
+    rec.dayTimer = 0
   }
   rec.deadline = computeDeadline(rec.el, Date.now())
   tickCountdown(rec)
@@ -890,6 +933,7 @@ function startTicker(rec: Rec): void {
     const intervalMs = formatTickerIntervalMs(rec.el.countdown?.format || '') || 1000
     rec.ticker = window.setInterval(() => tickCountdown(rec), intervalMs)
   }
+  if (needsDayTimer(rec.el)) scheduleDayTimer(rec)
 }
 
 interface Effective {
@@ -1716,6 +1760,17 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
 
   for (const rec of recs) applyMountAnim(rec)
   for (const rec of recs) if (rec.el.type === 'countdown') startTicker(rec)
+
+  // Containers freeze a creative and resume it later — sometimes on the next day, which
+  // the midnight setTimeout inside a throttled tab may have slept straight through. Cheap
+  // insurance: re-render every date-driven element the moment the ad becomes visible again.
+  const onVisible = (): void => {
+    if (document.visibilityState !== 'visible') return
+    for (const rec of recs) if (rec.el.type === 'countdown' && needsDayTimer(rec.el)) refreshDay(rec)
+  }
+  document.addEventListener('visibilitychange', onVisible)
+  // Cleared in destroy() so a settled document.fonts.ready can't lay out a dead stage.
+  let fontsAlive = true
 
   // 'set-text' lets reveal tallies (and future score drivers) push a value into a
   // text element by id. Mutates the live element so later re-layouts keep the value.
@@ -2782,17 +2837,30 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       enterSfxTimers.length = 0
       for (const dispose of scratchDisposers) dispose()
       scratchDisposers.length = 0
+      document.removeEventListener('visibilitychange', onVisible)
+      fontsAlive = false
       for (const rec of recs) {
         rec.host?.destroy()
         rec.hg?.stop()
         rec.idle?.stop()
         rec.confetti?.destroy()
         if (rec.ticker) window.clearInterval(rec.ticker)
+        if (rec.dayTimer) window.clearTimeout(rec.dayTimer)
         if (rec.typeTimer) window.clearTimeout(rec.typeTimer)
       }
       root.removeEventListener('pa-endscene-media-reset', onEndsceneMediaReset)
       root.remove()
     },
+  }
+
+  // Custom faces load asynchronously: everything measured against the fallback font is
+  // wrong until they land. Only auto-shrunk labels (countdown.fitWidthPx) actually MEASURE
+  // text, so this pass exists for them — one relayout, skipped entirely when the stage is
+  // already gone (the editor rebuilds a scene on every structural edit).
+  if (typeof document !== 'undefined' && document.fonts?.ready) {
+    document.fonts.ready.then(() => {
+      if (fontsAlive) handle.layoutAll()
+    }).catch(() => {})
   }
   return handle
 }
@@ -2939,7 +3007,16 @@ function layoutRec(rec: Rec): void {
   outer.classList.toggle('pa-hide-after-basket-interaction', !!rec.el.hideAfterBasketInteraction)
   outer.style.opacity = e.opacity != null ? String(e.opacity) : ''
 
-  if (e.hidden) {
+  // Dynamic holiday: an element can be tied to whether the promo calendar has a label
+  // for the viewer's LOCAL date — 'holiday' shows only inside a promo period, and its
+  // 'noHoliday' sibling covers the gaps, so a designer composes both states in the same
+  // spot. This is a visibility rule, not a layout path: a hidden element simply skips
+  // layout exactly as `hidden` does, and the day timer re-runs layoutRec at midnight.
+  const showWhen = rec.el.countdown?.showWhen
+  const holidayOff = !!showWhen && showWhen !== 'always' && (showWhen === 'holiday') !== !!promoLabelFor(runtimeNow())
+  outer.classList.toggle('pa-el--holiday-off', holidayOff)
+
+  if (e.hidden || holidayOff) {
     outer.style.display = 'none'
     return
   }
@@ -3621,6 +3698,45 @@ function layoutText(rec: Rec, e: Effective): void {
   inner.style.setProperty('-webkit-text-stroke', t.strokePx ? t.strokePx * s + 'px ' + (t.strokeColor ?? '#000') : '')
   inner.style.whiteSpace = e.w != null || t.maxWidthPx ? 'pre-line' : 'pre'
   inner.style.maxWidth = t.maxWidthPx ? t.maxWidthPx * s + 'px' : ''
+
+  // Auto-shrink (countdown.fitWidthPx): scale the font DOWN until the rendered string
+  // fits a design-px budget. Everything on both sides of the ratio is drawn at the same
+  // scale `s` — the budget is `fitWidthPx * s`, the measured width grows with `s` too —
+  // so the factor is identical at every viewport, and the label keeps a constant size
+  // relative to the composition instead of re-fitting itself per screen. (headerScale
+  // keeps the box in raw design px inside one transform; there `s` is just the element's
+  // own scale, so the same expression is the design-px budget the plan calls for.)
+  // Re-applied by tickCountdown whenever the string changes, and once more when custom
+  // fonts finish loading (buildScene's document.fonts.ready relayout).
+  const fitWidthPx = rec.el.countdown?.fitWidthPx
+  const baseFontPx = t.fontSizePx * s
+  const baseSpacingPx = (t.letterSpacingPx ?? 0) * s
+  if (fitWidthPx && fitWidthPx > 0 && s > 0) {
+    const budget = fitWidthPx * s
+    // Reading scrollWidth forces a synchronous layout, and the ticker can call this a
+    // hundred times a second on an {ms} timer. The fit only depends on the STRING (the
+    // scale is baked into `budget` and `baseFontPx`, and a layout pass rebuilds this
+    // closure), so an unchanged string keeps the size it was already given.
+    let fitted: string | null = null
+    rec.refit = (): void => {
+      const text = inner.textContent ?? ''
+      if (text === fitted) return
+      inner.style.fontSize = baseFontPx + 'px'
+      inner.style.letterSpacing = baseSpacingPx + 'px'
+      // jsdom (and a not-yet-laid-out node) reports 0 — leave the authored size alone
+      // rather than shrinking to nothing on a measurement that never happened.
+      const measured = inner.scrollWidth
+      if (!measured) return
+      fitted = text
+      const factor = Math.min(1, budget / measured)
+      if (factor >= 1) return
+      inner.style.fontSize = baseFontPx * factor + 'px'
+      inner.style.letterSpacing = baseSpacingPx * factor + 'px'
+    }
+    rec.refit()
+  } else {
+    rec.refit = undefined
+  }
 
   // background box
   applyBoxStyle(box, rec.el.box, s)

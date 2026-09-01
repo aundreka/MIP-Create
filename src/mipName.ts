@@ -88,21 +88,29 @@ export function isSip(project: Pick<Project, 'scenes'>): boolean {
   return scene.kind === 'endscene' || (scene.kind === 'overlay' && scene.asEndscene === true)
 }
 
-// The dynamic-date slot: the token that sits between "human" and the unique/none
-// promo slot. 'dd' is a dynamic date, 'dt' a dynamic date + time, and 'none' no
-// dynamic date at all - which is what an unset meta.dynamicDate reads as.
-export function dynamicDateToken(meta: Pick<ProjectMeta, 'dynamicDate'>): 'dd' | 'dt' | 'none' {
-  return meta.dynamicDate === 'dd' || meta.dynamicDate === 'dt' ? meta.dynamicDate : 'none'
+/**
+ * The subconcept slot: the token that sits between "human" and the unique/none
+ * promo slot. 'dd' is a dynamic date, 'dt' a dynamic time, 'dh' a dynamic
+ * holiday, 'dtd' a dynamic date and time, and 'none' no dynamic element - which
+ * is what an unset (or unrecognized) meta.subconcept reads as.
+ */
+export const SUBCONCEPTS = ['none', 'dd', 'dt', 'dh', 'dtd'] as const
+
+export type Subconcept = (typeof SUBCONCEPTS)[number]
+
+export function subconceptToken(meta: Pick<ProjectMeta, 'subconcept'>): Subconcept {
+  const value = meta.subconcept
+  return value && (SUBCONCEPTS as readonly string[]).includes(value) ? value : 'none'
 }
 
 /**
  * The export file base name. Format:
- * "<client>_acslanot_mip_<date>_<version>_emily_game_<mechanic>_human_<dynamicDate>_<unique>"
+ * "<client>_acslanot_mip_<date>_<version>_emily_game_<mechanic>_human_<subconcept>_<unique>"
  * where `<mechanic>` is "unknown" when the MIP has no game mount,
- * `<dynamicDate>` is "dd"/"dt"/"none" per Project settings (see
- * dynamicDateToken), and `<unique>` is "unique" unless Project settings marks
+ * `<subconcept>` is one of dd/dt/dh/dtd/none per Project settings (see
+ * subconceptToken), and `<unique>` is "unique" unless Project settings marks
  * the MIP non-unique ("none") - so a MIP with neither ends "..._none_none" and
- * one with both ends "..._dd_unique".
+ * one with a dynamic date and a promo ends "..._dd_unique".
  *
  * A SIP (one scene, and that scene is an end card - see isSip) swaps the two
  * type slots instead: "..._acslanot_sip_..._emily_product_<format>_human_..."
@@ -114,9 +122,9 @@ export function fileBaseName(project: Pick<Project, 'meta' | 'scenes'>): string 
   const date = compactDateToken(meta.exportDate || meta.mipDate)
   const version = mipVersionToken(meta)
   const unique = meta.unique === false ? 'none' : 'unique'
-  const dynamic = dynamicDateToken(meta)
+  const subconcept = subconceptToken(meta)
   const sip = isSip(project)
   const type = sip ? 'sip' : 'mip'
   const kind = sip ? `product_${meta.sipFormat === 'card' ? 'card' : 'carousel'}` : `game_${exportMechanicToken(project)}`
-  return `${client}_acslanot_${type}_${date}_${version}_emily_${kind}_human_${dynamic}_${unique}`
+  return `${client}_acslanot_${type}_${date}_${version}_emily_${kind}_human_${subconcept}_${unique}`
 }
