@@ -37,8 +37,11 @@ export interface HeaderConfig {
   // Starts after `entrance` finishes, like a scene element's loop does.
   loop?: AnimSpec
   // Beat with the CTA instead of authoring `loop`: the header copies the pulse of the
-  // current scene's CTA button — same keyframes, duration and post-entrance delay, restarted
-  // together with it so the two run in phase. Scenes with no CTA fall back to `loop`.
+  // CTA button that is on screen right now — same keyframes, duration and post-entrance
+  // delay, restarted together with it so the two run in phase. "On screen right now"
+  // outlives the scene it was authored on: a carry-over CTA and the CTA of the scene under
+  // a floated overlay are both still pulsing, so the band keeps following (and keeps its
+  // phase — see followCta's keepPhase). Only with no CTA at all does it fall back to `loop`.
   loopFollowsCta?: boolean
   // Nudge the band away from the physical top-centre, in DESIGN px (they scale with
   // everything else). +x right, +y down. The band keeps its full-bleed width, so an
@@ -85,8 +88,12 @@ interface HeaderHandle {
   setSceneLayout(override: HeaderSceneOverride | null | undefined): void
   /** Adopt the loop of the scene's CTA (`loopFollowsCta`). `css` is that element's loop
    * shorthand — see followLoopCss — or null for a scene with no CTA, which restores the
-   * header's own `loop`. A no-op unless the header opted into following. */
-  followCta(css: string | null): void
+   * header's own `loop`. A no-op unless the header opted into following.
+   * `keepPhase` says the SAME live button is still on screen running that very animation
+   * (a carry-over CTA, or the CTA of the scene under a floated overlay): re-applying the
+   * identical shorthand would restart the band mid-beat and drift out of step with a
+   * button that never restarted, so the band is left running instead. */
+  followCta(css: string | null, keepPhase?: boolean): void
   /** Freeze a live countdown at its current displayed instant for the rest of this playable. */
   freezeCountdown(): void
   destroy(): void
@@ -224,12 +231,14 @@ export function mountHeader(container: HTMLElement, opts: HeaderConfig, clip?: (
   const ownLoopCss = opts.loop ? loopAnimationCss(opts.loop, entranceEndMs) : ''
   // Restarted on each assignment (animation:none + reflow) so a followed CTA pulse starts
   // its cycle with the CTA that was just mounted instead of mid-beat.
+  let appliedLoopCss = ''
   const applyLoop = (css: string): void => {
     if (css) injectAnimStyles()
     text.style.animation = 'none'
     void text.offsetWidth // force reflow so the next assignment restarts the animation
     text.style.animation = css
     text.style.willChange = css ? 'transform' : ''
+    appliedLoopCss = css
   }
   if (ownLoopCss) applyLoop(ownLoopCss)
 
@@ -364,9 +373,12 @@ export function mountHeader(container: HTMLElement, opts: HeaderConfig, clip?: (
       sceneLayout = next
       relayout() // applyLayout runs inside, so size AND position land together
     },
-    followCta(css: string | null) {
+    followCta(css: string | null, keepPhase = false) {
       if (!opts.loopFollowsCta) return
-      applyLoop(css || ownLoopCss)
+      const next = css || ownLoopCss
+      // Same animation, same still-running button: holding the current cycle IS the sync.
+      if (keepPhase && next === appliedLoopCss) return
+      applyLoop(next)
     },
     freezeCountdown,
     destroy() {

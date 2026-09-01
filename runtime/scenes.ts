@@ -390,6 +390,9 @@ export function playProject(project: Project, assets: AssetMap, opts: { mount: H
   }
   const buildPersist = (): void => {
     if (!persistDefs.length) return
+    // One node set for the layer's whole life; a locale rebuild makes a new one, so the
+    // header must not mistake the replacement for the button it was already following.
+    persistCtaKey = 'carry' + ++ctaNodeSeq
     for (const t of persistTiers) {
       if (!t.defs.length) continue // no empty layer for a tier nobody opted into
       const layer = document.createElement('div')
@@ -495,14 +498,65 @@ export function playProject(project: Project, assets: AssetMap, opts: { mount: H
   // headerAllowedFor is shared with the editor canvas (frame.ts) so both agree.
   const headerAllowed = (def: SceneDef): boolean => headerAllowedFor(def)
 
-  // meta.header.loopFollowsCta: the band beats with the CTA button of whatever scene is on
-  // screen. Copy that element's loop (its pulse, or an explicit loop spec) and hand it to the
-  // header at mount time, so both animations start on the same frame and stay in phase.
-  // Scenes without a CTA pass null — the header falls back to its own authored loop.
-  const syncHeaderCta = (def: SceneDef): void => {
+  // meta.header.loopFollowsCta: the band beats with the CTA button that is ON SCREEN — not
+  // merely the one the current scene def happens to list. Three homes count, because a CTA
+  // routinely outlives the scene it was authored on:
+  //   1. the scene's (or floated overlay's) own CTA, rebuilt with it;
+  //   2. a carry-over CTA (`persist`), built once into the carry-over layer and never torn
+  //      down — the same button pulses right through every cut;
+  //   3. while an overlay floats, the CTA of the scene UNDERNEATH it: a CTA is immune by
+  //      default, so it stays parked above the dim (or reads through it with `belowOverlay`)
+  //      and goes on pulsing unless it opted into `hideOnOverlay`.
+  // Missing 2 and 3 is what used to stop the date dead the moment the flow left the scene the
+  // CTA was authored on, or the moment a win card floated over it.
+  //
+  // Each candidate is returned with a key naming the LIVE NODE running the pulse. An unchanged
+  // key means that very button is still going, so the band holds its cycle (keepPhase) instead
+  // of restarting into a beat the button is already halfway through; a new key restarts both
+  // together, as at a plain scene mount. Only with no CTA anywhere does the band fall back to
+  // its own authored loop.
+  type CtaFollow = { css: string; key: string }
+  // Bumped per built node-set so a key can never outlive the DOM it names (a scene remount, a
+  // floated overlay, a locale rebuild of the carry-over layer).
+  let ctaNodeSeq = 0
+  const stageCtaKey = new WeakMap<StageHandle, string>()
+  let persistCtaKey = 'carry0'
+  let ctaFollowKey: string | null = null
+  const tagCtaNodes = (stage: StageHandle): StageHandle => {
+    stageCtaKey.set(stage, 'n' + ++ctaNodeSeq)
+    return stage
+  }
+  const ctaFollow = (def: SceneDef, stage: StageHandle | null, overlayUp: boolean, under: { def: SceneDef; stage: StageHandle } | null): CtaFollow | null => {
+    // `hidden` is authoring-time; hideOnOverlay only takes the button off screen while a
+    // card is actually floating over it.
+    const showing = (e: SceneElement): boolean => e.type === 'cta' && !e.hidden && !(overlayUp && e.hideOnOverlay)
+    const follow = (el: SceneElement | undefined, node: string): CtaFollow | null => {
+      if (!el) return null
+      const css = followLoopCss(el, opts.interactive)
+      return css ? { css, key: `${node}:${el.id}` } : null
+    }
+    // Carry-over elements are stripped out of the scene's own stage (see stripPersist), so
+    // the def's copy of one names a node that lives in the carry-over layer, not here.
+    const own = follow(
+      def.elements.find((e) => !e.persist && showing(e)),
+      stage ? (stageCtaKey.get(stage) ?? 'n0') : 'n0',
+    )
+    if (own) return own
+    const carriedEl = persistTiers.some((t) => t.stage) ? persistDefs.find((e) => showing(e) && showsOn(e, def.id)) : undefined
+    const carried = follow(carriedEl, persistCtaKey)
+    if (carried) return carried
+    if (!under) return null
+    return follow(
+      under.def.elements.find((e) => !e.persist && showing(e)),
+      stageCtaKey.get(under.stage) ?? 'n0',
+    )
+  }
+  const syncHeaderCta = (def: SceneDef, stage: StageHandle | null, overlayUp = false, under: { def: SceneDef; stage: StageHandle } | null = null): void => {
     if (!header) return
-    const cta = def.elements.find((e) => e.type === 'cta' && !e.hidden)
-    header.followCta(cta ? followLoopCss(cta, opts.interactive) || null : null)
+    const next = ctaFollow(def, stage, overlayUp, under)
+    const keepPhase = next != null && next.key === ctaFollowKey
+    ctaFollowKey = next?.key ?? null
+    header.followCta(next?.css ?? null, keepPhase)
   }
 
   // The band is mounted once for the whole flow, so each scene hands it ITS layout —
@@ -545,7 +599,7 @@ export function playProject(project: Project, assets: AssetMap, opts: { mount: H
     const showsHeader = headerAllowed(displayDef)
     if (header && showsHeader && headerGameWinSceneId == null) headerGameWinSceneId = def.id
     header?.setVisible(showsHeader)
-    const stage = buildScene(toScene(displayDef), assets, { mount: container })
+    const stage = tagCtaNodes(buildScene(toScene(displayDef), assets, { mount: container }))
     stage.layoutAll()
     parkImmune(stage)
     syncPersist(def.id) // carry-over elements follow the destination scene's allow-list
@@ -583,7 +637,7 @@ export function playProject(project: Project, assets: AssetMap, opts: { mount: H
       if (isEndscene(displayDef)) armEndcard(displayDef, stage.root)
     }
     syncHeaderLayout(displayDef)
-    syncHeaderCta(displayDef)
+    syncHeaderCta(displayDef, stage)
     return stage
   }
 
@@ -812,13 +866,15 @@ export function playProject(project: Project, assets: AssetMap, opts: { mount: H
         kind: def.kind,
         overlay: def.overlay,
       }
-      const overStage = buildScene(overScene, assets, { mount: overlayDiv, float: true })
+      const overStage = tagCtaNodes(buildScene(overScene, assets, { mount: overlayDiv, float: true }))
       overStage.layoutAll()
       overStage.startGames(true)
       overStage.playEntrances()
       const morphRun = flyMorphs(morphs, overStage)
       syncHeaderLayout(def) // a floated overlay places the band too (it never passes through mountScene)
-      syncHeaderCta(def) // an end-card overlay carries its own CTA — follow THAT one
+      // An end-card overlay carrying its own CTA takes the band over; one that does not
+      // leaves the scene's (still-pulsing, still-immune) CTA underneath in charge.
+      syncHeaderCta(def, overStage, true, current)
       overlayStages.add(overStage)
 
       // Lift the overlay scene's OWN "top layer" (overlayTop) elements OUT of overlayDiv.
@@ -844,7 +900,7 @@ export function playProject(project: Project, assets: AssetMap, opts: { mount: H
         // on a plain dismiss, or the redirect destination (mountScene already set it; same value).
         if (current) header?.setVisible(headerAllowed(current.def))
         if (current) syncHeaderLayout(localizeSceneDef(current.def)) // back to the underlying scene's layout
-        if (current) syncHeaderCta(localizeSceneDef(current.def)) // back to the underlying scene's CTA
+        if (current) syncHeaderCta(localizeSceneDef(current.def), current.stage) // back to the underlying scene's CTA
         if (current) syncPersist(current.def.id)
       }
       const removeOverlayDom = (): void => {
