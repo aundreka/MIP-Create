@@ -88,12 +88,21 @@ export function isSip(project: Pick<Project, 'scenes'>): boolean {
   return scene.kind === 'endscene' || (scene.kind === 'overlay' && scene.asEndscene === true)
 }
 
+// The dynamic-date slot: the token that sits between "human" and the unique/none
+// promo slot. 'dd' is a dynamic date, 'dt' a dynamic date + time, and 'none' no
+// dynamic date at all - which is what an unset meta.dynamicDate reads as.
+export function dynamicDateToken(meta: Pick<ProjectMeta, 'dynamicDate'>): 'dd' | 'dt' | 'none' {
+  return meta.dynamicDate === 'dd' || meta.dynamicDate === 'dt' ? meta.dynamicDate : 'none'
+}
+
 /**
  * The export file base name. Format:
- * "<client>_acslanot_mip_<date>_<version>_emily_game_<mechanic>_human_<unique>"
- * where `<mechanic>` is "unknown" when the MIP has no game mount, and
- * `<unique>` is "unique" unless Project settings marks the MIP non-unique
- * ("none").
+ * "<client>_acslanot_mip_<date>_<version>_emily_game_<mechanic>_human_<dynamicDate>_<unique>"
+ * where `<mechanic>` is "unknown" when the MIP has no game mount,
+ * `<dynamicDate>` is "dd"/"dt"/"none" per Project settings (see
+ * dynamicDateToken), and `<unique>` is "unique" unless Project settings marks
+ * the MIP non-unique ("none") - so a MIP with neither ends "..._none_none" and
+ * one with both ends "..._dd_unique".
  *
  * A SIP (one scene, and that scene is an end card - see isSip) swaps the two
  * type slots instead: "..._acslanot_sip_..._emily_product_<format>_human_..."
@@ -105,8 +114,9 @@ export function fileBaseName(project: Pick<Project, 'meta' | 'scenes'>): string 
   const date = compactDateToken(meta.exportDate || meta.mipDate)
   const version = mipVersionToken(meta)
   const unique = meta.unique === false ? 'none' : 'unique'
+  const dynamic = dynamicDateToken(meta)
   const sip = isSip(project)
   const type = sip ? 'sip' : 'mip'
   const kind = sip ? `product_${meta.sipFormat === 'card' ? 'card' : 'carousel'}` : `game_${exportMechanicToken(project)}`
-  return `${client}_acslanot_${type}_${date}_${version}_emily_${kind}_human_${unique}`
+  return `${client}_acslanot_${type}_${date}_${version}_emily_${kind}_human_${dynamic}_${unique}`
 }

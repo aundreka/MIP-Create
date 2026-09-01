@@ -9,9 +9,9 @@ import type { Project, ProjectMeta, SceneDef, SceneElement } from '../runtime/sc
 import type { AssetEntry, AssetMap } from '../runtime/types'
 import type { ProjectData } from './bridge'
 import { GAME_TEMPLATES } from '../runtime/games/registry'
-import { sfxPreviewUrl } from './sfxLibrary'
+import { sfxAssetSrc } from './sfxLibrary'
 
-const sfxAsset = (id: string): AssetEntry => ({ src: sfxPreviewUrl(id), w: 0, h: 0, kind: 'audio' })
+const sfxAsset = (id: string): AssetEntry => ({ src: sfxAssetSrc(id), w: 0, h: 0, kind: 'audio' })
 
 const VERSION = 1
 

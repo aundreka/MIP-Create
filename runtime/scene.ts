@@ -1347,6 +1347,11 @@ export interface ProjectMeta {
   // token of the export filename ('unique' vs 'none'). Undefined reads as true
   // so existing MIPs keep the name they already ship with.
   unique?: boolean
+  // Delivery naming: the dynamic-date slot, the token immediately before the
+  // unique/none slot. 'dd' = dynamic date, 'dt' = dynamic date + time, 'none' =
+  // no dynamic date. Undefined reads as 'none'. e.g. '..._human_dd_unique'
+  // (dynamic date + promo) vs '..._human_none_none' (neither).
+  dynamicDate?: 'dd' | 'dt' | 'none'
   // Delivery naming for a SIP (a single-scene endscene build): whether the end
   // card reads as a product 'carousel' or a product 'card'. Drives the mechanic
   // slot of the export filename ('product_carousel' vs 'product_card').

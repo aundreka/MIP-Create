@@ -10,7 +10,7 @@ import { getActiveVariant } from './variantMode'
 import { applyVariantPatches } from './variants'
 import { migrateProject } from './migrate'
 import { GAME_TEMPLATES } from '../runtime/games/registry'
-import { sfxPreviewUrl } from './sfxLibrary'
+import { sfxAssetSrc } from './sfxLibrary'
 import { deleteSharedElement, ensureGroupByName, putSharedElement } from './projectGroups'
 import { syncMipName } from './mipName'
 import { getEditLocale, subscribeEditLocale } from './locale'
@@ -1214,10 +1214,30 @@ export function addScene(kind: SceneDef['kind'] = 'overlay'): void {
     transition: { type: 'fade', durationMs: 350 },
   }
   const extraAssets: AssetMap = {}
-  if (kind === 'overlay' && !state.assets['sfx_f_correctBright']) extraAssets['sfx_f_correctBright'] = { src: sfxPreviewUrl('f_correctBright'), w: 0, h: 0, kind: 'audio' }
-  if (kind === 'endscene' && !state.assets['sfx_f_winJingle']) extraAssets['sfx_f_winJingle'] = { src: sfxPreviewUrl('f_winJingle'), w: 0, h: 0, kind: 'audio' }
+  if (kind === 'overlay' && !state.assets['sfx_f_correctBright']) extraAssets['sfx_f_correctBright'] = { src: sfxAssetSrc('f_correctBright'), w: 0, h: 0, kind: 'audio' }
+  if (kind === 'endscene' && !state.assets['sfx_f_winJingle']) extraAssets['sfx_f_winJingle'] = { src: sfxAssetSrc('f_winJingle'), w: 0, h: 0, kind: 'audio' }
   const assets = Object.keys(extraAssets).length ? { ...state.assets, ...extraAssets } : state.assets
   set({ dirty: true, activeSceneId: id, selectedIds: [], project: { ...state.project, scenes: [...state.project.scenes, sd] }, assets })
+  settleProjectSfx(extraAssets)
+}
+
+// Upgrade freshly-seeded built-in SFX to self-contained data URLs. A recorded clip
+// is seeded with its Vite bundle URL (see sfxAssetSrc) so it plays at once, but that
+// URL is content-hashed and dies on the next build or deploy — a project saved while
+// still holding one loses that sound, which is how the scratch loop went silent.
+// Fire-and-forget: patches state in place, never marks the project dirty on its own.
+function settleProjectSfx(seeded: AssetMap): void {
+  if (!Object.keys(seeded).length) return
+  const project = state.project
+  void import('./sfxLibrary')
+    .then(async ({ inlineProjectSfx }) => {
+      const changed = await inlineProjectSfx(seeded)
+      if (changed && state.project === project) {
+        state = { ...state, assets: { ...state.assets, ...changed } }
+        emit()
+      }
+    })
+    .catch(() => {})
 }
 
 export function addGameScene(templateId: string): void {
@@ -1262,11 +1282,12 @@ export function addGameScene(templateId: string): void {
   }
   const extraAssets: AssetMap = {}
   if (isScratch) {
-    if (!state.assets['sfx_f_scratch']) extraAssets['sfx_f_scratch'] = { src: sfxPreviewUrl('f_scratch'), w: 0, h: 0, kind: 'audio' }
-    if (!state.assets['sfx_f_correctBright']) extraAssets['sfx_f_correctBright'] = { src: sfxPreviewUrl('f_correctBright'), w: 0, h: 0, kind: 'audio' }
+    if (!state.assets['sfx_f_scratch']) extraAssets['sfx_f_scratch'] = { src: sfxAssetSrc('f_scratch'), w: 0, h: 0, kind: 'audio' }
+    if (!state.assets['sfx_f_correctBright']) extraAssets['sfx_f_correctBright'] = { src: sfxAssetSrc('f_correctBright'), w: 0, h: 0, kind: 'audio' }
   }
   const assets = Object.keys(extraAssets).length ? { ...state.assets, ...extraAssets } : state.assets
   set({ dirty: true, activeSceneId: id, selectedIds: [], project: { ...state.project, scenes: [...state.project.scenes, sd] }, assets })
+  settleProjectSfx(extraAssets)
 }
 export function duplicateScene(id: string): void {
   const sd = state.project.scenes.find((s) => s.id === id)

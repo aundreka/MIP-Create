@@ -192,9 +192,26 @@ export function sfxItems(): SfxItem[] {
 }
 
 /** Source to feed `new Audio()` for a one-shot preview: a synthesized data URL,
- * or the bundled file URL for recorded clips (streamed, not converted). */
+ * or the bundled file URL for recorded clips (streamed, not converted).
+ *
+ * PREVIEW ONLY — never persist this into an AssetEntry. For a recorded clip it
+ * returns a CONTENT-HASHED bundle URL (`/assets/sfx/scratch-<hash>.wav`), which
+ * dies on the next build or deploy when the hash changes, so a project saved with
+ * one loses that sound. Seed assets with `sfxAssetSrc` instead, which inlines. */
 export function sfxPreviewUrl(id: string): string {
   return id in FILE_DEFS ? fileUrl(id) : sfxDataUrl(id)
+}
+
+/** Persistence-grade `src` for seeding a built-in SFX asset synchronously.
+ *
+ * Synth clips render inline, so they are already self-contained. A recorded clip
+ * has no data URL until it has been fetched once, so this returns the bundle URL
+ * as a SEED — playable immediately, but not durable. Callers must pair it with
+ * `inlineProjectSfx` (see `settleProjectSfx`) to upgrade it to a data URL before
+ * the project is saved; a cached clip skips the seed and is durable right away. */
+export function sfxAssetSrc(id: string): string {
+  if (id in FILE_DEFS) return fileDataUrlCache[id] ?? fileUrl(id)
+  return sfxDataUrl(id)
 }
 
 /** Add a built-in sound to the shared asset library (idempotent) and return its
@@ -239,10 +256,15 @@ export async function builtinSfxDataUrl(id: string): Promise<string | null> {
 export async function inlineProjectSfx(assets: AssetMap): Promise<Record<string, AssetEntry> | null> {
   const changed: Record<string, AssetEntry> = {}
   for (const [id, a] of Object.entries(assets)) {
-    if (!a || a.kind !== 'audio' || !a.src || a.src.startsWith('data:')) continue
+    if (!a || a.kind !== 'audio' || a.src?.startsWith('data:')) continue
+    // An EMPTY src is recoverable too, and must not be skipped: a built-in SFX is
+    // regenerated from its `sfx_<id>` key alone and needs no stored bytes at all.
+    // Skipping these left a clip whose bytes went missing (a dropped IndexedDB
+    // write, a half-restored backup) permanently silent despite being trivially
+    // rebuildable — which reads as "some SFX stopped working" while others are fine.
     let src: string | null = null
     if (id.startsWith('sfx_')) src = await builtinSfxDataUrl(id.slice(4))
-    if (!src) src = await remoteToDataUrl(a.src) // custom/uploaded audio whose URL still resolves
+    if (!src && a.src) src = await remoteToDataUrl(a.src) // custom/uploaded audio whose URL still resolves
     if (src && src.startsWith('data:')) changed[id] = { ...a, src }
   }
   return Object.keys(changed).length ? changed : null

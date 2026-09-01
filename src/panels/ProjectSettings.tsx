@@ -118,10 +118,21 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
       <Row label="MIP name">
         <input value={mipName(m)} readOnly title="Auto-named from Client + MIP + Date" />
       </Row>
+      <Row label="Dynamic date">
+        <Select
+          value={m.dynamicDate ?? 'none'}
+          options={[
+            { value: 'none', label: 'None — no dynamic date (…_human_none_…)' },
+            { value: 'dd', label: 'dd — dynamic date (…_human_dd_…)' },
+            { value: 'dt', label: 'dt — dynamic date + time (…_human_dt_…)' },
+          ]}
+          onChange={(v) => patchMeta({ dynamicDate: v as 'dd' | 'dt' | 'none' })}
+        />
+      </Row>
       <Checkbox
         label="Unique creative"
         checked={m.unique !== false}
-        title="Off names the export …_human_none instead of …_human_unique"
+        title="Off names the export …_none instead of …_unique in the last slot"
         onChange={(v) => patchMeta({ unique: v })}
       />
       {isSip(project) && (
@@ -139,7 +150,7 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
       <Row label="Export file">
         <input value={fileBaseName(project)} readOnly title="Export filename stem" />
       </Row>
-      <div className="hint pad">Auto-named <b>Client + MIP + Date</b>. Export files use <b>client_acslanot_mip_date_mip_emily_game_mechanic_human_unique</b>. A MIP with no minigame names the mechanic slot <b>unknown</b>; clearing <b>Unique creative</b> ends the name in <b>none</b>. A <b>SIP</b> — one scene, and that scene is an end card — names itself <b>client_acslanot_sip_date_mip_emily_product_carousel_human_unique</b>, with <b>SIP format</b> switching <b>carousel</b> ↔ <b>card</b>.</div>
+      <div className="hint pad">Auto-named <b>Client + MIP + Date</b>. Export files use <b>client_acslanot_mip_date_mip_emily_game_mechanic_human_dynamicdate_unique</b>. A MIP with no minigame names the mechanic slot <b>unknown</b>; <b>Dynamic date</b> sets the second-to-last slot (<b>dd</b> / <b>dt</b> / <b>none</b>) and clearing <b>Unique creative</b> ends the name in <b>none</b> — so no dynamic date and no promo ends <b>…_none_none</b>, and a dynamic date with a promo ends <b>…_dd_unique</b>. A <b>SIP</b> — one scene, and that scene is an end card — names itself <b>client_acslanot_sip_date_mip_emily_product_carousel_human_none_unique</b>, with <b>SIP format</b> switching <b>carousel</b> ↔ <b>card</b>.</div>
       <div className="grid2">
         <NumField label="Base W" value={m.baseW} suffix="px" onChange={(n) => patchMeta({ baseW: n })} />
         <NumField label="Base H" value={m.baseH} suffix="px" onChange={(n) => patchMeta({ baseH: n })} />
