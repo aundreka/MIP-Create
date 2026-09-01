@@ -11,7 +11,9 @@
 //     opacity the author gave it until one of its copies is caught.
 //   * the BOX is a single slot too, and assigning one replaces the game's own basket
 //     rig: where it was dropped on the canvas is where it stays, the height it sits at
-//     IS the catch line, and it only ever moves sideways.
+//     IS the catch line, and it only ever moves sideways. Its FRONT is an optional second
+//     slot — art that travels with the box and paints over the falling items, so a catch
+//     lands behind it and reads as going INTO the box.
 //   * the CHECK MARK is a single slot for the whole game. It is copied onto each item as
 //     that item is caught, so a five-item board needs one assignment rather than five.
 //   * an element holds at most one role: naming an item as the check mark MOVES it.
@@ -56,7 +58,7 @@ export function assignCatchSlot(args: AssignCatchArgs): CatchSlotEdit[] {
       catchRole: {
         gameId,
         role,
-        index: role === 'item' ? Math.max(1, Math.round(index ?? 1)) : undefined,
+        index: role === 'item' || role === 'soften' || role === 'collected' ? Math.max(1, Math.round(index ?? 1)) : undefined,
         // Whether the hidden check mark is shown on the canvas is a property of that
         // element's authoring state, not of the slot, so it survives a move.
         showOnCanvas: role === 'check' ? existing?.catchRole?.showOnCanvas : undefined,
@@ -83,7 +85,10 @@ export function releaseItem(elements: SceneElement[], gameId: string, index: num
   const edits: CatchSlotEdit[] = []
   for (const e of catchMembers(elements, gameId)) {
     const r = e.catchRole
-    if (r?.role !== 'item') continue
+    // A 'collected' element is addressed by ITS item's number, so it has to slide along with
+    // the renumbering — otherwise removing item 2 of five leaves every in-box place attached
+    // to the wrong product.
+    if (r?.role !== 'item' && r?.role !== 'collected') continue
     const at = r.index ?? 1
     if (at === index) edits.push({ id: e.id, patch: { catchRole: undefined } })
     else if (at > index) edits.push({ id: e.id, patch: { catchRole: { ...r, index: at - 1 } } })
@@ -107,6 +112,39 @@ export function catchItems(elements: SceneElement[], gameId: string): SceneEleme
 /** The one box, if the board has one. */
 export function catchBox(elements: SceneElement[], gameId: string): SceneElement | undefined {
   return catchMembers(elements, gameId).find((e) => e.catchRole?.role === 'box')
+}
+
+/** The element standing in for item `index` once it has been caught — its place in the box.
+ * Addressed by the ITEM's number, so clearing one never renumbers the others. */
+export function catchCollected(elements: SceneElement[], gameId: string, index: number): SceneElement | undefined {
+  return catchMembers(elements, gameId).find((e) => e.catchRole?.role === 'collected' && (e.catchRole.index ?? 1) === index)
+}
+
+/** The elements the falling items are softened behind, in slot order. */
+export function catchSoften(elements: SceneElement[], gameId: string): SceneElement[] {
+  return catchMembers(elements, gameId)
+    .filter((e) => e.catchRole?.role === 'soften')
+    .sort((a, b) => (a.catchRole?.index ?? 1) - (b.catchRole?.index ?? 1))
+}
+
+/** Drop soften slot `index`, closing the gap. Nothing is addressed BY these numbers — they
+ * only keep the panel's rows stable — but they still have to stay a run without holes, or
+ * the row after the one removed would come back as an empty slot. */
+export function releaseSoften(elements: SceneElement[], gameId: string, index: number): CatchSlotEdit[] {
+  const edits: CatchSlotEdit[] = []
+  for (const e of catchMembers(elements, gameId)) {
+    const r = e.catchRole
+    if (r?.role !== 'soften') continue
+    const at = r.index ?? 1
+    if (at === index) edits.push({ id: e.id, patch: { catchRole: undefined } })
+    else if (at > index) edits.push({ id: e.id, patch: { catchRole: { ...r, index: at - 1 } } })
+  }
+  return edits
+}
+
+/** The box's front layer, if one is assigned — the art the falling items pass behind. */
+export function catchBoxFront(elements: SceneElement[], gameId: string): SceneElement | undefined {
+  return catchMembers(elements, gameId).find((e) => e.catchRole?.role === 'boxfront')
 }
 
 /** The one check mark, if the board has one. */
@@ -134,6 +172,9 @@ export function catchOptionLabel(el: SceneElement): string {
   if (r?.role === 'item') return `${base} — falling item ${r.index ?? 1}`
   if (r?.role === 'check') return `${base} — the check mark`
   if (r?.role === 'box') return `${base} — the box`
+  if (r?.role === 'boxfront') return `${base} — the front of the box`
+  if (r?.role === 'soften') return `${base} — items soften behind it`
+  if (r?.role === 'collected') return `${base} — item ${r.index ?? 1} in the box`
   if (el.tapRole) return `${base} — in the tap-to-remove board`
   if (el.revealRole) return `${base} — in the tap-to-reveal board`
   if (el.cleanRole) return `${base} — in the drag-to-clean board`
@@ -147,6 +188,9 @@ export function catchOptionLabel(el: SceneElement): string {
 export function catchSlotSummary(role: CatchRoleConfig): string {
   if (role.role === 'item') return `falling item ${role.index ?? 1}, and its tick in the row`
   if (role.role === 'box') return 'the box — it catches at the height you placed it, and only moves sideways'
+  if (role.role === 'boxfront') return 'the front of the box — it rides with the box, and the falling items pass behind it'
+  if (role.role === 'soften') return 'falling items blur and fade while passing behind it, so its art stays legible'
+  if (role.role === 'collected') return `item ${role.index ?? 1}'s place in the box — it appears there once that item is caught`
   return 'the check mark stamped on each item as it is caught'
 }
 

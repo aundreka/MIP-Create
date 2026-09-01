@@ -83,33 +83,59 @@ export function loadProjectData(id: string): ProjectData | null {
   }
 }
 
-// Persist a project. With IndexedDB, asset BYTES go to IDB and only metadata
-// (w/h/kind/compress, empty src) lands in localStorage — so media-heavy MIPs no
-// longer overflow the ~5MB cap. Without IDB, bytes stay inline (today's behavior).
-// localStorage is written synchronously; the returned promise resolves once the
-// IDB byte-write completes. Only assets WITH a src are written (so re-saving a
-// metadata-only bundle, e.g. a rename, never clobbers existing bytes).
-function writeData(id: string, data: ProjectData): Promise<void> {
-  let stored: ProjectData = data
-  const bytes: Record<string, string> = {}
-  if (idbAvailable()) {
-    const meta: AssetMap = {}
-    for (const [aid, a] of Object.entries(data.assets)) {
-      meta[aid] = { ...a, src: '' }
-      if (a.src && !flushed.has(id + '/' + aid)) bytes[aid] = a.src // only bytes not already in IDB
-    }
-    stored = { project: data.project, assets: meta, trace: data.trace }
-  }
+function writeSlot(id: string, bundle: ProjectData): void {
   try {
-    localStorage.setItem(DATA_PREFIX + id, JSON.stringify(stored))
+    localStorage.setItem(DATA_PREFIX + id, JSON.stringify(bundle))
   } catch {
     /* quota — should be rare now that bytes live in IDB */
   }
+}
+
+// Persist a project. With IndexedDB, asset BYTES go to IDB and only metadata
+// (w/h/kind/compress, empty src) lands in localStorage — so media-heavy MIPs no
+// longer overflow the ~5MB cap. Without IDB, bytes stay inline (today's behavior).
+// Only assets WITH a src are written (so re-saving a metadata-only bundle, e.g. a
+// rename, never clobbers existing bytes).
+//
+// WRITE-AHEAD ORDER MATTERS. The stripped bundle (src: '') may only be stored once
+// the bytes are CONFIRMED in IDB — otherwise a refused write (quota, a transaction
+// abort, a browser blocking site data) erases the sole remaining copy: localStorage
+// no longer has it, IDB never got it, and `flushed` would mark it done so no later
+// save retries. That silently blanks every image in the project on the next open.
+// So: flush to IDB first, and if it refuses, keep the bytes inline in localStorage
+// exactly as the no-IDB fallback does.
+async function writeData(id: string, data: ProjectData): Promise<void> {
+  if (!idbAvailable()) {
+    writeSlot(id, data) // no IDB — bytes stay inline
+    return
+  }
+  const meta: AssetMap = {}
+  const bytes: Record<string, string> = {}
+  for (const [aid, a] of Object.entries(data.assets)) {
+    meta[aid] = { ...a, src: '' }
+    if (a.src && !flushed.has(id + '/' + aid)) bytes[aid] = a.src // only bytes not already in IDB
+  }
+  const stripped: ProjectData = { project: data.project, assets: meta, trace: data.trace }
   const ids = Object.keys(bytes)
-  return ids.length ? putAssetBytes(id, bytes).then(() => ids.forEach((aid) => flushed.add(id + '/' + aid))) : Promise.resolve()
+  // Nothing new to flush: every src is either empty or already confirmed in IDB,
+  // so the stripped bundle is safe to store right away (the common autosave).
+  if (!ids.length) {
+    writeSlot(id, stripped)
+    return
+  }
+  if (await putAssetBytes(id, bytes)) {
+    for (const aid of ids) flushed.add(id + '/' + aid)
+    writeSlot(id, stripped)
+    return
+  }
+  console.warn(`[projects] IndexedDB refused ${ids.length} asset(s) for ${id}; keeping bytes inline in localStorage`)
+  writeSlot(id, data)
 }
 
 // Fill in any asset `src` that lives in IndexedDB (empty src in the stored bundle).
+// An id the store cannot return is an asset that will render as a blank box, so say
+// so loudly — silently handing back `src: ''` is what made this class of bug so hard
+// to see. Anything still missing stays unflushed, so the next save re-attempts it.
 async function rehydrate(id: string, assets: AssetMap): Promise<AssetMap> {
   const missing = Object.entries(assets)
     .filter(([, a]) => !a.src)
@@ -117,6 +143,8 @@ async function rehydrate(id: string, assets: AssetMap): Promise<AssetMap> {
   if (!missing.length) return assets
   const bytes = await getAssetBytes(id, missing)
   for (const aid of Object.keys(bytes)) flushed.add(id + '/' + aid) // confirmed present in IDB
+  const lost = missing.filter((aid) => bytes[aid] == null)
+  if (lost.length) console.warn(`[projects] ${lost.length}/${missing.length} asset(s) have no bytes in IndexedDB for ${id}:`, lost)
   const out: AssetMap = {}
   for (const [aid, a] of Object.entries(assets)) out[aid] = a.src ? a : bytes[aid] != null ? { ...a, src: bytes[aid] } : a
   return out

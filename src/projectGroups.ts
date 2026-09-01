@@ -152,19 +152,20 @@ export async function putSharedElement(groupId: string, el: SceneElement, assets
   for (const aid of referencedAssetIds(el)) {
     const a = assets[aid]
     if (!a) continue
-    if (idbAvailable()) {
-      assetMeta[aid] = { ...a, src: '' }
-      if (a.src) bytes[aid] = a.src
-    } else {
-      assetMeta[aid] = { ...a } // no IDB: keep bytes inline
-    }
+    assetMeta[aid] = { ...a }
+    if (idbAvailable() && a.src) bytes[aid] = a.src
+  }
+  // Flush the bytes BEFORE recording them as living in IDB. Stripping `src` up
+  // front and then discovering the write was refused would leave the shared
+  // element pointing at bytes that exist nowhere — see writeData in projects.ts.
+  const ids = Object.keys(bytes)
+  if (ids.length && (await putAssetBytes(assetScope(groupId), bytes))) {
+    for (const aid of ids) assetMeta[aid] = { ...assetMeta[aid], src: '' }
   }
   const map = readShared(groupId)
   map[key] = { key, scope, el: rest, assetMeta, updatedAt: nowTs() }
   writeShared(groupId, map)
   touchGroup(groupId)
-  const ids = Object.keys(bytes)
-  if (ids.length) await putAssetBytes(assetScope(groupId), bytes)
 }
 
 export function deleteSharedElement(groupId: string, key: string): void {

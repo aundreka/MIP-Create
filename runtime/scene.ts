@@ -854,10 +854,22 @@ export interface CatchRoleConfig {
   gameId?: string
   /** 'item' is one of the things that fall (and its own tick-list entry); 'check' is
    * the one mark stamped over each item as it is caught; 'box' is the thing that
-   * catches them — placed on the canvas, and its placed position IS the catch line. */
-  role: 'item' | 'check' | 'box'
-  /** 'item' only, 1-based. Which falling item this is — the index the caught-item
-   * layout lists (position, angle, scale in the basket) are addressed by. */
+   * catches them — placed on the canvas, and its placed position IS the catch line.
+   * 'boxfront' is the box's FRONT layer: a second element that rides along with the box
+   * and paints over the falling items, so a caught thing drops in BEHIND it and looks
+   * like it landed inside. It is the placed-box equivalent of the built-in rig's front
+   * basket image, and means nothing without a 'box'. 'soften' marks an element the
+   * falling items should read faintly through: while a copy is passing behind one, it is
+   * blurred and faded so the element's own art stays legible. Any number of them.
+   * 'collected' is one item's place IN the box: an element the author positioned inside the
+   * box on the canvas, hidden while the game runs until that item is caught, at which point
+   * the falling copy turns into it. Layer them over each other on the canvas and the box
+   * fills up as a stack. Addressed by `index` — the item it belongs to. */
+  role: 'item' | 'check' | 'box' | 'boxfront' | 'soften' | 'collected'
+  /** 1-based. For an 'item', which falling item this is — the index the caught-item layout
+   * lists (position, angle, scale in the basket) are addressed by. For a 'collected'
+   * element, the item whose place in the box it is. For 'soften' it only keeps the panel's
+   * rows stable. */
   index?: number
   /** 'check' only, authoring-only: keep it visible on the editor canvas while it is
    * being positioned. Play always starts with it hidden — what the player sees are the
@@ -984,19 +996,27 @@ export interface SyncConfig {
 // point (originX/originY). It animates only during interactive playback
 // (Preview/export); the editor canvas shows a single frozen frame so it can be placed.
 export interface ConfettiConfig {
-  mode?: 'rain' | 'burst'
+  // 'rain' falls from the top; 'burst' throws pieces up and out across the screen;
+  // 'pop' is a party-popper — punched shards and curved paper ribbons thrown out to
+  // a fixed RADIUS around the origin (not the whole screen), with a few big
+  // out-of-focus pieces in front of the lens for depth.
+  mode?: 'rain' | 'burst' | 'pop'
   trigger?: 'sceneEnter' | 'onGameWin' // when it fires (default sceneEnter)
   pieces?: number // particle count (default 200)
-  colors?: string[] // palette (default a Material-ish 16-colour set)
-  gravity?: number // downward acceleration per frame (default 0.08 rain / 0.28 burst)
+  colors?: string[] // palette (default a Material-ish 16-colour set; 6 party colours for pop)
+  gravity?: number // downward acceleration per frame (default 0.08 rain / 0.28 burst / 0.05 pop)
   wind?: number // constant horizontal drift (default 0)
   spread?: number // initial horizontal velocity range, rain (default 5)
-  power?: number // launch/fall speed (default 8 rain / 9 burst)
+  power?: number // launch/fall speed (default 8 rain / 9 burst; unused by pop — see radius)
   scalar?: number // piece-size multiplier (default 1)
   recycle?: boolean // rain: keep respawning pieces so it never runs out (default true)
   durationMs?: number // rain+recycle: emit for N ms then let it fall out (0/unset = forever)
-  originX?: number // burst origin X, % of width (default 50)
-  originY?: number // burst origin Y, % of height (default 45)
+  originX?: number // burst/pop origin X, % of width (default 50)
+  originY?: number // burst/pop origin Y, % of height (default 45)
+  radius?: number // pop: how far the cloud reaches, % of the screen's SHORT side (default 45)
+  holdMs?: number // pop: how long the cloud stays up before it starts fading (default 1400)
+  fadeMs?: number // pop: fade-out length (default 900; 0 = never fade, drift off instead)
+  blurDepth?: boolean // pop: big out-of-focus foreground pieces (default true)
 }
 
 export interface GameMountConfig {

@@ -14,23 +14,52 @@ export function idbAvailable(): boolean {
   return typeof indexedDB !== 'undefined'
 }
 
-let dbp: Promise<IDBDatabase | null> | null = null
-function openDb(): Promise<IDBDatabase | null> {
-  if (dbp) return dbp
-  dbp = new Promise((resolve) => {
+// One `indexedDB.open` at a fixed version, resolving null on any failure.
+function rawOpen(version?: number): Promise<IDBDatabase | null> {
+  return new Promise((resolve) => {
     try {
-      if (!idbAvailable()) return resolve(null)
-      const req = indexedDB.open(DB_NAME, 1)
+      const req = version == null ? indexedDB.open(DB_NAME) : indexedDB.open(DB_NAME, version)
       req.onupgradeneeded = () => {
         if (!req.result.objectStoreNames.contains(STORE)) req.result.createObjectStore(STORE)
       }
       req.onsuccess = () => resolve(req.result)
       req.onerror = () => resolve(null)
+      // `blocked` fires neither success nor error — without this the promise (and
+      // every caller awaiting it, including boot's rehydrate) would hang forever.
+      req.onblocked = () => resolve(null)
     } catch {
       resolve(null)
     }
   })
-  return dbp
+}
+
+let dbp: Promise<IDBDatabase | null> | null = null
+function openDb(): Promise<IDBDatabase | null> {
+  if (dbp) return dbp
+  const p: Promise<IDBDatabase | null> = (async () => {
+    if (!idbAvailable()) return null
+    // Open at whatever version exists (no version arg) so we never *downgrade* —
+    // opening at 1 against a higher-versioned DB errors outright.
+    const db = await rawOpen()
+    if (!db || db.objectStoreNames.contains(STORE)) return db
+    // The database exists but has no object store: an upgrade that was interrupted
+    // (tab closed mid-`onupgradeneeded`, an aborted upgrade transaction) leaves this
+    // behind, and it is silently fatal — `open` succeeds, so nothing reports an
+    // error, but every transaction throws NotFoundError, so reads return nothing
+    // and writes report failure forever. Repair it by reopening one version higher,
+    // which is the only way to get an upgrade transaction and create the store.
+    const version = db.version + 1
+    db.close()
+    return rawOpen(version)
+  })()
+  dbp = p
+  // Never cache a failure: a transient open error (another tab upgrading, a
+  // storage hiccup) would otherwise disable the byte store for the whole session
+  // and every save would fall back to inline bytes against the 5MB cap.
+  void p.then((db) => {
+    if (!db && dbp === p) dbp = null
+  })
+  return p
 }
 
 const keyFor = (projectId: string, assetId: string): string => `${projectId}/${assetId}`

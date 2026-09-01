@@ -6,6 +6,7 @@ import type {
   Anchor,
   AdjustConfig,
   AdvanceOn,
+  CatchRoleConfig,
   AnimPresetId,
   AnimSpec,
   AnimTrigger,
@@ -163,13 +164,17 @@ import {
 import {
   assignCatchSlot,
   catchBox,
+  catchBoxFront,
   catchCandidates,
+  catchCollected,
+  catchSoften,
   catchCheck,
   catchItems,
   catchOptionLabel,
   catchSlotCount,
   catchSlotSummary,
   releaseItem,
+  releaseSoften,
   setCatchCanvasVisible,
   type CatchSlotEdit,
 } from '../catchSlots'
@@ -2673,6 +2678,8 @@ function CatchBoardSetup({ params, setParam, elementId, siblings }: CatchBoardSe
   const items = catchItems(siblings, elementId)
   const check = catchCheck(siblings, elementId)
   const box = catchBox(siblings, elementId)
+  const boxFront = catchBoxFront(siblings, elementId)
+  const soften = catchSoften(siblings, elementId)
   // Always one empty slot past the end, so the board grows by filling rather than by
   // pressing an "add" button first.
   const slots = Math.max(catchSlotCount(siblings, elementId), items.length) + 1
@@ -2684,7 +2691,7 @@ function CatchBoardSetup({ params, setParam, elementId, siblings }: CatchBoardSe
     for (const e of edits) patchElement(e.id, e.patch)
     endTransaction()
   }
-  const assign = (nextId: string, current: SceneElement | undefined, role: 'item' | 'check' | 'box', index?: number): void => {
+  const assign = (nextId: string, current: SceneElement | undefined, role: CatchRoleConfig['role'], index?: number): void => {
     apply(assignCatchSlot({ nextId, current, role, gameId: elementId, index, elements: siblings }))
     // The unique-item count is what the older image-slot path counts by, and the catch
     // effects panel is built on it; keeping it level with the row means the two can't
@@ -2702,7 +2709,7 @@ function CatchBoardSetup({ params, setParam, elementId, siblings }: CatchBoardSe
 
   /** One assignment row. `hides` marks the kind play keeps hidden — the check mark —
    * which gets the eye that holds it on the canvas while it is being positioned. */
-  const slot = (label: string, hint: string, current: SceneElement | undefined, role: 'item' | 'check' | 'box', index?: number, hides = false): JSX.Element => (
+  const slot = (label: string, hint: string, current: SceneElement | undefined, role: CatchRoleConfig['role'], index?: number, hides = false): JSX.Element => (
     <div className="combo-slot" key={`${role}${index ?? 0}-${current?.id ?? 'add'}`}>
       <span title={hint}>{label}</span>
       <Select value={current?.id ?? ''} onChange={(v) => assign(v, current, role, index)} options={choices(current)} title={hint} />
@@ -2739,6 +2746,21 @@ function CatchBoardSetup({ params, setParam, elementId, siblings }: CatchBoardSe
           ? 'The catch line is the top of this element, where you placed it. Move it on the canvas to move the line — the Basket section below no longer applies.'
           : 'Leave this empty to use the uploaded basket images and the Basket settings below instead.'}
       </div>
+      {box && (
+        <>
+          {slot(
+            'Front',
+            'Optional. A second element placed over the box — its front wall. It slides with the box and the falling items pass BEHIND it, so a catch drops into the box instead of landing on its face.',
+            boxFront,
+            'boxfront',
+          )}
+          <div className="hint pad">
+            {boxFront
+              ? 'Falling items pass behind this and in front of the box, so a catch lands inside. It travels with the box, so place it over the box on the canvas.'
+              : 'Leave this empty and the items simply land in front of the whole box.'}
+          </div>
+        </>
+      )}
       <div className="group-title2">Placed items</div>
       {Array.from({ length: slots }, (_, i) => {
         const index = i + 1
@@ -2752,6 +2774,14 @@ function CatchBoardSetup({ params, setParam, elementId, siblings }: CatchBoardSe
               'item',
               index,
             )}
+            {item &&
+              slot(
+                `↳ In box`,
+                'Optional. An element you placed inside the box on the canvas. When this item is caught the falling copy turns into it, exactly where you put it — so the box fills with the products it collected. Stack these over each other to build a pile.',
+                catchCollected(siblings, elementId, index),
+                'collected',
+                index,
+              )}
             {item && (
               <div className="combo-slot">
                 <span />
@@ -2781,6 +2811,37 @@ function CatchBoardSetup({ params, setParam, elementId, siblings }: CatchBoardSe
         {items.length === 0
           ? 'Optional. Assign elements you have placed on the canvas and they become the falling items — each one dimmed until it is caught. Leave this empty to use the uploaded images below instead.'
           : `The board is these ${items.length} elements${params.requireUnique === false ? '' : ', won when one of each has been caught'}. Each falls at its own size on the canvas times the scale below.`}
+      </div>
+      <div className="group-title2">Soften behind</div>
+      {Array.from({ length: soften.length + 1 }, (_, i) => {
+        const index = i + 1
+        const el = soften.find((e) => (e.catchRole?.index ?? 1) === index)
+        return (
+          <div key={`soften${index}`}>
+            {slot(
+              `Element ${index}`,
+              'Optional. A falling item passing behind this element is blurred and faded, so the element’s own art stays legible over the traffic behind it. Set the strength in Falling Items below.',
+              el,
+              'soften',
+              index,
+            )}
+            {el && (
+              <div className="combo-slot">
+                <span />
+                <button className="btn" onClick={() => apply(releaseSoften(siblings, elementId, index))}>
+                  Remove element {index}
+                </button>
+                <span className="combo-slot-actions" />
+              </div>
+            )}
+          </div>
+        )
+      })}
+      <div className="hint pad">
+        The placed items above are softened behind automatically — the row is read constantly while copies of those same items rain past it.{' '}
+        {soften.length === 0
+          ? 'Add anything else the falling items should read faintly through here: a logo, a title, whatever the board would otherwise clutter. Only the falling copies are touched; the element itself is never dimmed.'
+          : `Plus these ${soften.length}. Strength is set by Soften blur / opacity in Falling Items below.`}
       </div>
     </>
   )
@@ -5672,6 +5733,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                   items={[
                     { key: 'rain', label: 'Rain', active: mode === 'rain', onClick: () => set({ mode: 'rain' }) },
                     { key: 'burst', label: 'Burst', active: mode === 'burst', onClick: () => set({ mode: 'burst' }) },
+                    { key: 'pop', label: 'Pop', active: mode === 'pop', onClick: () => set({ mode: 'pop' }) },
                   ]}
                 />
               </Row>
@@ -5687,8 +5749,18 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               </Row>
               <Slider label="Pieces" value={cfg.pieces ?? 200} min={20} max={600} step={10} onChange={(n) => set({ pieces: n })} />
               <Slider label="Size" value={cfg.scalar ?? 1} min={0.4} max={3} step={0.1} suffix="×" onChange={(n) => set({ scalar: n })} />
-              <Slider label="Power" value={cfg.power ?? (mode === 'burst' ? 9 : 8)} min={2} max={20} step={0.5} onChange={(n) => set({ power: n })} />
-              <Slider label="Gravity" value={cfg.gravity ?? (mode === 'burst' ? 0.28 : 0.08)} min={0} max={0.6} step={0.02} onChange={(n) => set({ gravity: n })} />
+              {/* Pop takes its launch speed from the radius, so Power would fight it. */}
+              {mode !== 'pop' && (
+                <Slider label="Power" value={cfg.power ?? (mode === 'burst' ? 9 : 8)} min={2} max={20} step={0.5} onChange={(n) => set({ power: n })} />
+              )}
+              <Slider
+                label="Gravity"
+                value={cfg.gravity ?? (mode === 'burst' ? 0.28 : mode === 'pop' ? 0.05 : 0.08)}
+                min={0}
+                max={0.6}
+                step={0.02}
+                onChange={(n) => set({ gravity: n })}
+              />
               <Slider label="Wind" value={cfg.wind ?? 0} min={-6} max={6} step={0.5} onChange={(n) => set({ wind: n || undefined })} />
               {mode === 'rain' ? (
                 <>
@@ -5699,10 +5771,22 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                   )}
                 </>
               ) : (
-                <div className="grid2">
-                  <Slider label="Origin X" value={cfg.originX ?? 50} min={0} max={100} suffix="%" onChange={(n) => set({ originX: n })} />
-                  <Slider label="Origin Y" value={cfg.originY ?? 45} min={0} max={100} suffix="%" onChange={(n) => set({ originY: n })} />
-                </div>
+                <>
+                  <div className="grid2">
+                    <Slider label="Origin X" value={cfg.originX ?? 50} min={0} max={100} suffix="%" onChange={(n) => set({ originX: n })} />
+                    <Slider label="Origin Y" value={cfg.originY ?? 45} min={0} max={100} suffix="%" onChange={(n) => set({ originY: n })} />
+                  </div>
+                  {mode === 'pop' && (
+                    <>
+                      <Slider label="Radius" value={cfg.radius ?? 45} min={10} max={100} suffix="%" onChange={(n) => set({ radius: n })} />
+                      <div className="grid2">
+                        <NumField label="Hold (ms)" value={cfg.holdMs ?? 1400} step={100} min={0} onChange={(n) => set({ holdMs: n })} />
+                        <NumField label="Fade (ms, 0 = stay)" value={cfg.fadeMs ?? 900} step={100} min={0} onChange={(n) => set({ fadeMs: n })} />
+                      </div>
+                      <Toggle label="Depth blur (big out-of-focus pieces)" checked={cfg.blurDepth !== false} onChange={(v) => set({ blurDepth: v })} />
+                    </>
+                  )}
+                </>
               )}
               <Row label="Colours">
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
@@ -5726,10 +5810,14 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                   )}
                 </div>
               </Row>
-              {(!cfg.colors || cfg.colors.length === 0) && <div className="hint pad">Using the default multi-colour palette. Add colours to override it.</div>}
+              {(!cfg.colors || cfg.colors.length === 0) && (
+                <div className="hint pad">
+                  Using the default {mode === 'pop' ? 'six-colour party' : 'multi-colour'} palette. Add colours to override it.
+                </div>
+              )}
               <div className="hint pad">
-                Full-screen celebration overlay — always covers the whole screen (position &amp; size are ignored). It only animates in <b>Preview</b> / export; here you see a
-                frozen sample. Use the layers panel to place it above your content.
+                Full-screen celebration overlay — always covers the whole screen (position &amp; size are ignored; <b>Pop</b> stays inside its radius around the origin). It
+                only animates in <b>Preview</b> / export; here you see a frozen sample. Use the layers panel to place it above your content.
               </div>
             </Accordion>
           )
