@@ -62,6 +62,7 @@ export function assignComboSlot(args: AssignArgs): ComboSlotEdit[] {
         showOnCanvas: role === 'layer' || role === 'dragArt' || role === 'caption' ? existing?.comboRole?.showOnCanvas : undefined,
       },
       basketItem: undefined,
+      configRole: undefined,
       cleanRole: undefined,
       tapRole: undefined,
       revealRole: undefined,

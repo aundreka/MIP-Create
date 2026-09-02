@@ -59,6 +59,7 @@ export function assignTapSlot(args: AssignTapArgs): TapSlotEdit[] {
       cleanRole: undefined,
       revealRole: undefined,
       basketItem: undefined,
+      configRole: undefined,
       catchRole: undefined,
       drag: undefined,
     },

@@ -39,6 +39,11 @@ function gameAssetKeys(el: Partial<SceneElement>): Set<string> {
   if (el.game?.templateId === 'scratch_grid') {
     for (const key of Object.keys(params)) if (/^cell\d+(?:cover|text|winOverlayImage)?$/.test(key)) keys.add(key)
   }
+  // The configurator's picture table is one param per combination (img_2_3) plus one
+  // per option's selected art (on_1_4), so its keys are dynamic for the same reason.
+  if (el.game?.templateId === 'configurator') {
+    for (const key of Object.keys(params)) if (/^(?:img|on)(?:_\d+)+$/.test(key)) keys.add(key)
+  }
   return keys
 }
 

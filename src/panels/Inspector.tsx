@@ -16,6 +16,7 @@ import type {
   ButtonTapEffect,
   CleanRoleConfig,
   ComboRoleConfig,
+  ConfigRoleConfig,
   TapRoleConfig,
   ConfettiConfig,
   CountdownConfig,
@@ -127,6 +128,22 @@ import {
   setCanvasVisible,
   type ComboSlotEdit,
 } from '../comboSlots'
+import {
+  assignConfigSlot,
+  configActiveKey,
+  configBound,
+  configCandidates,
+  configChoiceCounts,
+  configCombos,
+  configDisplays,
+  configImageKey,
+  configMembers,
+  configOption,
+  configOptionLabel,
+  configStateArt,
+  setConfigCanvasVisible,
+  type ConfigSlotEdit,
+} from '../configSlots'
 import {
   assignCleanSlot,
   cleanAttachments,
@@ -578,6 +595,8 @@ function ElementSound(props: { el: SceneElement }): JSX.Element {
   const isCarousel = el.game?.templateId === 'carousel'
   const isCombo = el.game?.templateId === 'combo'
   const hasCombo = scene.elements.some((candidate) => candidate.game?.templateId === 'combo')
+  const isConfigurator = el.game?.templateId === 'configurator'
+  const hasConfigurator = scene.elements.some((candidate) => candidate.game?.templateId === 'configurator')
   const isDragClean = el.game?.templateId === 'dragclean'
   const hasDragClean = scene.elements.some((candidate) => candidate.game?.templateId === 'dragclean')
   const isTapRemove = el.game?.templateId === 'tapremove'
@@ -642,6 +661,13 @@ function ElementSound(props: { el: SceneElement }): JSX.Element {
         ]
       : []),
     ...(isCombo ? [{ value: 'onReveal', label: 'When the game is won' }] : []),
+    ...(hasConfigurator
+      ? [
+          { value: 'configSelect', label: 'When an option is tapped' },
+          { value: 'configChange', label: 'When the product image changes' },
+        ]
+      : []),
+    ...(isConfigurator ? [{ value: 'onReveal', label: 'When the game is won' }] : []),
     ...(hasDragClean
       ? [
           { value: 'cleanPick', label: 'When the tool is picked up' },
@@ -2215,6 +2241,236 @@ function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps):
   )
 }
 
+interface ConfigSetupProps {
+  params: Record<string, unknown>
+  setParam: (k: string, v: unknown) => void
+  elementId: string
+  siblings: SceneElement[]
+}
+/**
+ * Configurator setup. Two halves, and the split is the whole point of the mechanic:
+ * the BOARD is assigned from elements already placed on the canvas — the swatches, the
+ * labels, the product frame — while the PICTURES live here, because a product shot for
+ * "walnut + 5 drawer" is one photograph rather than something to be arranged.
+ */
+function ConfigSetup({ params, setParam, elementId, siblings }: ConfigSetupProps): JSX.Element {
+  const [active, setActive] = useState(0)
+  const groups = Math.max(1, Math.round(Number(params.groups ?? 1)))
+  const g = Math.min(active, groups - 1)
+
+  const mine = configMembers(siblings, elementId)
+  const displays = configDisplays(siblings, elementId)
+  const stateArt = configStateArt(siblings, elementId)
+  const counts = configChoiceCounts(siblings, elementId, groups)
+  const combos = configCombos(counts)
+  // Never fewer slots than are actually wired up: a project edited down by mistake
+  // would otherwise hide live assignments.
+  const wired = mine.reduce((n, e) => Math.max(n, e.configRole?.role === 'display' ? 1 : (e.configRole?.choice ?? 1)), 1)
+  const optionSlots = Math.max(wired, 1, Math.round(Number(params.options ?? 1)))
+
+  const candidates = configCandidates(siblings)
+  const choices = (current: SceneElement | undefined): { value: string; label: string }[] => [
+    { value: '', label: '— none —' },
+    ...candidates.map((e) => ({ value: e.id, label: configOptionLabel(e) + (current && e.id === current.id ? ' ✓' : '') })),
+  ]
+
+  const apply = (edits: ConfigSlotEdit[]): void => {
+    if (!edits.length) return
+    beginTransaction()
+    for (const e of edits) patchElement(e.id, e.patch)
+    endTransaction()
+  }
+
+  const assign = (nextId: string, current: SceneElement | undefined, role: ConfigRoleConfig['role'], group?: number, choice?: number): void =>
+    apply(assignConfigSlot({ nextId, current, role, gameId: elementId, group, choice, elements: siblings }))
+
+  const setArtVisible = (els: SceneElement[], visible: boolean): void => apply(els.map((e) => setConfigCanvasVisible(e, visible)))
+
+  /** What an option is CALLED, for the picture table's labels: the name of the element
+   * standing for it, so the rows read “Walnut · 5 Drawer” rather than “1 · 2”. */
+  const nameOf = (group: number, choice: number): string => {
+    const el = configOption(siblings, elementId, group, choice)
+    return el?.name || `G${group} option ${choice}`
+  }
+
+  /** One assignment row, the same shape as the combo panel's so the two read alike.
+   * `hides` marks the kinds play decides for itself, which get the eye that holds them
+   * on the canvas while they are being positioned. */
+  const slot = (label: string, hint: string, current: SceneElement | undefined, role: ConfigRoleConfig['role'], choice?: number, hides = false): JSX.Element => (
+    <div className="combo-slot" key={`${role}${choice ?? ''}-${current?.id ?? 'add'}`}>
+      <span title={hint}>{label}</span>
+      <Select
+        value={current?.id ?? ''}
+        onChange={(v) => assign(v, current, role, role === 'display' ? undefined : g + 1, role === 'display' ? undefined : choice)}
+        options={choices(current)}
+        title={hint}
+      />
+      <span className="combo-slot-actions">
+        {current && hides && (
+          <button
+            className={'icon-btn' + (current.configRole?.showOnCanvas ? ' on' : '')}
+            title={current.configRole?.showOnCanvas ? 'Showing on the canvas while you position it (play decides it)' : 'Hidden — show it on the canvas while you position it'}
+            onClick={() => setArtVisible([current], !current.configRole?.showOnCanvas)}
+          >
+            <Icon icon={current.configRole?.showOnCanvas ? Eye : EyeOff} size={13} />
+          </button>
+        )}
+        {current && (
+          <button className="icon-btn" title={`Select “${current.name || current.id}” on the canvas`} onClick={() => selectOnly(current.id)}>
+            <Icon icon={ScanSearch} size={13} />
+          </button>
+        )}
+      </span>
+    </div>
+  )
+
+  /** One option and everything bound to it. */
+  const optionSlot = (choice: number): JSX.Element => {
+    const opt = configOption(siblings, elementId, g + 1, choice)
+    return (
+      <div key={choice}>
+        <div className="group-title2">
+          Option {choice}
+          {opt ? ` · ${opt.name || opt.id}` : ' · empty'}
+        </div>
+        {slot('Tap', 'The element the player taps to make this choice. Every group stays live at once, so this can be re-chosen at any time.', opt, 'option', choice)}
+        <AssetPicker
+          label="Selected image (optional)"
+          value={(params[configActiveKey(g + 1, choice)] as string) || undefined}
+          allowNone
+          onChange={(aid) => setParam(configActiveKey(g + 1, choice), aid ?? '')}
+        />
+        {[...configBound(siblings, elementId, 'active', g + 1, choice), undefined].map((el) =>
+          slot(
+            el ? 'Selected art' : 'Add selected art',
+            'Optional. Extra art up only while this option is selected — a tick, a ring, a bold label. Add as many as you like.',
+            el,
+            'active',
+            choice,
+            true,
+          ),
+        )}
+        {[...configBound(siblings, elementId, 'inactive', g + 1, choice), undefined].map((el) =>
+          slot(
+            el ? 'Unselected art' : 'Add unselected art',
+            'Optional. The mirror image: up only while this option is NOT selected. Pair a plain label here with a bold one above and the label swaps cleanly instead of both showing at once.',
+            el,
+            'inactive',
+            choice,
+            true,
+          ),
+        )}
+        {[...configBound(siblings, elementId, 'follow', g + 1, choice), undefined].map((el) =>
+          slot(
+            el ? 'Rides along' : 'Add rider',
+            'Optional. Always visible art that belongs to this option and travels with it when the row opens up to make room for a grown selection — the name written under a swatch.',
+            el,
+            'follow',
+            choice,
+          ),
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <>
+      <div className="group-title2">Groups</div>
+      <NumField label="How many option groups" value={groups} step={1} min={1} onChange={(n) => setParam('groups', Math.max(1, Math.round(n)))} />
+      <NumField label="Options per group" value={optionSlots} step={1} min={1} onChange={(n) => setParam('options', Math.max(1, Math.round(n)))} />
+      <NumField
+        label="Taps to win (0 = one per group)"
+        value={Math.max(0, Math.round(Number(params.winTaps ?? 0)))}
+        step={1}
+        min={0}
+        onChange={(n) => setParam('winTaps', Math.max(0, Math.round(n)))}
+      />
+      <Toggle label="Start on each group’s first option" checked={params.preselect !== false} onChange={(v) => setParam('preselect', v)} />
+      <Toggle label="Open a gap around the selection" checked={String(params.spread ?? 'push') !== 'none'} onChange={(v) => setParam('spread', v ? 'push' : 'none')} />
+      <div className="combo-slot">
+        <span title="What happens to a choice the picture table has no image for, once the other groups rule it out — the finish that isn’t made in that size.">Unavailable</span>
+        <Select
+          value={String(params.unavailable ?? 'ignore')}
+          onChange={(v) => setParam('unavailable', v)}
+          options={[
+            { value: 'ignore', label: 'Leave it tappable' },
+            { value: 'dim', label: 'Fade it and switch it off' },
+            { value: 'hide', label: 'Hide it' },
+          ]}
+        />
+        <span className="combo-slot-actions" />
+      </div>
+      <div className="hint pad">
+        Taps to win: 0 wins once the player has chosen in every group. A pre-selection is a starting state, not a move, so it never counts toward that.
+      </div>
+      <div className="hint pad">
+        Selection doesn’t need a second image: <b>Selected look</b> below draws a border, grows the option and nudges it, and the gap opens by exactly what the growth needs — so
+        the space around the selected option ends up wider than the gaps between the rest.
+      </div>
+      <Chips
+        items={Array.from({ length: groups }, (_, i) => ({
+          key: String(i),
+          label: `G${i + 1}${counts[i + 1] ? '' : ' !'}`,
+          active: i === g,
+          onClick: () => setActive(i),
+        }))}
+      />
+      <div className="hint pad">! = no options yet, so that group is not a dimension of the picture table.</div>
+
+      <div className="group-title2">Group {g + 1}</div>
+      {Array.from({ length: optionSlots }, (_, i) => optionSlot(i + 1))}
+
+      <div className="group-title2">Product image</div>
+      {[...displays, undefined].map((d) =>
+        slot(
+          d ? 'Shows' : 'Add product image',
+          'The image element the table swaps. Its source is replaced, cross-faded, with the picture for whatever combination is chosen. Add more than one and they all follow the same combination.',
+          d,
+          'display',
+        ),
+      )}
+
+      <div className="group-title2">Picture table</div>
+      {combos.length === 0 ? (
+        <div className="hint pad">Assign an option above and the combinations to fill in appear here.</div>
+      ) : (
+        <>
+          {combos.map((combo) => {
+            const key = configImageKey(combo)
+            return (
+              <AssetPicker
+                key={key}
+                label={combo.map((choice, i) => nameOf(i + 1, choice)).join(' · ')}
+                value={(params[key] as string) || undefined}
+                allowNone
+                onChange={(aid) => setParam(key, aid ?? '')}
+              />
+            )
+          })}
+          <div className="hint pad">
+            One product shot per combination — {combos.length} in all. A cell left empty is a combination that doesn’t exist: it falls back to the art you placed, and “Unavailable”
+            above decides how the choice that would reach it reads.
+          </div>
+        </>
+      )}
+
+      {stateArt.length > 0 && (
+        <>
+          <div className="group-title2">Canvas</div>
+          <div className="grid2" style={{ padding: '2px 10px' }}>
+            <button className="btn" onClick={() => setArtVisible(stateArt, true)}>
+              Show state art
+            </button>
+            <button className="btn" onClick={() => setArtVisible(stateArt, false)}>
+              Hide state art
+            </button>
+          </div>
+        </>
+      )}
+    </>
+  )
+}
+
 interface ScratchGridCellsProps {
   params: Record<string, unknown>
   setParam: (k: string, v: unknown) => void
@@ -3199,7 +3455,9 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
         | 'cleanWipe'
         | 'cleanDrop'
         | 'tapRemove'
-        | 'tapReveal',
+        | 'tapReveal'
+        | 'configSelect'
+        | 'configChange',
       primary: AnimSpec | undefined,
       extra: AnimSpec[],
     ): void => {
@@ -3362,6 +3620,30 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               defaultExtraSpec={{ preset: 'shine', durationMs: 700, delayMs: 0, easing: 'ease-in-out' }}
               onChange={(primary, ex) => patchAllPhase('tapReveal', primary, ex)}
             />
+          )}
+          {state.scene.elements.some((e) => e.game?.templateId === 'configurator') && (
+            <>
+              <AnimPhase
+                title="On option tapped"
+                primary={first?.animations?.configSelect}
+                extra={first?.animations?.configSelectExtra}
+                presets={NODE_PRESETS}
+                extraPresets={NODE_PRESETS}
+                defaultSpec={{ preset: 'pop', durationMs: 260, delayMs: 0, easing: 'ease-out' }}
+                defaultExtraSpec={{ preset: 'glow', durationMs: 600, delayMs: 0, easing: 'ease-in-out' }}
+                onChange={(primary, ex) => patchAllPhase('configSelect', primary, ex)}
+              />
+              <AnimPhase
+                title="On product image change"
+                primary={first?.animations?.configChange}
+                extra={first?.animations?.configChangeExtra}
+                presets={NODE_PRESETS}
+                extraPresets={NODE_PRESETS}
+                defaultSpec={{ preset: 'pop', durationMs: 320, delayMs: 0, easing: 'ease-out' }}
+                defaultExtraSpec={{ preset: 'shine', durationMs: 700, delayMs: 0, easing: 'ease-in-out' }}
+                onChange={(primary, ex) => patchAllPhase('configChange', primary, ex)}
+              />
+            </>
           )}
           {state.scene.elements.some((e) => e.game?.templateId === 'thoughtwhack') && (
             <>
@@ -4275,6 +4557,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 <>
                   {tpl.id === 'combo' && <ComboSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
                   {tpl.id === 'combo' && <div className="group-title2">Feel &amp; timing</div>}
+                  {tpl.id === 'configurator' && <ConfigSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
                   {tpl.id === 'dragclean' && <DragCleanSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
                   {tpl.id === 'tapremove' && <TapRemoveSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
                   {tpl.id === 'tapreveal' && <TapRevealSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
@@ -4302,6 +4585,8 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                           !(tpl.id === 'scratch' && (f.key === 'coverColor' || f.key === 'shadowColor')) &&
                           // ComboSetup owns both counts, right above its per-question chips.
                           !(tpl.id === 'combo' && (f.key === 'questions' || f.key === 'options')) &&
+                          // ConfigSetup owns both counts, right above its per-group chips.
+                          !(tpl.id === 'configurator' && (f.key === 'groups' || f.key === 'options')) &&
                           // Progress wiring is a dropdown of real elements in the setup
                           // panels above, never a typed-in element id.
                           f.key !== 'sourceGameId' &&
@@ -6178,6 +6463,30 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
           defaultExtraSpec={{ preset: 'shine', durationMs: 900, delayMs: 0, easing: 'ease-in-out' }}
           onChange={(primary, ex) => patchElement(id, { animations: { ...(el.animations ?? {}), tap: primary, tapExtra: ex.length ? ex : undefined } })}
         />
+        {state.scene.elements.some((e) => e.game?.templateId === 'configurator') && (
+          <>
+            <AnimPhase
+              title="On option tapped"
+              primary={el.animations?.configSelect}
+              extra={el.animations?.configSelectExtra}
+              presets={NODE_PRESETS}
+              extraPresets={NODE_PRESETS}
+              defaultSpec={{ preset: 'pop', durationMs: 260, delayMs: 0, easing: 'ease-out' }}
+              defaultExtraSpec={{ preset: 'glow', durationMs: 600, delayMs: 0, easing: 'ease-in-out' }}
+              onChange={(primary, ex) => patchElement(id, { animations: { ...(el.animations ?? {}), configSelect: primary, configSelectExtra: ex.length ? ex : undefined } })}
+            />
+            <AnimPhase
+              title="On product image change"
+              primary={el.animations?.configChange}
+              extra={el.animations?.configChangeExtra}
+              presets={NODE_PRESETS}
+              extraPresets={NODE_PRESETS}
+              defaultSpec={{ preset: 'pop', durationMs: 320, delayMs: 0, easing: 'ease-out' }}
+              defaultExtraSpec={{ preset: 'shine', durationMs: 700, delayMs: 0, easing: 'ease-in-out' }}
+              onChange={(primary, ex) => patchElement(id, { animations: { ...(el.animations ?? {}), configChange: primary, configChangeExtra: ex.length ? ex : undefined } })}
+            />
+          </>
+        )}
         {state.scene.elements.some((e) => e.game?.templateId === 'combo') && (
           <>
             <AnimPhase

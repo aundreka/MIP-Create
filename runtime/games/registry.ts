@@ -33,6 +33,7 @@ import { HOLDGAUGE_TEMPLATE } from './holdgauge'
 import { EMBED_TEMPLATE } from './embed'
 import { BASKET_TEMPLATE } from './basket'
 import { COMBO_TEMPLATE } from './combo'
+import { CONFIGURATOR_TEMPLATE } from './configurator'
 import { CAROUSEL_TEMPLATE } from './carousel'
 import { DRAGCLEAN_TEMPLATE } from './dragclean'
 import { TAPREMOVE_TEMPLATE } from './tapremove'
@@ -55,6 +56,7 @@ export const GAME_TEMPLATES: GameTemplate[] = [
   VENDING_TEMPLATE,
   BASKET_TEMPLATE,
   COMBO_TEMPLATE,
+  CONFIGURATOR_TEMPLATE,
   DRAGCLEAN_TEMPLATE,
   TAPREMOVE_TEMPLATE,
   TAPREVEAL_TEMPLATE,

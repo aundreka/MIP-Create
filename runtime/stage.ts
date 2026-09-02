@@ -1265,6 +1265,11 @@ function runComboEvent(rec: Rec, event: 'comboPick' | 'comboDrop' | 'comboNext')
   applyLightray(rec, event)
 }
 
+function runConfigEvent(rec: Rec, event: 'configSelect' | 'configChange'): void {
+  runOneShot(rec, event)
+  applyLightray(rec, event)
+}
+
 function runCleanEvent(rec: Rec, event: 'cleanPick' | 'cleanWipe' | 'cleanDrop'): void {
   runOneShot(rec, event)
   applyLightray(rec, event)
@@ -1638,6 +1643,20 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
         else outer.classList.add(COMBO_OFF_CLASS)
       }
     }
+    if (el.configRole) {
+      outer.dataset.configRole = el.configRole.role
+      if (el.configRole.gameId) outer.dataset.configGameId = el.configRole.gameId
+      if (el.configRole.group) outer.dataset.configGroup = String(el.configRole.group)
+      if (el.configRole.choice) outer.dataset.configChoice = String(el.configRole.choice)
+      // An option and the display are part of the board the author is arranging, so
+      // they stay visible. The two state arts are not: which of them is up is decided
+      // by the live selection, so play starts them hidden and the author can keep one
+      // on the editor canvas while positioning it.
+      if (el.configRole.role === 'active' || el.configRole.role === 'inactive') {
+        if (el.configRole.showOnCanvas) outer.dataset.configCanvasShow = '1'
+        else outer.classList.add(COMBO_OFF_CLASS)
+      }
+    }
     if (el.revealRole) {
       outer.dataset.revealRole = el.revealRole.role
       if (el.revealRole.gameId) outer.dataset.revealGameId = el.revealRole.gameId
@@ -1735,6 +1754,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       !el.button &&
       !el.basketItem &&
       el.comboRole?.role !== 'option' &&
+      el.configRole?.role !== 'option' &&
       el.cleanRole?.role !== 'draggable' &&
       el.tapRole?.role !== 'obstacle' &&
       el.catchRole?.role !== 'box' &&
@@ -1861,6 +1881,13 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     broadcastGameEvent(event, (target) => runComboEvent(target, event))
   }
 
+  // The Configurator broadcasts the same way: 'configSelect' every time an option is
+  // tapped, 'configChange' only when the product shot actually becomes a different
+  // picture — which is the beat worth popping the product on.
+  const fireConfigEvent = (event: 'configSelect' | 'configChange'): void => {
+    broadcastGameEvent(event, (target) => runConfigEvent(target, event))
+  }
+
   const fireCleanEvent = (event: 'cleanPick' | 'cleanWipe' | 'cleanDrop'): void => {
     broadcastGameEvent(event, (target) => runCleanEvent(target, event))
   }
@@ -1874,7 +1901,19 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
   }
 
   function broadcastGameEvent(
-    event: 'thoughtSpawn' | 'thoughtWhack' | 'comboPick' | 'comboDrop' | 'comboNext' | 'cleanPick' | 'cleanWipe' | 'cleanDrop' | 'tapRemove' | 'tapReveal',
+    event:
+      | 'thoughtSpawn'
+      | 'thoughtWhack'
+      | 'comboPick'
+      | 'comboDrop'
+      | 'comboNext'
+      | 'configSelect'
+      | 'configChange'
+      | 'cleanPick'
+      | 'cleanWipe'
+      | 'cleanDrop'
+      | 'tapRemove'
+      | 'tapReveal',
     run: (target: Rec) => void,
   ): void {
     for (const target of recs) {
@@ -2251,6 +2290,10 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
               }
               if (event === 'comboPick' || event === 'comboDrop' || event === 'comboNext') {
                 fireComboEvent(event)
+                return
+              }
+              if (event === 'configSelect' || event === 'configChange') {
+                fireConfigEvent(event)
                 return
               }
               if (event === 'cleanPick' || event === 'cleanWipe' || event === 'cleanDrop') {

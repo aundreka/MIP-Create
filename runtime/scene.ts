@@ -137,6 +137,12 @@ export interface ElementAnimations {
   // while the cover is still visible, so an animation on the cover itself plays before
   // it leaves.
   tapReveal?: AnimSpec
+  // Replayed when a Configurator game in the same scene emits its two gameplay events:
+  // an option is tapped, and the product shot actually changes to a different picture.
+  // Like the combo ones these are authorable on ANY scene element, so the product
+  // image can pop on 'configChange' while a price line or a headline reacts to the tap.
+  configSelect?: AnimSpec
+  configChange?: AnimSpec
   // Additional specs stacked ON TOP of the primary one in each phase, played together with it
   // (e.g. entrance = pop + shine). Empty/absent = just the primary. The primary must exist for
   // extras to apply; extras share the primary entrance's trigger.
@@ -155,6 +161,8 @@ export interface ElementAnimations {
   cleanDropExtra?: AnimSpec[]
   tapRemoveExtra?: AnimSpec[]
   tapRevealExtra?: AnimSpec[]
+  configSelectExtra?: AnimSpec[]
+  configChangeExtra?: AnimSpec[]
 }
 
 // ---- colour adjustment -----------------------------------------------------
@@ -794,6 +802,46 @@ export interface ComboRoleConfig {
    * can see one at a time instead of the whole stack at once. */
   showOnCanvas?: boolean
 }
+// ---- configurator ----------------------------------------------------------
+// Enlists an ordinary scene element into a Configurator game — the tap-and-table
+// sibling of the combo board. Every part of the board is a real scene element the
+// author places on the canvas, so position, size, crop and animation all come from the
+// ordinary element tools; the pictures the game swaps in are the one thing that lives
+// in the game's panel instead, because they are pictures of the WHOLE product (or of
+// a whole swatch) rather than parts to be arranged.
+//
+//   'option'   a tappable choice in group `group`. Every group is live at once, so
+//              the player can change the colour after choosing the size. While it is
+//              selected its own picture is replaced by the option's ACTIVE image from
+//              the panel, when one is set.
+//   'display'  the product shot. Its source is replaced, cross-faded, by whatever the
+//              panel's table holds for the current combination. Any number of them.
+//   'active'   extra art up only while its option is selected — a tick, a ring, a bold
+//              label. Any number per option.
+//   'inactive' the mirror: up only while its option is NOT selected. An 'inactive'
+//              plain label paired with an 'active' bold one is how a label goes bold
+//              on selection without either state showing through the other.
+//   'follow'   art that belongs to an option and only ever RIDES ALONG with it — the
+//              name written under a swatch. Always visible; it exists so that when a
+//              row opens up to make room for a grown selection, the label travels with
+//              the swatch it names instead of being left behind.
+export interface ConfigRoleConfig {
+  gameId?: string
+  role: 'option' | 'display' | 'active' | 'inactive' | 'follow'
+  /** Every role but 'display': which option group this belongs to (1-based). The groups
+   * are the dimensions of the picture table, in this order. */
+  group?: number
+  /** Every role but 'display': which of the group's choices (1-based). A piece of bound
+   * art pairs with the option of the same group + choice; several may share one, and
+   * they all come up together. */
+  choice?: number
+  /** 'active' / 'inactive', authoring-only: keep it visible on the editor canvas while
+   * it is being positioned. Play decides both from the live selection, so this never
+   * leaks into the playable — it exists so the author can see one at a time instead of
+   * the whole stack at once. */
+  showOnCanvas?: boolean
+}
+
 // Drag to clean: which part an ordinary placed element plays. Assigned from the
 // GAME's panel (see src/cleanSlots.ts) rather than the element's own, so one screen
 // owns the whole wiring — the same arrangement the combo board uses, and for the
@@ -1231,6 +1279,7 @@ export interface SceneElement {
   drag?: DragConfig
   basketItem?: BasketItemConfig
   comboRole?: ComboRoleConfig
+  configRole?: ConfigRoleConfig
   cleanRole?: CleanRoleConfig
   tapRole?: TapRoleConfig
   revealRole?: RevealRoleConfig
