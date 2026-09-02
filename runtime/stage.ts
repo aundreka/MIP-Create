@@ -193,6 +193,7 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     | 'tap'
     | 'radialtap'
     | 'slide'
+    | 'slidetap'
     | 'scratch'
     | 'match'
     | 'thoughtwhack'
@@ -213,10 +214,12 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     kind = 'radialtap'
   } else if (cfg.mode === 'hold') {
     kind = 'hold'
-  } else if (cfg.mode === 'slide') {
+  } else if (cfg.mode === 'slide' || cfg.mode === 'slidetap') {
     if (cfg.nodes && cfg.nodes.length) pts = cfg.nodes.filter((p) => p && p.x != null && p.y != null)
     else if (cfg.toX != null && cfg.toY != null) pts = [{ x: cfg.toX, y: cfg.toY }]
-    if (pts.length) kind = 'slide'
+    // No path drawn yet: fall through to the in-place tap rather than a hand that
+    // sits there doing nothing while the author is still drawing the route.
+    if (pts.length) kind = cfg.mode
   } else if (cfg.mode === 'smart') {
     const t = recs.find((r) => r.el.type === 'cta') ?? recs.find((r) => r.el.type === 'game-mount')
     if (t && Math.hypot(t.el.x - sx, t.el.y - sy) > 24) {
@@ -254,7 +257,7 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
       ? cfg.periodMs
       : kind === 'scratch'
         ? 600
-        : kind === 'slide'
+        : kind === 'slide' || kind === 'slidetap'
           ? 1500
           : kind === 'combo'
             ? 1900
@@ -277,6 +280,10 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
   }
   const ease = EASE[cfg.easing ?? 'ease-in-out'] ?? cubic
 
+  // 'slidetap' only: the length of ONE tap at a stop. It is the dwell's opening
+  // stretch, so travel time and tap time are set independently of each other.
+  const tapMs = kind === 'slidetap' ? Math.max(0, Math.round(cfg.tapMs ?? 900)) : 0
+
   // Build a cyclic timeline: travel start -> node1 -> node2 ... then back to start
   // to loop. Each non-return leg dwells for its destination node's pauseMs (a tap
   // plays during the dwell). The "finger" stays pressed across the whole outbound
@@ -287,9 +294,13 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
   for (let i = 0; i < wps.length; i++) {
     const a = wps[i]
     const b = wps[(i + 1) % wps.length]
-    steps.push({ ax: a.x, ay: a.y, bx: b.x, by: b.y, dwell: Math.max(0, Math.round(b.pauseMs ?? 0)) })
+    // A 'slidetap' stop is the tap plus whatever extra dwell the node asks for, so an
+    // authored pause still lingers AFTER the tap instead of swallowing it.
+    steps.push({ ax: a.x, ay: a.y, bx: b.x, by: b.y, dwell: tapMs + Math.max(0, Math.round(b.pauseMs ?? 0)) })
   }
-  if (steps.length) steps[steps.length - 1].dwell = 0 // the return-to-start leg never dwells
+  // The return-to-start leg never dwells — except in 'slidetap', where the start is a
+  // stop like any other and gets its tap before the hand sets off again.
+  if (steps.length) steps[steps.length - 1].dwell = tapMs
   const total = steps.reduce((s, st) => s + travel + st.dwell, 0) || travel
   // (No press ramp: 'slide' is movement only — see the frame loop.)
 
@@ -570,9 +581,7 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
       // pointing at may be GROWING under it, since a selection can widen the row it
       // sits in. The rect is read fresh every frame, so the fingertip rides the change
       // instead of hanging where the option used to be.
-      const messEl = root.querySelector<HTMLElement>(
-        kind === 'tapremove' ? '[data-tap-hint]' : kind === 'tapreveal' ? '[data-reveal-hint]' : '[data-config-hint]',
-      )
+      const messEl = root.querySelector<HTMLElement>(kind === 'tapremove' ? '[data-tap-hint]' : kind === 'tapreveal' ? '[data-reveal-hint]' : '[data-config-hint]')
       if (!messEl) {
         content.style.opacity = '0'
         raf = requestAnimationFrame(frame)
@@ -726,7 +735,7 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
       ox = fingerX - (guideRect.left + guideRect.width * 0.22)
       oy = fingerY - (guideRect.top + guideRect.height * 0.12)
       content.style.opacity = alpha.toFixed(3)
-    } else if (kind === 'slide') {
+    } else if (kind === 'slide' || kind === 'slidetap') {
       const c = (now - t0) % total
       let rem = c
       let cx = sx
@@ -742,6 +751,10 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
         if (rem < st.dwell) {
           cx = st.bx
           cy = st.by
+          // Standing on a stop: 'slidetap' taps for the first tapMs of it and then
+          // waits out the rest. tapPress is the curve the coded hint hand taps on, so
+          // a stop reads exactly like the standalone 'tap' mode does.
+          if (rem < tapMs) press = tapPress(rem / tapMs)
           break
         }
         rem -= st.dwell
@@ -750,6 +763,9 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
       }
       ox = (cx - sx) * s
       oy = (cy - sy) * s
+      // A tap is a dip DOWN onto the point, so the hand hovers a little above each
+      // stop and comes down to touch it; the scale squash on its own reads as a push.
+      if (kind === 'slidetap') oy -= rec.outer.getBoundingClientRect().height * 0.28 * (1 - press)
       // Slide MOVES only — no press dip. The scale-down read as the hand zooming in
       // at the start of every loop, which fought the sense of it travelling a path.
       // (The other modes keep their dip: it is the whole point of a tap.)
@@ -924,10 +940,13 @@ function refreshDay(rec: Rec): void {
 function scheduleDayTimer(rec: Rec): void {
   if (rec.dayTimer) window.clearTimeout(rec.dayTimer)
   // +1s past midnight so a clock that fires a hair early still reads the new date.
-  rec.dayTimer = window.setTimeout(() => {
-    refreshDay(rec)
-    scheduleDayTimer(rec)
-  }, Math.max(1000, nextMidnight(Date.now()) - Date.now() + 1000))
+  rec.dayTimer = window.setTimeout(
+    () => {
+      refreshDay(rec)
+      scheduleDayTimer(rec)
+    },
+    Math.max(1000, nextMidnight(Date.now()) - Date.now() + 1000),
+  )
 }
 
 function startTicker(rec: Rec): void {
@@ -2914,9 +2933,11 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
   // text, so this pass exists for them — one relayout, skipped entirely when the stage is
   // already gone (the editor rebuilds a scene on every structural edit).
   if (typeof document !== 'undefined' && document.fonts?.ready) {
-    document.fonts.ready.then(() => {
-      if (fontsAlive) handle.layoutAll()
-    }).catch(() => {})
+    document.fonts.ready
+      .then(() => {
+        if (fontsAlive) handle.layoutAll()
+      })
+      .catch(() => {})
   }
   return handle
 }

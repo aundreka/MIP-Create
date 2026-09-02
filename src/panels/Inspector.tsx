@@ -2466,8 +2466,24 @@ function ConfigSetup({ params, setParam, elementId, siblings }: ConfigSetupProps
               </button>
               <span className="combo-slot-actions" />
             </div>
-            {artNum('Size', `onScale_${g + 1}_${choice}`, boardArtScale, 0.1, 5, 0.02, 'How big this option’s selected image is drawn, as a multiple of the option’s own box. 1 fills it exactly; above 1 spills past the edges, which is what art with a ring around it needs. The option’s box never changes, so nothing else moves.')}
-            {artNum('X', `onX_${g + 1}_${choice}`, boardArtX, -400, 400, 1, 'Shift this option’s selected image sideways inside its box, in px — for art that isn’t centred on what it replaces.')}
+            {artNum(
+              'Size',
+              `onScale_${g + 1}_${choice}`,
+              boardArtScale,
+              0.1,
+              5,
+              0.02,
+              'How big this option’s selected image is drawn, as a multiple of the option’s own box. 1 fills it exactly; above 1 spills past the edges, which is what art with a ring around it needs. The option’s box never changes, so nothing else moves.',
+            )}
+            {artNum(
+              'X',
+              `onX_${g + 1}_${choice}`,
+              boardArtX,
+              -400,
+              400,
+              1,
+              'Shift this option’s selected image sideways inside its box, in px — for art that isn’t centred on what it replaces.',
+            )}
             {artNum('Y', `onY_${g + 1}_${choice}`, boardArtY, -400, 400, 1, 'Shift this option’s selected image up or down inside its box, in px.')}
           </>
         )}
@@ -5489,6 +5505,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                     { value: 'radialtap', label: 'Radial tap (bounce + ping rings)' },
                     { value: 'hold', label: 'Hold (press and stay pressed)' },
                     { value: 'slide', label: 'Slide along a path' },
+                    { value: 'slidetap', label: 'Slide + tap at every stop' },
                     { value: 'scratch', label: 'Scratch (back-and-forth rub)' },
                     { value: 'match', label: 'Match pairs (follow the game’s next card)' },
                     { value: 'thoughtwhack', label: 'Whack-a-mole (follow an unwhacked thought)' },
@@ -5547,7 +5564,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                   />
                 </>
               )}
-              {hg.mode === 'slide' &&
+              {(hg.mode === 'slide' || hg.mode === 'slidetap') &&
                 (() => {
                   const nodes: HandguideNode[] = hg.nodes && hg.nodes.length ? hg.nodes : hg.toX != null && hg.toY != null ? [{ x: hg.toX, y: hg.toY }] : []
                   const setNodes = (ns: HandguideNode[]): void => setHg({ nodes: ns, toX: undefined, toY: undefined })
@@ -5593,6 +5610,15 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                           Click "Draw path", then click on the canvas to drop the start and each waypoint. Double-click or press Enter to finish; Esc cancels.
                         </div>
                       )}
+                      {hg.mode === 'slidetap' && (
+                        <>
+                          <NumField label="Tap time (ms)" value={hg.tapMs ?? 900} step={100} min={0} onChange={(n) => setHg({ tapMs: n })} />
+                          <div className="hint pad">
+                            The hand taps where it lands, including back at the start. &ldquo;Travel time&rdquo; below is one leg of the path and &ldquo;Tap time&rdquo; is one tap;
+                            a stop&rsquo;s own <b>Stop ms</b> is extra waiting after the tap.
+                          </div>
+                        </>
+                      )}
                     </>
                   )
                 })()}
@@ -5623,7 +5649,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 />
               </Row>
               <NumField
-                label="Loop speed (ms)"
+                label={hg.mode === 'slide' || hg.mode === 'slidetap' ? 'Travel time per leg (ms)' : 'Loop speed (ms)'}
                 value={hg.periodMs ?? (hg.mode === 'tap' || hg.mode === 'radialtap' || hg.mode === 'thoughtwhack' ? 900 : 1500)}
                 step={100}
                 min={300}

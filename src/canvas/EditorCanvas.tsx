@@ -1261,7 +1261,10 @@ export function EditorCanvas(props: Props): JSX.Element {
       const nodes = pts.slice(1).map((p, i) => ({ ...toDesign(p), pauseMs: prev[i]?.pauseMs }))
       beginTransaction()
       patchGeometry(tid, { x: start.x, y: start.y })
-      patchElement(tid, { handguide: { ...(tel?.handguide ?? { mode: 'slide' }), mode: 'slide', nodes, toX: undefined, toY: undefined } })
+      // Redrawing the route of a 'slidetap' hand keeps it tapping at its stops; every
+      // other mode becomes a plain 'slide', since drawing a path is what asks for one.
+      const mode = tel?.handguide?.mode === 'slidetap' ? 'slidetap' : 'slide'
+      patchElement(tid, { handguide: { ...(tel?.handguide ?? { mode }), mode, nodes, toX: undefined, toY: undefined } })
       endTransaction()
     }
     endPathDraw()
@@ -1584,7 +1587,7 @@ export function EditorCanvas(props: Props): JSX.Element {
   // Handguide slide path (design coords -> intrinsic) for the selected handguide:
   // a polyline from the hand's center through each waypoint.
   const hgPath = (() => {
-    if (!single || single.type !== 'handguide' || single.handguide?.mode !== 'slide' || !singleRect) return null
+    if (!single || single.type !== 'handguide' || (single.handguide?.mode !== 'slide' && single.handguide?.mode !== 'slidetap') || !singleRect) return null
     const hg = single.handguide
     const m = metricsRef.current
     const wp = hg.nodes && hg.nodes.length ? hg.nodes : hg.toX != null && hg.toY != null ? [{ x: hg.toX, y: hg.toY }] : []
@@ -2894,7 +2897,12 @@ export function EditorCanvas(props: Props): JSX.Element {
                             })}
                           <div
                             className="dim-badge"
-                            style={{ left: shapeRect.x + shapeRect.w / 2, top: shapeRect.y + shapeRect.h, transform: `translate(-50%, 6px) scale(${1 / zoom})`, whiteSpace: 'nowrap' }}
+                            style={{
+                              left: shapeRect.x + shapeRect.w / 2,
+                              top: shapeRect.y + shapeRect.h,
+                              transform: `translate(-50%, 6px) scale(${1 / zoom})`,
+                              whiteSpace: 'nowrap',
+                            }}
                           >
                             {shapeDrawing
                               ? 'click to add corners · drag to trace freehand · click the first corner (or Enter) to close'
@@ -3201,8 +3209,7 @@ export function EditorCanvas(props: Props): JSX.Element {
                       }}
                     >
                       <span className="scratch-mark cover" style={{ pointerEvents: 'none' }}>
-                        header · this scene · {landscape ? 'landscape' : 'portrait'} ·{' '}
-                        {curHeaderOff.x || curHeaderOff.y ? `${curHeaderOff.x}, ${curHeaderOff.y}` : 'pinned top'}
+                        header · this scene · {landscape ? 'landscape' : 'portrait'} · {curHeaderOff.x || curHeaderOff.y ? `${curHeaderOff.x}, ${curHeaderOff.y}` : 'pinned top'}
                         {ownsSlot(headerScene, orientOf(landscape)) ? '' : ' · from project'}
                       </span>
                     </div>

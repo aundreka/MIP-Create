@@ -585,6 +585,11 @@ export interface HandguideConfig {
   // the fingertip on contact, for when the tap target has no affordance of its own.
   // 'hold' presses in place and STAYS pressed for most of the cycle before
   // lifting — the press-and-hold gesture, as opposed to 'tap''s quick dip.
+  // 'slidetap' is 'slide' with a stop at every waypoint: the hand travels a leg of
+  // the path, taps where it lands, travels the next leg, and so on around the loop
+  // (the start counts as a stop, so it taps there too before setting off again).
+  // `periodMs` is the travel time of ONE leg and `tapMs` the length of one tap, so
+  // the two halves of the gesture are timed independently.
   // 'combo' follows the Combo builder's live option and mimes dragging it into the
   // drop area, advancing to the next question's option on its own.
   // 'carousel' mimes the whole gesture a carousel asks for, in one loop: a swipe that
@@ -609,6 +614,7 @@ export interface HandguideConfig {
     | 'tap'
     | 'radialtap'
     | 'slide'
+    | 'slidetap'
     | 'scratch'
     | 'match'
     | 'thoughtwhack'
@@ -626,7 +632,13 @@ export interface HandguideConfig {
   toX?: number
   toY?: number
   nodes?: HandguideNode[]
+  // Travel time of one leg of the path ('slide'/'slidetap'), or one gesture cycle
+  // for the modes that stay put.
   periodMs?: number
+  // 'slidetap' only: how long ONE tap at a stop lasts, in ms. Absent = 900 (the same
+  // beat the standalone 'tap' mode uses). A node's own `pauseMs` is dwell ON TOP of
+  // this, so the hand can linger after tapping.
+  tapMs?: number
   // 'radialtap' only. The ring OUTLINE (and the glow it throws), as hex or rgb().
   // Absent = the built-in violet.
   rippleColor?: string
