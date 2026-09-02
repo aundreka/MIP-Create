@@ -9,7 +9,7 @@
 // whatever the two boxes happen to be — that is the whole feature.
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { captureMorphs, launchMorphs, morphScale, planMorphs, MORPH_DEFAULT_EASING, MORPH_DEFAULT_MS, MORPH_OFF_CLASS } from './morph'
+import { autoMorphMatch, captureMorphs, launchMorphs, morphScale, morphTargets, planMorphs, MORPH_DEFAULT_EASING, MORPH_DEFAULT_MS, MORPH_OFF_CLASS } from './morph'
 import type { MorphConfig, SceneDef, SceneElement } from './scene'
 
 const el = (id: string, extra: Partial<SceneElement> = {}): SceneElement =>
@@ -53,8 +53,10 @@ describe('planMorphs', () => {
     })
   })
 
-  it('only fires on the screen the morph names', () => {
+  it('uses the authored pairing only on the screen it names', () => {
     const a = scene('s1', [el('logo', { morph: morph('s2', 'badge') })])
+    // 'badge' is the pairing's target, but this is a different screen: it only lands
+    // here if the automatic match finds it, and nothing about it matches 'logo'.
     expect(planMorphs(a, scene('s3', [el('badge')]))).toEqual([])
   })
 
@@ -78,11 +80,92 @@ describe('planMorphs', () => {
     expect(planMorphs(a, scene('s2', [el('pile')])).map((p) => p.fromId)).toEqual(['c1', 'c2'])
   })
 
+  // ---- reaching every screen, not just the one that was authored ----------
+  // A morph is about the screen CHANGE, not about position in the project: whichever
+  // screen the flow enters — the next one, a branch, or one it comes back to — the
+  // element flies onto its counterpart there.
+
+  it('finds the counterpart on a screen no pairing names, in either direction', () => {
+    const src = el('logo', { assetId: 'a1', morph: morph('s3', 'badge') })
+    const a = scene('s2', [src])
+    // s1 sits BEFORE this scene in the project and is named by nothing — the flow coming
+    // back to it is a screen change like any other.
+    expect(planMorphs(a, scene('s1', [el('hero', { assetId: 'a1' })]))[0]).toMatchObject({ fromId: 'logo', toId: 'hero' })
+    // and the authored pairing still wins on its own screen
+    expect(planMorphs(a, scene('s3', [el('badge'), el('spare', { assetId: 'a1' })]))[0]).toMatchObject({ toId: 'badge' })
+  })
+
+  it('matches by id, then artwork, then name — never by type alone', () => {
+    const src = el('logo', { assetId: 'a1', name: 'Logo', morph: morph('s9', 'x') })
+    const a = scene('s1', [src])
+    expect(planMorphs(a, scene('s2', [el('logo')]))[0]).toMatchObject({ toId: 'logo' })
+    expect(planMorphs(a, scene('s2', [el('other', { assetId: 'a1' })]))[0]).toMatchObject({ toId: 'other' })
+    expect(planMorphs(a, scene('s2', [el('other', { name: 'Logo' })]))[0]).toMatchObject({ toId: 'other' })
+    // Same type, nothing else in common: flying onto it would be a guess, and a wrong
+    // landing reads far worse than a plain cut.
+    expect(planMorphs(a, scene('s2', [el('bg', { name: 'Background' })]))).toEqual([])
+  })
+
+  it('stays on its pairings when the automatic match is switched off', () => {
+    const cfg: MorphConfig = { auto: false, targets: [{ toSceneId: 's3', toElementId: 'badge' }] }
+    const a = scene('s1', [el('logo', { assetId: 'a1', morph: cfg })])
+    expect(planMorphs(a, scene('s2', [el('twin', { assetId: 'a1' })]))).toEqual([])
+    expect(planMorphs(a, scene('s3', [el('badge')]))[0]).toMatchObject({ toId: 'badge' })
+  })
+
+  it('lets an empty pairing opt one screen out while the rest still fly', () => {
+    const cfg: MorphConfig = { targets: [{ toSceneId: 's2', toElementId: '' }] }
+    const a = scene('s1', [el('logo', { assetId: 'a1', morph: cfg })])
+    expect(planMorphs(a, scene('s2', [el('twin', { assetId: 'a1' })]))).toEqual([])
+    expect(planMorphs(a, scene('s3', [el('twin', { assetId: 'a1' })]))[0]).toMatchObject({ toId: 'twin' })
+  })
+
+  it('aims each screen separately when several are authored', () => {
+    const cfg: MorphConfig = {
+      targets: [
+        { toSceneId: 's2', toElementId: 'badge' },
+        { toSceneId: 's3', toElementId: 'crest' },
+      ],
+    }
+    const a = scene('s1', [el('logo', { morph: cfg })])
+    expect(planMorphs(a, scene('s2', [el('badge'), el('crest')]))[0]).toMatchObject({ toId: 'badge' })
+    expect(planMorphs(a, scene('s3', [el('badge'), el('crest')]))[0]).toMatchObject({ toId: 'crest' })
+  })
+
   it('never morphs a scene into itself, or across a missing scene', () => {
     const a = scene('s1', [el('logo', { morph: morph('s1', 'other') }), el('other')])
     expect(planMorphs(a, a)).toEqual([])
     expect(planMorphs(a, null)).toEqual([])
     expect(planMorphs(null, a)).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// morphTargets — the two authoring models, folded into one list
+// ---------------------------------------------------------------------------
+
+describe('morphTargets', () => {
+  it('reads a project saved before per-screen pairings existed', () => {
+    expect(morphTargets({ toSceneId: 's2', toElementId: 'badge' })).toEqual([{ toSceneId: 's2', toElementId: 'badge' }])
+  })
+
+  it('lets a pairing override the legacy destination for the same screen', () => {
+    const cfg: MorphConfig = { toSceneId: 's2', toElementId: 'old', targets: [{ toSceneId: 's2', toElementId: 'new' }] }
+    expect(morphTargets(cfg)).toEqual([{ toSceneId: 's2', toElementId: 'new' }])
+  })
+
+  it('keeps both when they name different screens', () => {
+    const cfg: MorphConfig = { toSceneId: 's2', toElementId: 'badge', targets: [{ toSceneId: 's3', toElementId: 'crest' }] }
+    expect(morphTargets(cfg).map((t) => t.toSceneId)).toEqual(['s3', 's2'])
+  })
+})
+
+describe('autoMorphMatch', () => {
+  it('skips hidden and carry-over elements when looking for the counterpart', () => {
+    const src = el('logo', { assetId: 'a1' })
+    expect(autoMorphMatch(src, scene('s2', [el('a', { assetId: 'a1', hidden: true })]))).toBeNull()
+    expect(autoMorphMatch(src, scene('s2', [el('a', { assetId: 'a1', persist: true })]))).toBeNull()
+    expect(autoMorphMatch(src, scene('s2', [el('a', { assetId: 'a1' })]))?.id).toBe('a')
   })
 })
 

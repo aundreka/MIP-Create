@@ -31,6 +31,7 @@ import type {
   MorphConfig,
   MorphEffect,
   MorphScaleMode,
+  MorphTarget,
   ObjectFit,
   SceneDef,
   SceneElement,
@@ -44,7 +45,7 @@ import type {
   UnboxingConfig,
 } from '../../runtime/scene'
 import { headerAllowedFor } from '../../runtime/scene'
-import { MORPH_DEFAULT_EASING, MORPH_DEFAULT_MS } from '../../runtime/morph'
+import { autoMorphMatch, morphTargets, MORPH_DEFAULT_EASING, MORPH_DEFAULT_MS } from '../../runtime/morph'
 import { ownsSlot, patchSlot, projectLayoutPatch, resolvedLayout, seedSlot, withOwnSlot, withoutSlot, type Orient } from '../headerLayout'
 import { TAP_FADE_DEFAULT_MS } from '../../runtime/elements/button'
 import { RIPPLE_DEFAULT_COLOR, RIPPLE_DEFAULT_OPACITY, RIPPLE_HAND_REF_W, RIPPLE_MAX_R } from '../../runtime/hint'
@@ -328,10 +329,18 @@ const MORPH_SCALES: { value: MorphScaleMode; label: string }[] = [
   { value: 'none', label: 'don’t resize (move only)' },
 ]
 
-// "Turn into…" — connect this element to one on ANOTHER screen. The screen change then
-// flies a copy of this element onto that one — position and size — instead of cutting
-// between the two, so it reads as the same object moving rather than two elements
-// swapping. See MorphConfig in runtime/scene.ts and the flight in runtime/morph.ts.
+// Not an element id — the option that opts one screen OUT of the automatic match.
+const MORPH_NONE = '__none'
+
+// "Turn into…" — connect this element to its counterpart on OTHER screens. A screen
+// change then flies a copy of this element onto that counterpart — position and size —
+// instead of cutting between the two, so it reads as the same object moving rather than
+// two elements swapping. See MorphConfig in runtime/scene.ts and the flight in
+// runtime/morph.ts.
+//
+// Screens are not enumerated by the author unless they want to be: the match is
+// automatic (same artwork, same name) on every screen the flow can reach, in either
+// direction, and the rows below only exist to correct or suppress it screen by screen.
 //
 // Geometry is deliberately not authored here: where it lands IS where the target element
 // sits on its own canvas, so dragging either end re-authors the move. Only the effect,
@@ -341,29 +350,40 @@ function MorphSection(props: { el: SceneElement; scenes: SceneDef[]; sceneId: st
   const id = el.id
   const cfg = el.morph
   const others = scenes.filter((s) => s.id !== sceneId)
-  const target = scenes.find((s) => s.id === cfg?.toSceneId)
+  const auto = cfg ? cfg.auto !== false : true
   // Carry-over elements are excluded at BOTH ends: they are built once above every scene
   // and never rebuilt by a screen change, so there is no hand-over to animate.
-  const candidates = (target?.elements ?? []).filter((e) => !e.persist)
-  const targetEl = candidates.find((e) => e.id === cfg?.toElementId)
+  const candidatesOn = (s: SceneDef | undefined): SceneElement[] => (s?.elements ?? []).filter((e) => !e.persist)
   const set = (patch: Partial<MorphConfig>): void => {
     if (cfg) patchElement(id, { morph: { ...cfg, ...patch } })
   }
+  // Rows are always written back as `targets` alone: the legacy single destination is
+  // folded into the list by morphTargets(), so leaving it behind would re-add a pairing
+  // the author just removed (see MorphConfig).
+  const rows = cfg ? morphTargets(cfg) : []
+  const setRows = (targets: MorphTarget[]): void => set({ targets, toSceneId: undefined, toElementId: undefined })
+  const setRow = (i: number, patch: Partial<MorphTarget>): void => setRows(rows.map((r, n) => (n === i ? { ...r, ...patch } : r)))
 
   // Picking a screen almost always means "the same thing over there", so pre-select the
   // element sharing this one's artwork — failing that its name, then its type. One click
   // instead of two, and still overridable.
   const guess = (s: SceneDef | undefined): string => {
-    const pool = (s?.elements ?? []).filter((e) => !e.persist && !e.hidden)
-    const byAsset = el.assetId ? pool.find((e) => e.assetId === el.assetId) : undefined
-    const byName = el.name ? pool.find((e) => e.name === el.name) : undefined
-    return (byAsset ?? byName ?? pool.find((e) => e.type === el.type) ?? pool[0])?.id ?? ''
+    if (!s) return ''
+    const pool = s.elements.filter((e) => !e.persist && !e.hidden)
+    return (autoMorphMatch(el, s) ?? pool.find((e) => e.type === el.type) ?? pool[0])?.id ?? ''
   }
   const enable = (on: boolean): void => {
     if (!on) return patchElement(id, { morph: undefined })
+    // Seeded with the screen the flow goes to next — the one an author reaches for
+    // first — and the automatic match left on for everywhere else.
     const s = others.find((x) => x.id === props.nextSceneId) ?? others[0]
-    if (s) patchElement(id, { morph: { toSceneId: s.id, toElementId: guess(s) } })
+    patchElement(id, { morph: s ? { targets: [{ toSceneId: s.id, toElementId: guess(s) }] } : {} })
   }
+
+  // What the automatic match would do on the screens no row names — the panel can show
+  // where this element flies without the author previewing every branch of the flow.
+  const autoHits = others.filter((s) => !rows.some((r) => r.toSceneId === s.id)).map((s) => ({ s, hit: auto ? autoMorphMatch(el, s) : null }))
+  const landing = autoHits.filter((a) => a.hit)
 
   return (
     <Accordion id="inspector.morph" title="Turn into an element on another screen" defaultOpen={false}>
@@ -379,25 +399,72 @@ function MorphSection(props: { el: SceneElement; scenes: SceneDef[]; sceneId: st
             </div>
           ) : (
             <>
-              <Row label="Screen">
-                <Select
-                  value={cfg.toSceneId}
-                  onChange={(v) => set({ toSceneId: v, toElementId: guess(scenes.find((x) => x.id === v)) })}
-                  options={others.map((s) => ({ value: s.id, label: s.name || s.id }))}
-                />
-              </Row>
-              {!target ? (
-                <div className="hint pad warn">That screen has been deleted — pick another one, or switch the morph off.</div>
-              ) : !candidates.length ? (
-                <div className="hint pad warn">“{target.name || target.id}” has no elements to land on yet.</div>
-              ) : (
-                <Row label="Turns into">
+              <Toggle label="Find the target automatically" checked={auto} onChange={(v) => set({ auto: v ? undefined : false })} />
+              <div className="hint pad">
+                On: whenever the flow moves to <b>any</b> other screen — the next one, or one it comes back to — this element flies onto the element there with the same artwork or
+                the same name. Screens with no such element are left alone. Off: it only flies where a row below says so.
+              </div>
+              {auto && (
+                <div className="hint pad">
+                  {landing.length ? (
+                    <>
+                      Lands automatically on{' '}
+                      {landing.map((a, i) => (
+                        <span key={a.s.id}>
+                          {i ? ', ' : ''}
+                          <b>{a.hit!.name || a.hit!.id}</b> on “{a.s.name || a.s.id}”
+                        </span>
+                      ))}
+                      .
+                    </>
+                  ) : (
+                    <>No other screen has an element with this one’s artwork or name, so the automatic match finds nothing — add a row below to aim it by hand.</>
+                  )}
+                </div>
+              )}
+              <div className="group-title2" style={{ marginTop: 6 }}>
+                Per-screen targets
+              </div>
+              {!rows.length && (
+                <div className="hint pad">No screen aimed by hand{auto ? ' — the automatic match handles them all.' : ' — nothing will fly until you add one.'}</div>
+              )}
+              {rows.map((r, i) => {
+                const target = scenes.find((x) => x.id === r.toSceneId)
+                const candidates = candidatesOn(target)
+                const targetEl = candidates.find((e) => e.id === r.toElementId)
+                const missing = !!r.toElementId && !targetEl
+                return (
+                  <div key={r.toSceneId} className="morph-row">
+                    <Row label={target ? target.name || target.id : 'Deleted screen'}>
+                      <div className="morph-row-controls">
+                        <Select
+                          value={targetEl ? targetEl.id : missing ? '' : MORPH_NONE}
+                          onChange={(v) => setRow(i, { toElementId: v === MORPH_NONE ? '' : v })}
+                          options={[
+                            ...(missing ? [{ value: '', label: '(deleted element)' }] : []),
+                            { value: MORPH_NONE, label: '(don’t morph into this screen)' },
+                            ...candidates.map((e) => ({ value: e.id, label: `${e.name || e.id} (${e.type})` })),
+                          ]}
+                        />
+                        <button className="mini" title="Remove this screen" onClick={() => setRows(rows.filter((_, n) => n !== i))}>
+                          ✕
+                        </button>
+                      </div>
+                    </Row>
+                    {!target && <div className="hint pad warn">That screen has been deleted — remove this row.</div>}
+                    {!!target && !candidates.length && <div className="hint pad warn">“{target.name || target.id}” has no elements to land on yet.</div>}
+                    {targetEl?.hidden && <div className="hint pad warn">“{targetEl.name || targetEl.id}” is hidden on that screen, so there is nothing to land on.</div>}
+                  </div>
+                )
+              })}
+              {others.some((s) => !rows.some((r) => r.toSceneId === s.id)) && (
+                <Row label="Add screen">
                   <Select
-                    value={targetEl ? targetEl.id : ''}
-                    onChange={(v) => set({ toElementId: v })}
+                    value=""
+                    onChange={(v) => v && setRows([...rows, { toSceneId: v, toElementId: guess(scenes.find((x) => x.id === v)) }])}
                     options={[
-                      ...(targetEl ? [] : [{ value: '', label: cfg.toElementId ? '(deleted element)' : '(pick one)' }]),
-                      ...candidates.map((e) => ({ value: e.id, label: `${e.name || e.id} (${e.type})` })),
+                      { value: '', label: '(pick a screen to aim by hand)' },
+                      ...others.filter((s) => !rows.some((r) => r.toSceneId === s.id)).map((s) => ({ value: s.id, label: s.name || s.id })),
                     ]}
                   />
                 </Row>
@@ -430,11 +497,10 @@ function MorphSection(props: { el: SceneElement; scenes: SceneDef[]; sceneId: st
                   carry-over to use it.
                 </div>
               )}
-              {targetEl?.hidden && <div className="hint pad warn">“{targetEl.name || targetEl.id}” is hidden on that screen, so there is nothing to land on.</div>}
               <div className="hint pad">
-                Where it lands is wherever <b>{targetEl?.name || 'the target'}</b> sits on “{target?.name || '…'}” — drag either element on its own canvas to re-aim the move.
-                <b> Lands at</b> lets the flight settle over or under the target's size before it hands over; the target itself always ends at its authored size. Preview the flow
-                to watch it — the editor canvas shows one screen at a time.
+                Where it lands is wherever the target sits on its own screen — drag either element on its own canvas to re-aim the move. <b>Lands at</b> lets the flight settle over
+                or under the target's size before it hands over; the target itself always ends at its authored size. Preview the flow to watch it — the editor canvas shows one
+                screen at a time.
               </div>
             </>
           )}
@@ -2274,6 +2340,22 @@ function ConfigSetup({ params, setParam, elementId, siblings }: ConfigSetupProps
     ...candidates.map((e) => ({ value: e.id, label: configOptionLabel(e) + (current && e.id === current.id ? ' ✓' : '') })),
   ]
 
+  // What a tap will actually DO, so a board that looks wired but does nothing on screen
+  // says so here rather than in a preview. Both halves are easy to leave half-done: the
+  // table is filled a cell at a time, and every part of the selected look is optional.
+  const previewing = String(params.canvasPreview ?? '')
+  const boardArtScale = Number(params.activeArtScale ?? 1)
+  const boardArtX = Number(params.activeArtX ?? 0)
+  const boardArtY = Number(params.activeArtY ?? 0)
+  const filled = combos.filter((combo) => params[configImageKey(combo)]).length
+  const hasSelectedLook =
+    mine.some((e) => e.configRole?.role === 'active' || e.configRole?.role === 'inactive') ||
+    Number(params.activeScale ?? 1) !== 1 ||
+    !!(params.activeBorderColor && Number(params.activeBorderPx ?? 0) > 0) ||
+    Number(params.activeOffsetX ?? 0) !== 0 ||
+    Number(params.activeOffsetY ?? 0) !== 0 ||
+    Object.keys(params).some((k) => /^on(?:_\d+)+$/.test(k) && params[k])
+
   const apply = (edits: ConfigSlotEdit[]): void => {
     if (!edits.length) return
     beginTransaction()
@@ -2285,6 +2367,36 @@ function ConfigSetup({ params, setParam, elementId, siblings }: ConfigSetupProps
     apply(assignConfigSlot({ nextId, current, role, gameId: elementId, group, choice, elements: siblings }))
 
   const setArtVisible = (els: SceneElement[], visible: boolean): void => apply(els.map((e) => setConfigCanvasVisible(e, visible)))
+
+  /** Size / position of ONE option's selected image, overriding the board-wide values
+   * under Selected look. Kept per option because active art is drawn per option — one
+   * swatch's ring can be heavier than another's — and the alternative is re-exporting
+   * the file. Cleared back to '' so the board-wide value takes over again. */
+  const artNum = (label: string, key: string, fallback: number, min: number, max: number, step: number, hint: string): JSX.Element => {
+    const raw = params[key]
+    const overridden = typeof raw === 'number' && isFinite(raw)
+    return (
+      <div className="combo-slot" key={key}>
+        <span title={hint}>{label}</span>
+        <input
+          type="number"
+          value={overridden ? raw : fallback}
+          min={min}
+          max={max}
+          step={step}
+          title={hint}
+          onChange={(e) => setParam(key, e.target.value === '' ? '' : Math.max(min, Math.min(max, Number(e.target.value) || 0)))}
+        />
+        <span className="combo-slot-actions">
+          {overridden && (
+            <button className="icon-btn" title="Back to the board-wide value under Selected look" onClick={() => setParam(key, '')}>
+              <Icon icon={X} size={13} />
+            </button>
+          )}
+        </span>
+      </div>
+    )
+  }
 
   /** What an option is CALLED, for the picture table's labels: the name of the element
    * standing for it, so the rows read “Walnut · 5 Drawer” rather than “1 · 2”. */
@@ -2340,6 +2452,25 @@ function ConfigSetup({ params, setParam, elementId, siblings }: ConfigSetupProps
           allowNone
           onChange={(aid) => setParam(configActiveKey(g + 1, choice), aid ?? '')}
         />
+        {!!params[configActiveKey(g + 1, choice)] && (
+          <>
+            <div className="combo-slot">
+              <span title="Draw this option’s selected look on the canvas while you size and place it — the art and the ring, nothing that would move the option itself. Authoring only; play always shows the live selection.">
+                Show on canvas
+              </span>
+              <button
+                className={'btn' + (previewing === `${g + 1}_${choice}` ? ' on' : '')}
+                onClick={() => setParam('canvasPreview', previewing === `${g + 1}_${choice}` ? '' : `${g + 1}_${choice}`)}
+              >
+                <Icon icon={previewing === `${g + 1}_${choice}` ? Eye : EyeOff} size={13} />
+              </button>
+              <span className="combo-slot-actions" />
+            </div>
+            {artNum('Size', `onScale_${g + 1}_${choice}`, boardArtScale, 0.1, 5, 0.02, 'How big this option’s selected image is drawn, as a multiple of the option’s own box. 1 fills it exactly; above 1 spills past the edges, which is what art with a ring around it needs. The option’s box never changes, so nothing else moves.')}
+            {artNum('X', `onX_${g + 1}_${choice}`, boardArtX, -400, 400, 1, 'Shift this option’s selected image sideways inside its box, in px — for art that isn’t centred on what it replaces.')}
+            {artNum('Y', `onY_${g + 1}_${choice}`, boardArtY, -400, 400, 1, 'Shift this option’s selected image up or down inside its box, in px.')}
+          </>
+        )}
         {[...configBound(siblings, elementId, 'active', g + 1, choice), undefined].map((el) =>
           slot(
             el ? 'Selected art' : 'Add selected art',
@@ -2448,11 +2579,21 @@ function ConfigSetup({ params, setParam, elementId, siblings }: ConfigSetupProps
             )
           })}
           <div className="hint pad">
-            One product shot per combination — {combos.length} in all. A cell left empty is a combination that doesn’t exist: it falls back to the art you placed, and “Unavailable”
-            above decides how the choice that would reach it reads.
+            {filled} of {combos.length} filled. A cell left empty is a combination that doesn’t exist: it falls back to the art you placed, and “Unavailable” above decides how the
+            choice that would reach it reads.
           </div>
         </>
       )}
+      {combos.length > 0 && filled === 0 && <div className="hint pad bad">No product shots yet, so tapping an option changes nothing on screen. Fill in the table above.</div>}
+      {!displays.length && combos.length > 0 && (
+        <div className="hint pad bad">No product image assigned, so there is nothing for the table to swap. Set one under Product image.</div>
+      )}
+      {!hasSelectedLook && (
+        <div className="hint pad bad">
+          Nothing marks the chosen option — no selected image, no selected art, and Selected look is left neutral. Only the product image will change when a tap lands.
+        </div>
+      )}
+      <div className="hint pad">Taps only do anything in Preview — the canvas holds every option still so you can place it.</div>
 
       {stateArt.length > 0 && (
         <>
@@ -3164,14 +3305,7 @@ function CatchTemplateInspector({ params, setParam, elementId, siblings }: Catch
         <NumField label="Unique item types" value={Number(params.itemTypes ?? 3)} step={1} min={1} max={20} onChange={(n) => setParam('itemTypes', n)} />
         {uniqueMode ? (
           <>
-            <NumField
-              label="Favour uncollected"
-              value={Number(params.uncaughtBias ?? 4)}
-              step={1}
-              min={1}
-              max={20}
-              onChange={(n) => setParam('uncaughtBias', n)}
-            />
+            <NumField label="Favour uncollected" value={Number(params.uncaughtBias ?? 4)} step={1} min={1} max={20} onChange={(n) => setParam('uncaughtBias', n)} />
             <div className="hint pad">
               The player wins after collecting one of each unique item. Total catches is ignored in this mode. An item still missing is thrown this many times as often as one
               already collected, so the last of a set turns up quickly — 1 is a flat random draw.
@@ -3187,14 +3321,7 @@ function CatchTemplateInspector({ params, setParam, elementId, siblings }: Catch
         {catchItems(siblings, elementId).length > 0 ? (
           <>
             <div className="group-title2">Falling copies</div>
-            <NumField
-              label="Size vs placed"
-              value={Number(params.itemFallScale ?? 2)}
-              step={0.1}
-              min={0.05}
-              max={20}
-              onChange={(n) => setParam('itemFallScale', n)}
-            />
+            <NumField label="Size vs placed" value={Number(params.itemFallScale ?? 2)} step={0.1} min={0.05} max={20} onChange={(n) => setParam('itemFallScale', n)} />
             <NumField label="Fade to full (ms)" value={Number(params.caughtFadeMs ?? 260)} step={20} min={0} max={3000} onChange={(n) => setParam('caughtFadeMs', n)} />
             {catchCheck(siblings, elementId) && (
               <>
@@ -3231,8 +3358,7 @@ function CatchTemplateInspector({ params, setParam, elementId, siblings }: Catch
       <Accordion id="inspector.catch.basket" title="Basket" defaultOpen={false}>
         {placedBox ? (
           <div className="hint pad">
-            The box is “{placedBox.name || placedBox.id}”. Its size and its catch height are its own, set by dragging it on the canvas — resize or move it there rather than
-            here.
+            The box is “{placedBox.name || placedBox.id}”. Its size and its catch height are its own, set by dragging it on the canvas — resize or move it there rather than here.
           </div>
         ) : (
           <>
@@ -3274,7 +3400,9 @@ function CatchTemplateInspector({ params, setParam, elementId, siblings }: Catch
         <NumberListEditor label="Rotations" value={params.caughtItemAngles} defaultValue={0} step={5} onChange={(v) => setParam('caughtItemAngles', v)} />
         <NumberListEditor label="Scales" value={params.caughtItemScales} defaultValue={0.7} step={0.05} min={0.05} max={5} onChange={(v) => setParam('caughtItemScales', v)} />
         <NumField label="Layer" value={Number(params.caughtItemZIndex ?? 1)} step={1} min={-10} max={10} onChange={(n) => setParam('caughtItemZIndex', n)} />
-        {placedBox && <div className="hint pad">Above 0 stacks caught items in front of the box’s picture; 0 or less tucks them behind it, which is what puts a shoe inside an open box.</div>}
+        {placedBox && (
+          <div className="hint pad">Above 0 stacks caught items in front of the box’s picture; 0 or less tucks them behind it, which is what puts a shoe inside an open box.</div>
+        )}
       </Accordion>
 
       <CatchPopupControls params={params} setParam={setParam} />
@@ -5369,6 +5497,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                     { value: 'dragclean', label: 'Drag to clean (carry the tool onto the nearest obstacle)' },
                     { value: 'tapremove', label: 'Tap to remove (tap the next obstacle standing)' },
                     { value: 'tapreveal', label: 'Tap to reveal (tap the next cover still up)' },
+                    { value: 'configurator', label: 'Configurator (tap through the groups)' },
                     { value: 'pinch', label: 'Pinch (two mirrored hands close on the target)' },
                     { value: 'carousel', label: 'Carousel (swipe, then tap the centre)' },
                     { value: 'brush', label: 'Point at the scratch brush (after its intro)' },
@@ -5754,9 +5883,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                       </div>
                     )}
                     {usesHoliday && !calendar.length && (
-                      <div className="hint pad bad">
-                        This element renders {'{holiday}'} but the MIP has no promo calendar, so the label is empty. Load one in Project settings.
-                      </div>
+                      <div className="hint pad bad">This element renders {'{holiday}'} but the MIP has no promo calendar, so the label is empty. Load one in Project settings.</div>
                     )}
                   </>
                 )
@@ -6144,9 +6271,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               <Slider label="Pieces" value={cfg.pieces ?? 200} min={20} max={600} step={10} onChange={(n) => set({ pieces: n })} />
               <Slider label="Size" value={cfg.scalar ?? 1} min={0.4} max={3} step={0.1} suffix="×" onChange={(n) => set({ scalar: n })} />
               {/* Pop takes its launch speed from the radius, so Power would fight it. */}
-              {mode !== 'pop' && (
-                <Slider label="Power" value={cfg.power ?? (mode === 'burst' ? 9 : 8)} min={2} max={20} step={0.5} onChange={(n) => set({ power: n })} />
-              )}
+              {mode !== 'pop' && <Slider label="Power" value={cfg.power ?? (mode === 'burst' ? 9 : 8)} min={2} max={20} step={0.5} onChange={(n) => set({ power: n })} />}
               <Slider
                 label="Gravity"
                 value={cfg.gravity ?? (mode === 'burst' ? 0.28 : mode === 'pop' ? 0.05 : 0.08)}
@@ -6205,13 +6330,11 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 </div>
               </Row>
               {(!cfg.colors || cfg.colors.length === 0) && (
-                <div className="hint pad">
-                  Using the default {mode === 'pop' ? 'six-colour party' : 'multi-colour'} palette. Add colours to override it.
-                </div>
+                <div className="hint pad">Using the default {mode === 'pop' ? 'six-colour party' : 'multi-colour'} palette. Add colours to override it.</div>
               )}
               <div className="hint pad">
-                Full-screen celebration overlay — always covers the whole screen (position &amp; size are ignored; <b>Pop</b> stays inside its radius around the origin). It
-                only animates in <b>Preview</b> / export; here you see a frozen sample. Use the layers panel to place it above your content.
+                Full-screen celebration overlay — always covers the whole screen (position &amp; size are ignored; <b>Pop</b> stays inside its radius around the origin). It only
+                animates in <b>Preview</b> / export; here you see a frozen sample. Use the layers panel to place it above your content.
               </div>
             </Accordion>
           )

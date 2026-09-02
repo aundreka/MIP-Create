@@ -112,7 +112,7 @@ export interface GameTemplate {
    * picks a game-aware logic template instead (e.g. 'match' follows the game's
    * data-mm-hint card); nodes then only place the hand's initial position. */
   defaultHandguide?: {
-    mode?: 'match' | 'hold' | 'thoughtwhack' | 'basket' | 'combo' | 'carousel' | 'dragclean' | 'tapremove' | 'tapreveal' | 'pinch'
+    mode?: 'match' | 'hold' | 'thoughtwhack' | 'basket' | 'combo' | 'configurator' | 'carousel' | 'dragclean' | 'tapremove' | 'tapreveal' | 'pinch'
     nodes: { x: number; y: number; pauseMs?: number }[]
     periodMs?: number
   }

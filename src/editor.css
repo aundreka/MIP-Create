@@ -1684,6 +1684,23 @@ button.frame-chip:hover {
   color: var(--accent);
 }
 
+/* A per-screen morph target: the element picker plus the button that drops the row
+   (see MorphSection). Sits inside a .field, so it only has to lay its two children out. */
+.morph-row-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.morph-row-controls select {
+  flex: 1;
+  min-width: 0;
+}
+.morph-row-controls .mini {
+  flex: 0 0 auto;
+  padding: 0 7px;
+  line-height: 22px;
+}
+
 /* ---- inspector fields ---- */
 .field {
   display: block;

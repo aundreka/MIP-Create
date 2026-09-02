@@ -5,25 +5,30 @@
 import { useEffect, useState } from 'react'
 import { patchElement, removeElement, reorderLayers, selectOnly, selectWithGroups, setSelection, toggleLock, toggleSelect, useEditorState } from '../store'
 import type { SceneElement } from '../../runtime/scene'
+import { resolveMorphTarget } from '../../runtime/morph'
 import { buildLayerTree } from '../layersTree'
 import { getGroupCollapsed, pruneGroupCollapsed, setGroupCollapsed } from '../uiState'
 import { ChevronRight, Eye, EyeOff, Folder, FolderOpen, GripVertical, Icon, LAYER_TYPE_ICON, LayoutGrid, Lock, LockOpen, X } from '../icons'
 
 export function LayersPanel(): JSX.Element {
-  const { project, scene, selectedIds, orientation } = useEditorState()
+  const { project, scene, activeSceneId, selectedIds, orientation } = useEditorState()
   const ordered = [...scene.elements].sort((a, b) => b.zIndex - a.zIndex) // front first
   // Visibility as the CURRENT canvas orientation renders it (landscape override wins
   // in landscape) — so a landscape-only element isn't dimmed while editing landscape.
   const effHidden = (el: SceneElement): boolean => (orientation === 'landscape' ? !!(el.landscape?.hidden ?? el.hidden) : !!el.hidden)
   const tree = buildLayerTree(ordered)
   // Where a morphing element hands over to (see MorphConfig) — named, so the badge can
-  // say which screen without opening the Inspector.
+  // say which screens without opening the Inspector. A morph reaches every screen its
+  // automatic match finds a counterpart on, so the tooltip lists what it resolves to
+  // rather than one authored destination.
   const morphTarget = (el: SceneElement): string | null => {
     if (!el.morph) return null
-    const s = project.scenes.find((x) => x.id === el.morph!.toSceneId)
-    const t = s?.elements.find((x) => x.id === el.morph!.toElementId)
-    if (!s) return 'a deleted screen'
-    return `“${t?.name || el.morph.toElementId}” on “${s.name || s.id}”`
+    const lands = project.scenes
+      .filter((s) => s.id !== activeSceneId)
+      .map((s) => ({ s, t: resolveMorphTarget(el, s) }))
+      .filter((x) => x.t)
+      .map((x) => `“${x.t!.name || x.t!.id}” on “${x.s.name || x.s.id}”`)
+    return lands.length ? lands.join(', ') : 'nothing on any other screen yet'
   }
   const [dragId, setDragId] = useState<string | null>(null)
   const [over, setOver] = useState<{ id: string; pos: 'before' | 'after' } | null>(null)

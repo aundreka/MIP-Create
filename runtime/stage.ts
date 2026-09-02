@@ -202,6 +202,7 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     | 'dragclean'
     | 'tapremove'
     | 'tapreveal'
+    | 'configurator'
     | 'pinch'
     | 'brush'
     | 'still'
@@ -240,6 +241,8 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     kind = 'tapremove'
   } else if (cfg.mode === 'tapreveal') {
     kind = 'tapreveal'
+  } else if (cfg.mode === 'configurator') {
+    kind = 'configurator'
   } else if (cfg.mode === 'pinch') {
     kind = 'pinch'
   } else if (cfg.mode === 'brush') {
@@ -517,7 +520,10 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
       // since that is the board this was built for, then the other two tap/wipe
       // markers so the same hand is useful on any of them.
       const targetEl =
-        root.querySelector<HTMLElement>('[data-reveal-hint]') ?? root.querySelector<HTMLElement>('[data-tap-hint]') ?? root.querySelector<HTMLElement>('[data-clean-hint]')
+        root.querySelector<HTMLElement>('[data-reveal-hint]') ??
+        root.querySelector<HTMLElement>('[data-tap-hint]') ??
+        root.querySelector<HTMLElement>('[data-config-hint]') ??
+        root.querySelector<HTMLElement>('[data-clean-hint]')
       if (!targetEl) {
         content.style.opacity = '0'
         if (mirror) mirror.style.opacity = '0'
@@ -552,14 +558,21 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
       oy = tipY
       mox = other - (guideRect.left + handW * 0.22)
       moy = tipY
-    } else if (kind === 'tapremove' || kind === 'tapreveal') {
+    } else if (kind === 'tapremove' || kind === 'tapreveal' || kind === 'configurator') {
       // Tap whatever the board still has waiting — the next obstacle on a Tap to
-      // remove board, the next cover on a Tap to reveal one. Each game moves its own
+      // remove board, the next cover on a Tap to reveal one, the first option of the
+      // first group a Configurator has not been answered in. Each game moves its own
       // marker after every hit, so this one hand walks the whole board without touching
       // a real element, and goes quiet the moment there is nothing left.
       //
-      // One branch for both: the marker differs, the gesture does not.
-      const messEl = root.querySelector<HTMLElement>(kind === 'tapremove' ? '[data-tap-hint]' : '[data-reveal-hint]')
+      // One branch for all three: the marker differs, the gesture does not. A
+      // configurator's hand does have one thing to be careful about — the option it is
+      // pointing at may be GROWING under it, since a selection can widen the row it
+      // sits in. The rect is read fresh every frame, so the fingertip rides the change
+      // instead of hanging where the option used to be.
+      const messEl = root.querySelector<HTMLElement>(
+        kind === 'tapremove' ? '[data-tap-hint]' : kind === 'tapreveal' ? '[data-reveal-hint]' : '[data-config-hint]',
+      )
       if (!messEl) {
         content.style.opacity = '0'
         raf = requestAnimationFrame(frame)

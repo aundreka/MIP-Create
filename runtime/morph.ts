@@ -3,9 +3,10 @@
 //
 // The work is split in two halves because the caller has to straddle the scene swap:
 //
-//   planMorphs()     pure, over the two scene DEFS. Resolves defaults and drops pairs
-//                    that can't fly (no target, hidden, carry-over). Testable without
-//                    a DOM.
+//   planMorphs()     pure, over the two scene DEFS. Resolves each source's target for
+//                    the scene being entered — an authored pairing, else the automatic
+//                    match — fills in the defaults, and drops pairs that can't fly (no
+//                    target, hidden, carry-over). Testable without a DOM.
 //   captureMorphs()  runs on the OUTGOING scene BEFORE anything moves: measures each
 //                    source's resting rect, takes a frozen copy of its DOM, and hides
 //                    the original so it can't fade out from under the copy.
@@ -19,7 +20,7 @@
 // ends live in different stages (and a parked immune element lives in neither), so the
 // caller resolves ids to nodes and this file stays out of stage.ts's way.
 
-import type { MorphEffect, MorphScaleMode, SceneDef } from './scene'
+import type { MorphConfig, MorphEffect, MorphScaleMode, MorphTarget, SceneDef, SceneElement } from './scene'
 
 export const MORPH_DEFAULT_MS = 600
 export const MORPH_DEFAULT_EASING = 'cubic-bezier(.4,0,.2,1)'
@@ -43,27 +44,83 @@ export interface MorphPlan {
 }
 
 /**
+ * Every pairing a morph carries, oldest authoring model first.
+ *
+ * Configs saved before per-scene pairings existed name their one destination in
+ * `toSceneId`/`toElementId`; it reads as the first pairing so those projects keep
+ * flying exactly where they always did. A pairing in `targets` for the same scene
+ * wins — the editor writes only `targets`, so an edited config never fights its own
+ * legacy fields.
+ */
+export function morphTargets(cfg: MorphConfig): MorphTarget[] {
+  const out: MorphTarget[] = []
+  const seen = new Set<string>()
+  for (const t of [...(cfg.targets ?? []), ...(cfg.toSceneId ? [{ toSceneId: cfg.toSceneId, toElementId: cfg.toElementId ?? '' }] : [])]) {
+    if (!t.toSceneId || seen.has(t.toSceneId)) continue
+    seen.add(t.toSceneId)
+    out.push(t)
+  }
+  return out
+}
+
+/**
+ * The counterpart of `el` on `to` when no pairing names one — "the same object, over
+ * there", found rather than authored.
+ *
+ * Deliberately narrow, because this fires on EVERY scene the flow enters and a wrong
+ * landing is worse than no flight at all: same element id (a duplicated screen), then
+ * same artwork, then same name. Never by type, which would happily fly a logo onto an
+ * unrelated background the moment both are images.
+ */
+export function autoMorphMatch(el: SceneElement, to: SceneDef): SceneElement | null {
+  const pool = to.elements.filter((e) => !e.hidden && !e.persist)
+  const byId = pool.find((e) => e.id === el.id)
+  const byAsset = el.assetId ? pool.find((e) => e.assetId === el.assetId) : undefined
+  const byName = el.name ? pool.find((e) => e.name === el.name) : undefined
+  return byId ?? byAsset ?? byName ?? null
+}
+
+/**
+ * The element on `to` that `el` turns into, or null for "this screen change doesn't
+ * morph it". Shared with the editor so the panel names the same target the flight
+ * will actually use.
+ */
+export function resolveMorphTarget(el: SceneElement, to: SceneDef): SceneElement | null {
+  const m = el.morph
+  if (!m || el.hidden || el.persist) return null
+  const pair = morphTargets(m).find((t) => t.toSceneId === to.id)
+  // An authored pairing is the whole answer for its scene, including the empty one:
+  // that is how an author opts a single screen out of the automatic match.
+  if (pair) return pair.toElementId ? (to.elements.find((e) => e.id === pair.toElementId && !e.hidden && !e.persist) ?? null) : null
+  return m.auto === false ? null : autoMorphMatch(el, to)
+}
+
+/**
  * Which of `from`'s elements morph into `to`'s, with every default resolved.
  *
- * Pairs are dropped rather than half-played: an element whose target scene isn't the
- * one being entered, whose target has gone (deleted, renamed id, pasted copy), or
- * whose either end is hidden or a carry-over has nothing to hand over.
+ * `to` is whatever screen the flow is entering — the next one, an overlay, or one it
+ * is coming BACK to. Order in the project is irrelevant; a morph is about the screen
+ * change, not about the list.
+ *
+ * Pairs are dropped rather than half-played: an element whose target has gone
+ * (deleted, renamed id, pasted copy), whose pairing opts this screen out, whose
+ * automatic match finds no counterpart, or whose either end is hidden or a carry-over
+ * has nothing to hand over.
  *
  * Several sources MAY converge on one target (three coins merging into a pile); the
  * runtime keeps the target hidden until the last of them lands.
  */
 export function planMorphs(from: SceneDef | null | undefined, to: SceneDef | null | undefined): MorphPlan[] {
   if (!from || !to || from.id === to.id) return []
-  const targets = new Map(to.elements.filter((e) => !e.hidden && !e.persist).map((e) => [e.id, e]))
   const out: MorphPlan[] = []
   for (const el of from.elements) {
     const m = el.morph
-    if (!m || el.hidden || el.persist) continue
-    if (m.toSceneId !== to.id || !m.toElementId) continue
-    if (!targets.has(m.toElementId)) continue
+    if (!m) continue
+    const dst = resolveMorphTarget(el, to)
+    if (!dst) continue
     out.push({
       fromId: el.id,
-      toId: m.toElementId,
+      toId: dst.id,
       effect: m.effect ?? 'cross-fade',
       scaleMode: m.scaleMode ?? 'fit',
       endScale: m.endScale && m.endScale > 0 ? m.endScale : 1,

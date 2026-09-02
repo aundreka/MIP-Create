@@ -57,6 +57,17 @@
 //                 src blanks the element for a frame while the new file decodes, which
 //                 on a swatch row reads as a flicker. Optional — leave it unset and the
 //                 rest of this list is what selection looks like.
+//                 How BIG that picture is drawn is its own knob, because active art is
+//                 so often a different size from the thing it replaces — a swatch with
+//                 a ring around it is bigger than the bare swatch by however much ring
+//                 the designer drew. `activeArtScale` sets it for the board and
+//                 `onScale_<g>_<c>` overrides it for one option, both measured against
+//                 the option's own box, so the art is sized by eye without re-exporting
+//                 it or resizing the element underneath. `activeArtX` / `activeArtY`
+//                 (and `onX_<g>_<c>` / `onY_<g>_<c>`) shift it within that box, in
+//                 design px, for art that is not centred on what it replaces — a ring
+//                 with a tick hanging off one corner. Neither knob touches the option's
+//                 own box, so nothing else on the board moves because of them.
 //   the border    a ring drawn AROUND the chosen option instead of a second picture:
 //                 `activeBorderColor`, `activeBorderPx`, `activeBorderRadiusPx`, held
 //                 `activeBorderGapPx` clear of the art so it reads as a selection ring
@@ -180,6 +191,9 @@ export function createConfigurator(): GameModule {
   let activeScale = 1
   let activeMs = 260
   let activeFadeMs = 200
+  let activeArtScale = 1
+  let activeArtX = 0
+  let activeArtY = 0
   let activeOffsetX = 0
   let activeOffsetY = 0
   let borderColor = ''
@@ -288,7 +302,41 @@ export function createConfigurator(): GameModule {
    * It sits in the content's own box at `inset:0`, so it grows, moves and animates with
    * the option as one thing, and is laid out `contain` so active art with a different
    * aspect (a ring, a shadow) keeps its shape instead of being stretched to the box. */
+  /** How big this option's active art is drawn, as a multiple of the option's own box:
+   * the board's `activeArtScale`, or this option's own `onScale_<g>_<c>` when it has
+   * one. Per option because active art is drawn per option — one swatch's ring can be
+   * heavier than another's, and the alternative is re-exporting the file. */
+  const artScaleOf = (o: OptionEl): number => Math.max(0.1, Math.min(5, num(params[`onScale_${o.group}_${o.choice}`], activeArtScale)))
+
+  /** Where this option's active art sits inside its box, in DESIGN px — the board's
+   * offset, or this option's own. Same reasoning as the scale: it is a property of the
+   * picture, not of the element it is laid over. */
+  const artOffsetOf = (o: OptionEl): Pt => ({
+    x: Math.max(-400, Math.min(400, num(params[`onX_${o.group}_${o.choice}`], activeArtX))),
+    y: Math.max(-400, Math.min(400, num(params[`onY_${o.group}_${o.choice}`], activeArtY))),
+  })
+
+  /** Size and place the active art inside the option's box. Re-applied on every layout
+   * pass, because the offset is in design px: an 8px nudge has to stay 8px at the size
+   * the board was authored at rather than 8 physical px on a phone.
+   *
+   * `translate` and `scale` are separate CSS properties and compose in that order, so
+   * the nudge is not multiplied by the growth — moving the art 8px means 8px whether it
+   * is drawn at 1x or 2x. */
+  function styleOverlay(o: OptionEl): void {
+    if (!o.overlay) return
+    const k = scale()
+    const off = artOffsetOf(o)
+    const s = artScaleOf(o)
+    o.overlay.style.translate = off.x || off.y ? `${off.x * k}px ${off.y * k}px` : ''
+    o.overlay.style.scale = s === 1 ? '' : String(s)
+  }
+
   const buildOverlay = (o: OptionEl): void => {
+    // Idempotent: the authoring preview in mount() may already have built this one, and
+    // a second <img> laid over the first would sit there at full opacity for the rest
+    // of the game with nothing tracking it.
+    if (o.overlay) return
     const src = ctx.assets.src(String(params[`on_${o.group}_${o.choice}`] ?? '')) || ''
     const host = o.img?.parentElement ?? animNode(o.el)
     if (!src || !host) return
@@ -297,10 +345,15 @@ export function createConfigurator(): GameModule {
     img.alt = ''
     img.draggable = false
     img.src = src
-    img.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:contain;pointer-events:none;opacity:0;'
+    // Sized against the option's box and grown about its own centre, so bigger art
+    // spills evenly past the edges instead of pushing off one corner — and the box
+    // itself never changes, which is what keeps the neighbours where the author put
+    // them until the row is deliberately asked to open up.
+    img.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:contain;pointer-events:none;opacity:0;transform-origin:center center;'
     if (!host.style.position) host.style.position = 'relative'
     host.appendChild(img)
     o.overlay = img
+    styleOverlay(o)
   }
 
   /** The selection ring: a box drawn around the option, transparent until it is chosen.
@@ -309,6 +362,7 @@ export function createConfigurator(): GameModule {
    * it appeared. Sized in DESIGN px and re-sized on every relayout, so a 2px ring is 2px
    * at the size the board was authored at rather than 2 physical px on a phone. */
   const buildRing = (o: OptionEl): void => {
+    if (o.ring) return // already built by the authoring preview (see buildOverlay)
     const host = o.img?.parentElement ?? animNode(o.el)
     if (!borderColor || borderPx <= 0 || !host) return
     const ring = document.createElement('div')
@@ -411,9 +465,15 @@ export function createConfigurator(): GameModule {
       if (spread === 'push' && chosen) {
         // What the growth actually needs: half the extra width it takes up, since it
         // grows about its own centre and eats into both neighbours equally.
+        //
+        // Both growths count. The option can be scaled up, and its active art can be
+        // drawn bigger again on top of that — a ringed swatch is wider than the swatch
+        // whether or not the element grew — so the room is measured against whichever
+        // of the two ends up widest.
         const r = chosen.el.getBoundingClientRect()
         const size = axis === 'x' ? r.width : r.height
-        distance = Math.max(0, ((activeScale - 1) * size) / 2 + spreadExtraPx * scale())
+        const grow = Math.max(1, activeScale, chosen.overlay ? activeScale * artScaleOf(chosen) : 1)
+        distance = Math.max(0, ((grow - 1) * size) / 2 + spreadExtraPx * scale())
       }
       for (const o of optionsIn(g)) {
         const mine = o.home[axis]
@@ -645,6 +705,9 @@ export function createConfigurator(): GameModule {
       activeScale = Math.max(0.5, Math.min(3, num(p.activeScale, 1)))
       activeMs = Math.max(0, Math.min(3000, num(p.activeMs, 260)))
       activeFadeMs = Math.max(0, Math.min(3000, num(p.activeFadeMs, 200)))
+      activeArtScale = Math.max(0.1, Math.min(5, num(p.activeArtScale, 1)))
+      activeArtX = Math.max(-400, Math.min(400, num(p.activeArtX, 0)))
+      activeArtY = Math.max(-400, Math.min(400, num(p.activeArtY, 0)))
       activeOffsetX = Math.max(-400, Math.min(400, num(p.activeOffsetX, 0)))
       activeOffsetY = Math.max(-400, Math.min(400, num(p.activeOffsetY, 0)))
       borderColor = typeof p.activeBorderColor === 'string' ? p.activeBorderColor : ''
@@ -652,7 +715,9 @@ export function createConfigurator(): GameModule {
       borderRadiusPx = Math.max(0, Math.min(999, num(p.activeBorderRadiusPx, 0)))
       borderGapPx = Math.max(-200, Math.min(200, num(p.activeBorderGapPx, 0)))
       spread = String(p.spread ?? 'push') === 'none' ? 'none' : 'push'
-      spreadExtraPx = Math.max(0, Math.min(400, num(p.spreadExtraPx, 0)))
+      // Negative is allowed: art with a lot of transparent padding already carries its
+      // own breathing room, and the row should be able to close back up around it.
+      spreadExtraPx = Math.max(-400, Math.min(400, num(p.spreadExtraPx, 0)))
       winTaps = Math.max(0, Math.round(num(p.winTaps, 0)))
       preselect = p.preselect !== false && p.preselect !== 'false'
       const mode = String(p.unavailable ?? 'ignore')
@@ -677,6 +742,26 @@ export function createConfigurator(): GameModule {
       // editor canvas, where every option and every piece of state art must stay
       // visible and selectable. start() (interactive only) is what collapses the board
       // to one live combination.
+      //
+      // The one exception is AUTHORING PREVIEW: `canvasPreview` names an option whose
+      // selected look should be drawn right here on the canvas ('2_3'), so the size and
+      // position of its active art can be dialled in against the real layout instead of
+      // in a preview-and-back loop. Only what lives inside the option's own box — the
+      // art and the ring — so the canvas never lies about where anything is placed.
+      // start() runs in the same synchronous call for real playback and repaints
+      // everything from the live selection, so this can never reach a player.
+      const preview = String(p.canvasPreview ?? '')
+      if (preview) {
+        const [pg, pc] = preview.split('_').map((n) => Math.round(Number(n) || 0))
+        const target = options.find((opt) => opt.group === pg && opt.choice === pc)
+        if (target) {
+          buildOverlay(target)
+          buildRing(target)
+          if (target.overlay) target.overlay.style.opacity = '1'
+          if (target.ring) target.ring.style.opacity = '1'
+          setScale(target, activeScale, 0)
+        }
+      }
     },
     start() {
       if (started) return
@@ -714,6 +799,7 @@ export function createConfigurator(): GameModule {
       for (const o of options) {
         setOffset(o, axisOf(o.group), 0, false)
         styleRing(o)
+        styleOverlay(o)
       }
       sampleHomes()
       applySpread(false)
@@ -801,13 +887,16 @@ export const CONFIGURATOR_TEMPLATE: GameTemplate = {
     { key: 'swapMs', label: 'Product cross-fade (ms)', type: 'number', group: 'Feel & timing', min: 0, max: 3000, step: 20 },
     { key: 'activeFadeMs', label: 'Selected art cross-fade (ms)', type: 'number', group: 'Feel & timing', min: 0, max: 3000, step: 20 },
     { key: 'activeScale', label: 'Selected option size (1 = no growth)', type: 'number', group: 'Selected look', min: 0.5, max: 3, step: 0.02 },
+    { key: 'activeArtScale', label: 'Selected image size (1 = fills the option)', type: 'number', group: 'Selected look', min: 0.1, max: 5, step: 0.02 },
+    { key: 'activeArtX', label: 'Selected image X (px)', type: 'number', group: 'Selected look', min: -400, max: 400, step: 1 },
+    { key: 'activeArtY', label: 'Selected image Y (px)', type: 'number', group: 'Selected look', min: -400, max: 400, step: 1 },
     { key: 'activeOffsetX', label: 'Selected nudge X (px)', type: 'number', group: 'Selected look', min: -400, max: 400, step: 1 },
     { key: 'activeOffsetY', label: 'Selected nudge Y (px)', type: 'number', group: 'Selected look', min: -400, max: 400, step: 1 },
     { key: 'activeBorderColor', label: 'Selected border colour', type: 'color', group: 'Selected look' },
     { key: 'activeBorderPx', label: 'Selected border weight (px)', type: 'number', group: 'Selected look', min: 0, max: 40, step: 1 },
     { key: 'activeBorderRadiusPx', label: 'Selected border radius (px)', type: 'number', group: 'Selected look', min: 0, max: 999, step: 1 },
     { key: 'activeBorderGapPx', label: 'Selected border gap (px)', type: 'number', group: 'Selected look', min: -200, max: 200, step: 1 },
-    { key: 'spreadExtraPx', label: 'Extra gap around the selection (px)', type: 'number', group: 'Selected look', min: 0, max: 400, step: 2 },
+    { key: 'spreadExtraPx', label: 'Extra gap around the selection (px)', type: 'number', group: 'Selected look', min: -400, max: 400, step: 2 },
     { key: 'activeMs', label: 'Grow / move / make room (ms)', type: 'number', group: 'Feel & timing', min: 0, max: 3000, step: 20 },
     { key: 'tapScale', label: 'Tap pop scale', type: 'number', group: 'Feel & timing', min: 0.5, max: 2, step: 0.02 },
     { key: 'tapMs', label: 'Tap pop (ms)', type: 'number', group: 'Feel & timing', min: 0, max: 1000, step: 20 },
@@ -834,6 +923,16 @@ export const CONFIGURATOR_TEMPLATE: GameTemplate = {
     // all, which is the common case; above 1 it grows and its row slides aside to make
     // exactly that much room ('none' switches the row apart).
     activeScale: 1,
+    // How big the selected IMAGE is drawn inside the option's box — its own knob,
+    // because active art is so often a different size from what it replaces. Per-option
+    // overrides ride alongside it as onScale_<group>_<choice>.
+    // Authoring only: the option whose selected look is drawn on the canvas while it is
+    // being sized ('group_choice'). start() repaints from the live selection, so it can
+    // never reach a player.
+    canvasPreview: '',
+    activeArtScale: 1,
+    activeArtX: 0,
+    activeArtY: 0,
     activeMs: 260,
     activeFadeMs: 200,
     // The styled selected state, for a board that wants an outline rather than a second
@@ -850,5 +949,10 @@ export const CONFIGURATOR_TEMPLATE: GameTemplate = {
     tapMs: 140,
   },
   defaultHintIdleMs: 3000,
+  // Seeds a placed handguide that taps its way through the groups: it follows the live
+  // option the game publishes as data-config-hint, moves on as each group is answered,
+  // and goes quiet once there is nothing left to choose. The node only sets where the
+  // hand starts, before the board has anything to point at.
+  defaultHandguide: { mode: 'configurator', nodes: [{ x: 0.5, y: 0.7 }], periodMs: 1100 },
   create: createConfigurator,
 }

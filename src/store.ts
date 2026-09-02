@@ -5,6 +5,7 @@
 
 import { useSyncExternalStore } from 'react'
 import type { HeaderConfig, OrientationOverride, Project, ProjectMeta, Scene, SceneDef, SceneElement, Variant } from '../runtime/scene'
+import { morphTargets } from '../runtime/morph'
 import type { AssetEntry, AssetMap, CompressProfile } from '../runtime/types'
 import { getActiveVariant } from './variantMode'
 import { applyVariantPatches } from './variants'
@@ -1114,13 +1115,28 @@ export function reorderScenes(ids: string[]): void {
   const startSceneId = wasFirst && scenes[0] ? scenes[0].id : state.project.startSceneId
   set({ dirty: true, project: { ...state.project, scenes, startSceneId } })
 }
+/** Forget a deleted screen inside one element's morph — see removeScene. */
+const dropMorphTo =
+  (sceneId: string) =>
+  (e: SceneElement): SceneElement => {
+    if (!e.morph) return e
+    const targets = morphTargets(e.morph).filter((t) => t.toSceneId !== sceneId)
+    if (!targets.length && e.morph.auto === false) return { ...e, morph: undefined }
+    // Rewritten as `targets` only: the legacy single destination is folded in above, so
+    // leaving it in place would resurrect the pairing that was just dropped.
+    return { ...e, morph: { ...e.morph, targets, toSceneId: undefined, toElementId: undefined } }
+  }
+
 export function removeScene(id: string): void {
   if (state.project.scenes.length <= 1) return
-  // Morphs aimed at the deleted screen are dropped with it, so a later screen reusing
-  // the id can't inherit somebody else's flight (see MorphConfig).
+  // Pairings aimed at the deleted screen go with it, so a later screen reusing the id
+  // can't inherit somebody else's flight (see MorphConfig). The rest of the morph stays:
+  // its other pairings and its automatic match still have screens to fly to. Only a
+  // morph left with no pairing AND no automatic match is dropped outright — it could
+  // never play again.
   const scenes = state.project.scenes
     .filter((s) => s.id !== id)
-    .map((s) => (s.elements.some((e) => e.morph?.toSceneId === id) ? { ...s, elements: s.elements.map((e) => (e.morph?.toSceneId === id ? { ...e, morph: undefined } : e)) } : s))
+    .map((s) => (s.elements.some((e) => e.morph && morphTargets(e.morph).some((t) => t.toSceneId === id)) ? { ...s, elements: s.elements.map(dropMorphTo(id)) } : s))
     // An overlay that floated over the deleted scene goes back to dimming whatever is on
     // screen, rather than keeping a dangling backdrop id.
     .map((s) => (s.overlayBase === id ? { ...s, overlayBase: undefined } : s))

@@ -208,9 +208,11 @@ export function adjustFilterCss(a: AdjustConfig | undefined): string {
 // on their own canvases, so nudging either end re-authors the flight. `effect`,
 // `durationMs`, `delayMs` and `easing` (the speed curve) are the knobs.
 //
-// Plays on an ordinary screen change AND on a scene floated as an overlay. A
-// `persist` (carry-over) element is never morphed at either end — it already survives
-// the cut untouched, so there is nothing to hand over.
+// Plays on an ordinary screen change AND on a scene floated as an overlay, in either
+// direction: the flow moving BACK to an earlier screen is a screen change like any
+// other, and the element flies onto its counterpart there just the same. A `persist`
+// (carry-over) element is never morphed at either end — it already survives the cut
+// untouched, so there is nothing to hand over.
 export type MorphEffect =
   // One flight: the SOURCE art travels and resizes, and the target takes over at the
   // landing frame. Right when both ends are the same picture.
@@ -229,11 +231,31 @@ export type MorphScaleMode =
   | 'stretch' // each axis matched on its own — distorts, but lands on the box exactly
   | 'none' // don't resize at all; the flight is a pure move
 
-export interface MorphConfig {
-  /** Scene holding the target element. The morph plays only when entering THIS scene. */
+/** One authored pairing: on THIS scene, turn into THAT element. */
+export interface MorphTarget {
+  /** Scene the pairing applies to. */
   toSceneId: string
-  /** Element on that scene this one turns into. */
+  /** Element on that scene this one turns into. Empty means "never morph into this
+   *  scene" — the way an author opts a single screen out of the automatic match. */
   toElementId: string
+}
+
+export interface MorphConfig {
+  /** Per-scene pairings, consulted before the automatic match. */
+  targets?: MorphTarget[]
+  /**
+   * On a scene no pairing names, find the counterpart by SAME element id, then same
+   * artwork, then same name — see autoMorphMatch. Default ON: an element that turns
+   * into something on one screen almost always turns into the same thing wherever else
+   * the flow leads, and the match is deliberately narrow enough to stay silent when
+   * there is no counterpart. Set false to fly only where a pairing says so.
+   */
+  auto?: boolean
+  /** @deprecated The single destination authored before per-scene pairings existed.
+   *  Read through morphTargets(), which folds it in as the first pairing. */
+  toSceneId?: string
+  /** @deprecated Paired with toSceneId. */
+  toElementId?: string
   effect?: MorphEffect // default 'cross-fade'
   scaleMode?: MorphScaleMode // default 'fit'
   // Extra multiplier on the LANDING size, e.g. 1.1 settles 10% over the target before
@@ -574,6 +596,10 @@ export interface HandguideConfig {
   // 'tapremove' taps the next obstacle a Tap to remove board still has standing, and
   // moves to the following one as they go.
   // 'tapreveal' does the same for the next cover a Tap to reveal board has not opened.
+  // 'configurator' taps the first option of the first group a Configurator board has
+  // not been answered in, moving on as each group is chosen and going quiet once the
+  // board is done. The rect is read every frame, so the hand rides an option that grows
+  // or slides as the row opens up around a selection.
   // 'pinch' is TWO hands closing on that same target: the placed hand, plus a mirrored
   // duplicate of it. Cloning the node rather than asking for a second element keeps the
   // pair guaranteed identical — same art, same size, same idle behaviour — and a
@@ -592,6 +618,7 @@ export interface HandguideConfig {
     | 'dragclean'
     | 'tapremove'
     | 'tapreveal'
+    | 'configurator'
     | 'pinch'
     | 'brush'
     | 'still'

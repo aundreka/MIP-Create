@@ -413,6 +413,78 @@ describe('configurator', () => {
     stage.destroy()
   })
 
+  it('sizes and places the selected image without moving the option', () => {
+    const stage = build([
+      game({ groups: 1, swapMs: 0, activeFadeMs: 0, preselect: false, on_1_1: 'onA', activeArtScale: 1.4, activeArtX: 6, onScale_1_2: 2, on_1_2: 'onA' }),
+      display(),
+      option('a1', 1, 1, 'swatchA'),
+      option('a2', 1, 2, 'swatchB'),
+    ])
+    stage.layoutAll()
+    stage.startGames(true)
+
+    // Board-wide size and nudge, applied to the art alone.
+    const art1 = overlayOf(byId(stage, 'a1'))!
+    expect(art1.style.scale).toBe('1.4')
+    expect(art1.style.translate).not.toBe('')
+    // The option's own box is untouched, so nothing else on the board moves.
+    expect(byId(stage, 'a1').style.translate).toBe('0px 0px')
+
+    // One option overrides the board-wide size for itself.
+    expect(overlayOf(byId(stage, 'a2'))!.style.scale).toBe('2')
+    stage.destroy()
+  })
+
+  it('draws one option’s selected look on the canvas, and never in play', () => {
+    const els = [game({ groups: 1, swapMs: 0, preselect: false, on_1_1: 'onA', canvasPreview: '1_1' }), display(), option('a1', 1, 1, 'swatchA'), option('a2', 1, 2, 'swatchB')]
+
+    // Editor canvas: the option being tuned shows its active art, at the size and
+    // position it is being given, without start() ever running.
+    const editor = build(els)
+    editor.layoutAll()
+    editor.startGames(false)
+    expect(overlayOf(byId(editor, 'a1'))!.style.opacity).toBe('1')
+    expect(overlayOf(byId(editor, 'a2'))).toBeNull()
+    editor.destroy()
+
+    // Real play: the same board opens on the live selection instead — here nothing is
+    // pre-selected, so the authoring preview is gone rather than stuck on.
+    document.body.innerHTML = ''
+    const play = build(els)
+    play.layoutAll()
+    play.startGames(true)
+    expect(play.root.querySelectorAll('img.pa-config-active').length).toBe(1)
+    expect(overlayOf(byId(play, 'a1'))!.style.opacity).toBe('0')
+    play.destroy()
+  })
+
+  it('publishes the option a hand should tap, and moves it on as groups are answered', () => {
+    const stage = build([
+      game({ groups: 2, swapMs: 0, img_1_1: 'p11', img_1_2: 'p12', img_2_1: 'p21', img_2_2: 'p22' }),
+      display(),
+      option('a1', 1, 1, 'swatchA'),
+      option('a2', 1, 2, 'swatchB'),
+      option('b1', 2, 1, 'swatchA'),
+      option('b2', 2, 2, 'swatchB'),
+    ])
+    stage.layoutAll()
+    stage.startGames(true)
+
+    // The first group is unanswered, and the hand is pointed at a choice that would
+    // actually change something — never at the one already showing.
+    expect(byId(stage, 'a2').dataset.configHint).toBe('1')
+    expect(byId(stage, 'a1').dataset.configHint).toBeUndefined()
+
+    byId(stage, 'a2').dispatchEvent(pointer('pointerdown'))
+    expect(byId(stage, 'b2').dataset.configHint).toBe('1')
+    expect(byId(stage, 'a2').dataset.configHint).toBeUndefined()
+
+    // Nothing left to ask for: the hand has nothing to point at and goes quiet.
+    byId(stage, 'b2').dispatchEvent(pointer('pointerdown'))
+    expect(stage.root.querySelectorAll('[data-config-hint]').length).toBe(0)
+    stage.destroy()
+  })
+
   it('cross-fades the product over swapMs and lands on the new picture', () => {
     const stage = build([game({ groups: 1, swapMs: 200, img_1: 'p11', img_2: 'p12' }), display(), option('a1', 1, 1, 'swatchA'), option('a2', 1, 2, 'swatchB')])
     stage.layoutAll()
