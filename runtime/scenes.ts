@@ -24,6 +24,14 @@ export interface SceneManager {
   destroy(): void
 }
 
+// Gesture types that can be "the first user interaction" for meta.sessionTimer.
+// pointer/touch are the real paths; mouse/click back up containers that synthesize
+// only mouse events. Mirrors the set index.ts uses to fire gameStart().
+const FIRST_TOUCH_EVENTS = ['pointerdown', 'touchstart', 'mousedown', 'click'] as const
+// Absolute expiry of the session timer, so an orientation reload resumes the same
+// countdown instead of granting the player a fresh one.
+const DEADLINE_KEY = 'pa:session-deadline'
+
 const SLIDE: Record<string, [string, string]> = {
   'slide-left': ['translateX(100%)', 'translateX(-28%)'],
   'slide-right': ['translateX(-100%)', 'translateX(28%)'],
@@ -152,6 +160,10 @@ export function playProject(project: Project, assets: AssetMap, opts: { mount: H
   // post-win (win overlay / next scene / end card) and a reload must RESTART the ad,
   // not resume — so the resume record stays cleared until another game scene mounts.
   let gameWon = false
+  // True once an end card has been armed (a mounted endscene, or a terminal overlay
+  // floating over the finished game). The end card is the flow's last screen, so the
+  // session timer must never navigate off it — see fireSessionTimer.
+  let endcardReached = false
   // The header belongs to the first scene in this play-through where it is allowed
   // to appear. Only that scene's game win freezes its countdown; later games cannot
   // change the already-finalized urgency value.
@@ -582,6 +594,7 @@ export function playProject(project: Project, assets: AssetMap, opts: { mount: H
   // tap-to-install. A scene carrying an 'endscene' ELEMENT wires its own tap (the video
   // card handles it), so only a CODED end card gets the blanket handler.
   const armEndcard = (def: SceneDef, surface: HTMLElement): void => {
+    endcardReached = true
     emit('sfx', 'endscene')
     notifyGameEnd()
     if (def.elements.some((e) => e.type === 'endscene')) return
@@ -735,6 +748,95 @@ export function playProject(project: Project, assets: AssetMap, opts: { mount: H
       emit('scene-overlay', { sceneId: id, redirectTo: after ?? undefined })
     } else {
       transitionTo(id)
+    }
+  }
+
+  // ---- session timer -------------------------------------------------------
+  // meta.sessionTimer is ONE countdown for the whole play-through: it starts on the
+  // player's first interaction and is never re-armed, so however many screens they
+  // visit it still expires at the same moment, and the flow then jumps to the scene it
+  // names. Deliberately kept out of clearTriggers() — a scene change owns the per-scene
+  // advance rule, never this. Nothing is rendered: it is flow logic only.
+  const timerCfg = project.meta.sessionTimer
+  // A target that isn't in the flow (deleted scene, blank config) disables the timer
+  // rather than firing into nothing.
+  const timerTo = timerCfg && timerCfg.ms > 0 && project.scenes.some((s) => s.id === timerCfg.to) ? timerCfg.to : null
+  let sessionTimer = 0
+  let sessionDone = false
+  let firstTouch: (() => void) | null = null
+
+  const clearDeadline = (): void => {
+    try {
+      window.sessionStorage.removeItem(DEADLINE_KEY)
+    } catch {
+      /* storage unavailable */
+    }
+  }
+  const detachFirstTouch = (): void => {
+    if (!firstTouch) return
+    for (const type of FIRST_TOUCH_EVENTS) window.removeEventListener(type, firstTouch, true)
+    firstTouch = null
+  }
+
+  const fireSessionTimer = (): void => {
+    if (sessionDone || !timerTo) return
+    // The end card is terminal — the play-through is already over, so the timer has
+    // nothing left to do and must not pull the player off the install screen.
+    if (endcardReached) {
+      sessionDone = true
+      clearDeadline()
+      return
+    }
+    // Mid-transition, or with an overlay floating over the scene, a hard swap would fight
+    // what is on screen (and would strand the overlay above the new scene). Wait for the
+    // screen to settle and retry — the end-card check above stops this looping forever.
+    if (transitioning || overlayStages.size) {
+      sessionTimer = window.setTimeout(fireSessionTimer, 200)
+      return
+    }
+    sessionDone = true
+    clearDeadline()
+    if (current?.def.id === timerTo) return // already on the target — expiring is a no-op
+    navigateTo(timerTo)
+  }
+
+  const runSessionTimer = (deadline: number): void => {
+    window.clearTimeout(sessionTimer)
+    sessionTimer = window.setTimeout(fireSessionTimer, Math.max(0, deadline - Date.now()))
+  }
+
+  if (opts.interactive && timerTo && timerCfg) {
+    // A rotation reload (see the resume record above) must NOT hand the player a fresh
+    // countdown, so the deadline is stored as an absolute timestamp and picked back up —
+    // but only on that resume path, which boot() has already vetted for freshness. Any
+    // other start is a new impression: drop whatever a previous run left behind.
+    let resumed = 0
+    if (opts.startSceneId) {
+      try {
+        const raw = window.sessionStorage.getItem(DEADLINE_KEY)
+        const at = raw ? Number(raw) : 0
+        if (Number.isFinite(at) && at > Date.now()) resumed = at
+      } catch {
+        /* storage unavailable — the timer just starts on the next interaction */
+      }
+    }
+    if (resumed) {
+      runSessionTimer(resumed)
+    } else {
+      clearDeadline()
+      firstTouch = (): void => {
+        detachFirstTouch()
+        const deadline = Date.now() + timerCfg.ms
+        try {
+          window.sessionStorage.setItem(DEADLINE_KEY, String(deadline))
+        } catch {
+          /* storage unavailable — a rotation reload restarts the countdown */
+        }
+        runSessionTimer(deadline)
+      }
+      // Capture + window-level so the countdown starts on the very first gesture, whatever
+      // it lands on and whoever stops its propagation (a game board, a button, the CTA).
+      for (const type of FIRST_TOUCH_EVENTS) window.addEventListener(type, firstTouch, { capture: true, passive: true })
     }
   }
 
@@ -1070,6 +1172,8 @@ export function playProject(project: Project, assets: AssetMap, opts: { mount: H
     },
     destroy() {
       clearTriggers()
+      window.clearTimeout(sessionTimer) // the session timer outlives scenes, so only destroy() drops it
+      detachFirstTouch()
       landMorph()
       if (unsubGoto) {
         unsubGoto()

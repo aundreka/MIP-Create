@@ -1479,10 +1479,21 @@ export interface ProjectMeta {
   // export when nothing in the project actually uses the token. Undefined means the
   // token renders empty, which hides a showWhen:'holiday' element.
   promoCalendar?: PromoCalendarEntry[]
+  // Project-wide session timer (see scenes.ts). A single countdown that starts on the
+  // player's FIRST interaction and runs across the whole play-through — visiting more
+  // screens never restarts it — and jumps the flow to one named scene when it expires.
+  // Purely logical: nothing is rendered. Undefined = no session timer.
+  sessionTimer?: SessionTimer
   // Export-time variants — slightly different mechanics/win-conditions of the same
   // MIP. Each is a set of element patches applied on top of the base; export emits
   // one playable per variant. Editor-only field (stripped from the rendered scene).
   variants?: Variant[]
+}
+
+// meta.sessionTimer — the whole-playthrough countdown.
+export interface SessionTimer {
+  ms: number // duration from the first interaction
+  to: string // scene id the flow jumps to when it expires (unknown id = disabled)
 }
 
 // A MIP variant: overrides applied to the base project at export. `patches` map

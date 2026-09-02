@@ -176,6 +176,37 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
         />
       </Row>
       <div className="hint pad">On screens taller than the design, <b>Center</b> keeps the content vertically centered (retaining relative size/position) instead of gluing it to the top. Top-pinned headers/bars stay pinned either way.</div>
+      <div className="group-title">Session timer</div>
+      <Checkbox
+        label="Session timer"
+        checked={!!m.sessionTimer}
+        title="One countdown for the whole playable, started by the player's first interaction"
+        onChange={(v) =>
+          patchMeta({
+            sessionTimer: v ? { ms: m.sessionTimer?.ms ?? 30000, to: m.sessionTimer?.to || project.scenes[project.scenes.length - 1]?.id || '' } : undefined,
+          })
+        }
+      />
+      {m.sessionTimer && (
+        <>
+          <NumField
+            label="Duration"
+            value={Math.round(m.sessionTimer.ms / 1000)}
+            min={1}
+            suffix="s"
+            onChange={(n) => patchMeta({ sessionTimer: { ...m.sessionTimer!, ms: Math.max(1, n) * 1000 } })}
+          />
+          <Row label="Go to scene">
+            <Select
+              value={m.sessionTimer.to}
+              options={project.scenes.map((s) => ({ value: s.id, label: s.name || s.id }))}
+              onChange={(v) => patchMeta({ sessionTimer: { ...m.sessionTimer!, to: v } })}
+            />
+          </Row>
+        </>
+      )}
+      <div className="hint pad">Starts on the player&rsquo;s <b>first interaction</b> and keeps running across every screen — moving between scenes never restarts it. When it runs out the flow jumps to the scene above. Nothing is drawn; it&rsquo;s flow logic only, and it does nothing once an end card is reached.</div>
+
       <Row label="CTA redirect">
         <Select
           value={m.clickUrlMode ?? 'store'}
