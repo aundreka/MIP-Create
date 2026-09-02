@@ -76,6 +76,10 @@ function cover(w: number, h: number, nw: number, nh: number): { top: number; hei
   return { top: f.top + (f.height - nh * k) / 2, height: nh * k }
 }
 
+// Half the letterbox of a centred project — the FIT frame's top edge, which is where
+// a band that is not riding a clip belongs.
+const offY = (vw: number, vh: number): number => Math.max(0, (vh - DESIGN_H * Math.min(vw / DESIGN_W, vh / DESIGN_H)) / 2)
+
 function band(vw: number, vh: number, project = proj()): { top: number; scale: number } {
   document.body.innerHTML = ''
   window.sessionStorage.clear()
@@ -89,10 +93,11 @@ function band(vw: number, vh: number, project = proj()): { top: number; scale: n
   if (card) card.getBoundingClientRect = () => fakeRect(0, 0, vw, vh)
   mgr.relayout()
   const el = mount.querySelector<HTMLElement>('.pa-header')!
-  return {
-    top: parseFloat(el.style.top) || 0,
-    scale: parseFloat(/scale\(([-\d.]+)\)/.exec(el.style.transform)?.[1] ?? '0'),
-  }
+  const k = parseFloat(/scale\(([-\d.]+)\)/.exec(el.style.transform)?.[1] ?? '0')
+  // Where design y 0 lands. A band that is not on a clip keeps its BOX at the screen top
+  // and pads its content down to the FIT frame (so the bar art still bleeds to the edge),
+  // so the padding — design px, hence × the scale — is part of that position.
+  return { top: (parseFloat(el.style.top) || 0) + (parseFloat(el.style.paddingTop) || 0) * k, scale: k }
 }
 
 describe('the pinned date band over an endscene card', () => {
@@ -157,16 +162,19 @@ describe('the pinned date band over an endscene card', () => {
   })
 
   // A contained clip letterboxes, so the composition the date belongs to IS the FIT
-  // frame — the same rule the scene elements over a card follow.
-  it('stays pinned to the screen top over a contain card', () => {
+  // frame — the same rule the scene elements over a card follow. These projects centre
+  // their letterbox (setVAlign('center') in band()), so that frame's top edge is offY,
+  // NOT the screen top: the band sits where design y 0 sits for everything else.
+  it('falls back to the FIT frame’s top edge over a contain card', () => {
     const b = band(390, 844, proj('contain'))
-    expect(b.top).toBe(0)
+    expect(b.top).toBeCloseTo(offY(390, 844), 5)
+    expect(b.top).toBeGreaterThan(0)
     expect(b.scale).toBeCloseTo(scale(), 5)
   })
 
-  it('stays pinned to the screen top when the scene has no card at all', () => {
+  it('falls back to the FIT frame’s top edge when the scene has no card at all', () => {
     const b = band(390, 844, proj('cover', false))
-    expect(b.top).toBe(0)
+    expect(b.top).toBeCloseTo(offY(390, 844), 5)
     expect(b.scale).toBeCloseTo(scale(), 5)
   })
 })

@@ -1,8 +1,14 @@
-// Pinned header that stays at the physical top of the screen (never drifts with
-// letterbox reflow). Fixed positioning + transform scale only — no _offY term.
+// Pinned header that rides the TOP EDGE of the FIT composition and bleeds its bar
+// art up to the physical screen edge. Fixed positioning + transform scale only.
+//
+// Design y 0 is the frame's top — `offY`, which is 0 for a top-anchored project (the
+// default, so the band still sits at the physical top there) and half the letterbox
+// for a `vAlign:'center'` one. Ignoring that term used to slide the band UP relative
+// to everything else on any viewport taller than the design aspect — a date authored
+// inside the CTA drifted out of it on a narrow phone.
 
 import { cssFontFamily } from './font'
-import { isLandscape, scale, viewW } from './responsive'
+import { isLandscape, metrics, scale, viewW } from './responsive'
 import { braceBareTokens, formatTickerIntervalMs, needsMidnightRefresh, nextMidnight, renderCountdownFormat, runtimeNow } from './elements/countdown'
 import { injectAnimStyles, loopAnimationCss, oneShotAnimationCss } from './anim'
 import type { AnimSpec } from './scene'
@@ -167,8 +173,9 @@ export function mountHeader(container: HTMLElement, opts: HeaderConfig, clip?: (
   const band = document.createElement('div')
   band.className = 'pa-header'
 
-  // Position:fixed anchors to the physical viewport top (always top:0, never drifts
-  // with _offY). Transform scale only — the sole viewport-dependent term is scale().
+  // Position:fixed anchors to the physical viewport top; relayout then pads the band
+  // down to the FIT frame's top edge. Transform scale only — scale() and offY are the
+  // only viewport-dependent terms.
   band.style.cssText =
     'position:fixed;top:0;left:50%;display:grid;overflow:hidden;' +
     'box-sizing:border-box;line-height:1.15;' +
@@ -356,13 +363,27 @@ export function mountHeader(container: HTMLElement, opts: HeaderConfig, clip?: (
     // the clip is one element that extends past the scene, and the date belongs to the
     // card's composition, so it scales and sits where the card's own top does — the same
     // lock every element drawn over the card gets (endsceneMediaPos in stage.ts). Every
-    // other scene keeps the band pinned to the physical screen top at the FIT scale.
+    // other scene keeps the band on the FIT frame at the FIT scale.
     const onClip = clip?.() ?? null
-    const s = onClip ? onClip.k : scale() // from responsive.ts — NO _offY term
+    const s = onClip ? onClip.k : scale() // from responsive.ts
     // Full-bleed either way: the width is divided by the scale the transform then
     // re-applies, so the band still reaches both screen edges at any clip scale.
     band.style.width = (viewW() + 24) / s + 'px'
-    band.style.top = onClip ? onClip.mapY(0) + 'px' : '0'
+    // Design y 0 of the composition the band belongs to: the clip's mapped top over a
+    // cover card, otherwise the FIT frame's top edge (offY — 0 unless the project
+    // centres its letterbox). Everything else on screen uses the same origin, so the
+    // band now holds its authored distance from the content at every viewport.
+    const frameTop = onClip ? onClip.mapY(0) : metrics().offY
+    // A bar must still touch the physical screen edge, so a band pushed down by a
+    // centred letterbox grows UPWARD by that gap (converted to design px) and pads its
+    // content back down: the art covers the strip, the text keeps its composed place.
+    const bleed = onClip ? 0 : Math.max(0, frameTop) / s
+    band.style.paddingTop = bleed ? bleed + 'px' : '0'
+    band.style.height = (cfg.heightPx ?? 120) + bleed + 'px'
+    // Only a bled band paints its own background — without a strip to cover, the bar
+    // art stays on `surface` alone so a transform entrance still animates all of it in.
+    band.style.backgroundColor = bleed && opts.bgColor ? opts.bgColor : ''
+    band.style.top = onClip ? frameTop + 'px' : '0'
     // The authored offset is in design px, so it scales with the band. It is applied
     // BEFORE scale() in screen px (hence the × s) and after the -50% centring, which
     // is measured against the band's own unscaled width.
