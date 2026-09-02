@@ -218,8 +218,10 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     if (cfg.nodes && cfg.nodes.length) pts = cfg.nodes.filter((p) => p && p.x != null && p.y != null)
     else if (cfg.toX != null && cfg.toY != null) pts = [{ x: cfg.toX, y: cfg.toY }]
     // No path drawn yet: fall through to the in-place tap rather than a hand that
-    // sits there doing nothing while the author is still drawing the route.
+    // sits there doing nothing while the author is still drawing the route. Say so —
+    // "it only taps" is otherwise indistinguishable from the animation being broken.
     if (pts.length) kind = cfg.mode
+    else console.log(`[handguide] mode '${cfg.mode}' has no path (nodes/toX-toY) — falling back to an in-place tap`)
   } else if (cfg.mode === 'smart') {
     const t = recs.find((r) => r.el.type === 'cta') ?? recs.find((r) => r.el.type === 'game-mount')
     if (t && Math.hypot(t.el.x - sx, t.el.y - sy) > 24) {

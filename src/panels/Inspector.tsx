@@ -5607,7 +5607,8 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                         </div>
                       ) : (
                         <div className="hint pad">
-                          Click "Draw path", then click on the canvas to drop the start and each waypoint. Double-click or press Enter to finish; Esc cancels.
+                          <b>No path yet — the hand just taps where it stands.</b> Click "Draw path", then click on the canvas to drop the start and each waypoint. Double-click or
+                          press Enter to finish; Esc cancels.
                         </div>
                       )}
                       {hg.mode === 'slidetap' && (
