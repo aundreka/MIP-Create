@@ -1960,6 +1960,39 @@ button.frame-chip:hover {
   background: var(--panel-2);
 }
 
+/* Typed hex code — every colour picker accepts one. */
+.swatch-hex {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--input-bg);
+}
+.swatch-hex span {
+  color: var(--muted);
+  font-size: var(--fs-sm, 12px);
+}
+.swatch-hex input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  padding: 4px 2px;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: var(--fs-sm, 12px);
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+}
+.swatch-hex input:focus {
+  outline: none;
+}
+.swatch-hex:focus-within {
+  border-color: var(--accent);
+}
+
 /* ---- compact swatch field + popup ---- */
 .swatch-field {
   display: block;
@@ -2214,6 +2247,12 @@ button.frame-chip:hover {
   justify-content: flex-end;
   z-index: 1000;
   animation: modal-fade var(--t-mid) var(--ease);
+}
+/* Picking a colour from a drawer (Project settings) — clear the dim so the
+   canvas shows the colour at its true value while the picker is open. */
+body.picking-color .drawer-backdrop {
+  background: transparent;
+  transition: background var(--t-fast) var(--ease);
 }
 .drawer {
   height: 100%;

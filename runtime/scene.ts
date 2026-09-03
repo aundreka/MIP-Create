@@ -1449,10 +1449,11 @@ export interface ProjectMeta {
   // client/MIP id and editable in Project settings. Part of the canonical MIP
   // name "<client> <mip> <mipDate>".
   mipDate?: string
-  // Export filename date token (YYYY-MM-DD in Project settings; written as
-  // YYYYMMDD in the delivered filename). Kept separate from `mipDate` because
-  // delivery naming can follow a different schedule than the MIP's canonical
-  // identity date.
+  // Export filename date token (YYYY-MM-DD; written as YYYYMMDD in the delivered
+  // filename). Project settings has a single Date field that writes this and
+  // `mipDate` together — the field survives only so older projects that set the
+  // two apart keep the filename they already shipped with until the date is
+  // edited. Treat `mipDate` as the source of truth for new code.
   exportDate?: string
   // Delivery naming: whether this creative is a unique build. Drives the last
   // token of the export filename ('unique' vs 'none'). Undefined reads as true

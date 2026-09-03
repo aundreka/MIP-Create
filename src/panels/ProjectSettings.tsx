@@ -66,7 +66,8 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
   // canonical name carries one. Stays editable below.
   useEffect(() => {
     if ((m.mipDate ?? '').trim() === '' && ((m.client ?? '').trim() !== '' || (m.mip ?? '').trim() !== '')) {
-      patchMeta({ mipDate: todayLabel() })
+      const date = (m.exportDate ?? '').trim() || todayLabel()
+      patchMeta({ mipDate: date, exportDate: date })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -116,11 +117,13 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
           <input value={m.mip ?? ''} placeholder="e.g. MIP3" onChange={(e) => patchMeta({ mip: e.target.value })} />
         </Row>
       </div>
-      <Row label="Export date">
-        <input type="date" value={m.exportDate ?? ''} onChange={(e) => patchMeta({ exportDate: e.target.value })} />
-      </Row>
       <Row label="Date">
-        <input type="date" value={m.mipDate ?? ''} onChange={(e) => patchMeta({ mipDate: e.target.value })} />
+        <input
+          type="date"
+          title="Used for the MIP name and the export filename's date token"
+          value={m.mipDate || m.exportDate || ''}
+          onChange={(e) => patchMeta({ mipDate: e.target.value, exportDate: e.target.value })}
+        />
       </Row>
       <Row label="MIP name">
         <input value={mipName(m)} readOnly title="Auto-named from Client + MIP + Date" />

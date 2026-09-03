@@ -156,10 +156,42 @@ async function eyedrop(): Promise<string | null> {
   }
 }
 
+// ---- Hex input ------------------------------------------------------------
+// Every color picker accepts a typed hex code. Takes "#rgb", "#rgba", "#rrggbb"
+// or "#rrggbbaa", with or without the leading "#", and returns a normalized
+// lowercase "#rrggbb"/"#rrggbbaa" - or null when the text isn't a hex color.
+export function normalizeHex(input: string): string | null {
+  const body = input.trim().replace(/^#/, '').toLowerCase()
+  if (!/^[0-9a-f]+$/.test(body)) return null
+  if (body.length === 3 || body.length === 4) return '#' + [...body].map((c) => c + c).join('')
+  if (body.length === 6 || body.length === 8) return '#' + body
+  return null
+}
+
+// `<input type="color">` only accepts "#rrggbb", so drop any alpha and let the
+// browser normalize the CSS colors that aren't hex at all (names, rgb(), hsl()).
+function toHex6(value: string | undefined): string {
+  const hex = normalizeHex(value ?? '')
+  if (hex) return hex.slice(0, 7)
+  try {
+    const ctx = document.createElement('canvas').getContext('2d')
+    if (ctx && value) {
+      ctx.fillStyle = '#ffffff'
+      ctx.fillStyle = value
+      if (typeof ctx.fillStyle === 'string' && /^#[0-9a-f]{6}$/i.test(ctx.fillStyle)) return ctx.fillStyle.toLowerCase()
+    }
+  } catch {
+    /* ignore */
+  }
+  return '#ffffff'
+}
+
 export function Swatches(props: { label: string; value?: string; onChange: (c: string | undefined) => void; allowNone?: boolean }): JSX.Element {
   const [open, setOpen] = useState(false)
   const [palette, setPalette] = useState<string[]>(() => loadPalette())
   const [pos, setPos] = useState<{ top: number; right: number } | null>(null)
+  // Typed hex, held locally so a half-typed code ("#ff") doesn't fight the value.
+  const [hexDraft, setHexDraft] = useState('')
   const dotRef = useRef<HTMLButtonElement>(null)
   const popRef = useRef<HTMLDivElement>(null)
   const hasEyedropper = typeof (window as unknown as { EyeDropper?: unknown }).EyeDropper !== 'undefined'
@@ -173,12 +205,34 @@ export function Swatches(props: { label: string; value?: string; onChange: (c: s
     return () => document.removeEventListener('mousedown', handler)
   }, [open])
 
+  // While a picker is open, drop the dim that overlays for drawers/modals so the
+  // canvas shows the colour being chosen at its true value.
+  useEffect(() => {
+    if (!open) return
+    document.body.classList.add('picking-color')
+    return () => document.body.classList.remove('picking-color')
+  }, [open])
+
+  // Commit a typed hex: normalize it, remember it in the palette, and snap the
+  // field back to the current colour when the text isn't a hex code at all.
+  const commitHex = (raw: string): void => {
+    const hex = normalizeHex(raw)
+    if (!hex) {
+      setHexDraft(props.value ?? '')
+      return
+    }
+    props.onChange(hex)
+    setPalette(addToPalette(hex))
+    setHexDraft(hex)
+  }
+
   const handleToggle = (): void => {
     if (open) { setOpen(false); return }
     if (dotRef.current) {
       const r = dotRef.current.getBoundingClientRect()
       setPos({ top: r.bottom + 6, right: window.innerWidth - r.right })
     }
+    setHexDraft(props.value ?? '')
     setOpen(true)
   }
 
@@ -223,7 +277,7 @@ export function Swatches(props: { label: string; value?: string; onChange: (c: s
               +
               <input
                 type="color"
-                value={props.value ?? '#ffffff'}
+                value={toHex6(props.value)}
                 onChange={(e) => { props.onChange(e.target.value); setPalette(addToPalette(e.target.value)) }}
               />
             </label>
@@ -233,6 +287,29 @@ export function Swatches(props: { label: string; value?: string; onChange: (c: s
                 if (c) { props.onChange(c); setPalette(addToPalette(c)); setOpen(false) }
               }}>⦿</button>
             )}
+          </div>
+          <div className="swatch-hex">
+            <span aria-hidden="true">#</span>
+            <input
+              value={hexDraft.replace(/^#/, '')}
+              placeholder="rrggbb"
+              spellCheck={false}
+              autoComplete="off"
+              aria-label="Hex colour code"
+              title="Type a hex code — 3, 4, 6 or 8 digits"
+              onChange={(e) => {
+                const raw = e.target.value.replace(/[^0-9a-fA-F]/g, '').slice(0, 8)
+                setHexDraft(raw)
+                // Preview live once the code is complete; shorthand waits for Enter/blur
+                // so typing "f00…" toward "f00baa" doesn't flash the wrong colour.
+                if (raw.length === 6 || raw.length === 8) props.onChange('#' + raw.toLowerCase())
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { commitHex(hexDraft); setOpen(false) }
+                if (e.key === 'Escape') setOpen(false)
+              }}
+              onBlur={() => commitHex(hexDraft)}
+            />
           </div>
         </div>,
         document.body
