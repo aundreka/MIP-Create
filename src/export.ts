@@ -113,6 +113,32 @@ function addSceneAssets(scene: SceneDef, assets: AssetMap, used: Set<string>, au
   }
 }
 
+/** The decoded markup of an inlined HTML asset (an imported end card), or '' for
+ * anything else. atob's latin1 output is fine here: every caller only substring-matches
+ * ASCII (asset ids, `data:` prefixes). */
+function innerHtmlText(src: string | undefined): string {
+  if (!src || !src.startsWith('data:text/html')) return ''
+  const comma = src.indexOf(',')
+  if (comma < 0) return ''
+  const body = src.slice(comma + 1)
+  if (!/;base64/i.test(src.slice(0, comma))) {
+    try { return decodeURIComponent(body) } catch { return body }
+  }
+  try { return atob(body) } catch { return '' }
+}
+
+// Asset ids an HTML end card reads out of the HOST at runtime: export hoists the card's
+// portrait/landscape clip into PA_ASSETS["<htmlId>__p" / "__l"] and rewrites the card to
+// read window.parent.PA_ASSETS (see processAssets).
+const PARENT_ASSET_REF = /PA_ASSETS\s*\[\s*["']([^"']+)["']\s*\]/g
+
+/** The PA_ASSETS ids referenced from inside an inlined HTML asset. */
+export function parentAssetRefs(src: string | undefined): string[] {
+  const inner = innerHtmlText(src)
+  if (!inner) return []
+  return [...inner.matchAll(PARENT_ASSET_REF)].map((m) => m[1])
+}
+
 // Only inline assets actually referenced (element.assetId + game param asset ids)
 // so the shared library never bloats the export.
 export function pruneAssets(project: Project, assets: AssetMap): AssetMap {
@@ -127,6 +153,13 @@ export function pruneAssets(project: Project, assets: AssetMap): AssetMap {
   // asset id) without any element referencing it.
   if (project.meta.header?.fontFamily) add(project.meta.header.fontFamily)
   for (const header of Object.values(project.meta.headerI18n ?? {})) add(header.fontFamily)
+  // An end card reaches BACK into the host for its own clip: nothing in the project points
+  // at the hoisted "<htmlId>__p" / "__l" video, only the card's markup does. Walking
+  // elements alone therefore drops it, and the card ships as a bare background with a dead
+  // <video> — invisible in the editor (no PA_ASSETS to read there) and only visible in the
+  // delivered file. Bites every re-export of a project recovered from a build, which keeps
+  // the already-rewritten card AND the hoisted clip. compress-playable.py guards the same way.
+  for (const id of [...used]) for (const ref of parentAssetRefs(assets[id]?.src)) add(ref)
   const out: AssetMap = {}
   for (const id of used) out[id] = assets[id]
   return out
@@ -545,6 +578,15 @@ export function blurWarnings(project: Project, assets: AssetMap): string[] {
       } catch { /* undecodable — skip */ }
     }
   }
+  // An HTML end card whose clip was hoisted into PA_ASSETS reads it back through
+  // window.parent.PA_ASSETS — with `""` as the fallback, so a missing entry ships a card
+  // that shows nothing but its background colour, silently and forever. It cannot be
+  // spotted in the editor either (the preview frame has no PA_ASSETS to read), so this is
+  // the only place it surfaces before delivery.
+  for (const [id, a] of Object.entries(assets))
+    for (const ref of new Set(parentAssetRefs(a.src)))
+      if (!assets[ref])
+        warns.push(`End card "${id}" reads its video from PA_ASSETS["${ref}"], which is not in this export — the card will play as a bare background. Re-upload the ORIGINAL card HTML (the one with its base64 video inline) for that endscene.`)
   return warns
 }
 

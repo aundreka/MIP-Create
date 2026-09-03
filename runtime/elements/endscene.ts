@@ -494,6 +494,40 @@ export function htmlEndsceneMediaEl(wrap: HTMLElement): HTMLVideoElement | HTMLI
   return null
 }
 
+// Has an HTML card got something to show yet?
+//
+// The card only starts loading once it is on the DOM, and the SIP template fills in its
+// <source> a frame or more AFTER that — so the card's first painted state is its bare
+// background, with the clip cutting in whenever it finishes decoding. The flow uses this
+// to hold the screen change until there is a card to change TO (see revealWhenCardReady in
+// scenes.ts), which is the only thing that can cover that gap: by the time the end scene
+// is up, the screen it would have cross-faded from is gone.
+//
+// Deliberately optimistic wherever the answer is unknowable — a cross-origin card, a card
+// with no clip at all — so nothing is ever held on a card that was never going to report.
+export function htmlEndsceneReady(wrap: HTMLElement): boolean {
+  if (wrap.dataset.mode !== 'html') return true
+  const iframe = wrap.querySelector<HTMLIFrameElement>('.pa-endscene-iframe')
+  if (!iframe || iframe.style.display === 'none') return true // no card configured
+  if (iframe.style.visibility === 'hidden') return false // srcdoc still parsing
+  let doc: Document | null = null
+  try {
+    doc = iframe.contentDocument
+  } catch {
+    return true // served cross-origin: not ours to inspect
+  }
+  if (!doc) return true
+  if (doc.readyState !== 'complete') return false
+  // HAVE_CURRENT_DATA: there is a frame to paint. A card that has not filled in its
+  // <source> yet reports 0 — exactly the window the hold exists to cover.
+  for (const v of Array.from(doc.querySelectorAll('video'))) if (v.readyState < 2) return false
+  for (const i of Array.from(doc.querySelectorAll('img'))) {
+    if (!(i.getAttribute('src') || i.currentSrc)) continue // nothing asked for yet
+    if (!i.complete || i.naturalWidth === 0) return false
+  }
+  return true
+}
+
 // Natural size of a clip, tag-sniffed rather than instanceof: the element may live
 // in an HTML card's iframe document, and a different realm's HTMLVideoElement is
 // never an instanceof the host's — that check silently reports every clip as 0x0.

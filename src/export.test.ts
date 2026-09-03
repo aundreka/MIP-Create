@@ -180,6 +180,40 @@ describe('embedded HTML endscene assets', () => {
     }
   })
 
+  it('keeps a clip the card reads back out of PA_ASSETS', () => {
+    // What an already-hoisted card looks like: the video lives in the OUTER asset map and
+    // the card reaches back for it, so nothing in the project references that id.
+    const card = `<script>const srcPortrait=(window.parent&&window.parent.PA_ASSETS&&window.parent.PA_ASSETS["card__p"])?window.parent.PA_ASSETS["card__p"].src:"";</script>`
+    const assets: AssetMap = {
+      card: { src: `data:text/html;base64,${b64(card)}`, w: 0, h: 0, kind: 'html' },
+      card__p: { src: 'data:video/mp4;base64,AA==', w: 0, h: 0, kind: 'video' },
+      unused: { src: 'data:video/mp4;base64,BB==', w: 0, h: 0, kind: 'video' },
+    }
+    const p: Project = {
+      meta: { schemaVersion: 1, name: 'p', clickUrl: { ios: '', android: '' }, baseW: 1080, baseH: 1920 },
+      scenes: [{ id: 'end', name: 'end', kind: 'endscene', advance: { on: 'manual' }, elements: [{ id: 'e', type: 'endscene', name: 'e', x: 0, y: 0, anchor: 'center', zIndex: 0, mode: 'extend', endscene: { mode: 'html', htmlId: 'card', objectFit: 'cover', bgColor: '#000000' } }] }],
+      startSceneId: 'end',
+    }
+    expect(Object.keys(pruneAssets(p, assets)).sort()).toEqual(['card', 'card__p'])
+  })
+
+  it('warns when the clip the card reads back is gone', () => {
+    const card = `<script>const srcPortrait=(window.parent&&window.parent.PA_ASSETS&&window.parent.PA_ASSETS["card__p"])?window.parent.PA_ASSETS["card__p"].src:"";</script>`
+    const proj: Project = {
+      meta: { schemaVersion: 1, name: 'p', clickUrl: { ios: '', android: '' }, baseW: 1080, baseH: 1920 },
+      scenes: [{ id: 's1', name: 's1', kind: 'game', advance: { on: 'manual' }, elements: [] }],
+      startSceneId: 's1',
+    }
+    const withClip: AssetMap = {
+      card: { src: `data:text/html;base64,${b64(card)}`, w: 0, h: 0, kind: 'html' },
+      card__p: { src: 'data:video/mp4;base64,AA==', w: 0, h: 0, kind: 'video' },
+    }
+    expect(blurWarnings(proj, withClip)).toEqual([])
+    const warns = blurWarnings(proj, { card: withClip.card })
+    expect(warns.length).toBe(1)
+    expect(warns[0]).toContain('card__p')
+  })
+
   it('leaves a card without a bridge untouched', async () => {
     const card = '<!doctype html><html><head><title>card</title></head><body></body></html>'
     const assets: AssetMap = { card: { src: `data:text/html;base64,${b64(card)}`, w: 0, h: 0, kind: 'html' } }

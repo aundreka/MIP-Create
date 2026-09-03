@@ -10,6 +10,7 @@ import { notifyGameClose, notifyGameEnd, triggerCTA } from './networks'
 import { createSfxManager, type SfxManager } from './sfx'
 import { mountHeader } from './header'
 import { preloadScratchCover } from './games/scratch'
+import { htmlEndsceneReady } from './elements/endscene'
 import { followLoopCss } from './anim'
 import { captureMorphs, launchMorphs, planMorphs, type MorphCapture, type MorphRun } from './morph'
 import { localizeHeader, localizeSceneDef } from './i18n'
@@ -31,6 +32,15 @@ const FIRST_TOUCH_EVENTS = ['pointerdown', 'touchstart', 'mousedown', 'click'] a
 // Absolute expiry of the session timer, so an orientation reload resumes the same
 // countdown instead of granting the player a fresh one.
 const DEADLINE_KEY = 'pa:session-deadline'
+
+// How long the flow will sit on the screen the player is already looking at while an
+// incoming HTML end card loads its own document (and, in the SIP template, its own clip).
+// The card cannot start loading before it is mounted, so without this the end scene arrives
+// as a slab of its background colour and the video cuts in a beat later — and by then the
+// screen it could have cross-faded from is gone. Bounded: a card that never reports ready
+// (no clip, a dead source) still arrives, just on the background it would have shown anyway.
+const CARD_HOLD_MS = 1200
+const CARD_POLL_MS = 60
 
 const SLIDE: Record<string, [string, string]> = {
   'slide-left': ['translateX(100%)', 'translateX(-28%)'],
@@ -607,15 +617,23 @@ export function playProject(project: Project, assets: AssetMap, opts: { mount: H
     })
   }
 
-  const mountScene = (def: SceneDef): StageHandle => {
+  // `defer`, when given, collects the work that belongs to the moment the scene REACHES
+  // the player rather than the moment it is built: the pinned band's hand-over, the
+  // carry-over layer's new allow-list, the immune elements that get parked into the stage
+  // container (they live ABOVE every scene root, so they are not hidden by hiding one),
+  // entrance animations with their enter SFX, and the end-card arming. A scene held back
+  // while its end card loads (revealWhenCardReady) is built well before the player sees
+  // it, and none of that may fire over the scene still on screen.
+  const mountScene = (def: SceneDef, defer?: (fn: () => void) => void): StageHandle => {
+    const later = defer ?? ((fn: () => void): void => fn())
     const displayDef = localizeSceneDef(def)
     const showsHeader = headerAllowed(displayDef)
     if (header && showsHeader && headerGameWinSceneId == null) headerGameWinSceneId = def.id
-    header?.setVisible(showsHeader)
+    later(() => header?.setVisible(showsHeader))
     const stage = tagCtaNodes(buildScene(toScene(displayDef), assets, { mount: container }))
     stage.layoutAll()
-    parkImmune(stage)
-    syncPersist(def.id) // carry-over elements follow the destination scene's allow-list
+    later(() => parkImmune(stage))
+    later(() => syncPersist(def.id)) // carry-over elements follow the destination scene's allow-list
     stage.startGames(opts.interactive)
     if (opts.interactive) {
       // Remember where the player is: some containers (AppLovin) RELOAD the page
@@ -643,15 +661,43 @@ export function playProject(project: Project, assets: AssetMap, opts: { mount: H
       } catch {
         /* storage unavailable — rotation reloads restart the flow */
       }
-      stage.playEntrances() // onMount entrances (skipped on the static editor canvas)
+      later(() => stage.playEntrances()) // onMount entrances (skipped on the static editor canvas)
       // An overlay+asEndscene scene normally reaches the player floated (see 'scene-overlay'),
       // but it can also be mounted outright — as the start scene, or as a plain transition
       // target — and it must still be an end card when it does.
-      if (isEndscene(displayDef)) armEndcard(displayDef, stage.root)
+      if (isEndscene(displayDef)) later(() => armEndcard(displayDef, stage.root))
     }
-    syncHeaderLayout(displayDef)
-    syncHeaderCta(displayDef, stage)
+    later(() => syncHeaderLayout(displayDef))
+    later(() => syncHeaderCta(displayDef, stage))
     return stage
+  }
+
+  // Run `reveal` once the scene's HTML end card can paint, or after CARD_HOLD_MS — whichever
+  // lands first. Until then the built scene stays invisible and untouchable over the screen
+  // the player is still on, so the change they see is straight into the finished card rather
+  // than into its background. Scenes without one reveal on the spot.
+  const revealWhenCardReady = (stage: StageHandle, reveal: () => void): void => {
+    const wrap = opts.interactive ? stage.root.querySelector<HTMLElement>('.pa-endscene[data-mode="html"]') : null
+    if (!wrap || htmlEndsceneReady(wrap)) {
+      reveal()
+      return
+    }
+    stage.root.style.opacity = '0'
+    stage.root.style.pointerEvents = 'none'
+    const deadline = Date.now() + CARD_HOLD_MS
+    const finish = (): void => {
+      stage.root.style.opacity = ''
+      stage.root.style.pointerEvents = ''
+      // The hold is long enough for a rotation to have landed in the middle of it, and the
+      // held stage is not the one relayout() re-lays out (see `current`).
+      stage.layoutAll()
+      reveal()
+    }
+    const poll = (): void => {
+      if (!stage.root.isConnected || htmlEndsceneReady(wrap) || Date.now() >= deadline) finish()
+      else window.setTimeout(poll, CARD_POLL_MS)
+    }
+    window.setTimeout(poll, CARD_POLL_MS)
   }
 
   const armAdvance = (def: SceneDef): void => {
@@ -727,17 +773,23 @@ export function playProject(project: Project, assets: AssetMap, opts: { mount: H
     // (usually longer) flight: extending it would DROP an advance that fires mid-morph
     // rather than delay it.
     const morphs = grabMorphs(old.def, def, old.stage)
-    old.stage.playExit() // exit animations play as the scene leaves
-    unparkInto(old.stage) // parked header leaves with the old scene, not on top of the new one
-    const stage = mountScene(def)
-    current = { def, stage }
-    syncHeaderClip()
-    flyMorphs(morphs, stage)
-    applyTransition(old.stage.root, stage.root, def.transition ?? { type: 'fade', durationMs: 350 }, () => {
-      old.stage.destroy()
-      transitioning = false
+    // Built first, revealed second: an HTML end card cannot start loading until it is on the
+    // DOM, so the scene goes up (invisible) and the screen change waits for it.
+    const pending: Array<() => void> = []
+    const stage = mountScene(def, (fn) => pending.push(fn))
+    revealWhenCardReady(stage, () => {
+      old.stage.playExit() // exit animations play as the scene leaves
+      unparkInto(old.stage) // parked header leaves with the old scene, not on top of the new one
+      for (const fn of pending) fn()
+      current = { def, stage }
+      syncHeaderClip()
+      flyMorphs(morphs, stage)
+      applyTransition(old.stage.root, stage.root, def.transition ?? { type: 'fade', durationMs: 350 }, () => {
+        old.stage.destroy()
+        transitioning = false
+      })
+      armAdvance(def)
     })
-    armAdvance(def)
   }
 
   const navigateTo = (id: string): void => {
@@ -1033,33 +1085,40 @@ export function playProject(project: Project, assets: AssetMap, opts: { mount: H
         landMorph()
         // A morph OUT of the overlay scene: its elements are the ones leaving now.
         const overMorphs = grabMorphs(def, next, overStage)
-        const stage = mountScene(next)
-        current = { def: next, stage }
-        syncHeaderClip()
-        flyMorphs(overMorphs, stage)
-        const t = next.transition
-        const dur = t && t.type === 'fade' && t.durationMs > 0 ? t.durationMs : 380
-        // z above the overlay (9000) and BOTH immune tiers (10000 / overlayTop 10050) so
-        // the incoming scene covers everything as it fades in; reset to normal after.
-        stage.root.style.zIndex = '11000'
-        stage.root.style.opacity = '0'
-        stage.root.style.transition = `opacity ${dur}ms ease`
-        requestAnimationFrame(() =>
-          requestAnimationFrame(() => {
-            stage.root.style.opacity = '1'
-          }),
-        )
-        window.setTimeout(() => {
-          removeOverlayDom()
-          restoreImmune()
-          unparkInto(old.stage) // parked header rejoins the old game root, torn down with it
-          old.stage.destroy()
-          stage.root.style.transition = ''
-          stage.root.style.opacity = ''
-          stage.root.style.zIndex = '2'
-          transitioning = false
-        }, dur + 40)
-        armAdvance(next)
+        // The win overlay holds the screen while an incoming HTML end card loads, exactly as
+        // a plain scene does (see revealWhenCardReady) — a win → end-card redirect is the
+        // most common way an end card is reached, and the flash it covers is the same one.
+        const pending: Array<() => void> = []
+        const stage = mountScene(next, (fn) => pending.push(fn))
+        revealWhenCardReady(stage, () => {
+          for (const fn of pending) fn()
+          current = { def: next, stage }
+          syncHeaderClip()
+          flyMorphs(overMorphs, stage)
+          const t = next.transition
+          const dur = t && t.type === 'fade' && t.durationMs > 0 ? t.durationMs : 380
+          // z above the overlay (9000) and BOTH immune tiers (10000 / overlayTop 10050) so
+          // the incoming scene covers everything as it fades in; reset to normal after.
+          stage.root.style.zIndex = '11000'
+          stage.root.style.opacity = '0'
+          stage.root.style.transition = `opacity ${dur}ms ease`
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => {
+              stage.root.style.opacity = '1'
+            }),
+          )
+          window.setTimeout(() => {
+            removeOverlayDom()
+            restoreImmune()
+            unparkInto(old.stage) // parked header rejoins the old game root, torn down with it
+            old.stage.destroy()
+            stage.root.style.transition = ''
+            stage.root.style.opacity = ''
+            stage.root.style.zIndex = '2'
+            transitioning = false
+          }, dur + 40)
+          armAdvance(next)
+        })
       }
       const dismiss = (): void => {
         if (dismissed) return
