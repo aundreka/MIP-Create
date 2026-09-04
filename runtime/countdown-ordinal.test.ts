@@ -4,7 +4,7 @@
 // end in 1/2/3, so a naive unit-digit lookup renders "11st" / "12nd" / "13rd".
 
 import { describe, it, expect } from 'vitest'
-import { braceBareTokens, ordinalSuffix, renderCountdownFormat } from './elements/countdown'
+import { braceBareTokens, needsMidnightRefresh, ordinalSuffix, renderCountdownFormat } from './elements/countdown'
 
 // Local midday avoids any chance of a UTC-vs-local date rollover changing the day.
 const on = (y: number, m: number, d: number): number => new Date(y, m - 1, d, 12, 0, 0).getTime()
@@ -70,5 +70,39 @@ describe('{Do} / {o} rendering', () => {
   it('does not brace a lone "o", which is likelier to be copy than a token', () => {
     expect(braceBareTokens('o')).toBe('o')
     expect(braceBareTokens('Do')).toBe('{Do}')
+  })
+})
+
+describe('weekday tokens', () => {
+  it('renders {dddd} spelled out and {ddd} abbreviated', () => {
+    // 2026-07-21 is a Tuesday.
+    const at = on(2026, 7, 21)
+    expect(render('{dddd}', at)).toBe('Tuesday')
+    expect(render('{ddd}', at)).toBe('Tue')
+    expect(render('{dddd}, {MMMM} {Do}', at)).toBe('Tuesday, July 21st')
+  })
+
+  it('accepts bare weekday tokens like the other date parts', () => {
+    const at = on(2026, 7, 21)
+    expect(render('dddd, MMMM D', at)).toBe('Tuesday, July 21')
+    expect(render('ddd MMM DD', at)).toBe('Tue Jul 21')
+  })
+
+  it('follows dateLocale', () => {
+    const at = on(2026, 7, 21)
+    expect(renderCountdownFormat(braceBareTokens('dddd'), at, at, { dateLocale: 'es' })).toBe('martes')
+  })
+
+  // {dddd} names the TARGET day, like every other date part — three days on from a
+  // Tuesday is Friday — while {dd}/{d} stay the days remaining.
+  it('leaves the {dd}/{d} duration tokens alone', () => {
+    const now = on(2026, 7, 21)
+    expect(renderCountdownFormat('{dddd} {dd} {d}', now + 3 * 86400000, now, {})).toBe('Friday 03 3')
+  })
+
+  it('marks a weekday format as needing the midnight refresh', () => {
+    expect(needsMidnightRefresh('dddd')).toBe(true)
+    expect(needsMidnightRefresh('{ddd}')).toBe(true)
+    expect(needsMidnightRefresh('{mm}:{ss}')).toBe(false)
   })
 })

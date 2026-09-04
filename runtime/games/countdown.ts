@@ -397,7 +397,7 @@ export const COUNTDOWN_TEMPLATE: GameTemplate = {
     { key: 'startAngle', label: 'Start angle (deg from 12 o’clock)', type: 'number', min: -360, max: 360, step: 5 },
     { key: 'capRoundPct', label: 'Arc end rounding (%, 0 = square, 100 = fully round)', type: 'number', min: 0, max: 100, step: 5 },
     { key: 'showLabel', label: 'Show the label', type: 'boolean' },
-    { key: 'label', label: 'Label ({t} secs left, {tt}, {mm}:{ss}, {date}, MMMM D)', type: 'text' },
+    { key: 'label', label: 'Label ({t} secs left, {tt}, {mm}:{ss}, {date}, dddd, MMMM D)', type: 'text' },
     { key: 'endLabel', label: 'Label at zero (empty = keeps counting to 0)', type: 'text' },
     { key: 'fontFamily', label: 'Label font (family or uploaded font id)', type: 'text' },
     { key: 'fontSizePx', label: 'Label size (design px)', type: 'number', min: 4, max: 800, step: 2 },

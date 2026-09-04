@@ -9,7 +9,8 @@
 
 import { cssFontFamily } from './font'
 import { isLandscape, metrics, scale, viewW } from './responsive'
-import { braceBareTokens, formatTickerIntervalMs, needsMidnightRefresh, nextMidnight, renderCountdownFormat, runtimeNow } from './elements/countdown'
+import { braceBareTokens, formatTickerIntervalMs, needsMidnightRefresh, nextMidnight, renderCountdownFormat, resolveDynamicTarget, runtimeNow } from './elements/countdown'
+import type { Recurrence } from './elements/countdown'
 import { injectAnimStyles, loopAnimationCss, oneShotAnimationCss } from './anim'
 import type { AnimSpec } from './scene'
 
@@ -31,6 +32,10 @@ export interface HeaderConfig {
   countdownSeconds?: number
   countdownFormat?: string
   dateFormat?: string
+  // Which day the date band describes: `dateDays` days on from today (0/unset = today),
+  // then forward to the next day `dateRecur` allows. See resolveDynamicTarget.
+  dateDays?: number
+  dateRecur?: Recurrence
   // Case applied to the rendered date/timer (the band's own prefix/suffix are left
   // as typed). Passed straight through to the shared formatter — these used to be
   // dropped here, so the project-level date silently ignored them.
@@ -327,13 +332,15 @@ export function mountHeader(container: HTMLElement, opts: HeaderConfig, clip?: (
       for (const type of FIRST_INTERACTION_EVENTS) container.addEventListener(type, startDurationCountdown, { capture: true, passive: true })
     }
   } else {
-    // Custom layouts render today via the shared token formatter (deadline=now
-    // makes the date tokens target today); empty keeps the legacy fixed style.
+    // Custom layouts render the target day via the shared token formatter (the date
+    // tokens read the deadline, which is today unless dateDays/dateRecur move it —
+    // that is how a band says "Ships Monday"); empty keeps the legacy fixed style.
     // runtimeNow() is the real clock unless the editor has a preview date on, which
     // is how a designer sees a {holiday} band on another day.
     const renderDate = (): void => {
       const now = runtimeNow()
-      const date = opts.dateFormat ? renderCountdownFormat(braceBareTokens(opts.dateFormat), now, now, opts) : formatHeaderDate(new Date(now), opts.dateLocale)
+      const target = resolveDynamicTarget(now, opts.dateDays, opts.dateRecur)
+      const date = opts.dateFormat ? renderCountdownFormat(braceBareTokens(opts.dateFormat), target, now, opts) : formatHeaderDate(new Date(target), opts.dateLocale)
       text.textContent = (opts.prefix ?? '') + date + (opts.suffix ?? '')
     }
     renderDate()

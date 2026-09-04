@@ -117,6 +117,7 @@ import {
   X,
 } from '../icons'
 import { AssetPicker } from './AssetPicker'
+import { RecurrenceField } from './RecurrenceField'
 import {
   assignComboSlot,
   comboCandidates,
@@ -2862,7 +2863,7 @@ function ScratchGridCells({ params, setParam, setParams, elementId, cardAspect }
       <Accordion id="inspector.scratchGridDate" title="Dynamic date (inside cells)" defaultOpen={false}>
         <div className="hint pad">
           Shows a live date inside the cell reveal (under the cover), scaling with the cell like the cell art. Tokens: <b>MMMM</b> July, <b>MMM</b> Jul, <b>MM/M</b> 07/7,{' '}
-          <b>DD/D</b> day, <b>Do</b> 21st, <b>YYYY/YY</b> year — e.g. “(MMMM Do)” → “(July 21st)”. Empty everywhere = no date; each cell can opt out with its “Show dynamic date”
+          <b>DD/D</b> day, <b>Do</b> 21st, <b>dddd/ddd</b> Monday/Mon, <b>YYYY/YY</b> year — e.g. “(MMMM Do)” → “(July 21st)”. Empty everywhere = no date; each cell can opt out with its “Show dynamic date”
           toggle.
         </div>
         <Row label="Win cells date">
@@ -5743,7 +5744,21 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                   </div>
                 </>
               )}
-              {cfg.mode === 'dynamic' && <NumField label="Days from now" value={cfg.dynamicDays ?? 1} step={1} min={0} onChange={(n) => setCd({ dynamicDays: n })} />}
+              {cfg.mode === 'dynamic' && (
+                <>
+                  <NumField label={cfg.recur ? 'Day offset' : 'Days from now'} value={cfg.dynamicDays ?? 1} step={1} min={0} onChange={(n) => setCd({ dynamicDays: n })} />
+                  <RecurrenceField
+                    value={cfg.recur}
+                    days={cfg.dynamicDays ?? 1}
+                    onChange={(recur) =>
+                      // Turning a recurrence ON drops the offset to 0, so "the next Friday"
+                      // means the next Friday rather than the default 1–3 day lead plus a
+                      // snap — the author can raise it again to skip days deliberately.
+                      setCd(recur && !cfg.recur ? { recur, dynamicDays: 0 } : { recur })
+                    }
+                  />
+                </>
+              )}
               {cfg.mode === 'timer' && <NumField label="Seconds" value={cfg.seconds ?? 3600} step={60} min={0} onChange={(n) => setCd({ seconds: n })} />}
               {cfg.mode === 'date' && (
                 <Row label="Target date/time">
@@ -5919,7 +5934,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               <div className="hint pad">
                 <b>Timer</b> tokens (live): <b>{'{hh}:{mm}:{ss}'}</b> / <b>{'{d} {h} {m} {s}'}</b>; <b>{'{ss}:{ms}'}</b> shows “06:99” for 6.99 seconds. <b>Date</b> label (no
                 ticking): <b>{'{date}'}</b>, e.g. "Order by {'{date}'}", or build your own from parts: <b>MMMM</b> July, <b>MMM</b> Jul, <b>MM/M</b> 07/7, <b>DD/D</b> day,{' '}
-                <b>Do</b> 21st, <b>YYYY/YY</b> year (braces optional — "MM.D" → "07.16") — e.g. "Ends MMMM Do" → "Ends July 21st". <b>{'{holiday}'}</b> is the promo calendar's copy
+                <b>Do</b> 21st, <b>dddd/ddd</b> Monday/Mon, <b>YYYY/YY</b> year (braces optional — "MM.D" → "07.16") — e.g. "Ends MMMM Do" → "Ends July 21st". <b>{'{holiday}'}</b> is the promo calendar's copy
                 for today. "Dynamic" recomputes from today whenever the ad runs.
               </div>
             </Accordion>

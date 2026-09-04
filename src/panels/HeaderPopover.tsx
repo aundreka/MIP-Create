@@ -12,6 +12,7 @@ import { DATE_LOCALE_OPTIONS } from '../dateLocales'
 import { useEditLocale } from '../locale'
 import { localeEntry } from '../../runtime/i18n'
 import { effectiveHeader } from '../../runtime/header'
+import { RecurrenceField } from './RecurrenceField'
 import { scenesOwning, seedSlot } from '../headerLayout'
 import type { AnimPresetId, AnimSpec, HeaderConfig, HeaderOrientationOverride } from '../../runtime/scene'
 
@@ -161,15 +162,21 @@ export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): 
                 <Row label="Format">
                   <input
                     value={h.dateFormat ?? ''}
-                    placeholder="e.g. {date}, MMMM D, YYYY or {holiday}"
+                    placeholder="e.g. {date}, dddd, MMMM D, YYYY or {holiday}"
                     onChange={(e) => set({ dateFormat: e.target.value || undefined })}
                   />
                 </Row>
                 <div className="hint pad">
-                  Date parts: <b>MMMM</b> July, <b>MMM</b> Jul, <b>D</b>/<b>DD</b> day, <b>Do</b> 21st, <b>YYYY</b> year, or <b>{'{date}'}</b> for the whole localized date (braces
+                  Date parts: <b>MMMM</b> July, <b>MMM</b> Jul, <b>D</b>/<b>DD</b> day, <b>Do</b> 21st, <b>dddd</b> Monday, <b>ddd</b> Mon, <b>YYYY</b> year, or <b>{'{date}'}</b> for the whole localized date (braces
                   optional). <b>{'{holiday}'}</b> bands the promo calendar's copy for the viewer's own day — “Labor Day Sale” — and re-reads it at local midnight; set the calendar
                   up in Project settings.
                 </div>
+                <NumField label="Day offset" value={h.dateDays ?? 0} step={1} min={0} onChange={(n) => set({ dateDays: n || undefined })} />
+                <RecurrenceField
+                  value={h.dateRecur}
+                  days={h.dateDays ?? 0}
+                  onChange={(recur) => set({ dateRecur: recur })}
+                />
                 <Row label="Date language">
                   <Select
                     value={h.dateLocale ?? 'en-US'}
@@ -354,7 +361,7 @@ export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): 
                 ? h.countdownTarget === 'midnight'
                   ? 'Counts down to the viewer’s next midnight — at 5pm it shows about 7 hours left. It freezes when the first scene carrying this header is won. Format tokens: {hh} {mm} {ss} (padded), {ms} (hundredths, 00–99), or {h} {m} {s}.'
                   : 'Starts on the viewer’s first interaction and freezes when the first scene carrying this header is won. Use {ss}:{ms} for 06:99 (6.99 seconds). Other tokens: {hh} {mm} {ss} (padded) or {h} {m} {s}.'
-                : 'Shows the current date. Format tokens: {date}, MMMM (July), MMM (Jul), MM (07), M (7), DD (05), D (5), Do (5th), YYYY (2026), YY (26). Empty = localized full date, uppercased.'}{' '}
+                : 'Shows the current date. Format tokens: {date}, dddd (Monday), ddd (Mon), MMMM (July), MMM (Jul), MM (07), M (7), DD (05), D (5), Do (5th), YYYY (2026), YY (26). Empty = localized full date, uppercased.'}{' '}
               Leave background as “none” for no band.
             </div>
           </>

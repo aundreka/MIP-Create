@@ -1,7 +1,8 @@
 // Countdown / dynamic-date helpers. The element renders like a text element
 // (styled via el.text); the stage runs a 1s ticker that rewrites the inner text
 // using formatCountdown. 'dynamic' mode targets (now + dynamicDays) so the date
-// is always relative to when the ad actually runs.
+// is always relative to when the ad actually runs, optionally snapped forward to the
+// next day a `recur` set allows ("the next Friday", "the next weekday").
 
 import type { SceneElement } from '../scene'
 import { promoLabelFor } from './promoCalendar'
@@ -34,6 +35,60 @@ export function nowShift(): number {
   return nowOverride == null ? 0 : nowOverride - Date.now()
 }
 
+// ---------------------------------------------------------------------------
+// Recurrence. A dynamic date normally lands on a flat offset from today ("now + 3
+// days"), which drifts across the week — run the same ad on a Saturday and the
+// "order by" date is a Tuesday. A recurrence pins it to the days that actually mean
+// something to the offer instead: the next Friday, the next weekday (the classic
+// "next business day" ship date), the next weekend, or any set of days the author
+// picks. Shared by the countdown element and the pinned header, so both surfaces
+// resolve "next Friday" identically.
+// ---------------------------------------------------------------------------
+
+/** Which weekdays a dynamic date may land on: a named preset, or an explicit list of
+ * day numbers (0 = Sunday … 6 = Saturday) for "every Friday" / "Mon, Wed & Fri". */
+export type Recurrence = 'weekday' | 'weekend' | number[]
+
+/** The named presets, expanded to day numbers. Mon–Fri and Sat/Sun. */
+export const RECURRENCE_PRESETS: Record<'weekday' | 'weekend', number[]> = {
+  weekday: [1, 2, 3, 4, 5],
+  weekend: [0, 6],
+}
+
+/** Normalize a recurrence to the day numbers it allows, or null when there is nothing
+ * to snap to (unset, unknown, or a list holding no valid day) — in which case the flat
+ * `dynamicDays` offset stands on its own. */
+export function recurrenceDays(recur?: Recurrence | null): number[] | null {
+  if (!recur) return null
+  if (typeof recur === 'string') return RECURRENCE_PRESETS[recur] ?? null
+  const days = recur.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6)
+  return days.length ? days : null
+}
+
+/** The first instant at or after `from` whose LOCAL day is in `days`, keeping the
+ * time of day. Walking with setDate (rather than adding 86.4e6) is what makes the
+ * result the same wall-clock time on the far side of a DST change. Seven steps is
+ * always enough; the fallback only fires for an empty set, which callers exclude. */
+export function nextRecurrence(from: number, days: number[]): number {
+  const d = new Date(from)
+  for (let i = 0; i < 7; i++) {
+    if (days.includes(d.getDay())) return d.getTime()
+    d.setDate(d.getDate() + 1)
+  }
+  return from
+}
+
+/** The instant a dynamic date targets: `days` days on from now, then forward to the
+ * next day the recurrence allows. The two compose — `days` is a head start applied
+ * BEFORE the snap, so "weekday, 1 day" is tomorrow when tomorrow is a weekday and
+ * Monday otherwise, while "Friday, 0 days" stays on today when today is already
+ * Friday. Without a recurrence this is just the flat offset it has always been. */
+export function resolveDynamicTarget(now: number, days: number | undefined, recur?: Recurrence | null): number {
+  const start = now + Math.max(0, days ?? 0) * DAY
+  const set = recurrenceDays(recur)
+  return set ? nextRecurrence(start, set) : start
+}
+
 /** Resolve the target instant (ms epoch) for the element, given the load time. */
 export function computeDeadline(el: SceneElement, now: number): number {
   const cd = el.countdown
@@ -42,7 +97,7 @@ export function computeDeadline(el: SceneElement, now: number): number {
   // `now` directly and the deadline is only a placeholder.
   if (cd.mode === 'clock') return now
   if (cd.mode === 'timer') return now + Math.max(0, cd.seconds ?? 60) * 1000
-  if (cd.mode === 'dynamic') return now + Math.max(0, cd.dynamicDays ?? 3) * DAY
+  if (cd.mode === 'dynamic') return resolveDynamicTarget(now, cd.dynamicDays ?? 3, cd.recur)
   const t = cd.targetIso ? Date.parse(cd.targetIso) : NaN
   return isFinite(t) ? t : now
 }
@@ -66,7 +121,7 @@ export function formatTicks(fmt: string): boolean {
  * second: the holiday label and every date part. A format holding one of these
  * needs a single timer at midnight rather than a ticker (see startTicker). */
 export function needsMidnightRefresh(fmt: string): boolean {
-  return /\{holiday\}|\{promo\}|\{date\}|\{MMMM\}|\{MMM\}|\{MM\}|\{M\}|\{Do\}|\{o\}|\{DD\}|\{D\}|\{YYYY\}|\{YY\}/.test(braceBareTokens(fmt))
+  return /\{holiday\}|\{promo\}|\{date\}|\{dddd\}|\{ddd\}|\{MMMM\}|\{MMM\}|\{MM\}|\{M\}|\{Do\}|\{o\}|\{DD\}|\{D\}|\{YYYY\}|\{YY\}/.test(braceBareTokens(fmt))
 }
 
 /** Start of the next local day (tonight's 12am). setHours(24,…) rolls the date over
@@ -144,7 +199,7 @@ function applyCase(s: string, mode: TextCase): string {
 // `o` deliberately does NOT, since a lone "o" is far likelier to be copy than a token.
 // Write "{D}{o}" if you want the parts separately.
 export function braceBareTokens(fmt: string): string {
-  return fmt.replace(/\{[^}]*\}|\b(MMMM|MMM|MM|M|Do|DD|D|YYYY|YY)\b/g, (match, bare: string | undefined) => (bare ? `{${bare}}` : match))
+  return fmt.replace(/\{[^}]*\}|\b(dddd|ddd|MMMM|MMM|MM|M|Do|DD|D|YYYY|YY)\b/g, (match, bare: string | undefined) => (bare ? `{${bare}}` : match))
 }
 
 /** Render the format string for the remaining time to `deadline`. Bare date
@@ -196,6 +251,15 @@ export function renderCountdownFormat(fmt: string, deadline: number, now: number
       return ''
     }
   }
+  // Localized weekday name for {dddd} (Monday) / {ddd} (Mon), following dateLocale
+  // exactly like the month names do.
+  const weekdayName = (style: 'long' | 'short'): string => {
+    try {
+      return target.toLocaleDateString(locale, { weekday: style })
+    } catch {
+      return ''
+    }
+  }
   // AM/PM for the instant the other date tokens describe (today in clock mode, the
   // target otherwise). Braces are required — a bare "A" would collide with ordinary
   // copy like "A GREAT DEAL".
@@ -211,6 +275,11 @@ export function renderCountdownFormat(fmt: string, deadline: number, now: number
     .replace(/\{A\}/g, meridiem)
     .replace(/\{a\}/g, meridiem.toLowerCase())
     .replace(/\{date\}/g, dateStr)
+    // Weekday names. Both must be replaced before the {dd}/{d} duration tokens below:
+    // the brace patterns don't actually overlap, but keeping the four-then-three order
+    // is what stops "{dddd}" from ever being read as a shorter token.
+    .replace(/\{dddd\}/g, weekdayName('long'))
+    .replace(/\{ddd\}/g, weekdayName('short'))
     .replace(/\{MMMM\}/g, monthName('long'))
     .replace(/\{MMM\}/g, monthName('short'))
     .replace(/\{MM\}/g, pad(target.getMonth() + 1))

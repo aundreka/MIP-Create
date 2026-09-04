@@ -55,6 +55,29 @@ describe('header modes', () => {
     expect(bandText()).toBe(`${now.toLocaleDateString('en-US', { month: 'short' })} ${dd} ${yy}`)
   })
 
+  it('date mode spells the weekday out with dddd/ddd', () => {
+    mount({ dateFormat: 'dddd, MMM D' })
+    const now = new Date()
+    expect(bandText()).toBe(`${now.toLocaleDateString('en-US', { weekday: 'long' })}, ${now.toLocaleDateString('en-US', { month: 'short' })} ${now.getDate()}`)
+  })
+
+  it('date mode can point at a recurring day instead of today', () => {
+    // Ships on the next weekday: from any day, the band names a Mon–Fri.
+    mount({ dateFormat: 'Ships dddd', dateRecur: 'weekday', dateDays: 1 })
+    const day = bandText().replace('Ships ', '')
+    expect(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']).toContain(day)
+
+    document.body.innerHTML = ''
+    // An explicit set: the band always names that day, whichever day the test runs.
+    mount({ dateFormat: 'dddd', dateRecur: [5] })
+    expect(bandText()).toBe('Friday')
+
+    document.body.innerHTML = ''
+    // Offset alone still works, with no recurrence.
+    mount({ dateFormat: 'D', dateDays: 1 })
+    expect(bandText()).toBe(String(new Date(Date.now() + 86400000).getDate()))
+  })
+
   it('literal words in a date format are not eaten by token replacement', () => {
     mount({ dateFormat: 'DAY D' })
     expect(bandText()).toBe(`DAY ${new Date().getDate()}`)

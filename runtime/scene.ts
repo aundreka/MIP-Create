@@ -489,13 +489,14 @@ export interface BoxStyle {
 }
 
 // A live countdown / dynamic date. 'timer' counts down `seconds` from load;
-// 'date' counts to a fixed `targetIso`; 'dynamic' targets (now + dynamicDays) so
-// the date auto-updates whenever the ad runs. `format` is a token string:
+// 'date' counts to a fixed `targetIso`; 'dynamic' targets (now + dynamicDays), then
+// the next weekday `recur` allows, so the date auto-updates whenever the ad runs. `format` is a token string:
 // {d}{h}{m}{s} (raw) / {dd}{hh}{mm}{ss} (2-digit) / {ms} (hundredths, 00–99) /
 // {date} (localized date) /
 // date parts of the target date: {MMMM} July, {MMM} Jul, {M}/{MM} 7/07,
-// {D}/{DD} 12/12, {Do} 21st (ordinal day), {o} the bare suffix, {YYYY}/{YY} —
-// month names follow dateLocale; the ordinal suffix is English-only.
+// {D}/{DD} 12/12, {Do} 21st (ordinal day), {o} the bare suffix, {YYYY}/{YY},
+// {dddd} Monday, {ddd} Mon (weekday) — month and weekday names follow dateLocale;
+// the ordinal suffix is English-only.
 // {holiday} (alias {promo}) renders the promo calendar's copy for the VIEWER's local
 // date (see meta.promoCalendar) — "Labor Day Sale" — and is empty outside it.
 export interface CountdownConfig {
@@ -505,6 +506,12 @@ export interface CountdownConfig {
   seconds?: number
   targetIso?: string
   dynamicDays?: number
+  // Recurrence for 'dynamic' mode: snap the target forward to the next day of the
+  // week the offer actually uses — 'weekday' (Mon–Fri), 'weekend' (Sat/Sun), or an
+  // explicit list of day numbers (0 = Sunday … 6 = Saturday), e.g. [5] for "the next
+  // Friday" and [1, 3, 5] for "Mon, Wed or Fri". `dynamicDays` stays a head start
+  // applied BEFORE the snap, so 0 can land on today and 1 always skips it.
+  recur?: 'weekday' | 'weekend' | number[]
   format: string
   dateStyle?: 'short' | 'long' | 'numeric' | 'monthDay' // how {date} renders
   dateLocale?: string // BCP-47 tag for {date} rendering (default 'en-US')
@@ -1360,11 +1367,17 @@ export interface HeaderConfig {
   countdownTarget?: 'duration' | 'midnight'
   countdownSeconds?: number // timer length in seconds (default 300), starts on first interaction; 'duration' target only
   countdownFormat?: string // e.g. '{ss}:{ms}' -> 06:99; defaults to '{mm}:{ss}' (or '{hh}:{mm}:{ss}' to midnight)
-  // Custom layout for date mode, e.g. 'MMMM D, YYYY' → "July 15, 2026". Tokens
-  // (bare or {braced}): MMMM full month, MMM short month, MM/M numeric month,
-  // DD/D day, Do ordinal day (21st), YYYY/YY year. Empty → localized full date,
+  // Custom layout for date mode, e.g. 'dddd, MMMM D, YYYY' → "Wednesday, July 15, 2026".
+  // Tokens (bare or {braced}): MMMM full month, MMM short month, MM/M numeric month,
+  // DD/D day, Do ordinal day (21st), dddd/ddd weekday (Monday/Mon), YYYY/YY year. Empty → localized full date,
   // uppercased (legacy English shape: "JULY 15, 2026").
   dateFormat?: string
+  // Which day the band's date describes. Default (both unset) is today. `dateDays`
+  // offsets it — 1 = tomorrow — and `dateRecur` then snaps forward to the next day of
+  // the week that fits: 'weekday' (Mon–Fri), 'weekend' (Sat/Sun) or day numbers
+  // (0 = Sunday … 6 = Saturday), so a band can read "Ships dddd" → "Ships Monday".
+  dateDays?: number
+  dateRecur?: 'weekday' | 'weekend' | number[]
   dateLocale?: string // BCP-47 tag for date/month rendering (default 'en-US')
   dateStyle?: 'short' | 'long' | 'numeric' | 'monthDay' // how {date} renders in custom formats
   // Case applied to the rendered date/timer. 'upper' is what turns "Jul" into "JUL" —
