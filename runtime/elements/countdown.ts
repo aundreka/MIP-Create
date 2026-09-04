@@ -121,7 +121,7 @@ export function formatTicks(fmt: string): boolean {
  * second: the holiday label and every date part. A format holding one of these
  * needs a single timer at midnight rather than a ticker (see startTicker). */
 export function needsMidnightRefresh(fmt: string): boolean {
-  return /\{holiday\}|\{promo\}|\{date\}|\{dddd\}|\{ddd\}|\{MMMM\}|\{MMM\}|\{MM\}|\{M\}|\{Do\}|\{o\}|\{DD\}|\{D\}|\{YYYY\}|\{YY\}/.test(braceBareTokens(fmt))
+  return /\{holiday\}|\{promo\}|\{date\}|\{[Dd]{3,}\}|\{MMMM\}|\{MMM\}|\{MM\}|\{M\}|\{Do\}|\{o\}|\{DD\}|\{D\}|\{YYYY\}|\{YY\}/.test(braceBareTokens(fmt))
 }
 
 /** Start of the next local day (tonight's 12am). setHours(24,…) rolls the date over
@@ -198,8 +198,14 @@ function applyCase(s: string, mode: TextCase): string {
 // `Do` (ordinal day, "MMMM Do" → "July 21st") joins the bare list; the bare suffix
 // `o` deliberately does NOT, since a lone "o" is far likelier to be copy than a token.
 // Write "{D}{o}" if you want the parts separately.
+//
+// The weekday run `[Dd]{3,}` comes FIRST so a four-letter "DDDD" is taken whole
+// instead of being read as "DD" + "D" and left half-matched. It is deliberately the
+// one loose token in the list: any run of three or more d's in either case is a
+// weekday (see the {dddd} replace below), because that is what authors type. Month
+// tokens stay case-sensitive — {M} and {m} are month and minutes.
 export function braceBareTokens(fmt: string): string {
-  return fmt.replace(/\{[^}]*\}|\b(dddd|ddd|MMMM|MMM|MM|M|Do|DD|D|YYYY|YY)\b/g, (match, bare: string | undefined) => (bare ? `{${bare}}` : match))
+  return fmt.replace(/\{[^}]*\}|\b([Dd]{3,}|MMMM|MMM|MM|M|Do|DD|D|YYYY|YY)\b/g, (match, bare: string | undefined) => (bare ? `{${bare}}` : match))
 }
 
 /** Render the format string for the remaining time to `deadline`. Bare date
@@ -275,11 +281,12 @@ export function renderCountdownFormat(fmt: string, deadline: number, now: number
     .replace(/\{A\}/g, meridiem)
     .replace(/\{a\}/g, meridiem.toLowerCase())
     .replace(/\{date\}/g, dateStr)
-    // Weekday names. Both must be replaced before the {dd}/{d} duration tokens below:
-    // the brace patterns don't actually overlap, but keeping the four-then-three order
-    // is what stops "{dddd}" from ever being read as a shorter token.
-    .replace(/\{dddd\}/g, weekdayName('long'))
-    .replace(/\{ddd\}/g, weekdayName('short'))
+    // Weekday name: three d's is the abbreviation ("Mon"), four OR MORE is the name
+    // spelled out ("Monday"). Case is ignored and the run is open-ended on purpose —
+    // {dddd}, {DDDD} and a hand-typed {ddddd} all mean the same thing, and there is
+    // nothing else a run of d's could be. It cannot collide with the {dd}/{d} days-
+    // remaining or {DD}/{D} day-of-month tokens below, which are one and two letters.
+    .replace(/\{([Dd]{3,})\}/g, (_m, run: string) => weekdayName(run.length === 3 ? 'short' : 'long'))
     .replace(/\{MMMM\}/g, monthName('long'))
     .replace(/\{MMM\}/g, monthName('short'))
     .replace(/\{MM\}/g, pad(target.getMonth() + 1))

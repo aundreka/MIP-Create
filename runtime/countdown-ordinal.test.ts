@@ -82,6 +82,27 @@ describe('weekday tokens', () => {
     expect(render('{dddd}, {MMMM} {Do}', at)).toBe('Tuesday, July 21st')
   })
 
+  // Authors type these by hand, in whatever case and length feels right — "DDDD",
+  // "ddddd". Any run of 3+ d's is the weekday, 3 being the only length that means the
+  // abbreviation; nothing else in the vocabulary is a run of d's, so none of this is
+  // ambiguous.
+  it('takes any run of three or more d\'s, in either case', () => {
+    const at = on(2026, 7, 21)
+    expect(render('{DDDD}', at)).toBe('Tuesday')
+    expect(render('{ddddd}', at)).toBe('Tuesday')
+    expect(render('{DDDDD}', at)).toBe('Tuesday')
+    expect(render('{DDD}', at)).toBe('Tue')
+    expect(render('DDDD, MMMM D', at)).toBe('Tuesday, July 21')
+    expect(render('ddddd', at)).toBe('Tuesday')
+  })
+
+  it('keeps the one- and two-letter day tokens out of it', () => {
+    const now = on(2026, 7, 21)
+    // {DD}/{D} stay day-of-month, {dd}/{d} stay days remaining.
+    expect(render('{DD} {D}', now)).toBe('21 21')
+    expect(renderCountdownFormat('{dd} {d}', now + 3 * 86400000, now, {})).toBe('03 3')
+  })
+
   it('accepts bare weekday tokens like the other date parts', () => {
     const at = on(2026, 7, 21)
     expect(render('dddd, MMMM D', at)).toBe('Tuesday, July 21')
