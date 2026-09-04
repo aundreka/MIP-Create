@@ -1078,6 +1078,14 @@ html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;overscroll-b
    an inline hide would be dropped by the next resize and the element would pop back in.
    visibility keeps the box measurable for the editor's rect reporting. */
 .pa-el--t-off{opacity:0 !important;visibility:hidden !important;pointer-events:none !important;}
+/* Below its scratch-progress window (scratchShowAt/scratchHideAt) or off the open book
+   page (showOnPage). CLASSES for the same reason as .pa-el--t-off, and this pair has two
+   ways to lose an inline hide: layoutRec rewrites outer.style.opacity on every pass (the
+   countdown day-timer relayouts a single rec on visibilitychange, so a "fade in at 100%"
+   date would pop into view), and the carry-over layer captures outer.style.opacity per
+   element and writes it back on every scene change (so a revealed element could vanish
+   again on the next scene). No visibility:hidden — the fade is an opacity transition. */
+.pa-el--scratch-off,.pa-el--page-off{opacity:0 !important;pointer-events:none !important;}
 .pa-root:not(.has-interacted) .pa-show-after-interaction{opacity:0 !important;pointer-events:none !important;}
 .pa-root.has-interacted .pa-hide-after-basket-interaction{opacity:0 !important;pointer-events:none !important;}
 /* Combo builder. Off-question options/titles and unrevealed layers hide by CLASS for
@@ -1841,18 +1849,13 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
   // scratch games emit 'scratch-progress' (0..1). Activated in startGames (interactive playback only).
   const revealEls = recs.filter((r) => r.el.scratchShowAt != null || r.el.scratchHideAt != null)
   let offScratchProgress: (() => void) | null = null
-  let lastScratchP = 0 // re-applied after every layout pass (layoutRec resets outer opacity)
+  let lastScratchP = 0
   const applyScratchReveal = (p: number): void => {
     lastScratchP = p
     for (const r of revealEls) {
       const showAt = r.el.scratchShowAt != null ? r.el.scratchShowAt / 100 : -Infinity
       const hideAt = r.el.scratchHideAt != null ? r.el.scratchHideAt / 100 : Infinity
-      const visible = p >= showAt && p < hideAt
-      if (!r.outer.style.transition.includes('opacity')) {
-        r.outer.style.transition = (r.outer.style.transition ? r.outer.style.transition + ', ' : '') + 'opacity 350ms ease'
-      }
-      r.outer.style.opacity = visible ? String(r.el.opacity ?? 1) : '0'
-      r.outer.style.pointerEvents = visible ? '' : 'none'
+      fadeOffClass(r, 'pa-el--scratch-off', !(p >= showAt && p < hideAt), 350)
     }
   }
 
@@ -1862,17 +1865,10 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
   // the game reports, the stage decides who is visible.
   const pageEls = recs.filter((r) => r.el.showOnPage != null)
   let offBookPage: (() => void) | null = null
-  let lastPage = 1 // re-applied after every layout pass (layoutRec resets outer opacity)
+  let lastPage = 1
   const applyBookPage = (n: number): void => {
     lastPage = n
-    for (const r of pageEls) {
-      const visible = r.el.showOnPage === n
-      if (!r.outer.style.transition.includes('opacity')) {
-        r.outer.style.transition = (r.outer.style.transition ? r.outer.style.transition + ', ' : '') + 'opacity 300ms ease'
-      }
-      r.outer.style.opacity = visible ? String(r.el.opacity ?? 1) : '0'
-      r.outer.style.pointerEvents = visible ? '' : 'none'
-    }
+    for (const r of pageEls) fadeOffClass(r, 'pa-el--page-off', r.el.showOnPage !== n, 300)
   }
 
   // Fire 'elementEnter' SFX bindings for an element as it animates in. Scheduled at the
@@ -2266,8 +2262,8 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       for (const rec of recs) if (rec.host) rec.host.relayout()
       for (const rec of recs) if (rec.confetti) rec.confetti.resize()
       for (const fn of postLayout) fn() // re-anchor imperatively-positioned mechanics (drag, …)
-      // layoutRec resets outer opacity from el.opacity — re-impose the scratch-progress
-      // fade state so a resize/rotation can't pop threshold-hidden elements back in.
+      // The fade states hide by class, so a layout pass can no longer drop them — but a
+      // rebuilt/re-entered element list is re-imposed here so it lands on the live state.
       if (offScratchProgress) applyScratchReveal(lastScratchP)
       if (offBookPage) applyBookPage(lastPage)
     },
@@ -3060,6 +3056,20 @@ function effective(el: SceneElement): Effective {
 // ---------------------------------------------------------------------------
 // Layout one element.
 // ---------------------------------------------------------------------------
+/** Hide/show an element for a live playback state (scratch progress, book page) by CLASS.
+ * The class survives every writer of outer.style.opacity — layoutRec on the next pass, the
+ * carry-over layer's captured value on the next scene — which an inline hide does not (see
+ * .pa-el--scratch-off). The fade itself still needs an inline transition; it is added once
+ * and left in place, so the first application (before the first paint) cuts rather than
+ * fades only because there is nothing on screen to fade from. */
+function fadeOffClass(rec: Rec, cls: string, off: boolean, ms: number): void {
+  const outer = rec.outer
+  if (!outer.style.transition.includes('opacity')) {
+    outer.style.transition = (outer.style.transition ? outer.style.transition + ', ' : '') + `opacity ${ms}ms ease`
+  }
+  outer.classList.toggle(cls, off)
+}
+
 function layoutRec(rec: Rec): void {
   const e = effective(rec.el)
   const outer = rec.outer

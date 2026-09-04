@@ -48,8 +48,10 @@ function mount(els: SceneElement[], interactive = true): HTMLElement {
   return host
 }
 
-const opacity = (host: HTMLElement, id: string): string =>
-  (host.querySelector(`.pa-el[data-id="${id}"]`) as HTMLElement).style.opacity
+// Off-page elements hide by CLASS (.pa-el--page-off), not by an inline opacity a later
+// layout pass would drop — see the class's note in stage.ts.
+const el = (host: HTMLElement, id: string): HTMLElement => host.querySelector(`.pa-el[data-id="${id}"]`) as HTMLElement
+const off = (host: HTMLElement, id: string): boolean => el(host, id).classList.contains('pa-el--page-off')
 
 describe('elements bound to a book page', () => {
   beforeEach(() => {
@@ -59,32 +61,38 @@ describe('elements bound to a book page', () => {
 
   it('shows only the page-1 element when the book opens on page 1', () => {
     const host = mount([book, label('onCover', 1), label('onTwo', 2), label('always')])
-    expect(opacity(host, 'onCover')).toBe('1')
-    expect(opacity(host, 'onTwo')).toBe('0')
-    expect(opacity(host, 'always')).toBe('') // untouched — no binding, no interference
+    expect(off(host, 'onCover')).toBe(false)
+    expect(off(host, 'onTwo')).toBe(true)
+    expect(off(host, 'always')).toBe(false) // untouched — no binding, no interference
+    expect(el(host, 'always').style.opacity).toBe('')
   })
 
   it('swaps them as the book turns to page 2 and back is impossible', () => {
     const host = mount([book, label('onCover', 1), label('onTwo', 2)])
     emit('book-page', 2)
-    expect(opacity(host, 'onCover')).toBe('0')
-    expect(opacity(host, 'onTwo')).toBe('1')
+    expect(off(host, 'onCover')).toBe(true)
+    expect(off(host, 'onTwo')).toBe(false)
     emit('book-page', 3)
-    expect(opacity(host, 'onTwo')).toBe('0')
+    expect(off(host, 'onTwo')).toBe(true)
   })
 
-  it('keeps a hidden page element out of the way of taps', () => {
-    const host = mount([book, label('onTwo', 2)])
-    const el = host.querySelector('.pa-el[data-id="onTwo"]') as HTMLElement
-    expect(el.style.pointerEvents).toBe('none')
+  it('keeps the page state through a layout pass that rewrites inline opacity', () => {
+    document.body.innerHTML = ''
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const stage = buildScene(scene([book, label('onCover', 1), label('onTwo', 2)]), ART, { mount: host })
+    stage.layoutAll()
+    stage.startGames(true)
     emit('book-page', 2)
-    expect(el.style.pointerEvents).toBe('')
+    stage.layoutAll() // a resize/rotation: layoutRec rewrites outer.style.opacity from the element
+    expect(off(host, 'onCover')).toBe(true)
+    expect(off(host, 'onTwo')).toBe(false)
   })
 
   it('leaves every page visible on the editor canvas, so they stay placeable', () => {
     const host = mount([book, label('onCover', 1), label('onTwo', 2)], false)
-    expect(opacity(host, 'onCover')).toBe('')
-    expect(opacity(host, 'onTwo')).toBe('')
+    expect(off(host, 'onCover')).toBe(false)
+    expect(off(host, 'onTwo')).toBe(false)
   })
 })
 
