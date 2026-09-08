@@ -1423,6 +1423,25 @@ button.frame-chip:hover {
 .h-sw {
   cursor: nesw-resize;
 }
+/* Rotate handle: a round dot on a short stem above the selection box. Round rather
+   than square so it never reads as one more resize grip, and offset far enough that
+   the top-edge handles stay hittable. */
+.handle.h-rot {
+  border-radius: 50%;
+  background: var(--accent);
+  border-color: #fff;
+  cursor: grab;
+}
+.handle.h-rot:active {
+  cursor: grabbing;
+}
+.rot-stem {
+  position: absolute;
+  width: calc(1.5px * var(--hz, 1));
+  margin-left: calc(-0.75px * var(--hz, 1));
+  background: var(--accent);
+  pointer-events: none;
+}
 .h-n,
 .h-s {
   cursor: ns-resize;

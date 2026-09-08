@@ -245,6 +245,11 @@ type Drag =
       sDist: number
       members: { id: string; x: number; y: number; w?: number; h?: number; scale?: number; font?: number; isText?: boolean }[]
     }
+  // Spin the selected element about its own centre. `base` is the rotation it had at
+  // grab and `startAngle` the pointer's bearing from the centre then, so the element
+  // follows the pointer by the DIFFERENCE — grabbing the handle never snaps the
+  // element to the pointer.
+  | { mode: 'rotate'; id: string; cx: number; cy: number; startAngle: number; base: number }
   | { mode: 'marquee'; start: { px: number; py: number } }
   | { mode: 'pan'; start: { x: number; y: number }; pan0: { x: number; y: number } }
   | null
@@ -276,6 +281,8 @@ export function EditorCanvas(props: Props): JSX.Element {
   const metricsByScene = useRef<Record<string, FrameMetrics>>({})
   const metricsRef = useRef<FrameMetrics>({ s: 1, offX: 0, offY: 0, vw: 1, vh: 1 })
   const [guides, setGuides] = useState<{ x: number[]; y: number[] }>({ x: [], y: [] })
+  // Live angle readout while the rotate handle is being dragged (null = not rotating).
+  const [rotLive, setRotLive] = useState<number | null>(null)
   // Figma-style spacing measurements shown while dragging: the pixel gap from the moving
   // element to its nearest neighbour (or the canvas edge) on each side. Overlay coords.
   const [measures, setMeasures] = useState<{ x1: number; y1: number; x2: number; y2: number; label: string; horiz: boolean }[]>([])
@@ -1156,6 +1163,25 @@ export function EditorCanvas(props: Props): JSX.Element {
     }
   }
 
+  /** Grab the rotate handle. Rotation is one shared number (no landscape / per-locale
+   * override), so this writes the element directly the way the Inspector's Angle field
+   * does — spinning something in landscape spins it in portrait too, deliberately: a
+   * logo lying at 12° is at 12° on both. */
+  const onRotateHandleDown = (e: React.PointerEvent): void => {
+    e.stopPropagation()
+    overlayRef.current?.setPointerCapture(e.pointerId)
+    const id = liveRef.current.selectedIds[0]
+    const el = liveRef.current.scene.elements.find((x) => x.id === id)
+    const rect = liveRef.current.rects.find((r) => r.id === id)
+    if (!el || !rect) return
+    const { px, py } = toIntrinsic(e.clientX, e.clientY)
+    const cx = rect.x + rect.w / 2
+    const cy = rect.y + rect.h / 2
+    beginTransaction()
+    setRotLive(el.rotation ?? 0)
+    drag.current = { mode: 'rotate', id, cx, cy, startAngle: (Math.atan2(py - cy, px - cx) * 180) / Math.PI, base: el.rotation ?? 0 }
+  }
+
   const onPointerMove = (e: React.PointerEvent): void => {
     if (thoughtZoneDrag.current) {
       moveThoughtZone(e)
@@ -1173,6 +1199,20 @@ export function EditorCanvas(props: Props): JSX.Element {
       return
     }
     const { px, py } = toIntrinsic(e.clientX, e.clientY)
+    if (d.mode === 'rotate') {
+      const now = (Math.atan2(py - d.cy, px - d.cx) * 180) / Math.PI
+      let deg = d.base + (now - d.startAngle)
+      // Shift snaps to 15°, the same increments the design tools people come from use;
+      // without it the free angle is rounded to a whole degree so the stored number
+      // stays readable in the Inspector.
+      deg = e.shiftKey ? Math.round(deg / 15) * 15 : Math.round(deg)
+      deg = ((deg % 360) + 360) % 360
+      if (deg > 180) deg -= 360
+      setRotLive(deg)
+      patchElement(d.id, { rotation: deg === 0 ? undefined : deg })
+      sendToActiveFrame()
+      return
+    }
     if (d.mode === 'move') {
       const snapped = snapMove(d.bbox, px - d.start.px, py - d.start.py)
       const dd = designDelta(snapped.dx, snapped.dy)
@@ -1321,7 +1361,8 @@ export function EditorCanvas(props: Props): JSX.Element {
         .map((r) => r.id)
       if (hit.length) setSelection(hit)
     }
-    if (d.mode === 'move' || d.mode === 'resize' || d.mode === 'group-scale') endTransaction()
+    if (d.mode === 'rotate') setRotLive(null)
+    if (d.mode === 'move' || d.mode === 'resize' || d.mode === 'group-scale' || d.mode === 'rotate') endTransaction()
     drag.current = null
     setMarquee(null)
     setGuides({ x: [], y: [] })
@@ -2652,6 +2693,21 @@ export function EditorCanvas(props: Props): JSX.Element {
                         onPointerDown={(e) => onHandlePointerDown(e, h, 'single')}
                       />
                     ))}
+                  {/* Rotate: a round handle floating above the box, offset by a constant
+                      SCREEN distance (hence /zoom) so it stays clear of the top edge at
+                      every zoom level. Works on any element type — the game mount whose
+                      box is a result area is only the case that asked for it. */}
+                  {!revealEdit && !zoneEdit && !cropEdit && !shapeEdit && !trackerEdit && !spineEdit && showHandles && single && singleRect && (
+                    <>
+                      <div className="rot-stem" style={{ left: singleRect.x + singleRect.w / 2, top: singleRect.y - 22 / zoom, height: 22 / zoom }} />
+                      <div className="handle h-rot" style={{ left: singleRect.x + singleRect.w / 2, top: singleRect.y - 22 / zoom }} onPointerDown={onRotateHandleDown} title="Drag to rotate (hold Shift for 15° steps)" />
+                      {rotLive != null && (
+                        <div className="dim-badge" style={{ left: singleRect.x + singleRect.w / 2, top: singleRect.y - 22 / zoom, transform: `translate(-50%, -22px) scale(${1 / zoom})` }}>
+                          {rotLive}°
+                        </div>
+                      )}
+                    </>
+                  )}
                   {!revealEdit && !zoneEdit && !cropEdit && !shapeEdit && !trackerEdit && !spineEdit && single && singleRect && (
                     <div
                       className="dim-badge"

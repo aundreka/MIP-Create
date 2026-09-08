@@ -672,6 +672,7 @@ function ElementSound(props: { el: SceneElement }): JSX.Element {
   const hasTapReveal = scene.elements.some((candidate) => candidate.game?.templateId === 'tapreveal')
   const isProgressBar = el.game?.templateId === 'progressbar'
   const hasProgressBar = scene.elements.some((candidate) => candidate.game?.templateId === 'progressbar')
+  const isNameInput = el.game?.templateId === 'nameinput'
   const gaugeStages = ((): { value: string; label: string }[] => {
     if (!isHoldGauge) return []
     const p = el.game?.params ?? {}
@@ -749,6 +750,12 @@ function ElementSound(props: { el: SceneElement }): JSX.Element {
     ...(isTapReveal ? [{ value: 'onReveal', label: 'When the game is won' }] : []),
     ...(hasProgressBar ? [{ value: 'progressStep', label: 'When the progress bar gains a step' }] : []),
     ...(isProgressBar ? [{ value: 'onReveal', label: 'When the bar fills up' }] : []),
+    ...(isNameInput
+      ? [
+          { value: 'nameKey', label: 'On each letter typed' },
+          { value: 'nameDone', label: 'When they finish typing' },
+        ]
+      : []),
     ...(isCarousel
       ? [
           { value: 'swipeStart', label: 'When a swipe starts' },

@@ -177,7 +177,11 @@ export function gameTemplateStarters(): Starter[] {
       // A progress bar is a strip near the top, not a play area — the shared square
       // mount below would render it as an enormous pill. See addGameScene.
       const isBar = t.id === 'progressbar'
-      const mount = isBar ? { y: 230, w: 864, h: 58 } : { y: 1080, w: 980, h: 1100 }
+      // The name mechanics are a FIELD and a lettering area, not a play area either —
+      // and neither of them can be won (see nameinput.ts), so the starter's scene has
+      // to advance on a tap or it would be a dead end.
+      const isField = t.id === 'nameinput' || t.id === 'nameresult'
+      const mount = isBar ? { y: 230, w: 864, h: 58 } : isField ? { y: 760, w: 820, h: 150 } : { y: 1080, w: 980, h: 1100 }
       const catchElements: SceneElement[] = isCatch ? [
         // headerScale: sized by one transform with an unrounded anchor, the way the pinned
         // date band is (header.ts). A score sits inside artwork, where a half-pixel of layout
@@ -199,11 +203,11 @@ export function gameTemplateStarters(): Starter[] {
               id: 'game',
               name: t.label,
               kind: 'game',
-              advance: { on: 'gameWin', delayMs: 400 },
+              advance: isField ? { on: 'tap', delayMs: 0 } : { on: 'gameWin', delayMs: 400 },
               transition: { type: 'fade', durationMs: 250 },
               elements: [
                 ...headerBlock('hdr'),
-                { id: 'game_title', type: 'text', name: 'Prompt', x: C, y: 320, anchor: 'center', zIndex: 12, mode: 'fit', text: { value: isCatch ? 'Catch them all!' : 'Tap to play!', fontSizePx: 72, fontWeight: 800, color: '#ffffff', align: 'center' } },
+                { id: 'game_title', type: 'text', name: 'Prompt', x: C, y: 320, anchor: 'center', zIndex: 12, mode: 'fit', text: { value: isCatch ? 'Catch them all!' : isField ? "Type your dog's name" : 'Tap to play!', fontSizePx: 72, fontWeight: 800, color: '#ffffff', align: 'center' } },
                 ...catchElements,
                 { id: 'game_mount', type: 'game-mount', name: t.label, x: C, y: mount.y, w: mount.w, h: mount.h, anchor: 'center', zIndex: 5, mode: 'fit', game: { templateId: t.id, params: { ...t.defaultParams }, hintEnabled: true, hintIdleMs: t.defaultHintIdleMs ?? 4000 }, sfx: isScratch ? [{ event: 'whileScratching', assetId: 'sfx_f_scratch' }, { event: 'onReveal', assetId: 'sfx_f_correctBright' }] : undefined },
               ],

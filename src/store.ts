@@ -1269,14 +1269,19 @@ export function addGameScene(templateId: string): void {
   // area. Given the usual big square mount it renders as an enormous pill and reads
   // as broken, so — like the full-bleed scroll page above — it gets its own box.
   const isBar = templateId === 'progressbar'
+  // Same reasoning for the two name mechanics: one is a text FIELD and the other a
+  // lettering area, and a half-screen square reads as broken for both. Neither can be
+  // won either, so the scene advances on a tap instead of waiting for a win that never
+  // comes (see runtime/games/nameinput.ts).
+  const isField = templateId === 'nameinput' || templateId === 'nameresult'
   const gameEl: SceneElement = {
     id: nextId('game'),
     type: 'game-mount',
     name: tpl?.label ?? 'Game',
     x: c.x,
-    y: fullBleed ? c.y : isBar ? Math.round(m.baseH * 0.12) : Math.round(m.baseH * 0.45),
-    w: fullBleed ? m.baseW : isBar ? Math.round(m.baseW * 0.8) : Math.round(m.baseW * 0.9),
-    h: fullBleed ? m.baseH : isBar ? Math.round(m.baseH * 0.03) : Math.round(m.baseH * 0.52),
+    y: fullBleed ? c.y : isBar ? Math.round(m.baseH * 0.12) : isField ? Math.round(m.baseH * 0.4) : Math.round(m.baseH * 0.45),
+    w: fullBleed ? m.baseW : isBar ? Math.round(m.baseW * 0.8) : isField ? Math.round(m.baseW * 0.76) : Math.round(m.baseW * 0.9),
+    h: fullBleed ? m.baseH : isBar ? Math.round(m.baseH * 0.03) : isField ? Math.round(m.baseH * 0.078) : Math.round(m.baseH * 0.52),
     anchor: 'center',
     zIndex: 10,
     mode: fullBleed ? 'extend' : 'fit',
@@ -1293,7 +1298,7 @@ export function addGameScene(templateId: string): void {
     name: `Game ${state.project.scenes.length + 1}`,
     kind: 'game',
     elements: [gameEl],
-    advance: { on: 'gameWin' },
+    advance: isField ? { on: 'tap' } : { on: 'gameWin' },
     transition: { type: 'fade', durationMs: 350 },
   }
   const extraAssets: AssetMap = {}

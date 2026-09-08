@@ -39,6 +39,8 @@ import { DRAGCLEAN_TEMPLATE } from './dragclean'
 import { TAPREMOVE_TEMPLATE } from './tapremove'
 import { TAPREVEAL_TEMPLATE } from './tapreveal'
 import { PROGRESSBAR_TEMPLATE } from './progressbar'
+import { NAMEINPUT_TEMPLATE } from './nameinput'
+import { NAMERESULT_TEMPLATE } from './nameresult'
 
 export const GAME_TEMPLATES: GameTemplate[] = [
   FLIPBOOK_TEMPLATE,
@@ -60,6 +62,8 @@ export const GAME_TEMPLATES: GameTemplate[] = [
   DRAGCLEAN_TEMPLATE,
   TAPREMOVE_TEMPLATE,
   TAPREVEAL_TEMPLATE,
+  NAMEINPUT_TEMPLATE,
+  NAMERESULT_TEMPLATE,
   DRAG_TEMPLATE,
   CATCH_TEMPLATE,
   BUBBLES_TEMPLATE,
