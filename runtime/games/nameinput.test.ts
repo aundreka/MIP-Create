@@ -10,6 +10,9 @@ import { createNameResult, NAMERESULT_TEMPLATE } from './nameresult'
 import { readName, resetNames } from './namechannel'
 import { mulberry32, type GameContext, type GameModule } from './types'
 
+/** A px style value as a number. */
+const px = (v: string): number => parseFloat(v)
+
 function ctxFor(root: HTMLElement, played: string[]): GameContext {
   return {
     root,
@@ -101,7 +104,9 @@ describe('name box', () => {
     expect(ghostOf(matched.mount).style.color).toBe('rgb(154, 163, 178)')
     const own = makeInput({ placeholderMatch: false, placeholderFontSizePx: 30, placeholderWeight: 400, placeholderItalic: true, placeholderOpacity: 0.6 })
     const g = ghostOf(own.mount)
-    expect(g.style.fontSize).toBe('30.00px')
+    // px() rather than a string compare: the CSSOM normalises what it is handed
+    // ('30.00px' comes back as '30px'), and the number is what the test is about.
+    expect(px(g.style.fontSize)).toBe(30)
     expect(g.style.fontWeight).toBe('400')
     expect(g.style.fontStyle).toBe('italic')
     expect(g.style.opacity).toBe('0.6')
@@ -109,12 +114,12 @@ describe('name box', () => {
 
   it('draws the cursor as a bar, a block or an underline', () => {
     const bar = makeInput({ caretStyle: 'bar', caretWidthPx: 3, fontSizePx: 40, caretHeightPct: 100 })
-    expect(bar.caret.style.width).toBe('3.0px')
-    expect(bar.caret.style.height).toBe('40.0px')
+    expect(px(bar.caret.style.width)).toBe(3)
+    expect(px(bar.caret.style.height)).toBe(40)
     const block = makeInput({ caretStyle: 'block', fontSizePx: 40, caretHeightPct: 100 })
-    expect(block.caret.style.width).toBe('22.0px') // 0.55em, the width of a character cell
+    expect(px(block.caret.style.width)).toBe(22) // 0.55em, the width of a character cell
     const under = makeInput({ caretStyle: 'underline', caretWidthPx: 4, fontSizePx: 40 })
-    expect(under.caret.style.height).toBe('4.0px') // the weight becomes the THICKNESS
+    expect(px(under.caret.style.height)).toBe(4) // the weight becomes the THICKNESS
     expect(under.caret.style.alignSelf).toBe('flex-end')
   })
 
