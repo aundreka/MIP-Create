@@ -8,10 +8,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createNameInput, NAMEINPUT_TEMPLATE, resetKeyboardProbe } from './nameinput'
 import { createNameResult, NAMERESULT_TEMPLATE } from './nameresult'
 import { readName, resetNames } from './namechannel'
+import { rotatedFootprint } from './nametext'
 import { mulberry32, type GameContext, type GameModule } from './types'
 
 /** A px style value as a number. */
 const px = (v: string): number => parseFloat(v)
+
+/** jsdom lays nothing out — give a node the box the test is reasoning about. */
+function stubBox(el: HTMLElement, w: number, h: number): void {
+  Object.defineProperty(el, 'clientWidth', { value: w, configurable: true })
+  Object.defineProperty(el, 'clientHeight', { value: h, configurable: true })
+}
+function stubLine(el: HTMLElement, w: number, h: number): void {
+  Object.defineProperty(el, 'offsetWidth', { value: w, configurable: true })
+  Object.defineProperty(el, 'offsetHeight', { value: h, configurable: true })
+}
+/** The scale() factor out of a transform list, 1 when there isn't one. */
+const scaleOf = (el: HTMLElement): number => {
+  const m = /scale\(([\d.]+)\)/.exec(el.style.transform)
+  return m ? parseFloat(m[1]) : 1
+}
 
 function ctxFor(root: HTMLElement, played: string[], scale = 1): GameContext {
   return {
@@ -285,6 +301,19 @@ describe('name result', () => {
     expect(r.text()).toBe('BROWNIE')
   })
 
+  it('starts empty on a fresh load — the last player\'s name is not still in the box', () => {
+    const p = makeInput()
+    p.type('Brownie')
+    expect(readName('name')).toBe('Brownie')
+    // resetNames() is what a page load does for free: the channel is module state, so
+    // a refresh re-runs the module with an empty map. Nothing is persisted anywhere.
+    resetNames()
+    const reloaded = makeInput({ placeholder: 'type here' })
+    expect(reloaded.pre() + reloaded.post()).toBe('')
+    expect(reloaded.ghost()).toBe('type here')
+    expect(window.sessionStorage.getItem('pa:name:name')).toBeNull()
+  })
+
   it('carries the name into a later scene — the box it came from is long gone', () => {
     const p = makeInput()
     p.type('Brownie')
@@ -301,6 +330,70 @@ describe('name result', () => {
     const mine = makeResult({ channel: 'pet', textTransform: 'Capitalized', prefix: 'For ', suffix: '!' })
     expect(other.text()).toBe('X')
     expect(mine.text()).toBe('For Brownie!')
+  })
+
+  it('shrinks a turned name to its TURNED footprint, so a long one cannot escape the area', () => {
+    // jsdom has no layout, so the line reports whatever we give it: a wide label in a
+    // square area. Upright it fits at 1; at 45° its footprint is ~sqrt(2) bigger on
+    // both axes and it has to come down to stay inside.
+    const r = makeResult({ emptyText: 'BARTHOLOMEW', fit: 'shrink to fit', minScalePct: 1 })
+    stubBox(r.mount, 200, 200)
+    stubLine(r.line(), 200, 40)
+    r.mod.relayout()
+    expect(scaleOf(r.line())).toBeCloseTo(1, 2) // upright: already fits exactly
+
+    const spun = makeResult({ emptyText: 'BARTHOLOMEW', fit: 'shrink to fit', minScalePct: 1, textAngle: 45 })
+    stubBox(spun.mount, 200, 200)
+    stubLine(spun.line(), 200, 40)
+    spun.mod.relayout()
+    // footprint at 45° = (200+40)/sqrt(2) ≈ 169.7 on each axis → 200/169.7 ≈ 1.18 → capped at 1?
+    // No: shrink mode caps at 1 only when it FITS. 169.7 < 200, so it fits and stays 1.
+    expect(scaleOf(spun.line())).toBeLessThanOrEqual(1)
+
+    // Now a label too long to fit once turned: the fit must come down below 1.
+    const long = makeResult({ emptyText: 'BARTHOLOMEW', fit: 'shrink to fit', minScalePct: 1, textAngle: 45 })
+    stubBox(long.mount, 200, 200)
+    stubLine(long.line(), 400, 40)
+    long.mod.relayout()
+    const f = scaleOf(long.line())
+    expect(f).toBeLessThan(1)
+    // Whatever it chose, the turned footprint must sit inside the area.
+    const fp = rotatedFootprint(400 * f, 40 * f, 45, 0)
+    expect(fp.w).toBeLessThanOrEqual(200.5)
+    expect(fp.h).toBeLessThanOrEqual(200.5)
+  })
+
+  it('centres a turned name in the area rather than letting it swing off one edge', () => {
+    const r = makeResult({ emptyText: 'BROWNIE', textAngle: 30, align: 'center', vAlign: 'middle', minScalePct: 1 })
+    stubBox(r.mount, 300, 300)
+    stubLine(r.line(), 200, 50)
+    r.mod.relayout()
+    const t = r.line().style.transform
+    expect(r.line().style.transformOrigin).toBe('center center')
+    // Centred in both axes: the nudge that lines the footprint up with the layout box
+    // is zero either way, because the pivot is already the centre of both.
+    const m = /translate\(([-\d.]+)px,([-\d.]+)px\)/.exec(t)
+    if (m) {
+      expect(Math.abs(parseFloat(m[1]))).toBeLessThan(0.01)
+      expect(Math.abs(parseFloat(m[2]))).toBeLessThan(0.01)
+    }
+  })
+
+  it('lands a turned name on the edge it is aligned to, footprint and all', () => {
+    const r = makeResult({ emptyText: 'BROWNIE', textAngle: 30, align: 'left', vAlign: 'top', minScalePct: 1 })
+    stubBox(r.mount, 300, 300)
+    stubLine(r.line(), 200, 50)
+    r.mod.relayout()
+    const m = /translate\(([-\d.]+)px,([-\d.]+)px\)/.exec(r.line().style.transform)
+    expect(m).not.toBeNull()
+    // The footprint is centred on the layout box's centre, so aligning its edge to the
+    // box's edge is half the difference between the two — which is NEGATIVE horizontally
+    // here: a 200-wide line turned 30° is only 198.2 wide, so its left edge starts
+    // inside the box and has to move out to reach the inset.
+    const fp = rotatedFootprint(200, 50, 30, 0)
+    expect(parseFloat(m![1])).toBeCloseTo((fp.w - 200) / 2, 1)
+    expect(parseFloat(m![2])).toBeCloseTo((fp.h - 50) / 2, 1)
+    expect(parseFloat(m![2])).toBeGreaterThan(0) // vertically it really is pushed down
   })
 
   it('puts the angle and the slant on the text, leaving the area itself square', () => {

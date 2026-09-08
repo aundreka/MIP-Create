@@ -2,10 +2,17 @@
 //
 // The area IS the game mount's box, which is the whole reason this is a mechanic and
 // not a parameter of the name box. Sizing it is dragging its corners on the canvas;
-// putting it on the patch stitched onto a harness is dragging it there; sitting it at
-// the angle the patch is photographed at is the element's own Angle (with `textAngle`
-// here for a nudge that leaves the area itself square). Nothing about placement is
-// typed into a panel.
+// putting it on the patch stitched onto a harness is dragging it there. Nothing about
+// placement is typed into a panel.
+//
+// Two rotations, and which one an author wants depends on what they are protecting:
+//   • The element's own **Angle** (the rotate handle on the canvas) turns the AREA.
+//     The fit rectangle tilts with it, so a name set diagonally across a patch gets the
+//     full diagonal to grow into. This is the one to reach for.
+//   • **Turn the text only** turns the lettering inside an upright area. The fit then
+//     has to allow for the turned footprint — a tilted word is wider and taller than
+//     the same word straight — which it does, so a long name still cannot escape the
+//     rectangle the author drew.
 //
 // What it shows comes off the name channel, so it needs no connection to the box the
 // player typed into — same channel name, and that is the wiring. That is also what
@@ -21,7 +28,7 @@
 import type { GameContext, GameModule, GameTemplate } from './types'
 import { num, str } from './types'
 import { onNameChange, readName } from './namechannel'
-import { applyBoxStyle, applyCase, applyTextStyle, boxFields, BOX_DEFAULTS, fitScale, readBoxStyle, readTextStyle, textFields, TEXT_DEFAULTS, type BoxStyle, type FitMode, type TextStyle } from './nametext'
+import { applyBoxStyle, applyCase, applyTextStyle, boxFields, BOX_DEFAULTS, fitOffset, fitScale, readBoxStyle, readTextStyle, textFields, TEXT_DEFAULTS, type BoxStyle, type FitMode, type TextStyle } from './nametext'
 
 type VAlign = 'top' | 'middle' | 'bottom'
 
@@ -89,13 +96,22 @@ export function createNameResult(): GameModule {
     line.style.maxWidth = text.wrap ? availW.toFixed(1) + 'px' : ''
 
     line.style.transform = 'none'
-    const f = fitScale(line, availW, availH, fit, minScalePct, maxScalePct)
-    const origin = (text.align === 'center' ? 'center' : text.align === 'right' ? 'right' : 'left') + ' ' + (vAlign === 'top' ? 'top' : vAlign === 'bottom' ? 'bottom' : 'center')
-    line.style.transformOrigin = origin
-    // Rotation and skew ride the same transform as the fit, INSIDE the area: the
-    // element's own Angle turns the whole box (background and all), this turns only
-    // the lettering within it — which is what a name printed on an angled patch needs.
+    // Measured against the label's TURNED footprint, so a long name at an angle
+    // shrinks to stay inside the area instead of running past its corners and being
+    // clipped. Fitting the upright box and then rotating the result — which is what
+    // this did first — gives the author no control over a long name at all.
+    const f = fitScale(line, availW, availH, fit, minScalePct, maxScalePct, textAngle, skewXDeg)
+    // Turned labels pivot about their own centre and are then nudged so that footprint
+    // lands against the edge the author aligned to (centred, by default, in both axes).
+    // A corner origin would swing the visible corners outside the area even at a scale
+    // that fits.
+    const spun = textAngle !== 0 || skewXDeg !== 0
+    line.style.transformOrigin = spun ? 'center center' : (text.align === 'center' ? 'center' : text.align === 'right' ? 'right' : 'left') + ' ' + (vAlign === 'top' ? 'top' : vAlign === 'bottom' ? 'bottom' : 'center')
     const parts: string[] = []
+    if (spun) {
+      const off = fitOffset(line.offsetWidth || line.scrollWidth, line.offsetHeight || line.scrollHeight, f, textAngle, skewXDeg, text.align, vAlign)
+      if (off.dx || off.dy) parts.push(`translate(${off.dx.toFixed(2)}px,${off.dy.toFixed(2)}px)`)
+    }
     if (f !== 1) parts.push(`scale(${f.toFixed(4)})`)
     if (textAngle) parts.push(`rotate(${textAngle}deg)`)
     if (skewXDeg) parts.push(`skewX(${skewXDeg}deg)`)
@@ -200,7 +216,7 @@ export const NAMERESULT_TEMPLATE: GameTemplate = {
     { key: 'minScalePct', group: 'Area', label: 'Shrink limit %', type: 'number', min: 1, max: 100, step: 5, showIf: (p) => str(p.fit, '') !== 'never resize' },
     { key: 'maxScalePct', group: 'Area', label: 'Grow limit %', type: 'number', min: 100, max: 1000, step: 10, showIf: (p) => str(p.fit, '') === 'fill the area' },
     { key: 'vAlign', group: 'Area', label: 'Vertical align', type: 'select', options: ['top', 'middle', 'bottom'] },
-    { key: 'textAngle', group: 'Area', label: 'Text angle (area stays square)', type: 'number', min: -180, max: 180, step: 1 },
+    { key: 'textAngle', group: 'Area', label: 'Turn the text only (Angle turns the area)', type: 'number', min: -180, max: 180, step: 1 },
     { key: 'skewXDeg', group: 'Area', label: 'Slant', type: 'number', min: -60, max: 60, step: 1 },
     { key: 'showArea', group: 'Area', label: 'Outline the area on the canvas', type: 'boolean' },
     ...boxFields('Area box'),

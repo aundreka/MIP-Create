@@ -223,6 +223,44 @@ export function applyBoxStyle(el: HTMLElement, b: BoxStyle, w: number, h: number
 export type FitMode = 'shrink to fit' | 'fill the area' | 'never resize'
 
 /**
+ * The four corners of a `w × h` box after skewX then rotate, measured from the box's
+ * CENTRE (which is the transform-origin used for a turned label).
+ *
+ * Order matches the CSS transform list `rotate(θ) skewX(a)`: the skew happens in the
+ * box's own frame and the rotation turns the result.
+ */
+function corners(w: number, h: number, angleDeg: number, skewDeg: number): { x: number; y: number }[] {
+  const r = (angleDeg * Math.PI) / 180
+  const cos = Math.cos(r)
+  const sin = Math.sin(r)
+  // Clamped well clear of ±90°, where tan runs away to infinity and the footprint
+  // would be meaningless. The param itself stops at ±60.
+  const k = Math.tan((Math.max(-80, Math.min(80, skewDeg)) * Math.PI) / 180)
+  const cx = w / 2
+  const cy = h / 2
+  return [
+    { x: 0, y: 0 },
+    { x: w, y: 0 },
+    { x: w, y: h },
+    { x: 0, y: h },
+  ].map((p) => {
+    const dx = p.x - cx
+    const dy = p.y - cy
+    const sx = dx + k * dy // skewX
+    return { x: cx + sx * cos - dy * sin, y: cy + sx * sin + dy * cos }
+  })
+}
+
+/** The axis-aligned box a turned/slanted `w × h` label really occupies. */
+export function rotatedFootprint(w: number, h: number, angleDeg: number, skewDeg: number): { w: number; h: number } {
+  if (!angleDeg && !skewDeg) return { w, h }
+  const pts = corners(w, h, angleDeg, skewDeg)
+  const xs = pts.map((p) => p.x)
+  const ys = pts.map((p) => p.y)
+  return { w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) }
+}
+
+/**
  * The factor that puts `line` inside a `availW × availH` box.
  *
  * Measured from the line's own layout size (offsetWidth/Height), which a transform
@@ -231,15 +269,53 @@ export type FitMode = 'shrink to fit' | 'fill the area' | 'never resize'
  * is not laid out yet (jsdom, or a scene built off-screen); returning 1 leaves the
  * authored size alone rather than collapsing the text to nothing on a measurement
  * that never happened.
+ *
+ * The fit is against the label's ROTATED footprint, not its upright box. A name set
+ * at an angle occupies a wider and taller rectangle than the same name straight, and
+ * measuring the upright box would let a long one run past the edges of the area — the
+ * one thing an author sizing an area is trying to prevent.
  */
-export function fitScale(line: HTMLElement, availW: number, availH: number, mode: FitMode, minPct: number, maxPct: number): number {
+export function fitScale(line: HTMLElement, availW: number, availH: number, mode: FitMode, minPct: number, maxPct: number, angleDeg = 0, skewDeg = 0): number {
   if (mode === 'never resize') return 1
   const w = line.offsetWidth || line.scrollWidth
   const h = line.offsetHeight || line.scrollHeight
   if (!w || !h || availW <= 0 || availH <= 0) return 1
-  const raw = Math.min(availW / w, availH / h)
+  const box = rotatedFootprint(w, h, angleDeg, skewDeg)
+  const raw = Math.min(availW / box.w, availH / box.h)
   const capped = mode === 'fill the area' ? raw : Math.min(1, raw)
   return Math.max(minPct / 100, Math.min(maxPct / 100, capped))
+}
+
+/**
+ * How far to nudge a turned label so its real footprint sits against the edge the
+ * author aligned it to.
+ *
+ * Rotating about the centre leaves the label's LAYOUT box where flex put it while its
+ * visible corners swing outside — so a left-aligned tilted name starts left of the
+ * inset even though it fits. This measures the scaled footprint against the layout box
+ * and returns the translate that lines the two up.
+ */
+export function fitOffset(
+  w: number,
+  h: number,
+  scale: number,
+  angleDeg: number,
+  skewDeg: number,
+  align: 'left' | 'center' | 'right',
+  vAlign: 'top' | 'middle' | 'bottom',
+): { dx: number; dy: number } {
+  if ((!angleDeg && !skewDeg) || !w || !h) return { dx: 0, dy: 0 }
+  const cx = w / 2
+  const cy = h / 2
+  const pts = corners(w, h, angleDeg, skewDeg).map((p) => ({ x: cx + (p.x - cx) * scale, y: cy + (p.y - cy) * scale }))
+  const minX = Math.min(...pts.map((p) => p.x))
+  const maxX = Math.max(...pts.map((p) => p.x))
+  const minY = Math.min(...pts.map((p) => p.y))
+  const maxY = Math.max(...pts.map((p) => p.y))
+  return {
+    dx: align === 'left' ? -minX : align === 'right' ? w - maxX : cx - (minX + maxX) / 2,
+    dy: vAlign === 'top' ? -minY : vAlign === 'bottom' ? h - maxY : cy - (minY + maxY) / 2,
+  }
 }
 
 // ---- caret ------------------------------------------------------------------

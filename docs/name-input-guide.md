@@ -48,11 +48,19 @@ is still there: it lives in the playable, not in the scene.
 ## The result area
 
 - **The area is the mount's box.** Drag its corners to say where the lettering may go.
-- **Angle**: drag the round handle above the selection box (hold <kbd>Shift</kbd> for
-  15° steps), or type a number into _Angle_ in the Inspector. That turns the whole
-  area. `Text angle` under **Area** turns only the lettering and leaves the box square,
-  and `Slant` skews it — between them you can sit a name on a patch photographed at
-  any angle.
+- **Rotating it — two ways, and the difference matters:**
+  - **Angle** (the round handle above the selection box, <kbd>Shift</kbd> for 15° steps,
+    or the number in the Inspector) turns **the area itself**. The fit rectangle tilts
+    with it, so a name set diagonally across a patch has the whole diagonal to grow
+    into. **This is the one to use for a tilted patch.**
+  - **Turn the text only** under **Area** turns the lettering inside an upright area,
+    with `Slant` for a skew. The fit allows for the turned footprint — a tilted word is
+    wider and taller than the same word upright — so a long name still cannot escape
+    the rectangle you drew. It just has less room to work with than a tilted area gives
+    it.
+- **Centring**: the text is centred in the area in both axes by default (`Align`
+  center, `Vertical align` middle), and stays centred when turned — the label pivots
+  about the area's centre, not a corner.
 - **Fit to the area**: `shrink to fit` (the default — a long name shrinks, a short one
   keeps its size), `fill the area` (scales up as well, so the lettering always fills
   the space), or `never resize`. `Shrink limit %` stops it going microscopic.
@@ -88,7 +96,7 @@ _When they finish typing_.
 Every box and every result carries a `Channel`, default `name`. Same channel = same
 value. Use a second channel (`pet2`, `city`) only when there are two separate things
 to type. `Max characters` and `Allowed characters` on the box are what keep a name
-inside the art it has to fit.
+inside the art it has to fit — the limit ships at **15 characters**.
 
 ## Things worth knowing
 
@@ -98,5 +106,7 @@ inside the art it has to fit.
   win** — use a CTA, a button, a tap or a timer.
 - Avoid scene tap-advance on a scene with a name box: a tap on the field is a tap on
   the scene.
-- The name survives a scene change, an orientation flip and an MRAID resume; it is
-  cleared when the ad is reloaded from scratch.
+- The name survives a scene change and an orientation flip. It is **cleared by any page
+  load or refresh** — deliberately: a reload is a new player, and opening the ad with
+  the previous one's name already in the box reads as broken. Nothing is written to
+  storage.

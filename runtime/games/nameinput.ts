@@ -74,7 +74,7 @@ export function createNameInput(): GameModule {
   let placeholderItalic = false
   /** Distance from the cursor to the preview text, in design px. */
   let placeholderGapPx = 0.5
-  let maxChars = 12
+  let maxChars = 15
   let allow: AllowMode = 'letters + numbers + space'
   let keyboardMode: KeyboardMode = 'auto (device, then built-in)'
   let fallbackMs = 900
@@ -433,7 +433,7 @@ export function createNameInput(): GameModule {
       placeholderSpacingPx = num(params.placeholderLetterSpacingPx, 0)
       placeholderItalic = params.placeholderItalic === true
       placeholderGapPx = num(params.placeholderGapPx, 0.5)
-      maxChars = Math.max(0, Math.round(num(params.maxChars, 12)))
+      maxChars = Math.max(0, Math.round(num(params.maxChars, 15)))
       allow = str(params.allow, 'letters + numbers + space') as AllowMode
       keyboardMode = str(params.keyboard, 'auto (device, then built-in)') as KeyboardMode
       fallbackMs = num(params.fallbackMs, 900)
@@ -637,7 +637,7 @@ export const NAMEINPUT_TEMPLATE: GameTemplate = {
     placeholderLetterSpacingPx: 0,
     placeholderItalic: false,
     placeholderGapPx: 0.5,
-    maxChars: 12,
+    maxChars: 15,
     allow: 'letters + numbers + space',
     fontSizePx: 46,
     fontWeight: 600,

@@ -10,11 +10,17 @@
 // separate things to type.
 //
 // Unlike the progress channel this does NOT live on the scene root: the whole point
-// is that the value outlives the scene it was typed on. It lives in a module map
-// (so a result mounted in the same tick reads it immediately) mirrored into
-// sessionStorage (so it also survives a scene rebuild, a locale switch, an orientation
-// flip, and an MRAID resume that reloads the document). Listeners hang off `document`,
-// which every scene shares, and every subscriber unhooks in destroy().
+// is that the value outlives the scene it was typed on. It lives in a module map, so
+// a result mounted in the same tick reads it immediately and every later scene in the
+// same play session sees it. Listeners hang off `document`, which every scene shares,
+// and every subscriber unhooks in destroy().
+//
+// A module map and nothing else, deliberately: the name must NOT survive a reload.
+// Storing it (sessionStorage) would mean a refresh — or a network replaying the
+// creative in the same webview — opened the ad with the last player's dog's name
+// already in the box, which reads as broken. A page load is a new player, so the map
+// starts empty and the field shows its preview text again. Scene changes never reload
+// the document, so cross-scene carry-over costs nothing to keep.
 
 export interface NameDetail {
   /** Which channel changed. */
@@ -24,30 +30,9 @@ export interface NameDetail {
 }
 
 const EVENT = 'pa-name'
-const PREFIX = 'pa:name:'
 
-/** Values seen this session. The map is authoritative; storage is its backup. */
+/** Values typed since this document loaded. Cleared by a reload, which is the point. */
 const values = new Map<string, string>()
-
-/** Storage is unavailable in some webviews (private mode, blocked cookies) and
- * absent in unit tests — every touch is guarded and a failure just means the value
- * doesn't survive a reload, which is not worth breaking typing over. */
-function readStored(channel: string): string {
-  try {
-    return window.sessionStorage.getItem(PREFIX + channel) ?? ''
-  } catch {
-    return ''
-  }
-}
-
-function writeStored(channel: string, value: string): void {
-  try {
-    if (value) window.sessionStorage.setItem(PREFIX + channel, value)
-    else window.sessionStorage.removeItem(PREFIX + channel)
-  } catch {
-    /* storage unavailable — the in-memory value still drives this session */
-  }
-}
 
 /** The node subscribers meet on: `document`, the one thing every scene root shares. */
 function host(): EventTarget {
@@ -56,12 +41,7 @@ function host(): EventTarget {
 
 /** What has been typed on this channel, '' when nothing has. */
 export function readName(channel: string): string {
-  const c = channel || 'name'
-  const mem = values.get(c)
-  if (mem != null) return mem
-  const stored = readStored(c)
-  values.set(c, stored)
-  return stored
+  return values.get(channel || 'name') ?? ''
 }
 
 /** Publish a new value. Cheap enough to call on every keystroke — that is the point:
@@ -70,7 +50,6 @@ export function writeName(channel: string, value: string): void {
   const c = channel || 'name'
   if (values.get(c) === value) return
   values.set(c, value)
-  writeStored(c, value)
   host().dispatchEvent(new CustomEvent<NameDetail>(EVENT, { detail: { channel: c, value } }))
 }
 
@@ -85,9 +64,9 @@ export function onNameChange(channel: string, fn: (value: string) => void): () =
   return () => host().removeEventListener(EVENT, handler)
 }
 
-/** Wipe every channel. Only used by tests and by a deliberate "play again" reset —
- * ordinary scene changes must NOT call this, or the name would not carry over. */
+/** Wipe every channel. A reload does this for free (the map is module state); this is
+ * for tests and for a deliberate "play again" reset. Ordinary scene changes must NOT
+ * call it, or the name would not carry over. */
 export function resetNames(): void {
-  for (const c of values.keys()) writeStored(c, '')
   values.clear()
 }
