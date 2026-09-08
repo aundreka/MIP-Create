@@ -67,13 +67,13 @@ export function createNameInput(): GameModule {
   let placeholder = 'type here'
   let placeholderColor = '#9aa3b2'
   let placeholderOpacity = 1
-  /** false = the preview text is styled on its own instead of following the typed text. */
-  let placeholderMatch = true
   let placeholderFont = ''
   let placeholderSizePx = 0
   let placeholderWeight = 0
   let placeholderSpacingPx = 0
   let placeholderItalic = false
+  /** Distance from the cursor to the preview text, in design px. */
+  let placeholderGapPx = 0.5
   let maxChars = 12
   let allow: AllowMode = 'letters + numbers + space'
   let keyboardMode: KeyboardMode = 'auto (device, then built-in)'
@@ -83,6 +83,8 @@ export function createNameInput(): GameModule {
   let caretStyle: CaretStyle = 'bar'
   let caretWidthPx = 3
   let caretHeightPct = 112
+  /** Space either side of the cursor, between it and the typed text. */
+  let caretGapPx = 0.5
   let caretBlinkMs = 1060
   let caretAlways = true
   let minScalePct = 45
@@ -177,20 +179,23 @@ export function createNameInput(): GameModule {
     pad.style.justifyContent = text.align === 'center' ? 'center' : text.align === 'right' ? 'flex-end' : 'flex-start'
 
     applyTextStyle(line, text, k)
-    // The preview text ("type here") is a separate span inside the same line, so by
-    // default it simply inherits everything the typed text is set to and only its
-    // colour differs — which is what a real field looks like. Turning off "match the
-    // typed text" lets it be its own typeface/size/weight/slant, for the placeholder
-    // that is meant to read as instructions rather than as a greyed-out answer. Each
-    // override is skipped when left at 0/blank, so a half-filled block still inherits
-    // the rest rather than snapping to a default.
+    // The preview text ("type here") is styled independently of the typed text — it is
+    // a different piece of copy doing a different job (an instruction, not an answer),
+    // and in most designs it is lighter, greyer, sometimes a different face entirely.
+    // It is a separate span inside the same line, so anything left at 0/blank simply
+    // isn't written and it inherits the field's own value for that one property —
+    // which keeps a half-filled block coherent instead of snapping to a default.
     ghost.style.color = placeholderColor
     ghost.style.opacity = placeholderOpacity === 1 ? '' : String(placeholderOpacity)
-    ghost.style.fontFamily = !placeholderMatch && placeholderFont ? cssFontFamily(placeholderFont) : ''
-    ghost.style.fontSize = !placeholderMatch && placeholderSizePx > 0 ? (placeholderSizePx * k).toFixed(2) + 'px' : ''
-    ghost.style.fontWeight = !placeholderMatch && placeholderWeight > 0 ? String(placeholderWeight) : ''
-    ghost.style.letterSpacing = !placeholderMatch && placeholderSpacingPx !== 0 ? (placeholderSpacingPx * k).toFixed(2) + 'px' : ''
-    ghost.style.fontStyle = !placeholderMatch && placeholderItalic ? 'italic' : ''
+    ghost.style.fontFamily = placeholderFont ? cssFontFamily(placeholderFont) : ''
+    ghost.style.fontSize = placeholderSizePx > 0 ? (placeholderSizePx * k).toFixed(2) + 'px' : ''
+    ghost.style.fontWeight = placeholderWeight > 0 ? String(placeholderWeight) : ''
+    ghost.style.letterSpacing = placeholderSpacingPx !== 0 ? (placeholderSpacingPx * k).toFixed(2) + 'px' : ''
+    ghost.style.fontStyle = placeholderItalic ? 'italic' : ''
+    // The gap to the cursor is the preview text's own number, not the cursor's: when
+    // the field is empty the cursor drops its right margin so this one value IS the
+    // distance, rather than the author having to add two numbers together.
+    ghost.style.marginLeft = (placeholderGapPx * k).toFixed(2) + 'px'
     // Cursor shape. Weight, height, colour and blink are all authored; the three
     // shapes differ only in which of those two numbers drives which axis, and where
     // the box sits against the line — a bar and a block are full-height and centred,
@@ -203,10 +208,13 @@ export function createNameInput(): GameModule {
     caret.style.height = (caretStyle === 'underline' ? Math.max(1, caretWidthPx * k) : fullH).toFixed(1) + 'px'
     caret.style.alignSelf = caretStyle === 'underline' ? 'flex-end' : 'center'
     caret.style.marginBottom = caretStyle === 'underline' ? (emPx * 0.08).toFixed(1) + 'px' : '0'
-    // Margin, not padding: the caret must occupy real width between the two halves of
-    // the string, and a zero-width box with side margins would collapse the gap.
-    caret.style.marginLeft = (caretWidthPx * k * 0.15).toFixed(1) + 'px'
-    caret.style.marginRight = (caretWidthPx * k * 0.15).toFixed(1) + 'px'
+    // Margin, not padding: the caret must occupy real width between itself and the
+    // text, and a zero-width box with side padding would collapse the gap. Negative is
+    // allowed and useful — it tucks the cursor against the letters.
+    // The right margin stands down while the preview text is showing, because that
+    // gap belongs to the preview text (above).
+    caret.style.marginLeft = (caretGapPx * k).toFixed(2) + 'px'
+    caret.style.marginRight = (value.length === 0 ? 0 : caretGapPx * k).toFixed(2) + 'px'
 
     // The fit is measured unscaled, then applied: a long name shrinks to stay inside
     // the field instead of running out of it, and the caret shrinks with it because
@@ -419,12 +427,12 @@ export function createNameInput(): GameModule {
       placeholder = str(params.placeholder, 'type here')
       placeholderColor = str(params.placeholderColor, '#9aa3b2')
       placeholderOpacity = Math.max(0, Math.min(1, num(params.placeholderOpacity, 1)))
-      placeholderMatch = params.placeholderMatch !== false
       placeholderFont = str(params.placeholderFontFamily, '')
       placeholderSizePx = Math.max(0, num(params.placeholderFontSizePx, 0))
       placeholderWeight = Math.max(0, num(params.placeholderWeight, 0))
       placeholderSpacingPx = num(params.placeholderLetterSpacingPx, 0)
       placeholderItalic = params.placeholderItalic === true
+      placeholderGapPx = num(params.placeholderGapPx, 0.5)
       maxChars = Math.max(0, Math.round(num(params.maxChars, 12)))
       allow = str(params.allow, 'letters + numbers + space') as AllowMode
       keyboardMode = str(params.keyboard, 'auto (device, then built-in)') as KeyboardMode
@@ -434,6 +442,7 @@ export function createNameInput(): GameModule {
       caretStyle = str(params.caretStyle, 'bar') as CaretStyle
       caretWidthPx = Math.max(0, num(params.caretWidthPx, 3))
       caretHeightPct = Math.max(10, num(params.caretHeightPct, 112))
+      caretGapPx = num(params.caretGapPx, 0.5)
       caretBlinkMs = Math.max(0, num(params.caretBlinkMs, 1060))
       caretAlways = params.caretAlways !== false
       minScalePct = Math.max(5, Math.min(100, num(params.minScalePct, 45)))
@@ -580,12 +589,12 @@ export const NAMEINPUT_TEMPLATE: GameTemplate = {
     { key: 'placeholder', group: 'Preview text', label: 'Preview text (hidden once they type)', type: 'text' },
     { key: 'placeholderColor', group: 'Preview text', label: 'Colour', type: 'color' },
     { key: 'placeholderOpacity', group: 'Preview text', label: 'Opacity', type: 'number', min: 0, max: 1, step: 0.05 },
-    { key: 'placeholderMatch', group: 'Preview text', label: 'Match the typed text', type: 'boolean' },
-    { key: 'placeholderFontFamily', group: 'Preview text', label: 'Font', type: 'font', showIf: (p) => p.placeholderMatch === false },
-    { key: 'placeholderFontSizePx', group: 'Preview text', label: 'Font size (0 = same)', type: 'number', min: 0, max: 400, step: 1, showIf: (p) => p.placeholderMatch === false },
-    { key: 'placeholderWeight', group: 'Preview text', label: 'Weight (0 = same)', type: 'number', min: 0, max: 900, step: 100, showIf: (p) => p.placeholderMatch === false },
-    { key: 'placeholderLetterSpacingPx', group: 'Preview text', label: 'Letter spacing (0 = same)', type: 'number', min: -20, max: 40, step: 0.5, showIf: (p) => p.placeholderMatch === false },
-    { key: 'placeholderItalic', group: 'Preview text', label: 'Italic', type: 'boolean', showIf: (p) => p.placeholderMatch === false },
+    { key: 'placeholderFontFamily', group: 'Preview text', label: 'Font (blank = the typed font)', type: 'font' },
+    { key: 'placeholderFontSizePx', group: 'Preview text', label: 'Font size (0 = the typed size)', type: 'number', min: 0, max: 400, step: 1 },
+    { key: 'placeholderWeight', group: 'Preview text', label: 'Weight (0 = the typed weight)', type: 'number', min: 0, max: 900, step: 100 },
+    { key: 'placeholderLetterSpacingPx', group: 'Preview text', label: 'Letter spacing', type: 'number', min: -20, max: 40, step: 0.5 },
+    { key: 'placeholderItalic', group: 'Preview text', label: 'Italic', type: 'boolean' },
+    { key: 'placeholderGapPx', group: 'Preview text', label: 'Gap from the cursor', type: 'number', min: -40, max: 200, step: 0.5 },
     { key: 'allow', group: 'Name', label: 'Allowed characters', type: 'select', options: ['letters', 'letters + numbers', 'letters + numbers + space', 'anything'] },
     ...textFields('Text'),
     { key: 'minScalePct', group: 'Text', label: 'Shrink limit %', type: 'number', min: 5, max: 100, step: 5 },
@@ -594,6 +603,7 @@ export const NAMEINPUT_TEMPLATE: GameTemplate = {
     { key: 'caretWidthPx', group: 'Cursor', label: 'Cursor weight (thickness)', type: 'number', min: 0, max: 20, step: 0.5, showIf: (p) => str(p.caretStyle, 'bar') !== 'block' },
     { key: 'caretHeightPct', group: 'Cursor', label: 'Cursor height % of font', type: 'number', min: 10, max: 300, step: 2, showIf: (p) => str(p.caretStyle, 'bar') !== 'underline' },
     { key: 'caretBlinkMs', group: 'Cursor', label: 'Blink speed — full cycle ms (0 = steady)', type: 'number', min: 0, max: 4000, step: 20 },
+    { key: 'caretGapPx', group: 'Cursor', label: 'Gap either side of the cursor', type: 'number', min: -40, max: 200, step: 0.5 },
     { key: 'caretAlways', group: 'Cursor', label: 'Show cursor before they tap', type: 'boolean' },
     ...boxFields('Field box'),
     { key: 'keyboard', group: 'Keyboard', label: 'Keyboard', type: 'select', options: ['auto (device, then built-in)', 'device only', 'built-in only'] },
@@ -619,12 +629,14 @@ export const NAMEINPUT_TEMPLATE: GameTemplate = {
     placeholder: 'type here',
     placeholderColor: '#9aa3b2',
     placeholderOpacity: 1,
-    placeholderMatch: true,
     placeholderFontFamily: '',
     placeholderFontSizePx: 0,
-    placeholderWeight: 0,
+    // Lighter than the typed text by default — the mock's grey "type here" reads as an
+    // instruction, and a placeholder at the answer's weight reads as an answer.
+    placeholderWeight: 400,
     placeholderLetterSpacingPx: 0,
     placeholderItalic: false,
+    placeholderGapPx: 0.5,
     maxChars: 12,
     allow: 'letters + numbers + space',
     fontSizePx: 46,
@@ -637,6 +649,7 @@ export const NAMEINPUT_TEMPLATE: GameTemplate = {
     caretWidthPx: 3,
     caretHeightPct: 112,
     caretBlinkMs: 1060,
+    caretGapPx: 0.5,
     caretAlways: true,
     boxColor: '#ffffff',
     boxRadiusPx: 10,

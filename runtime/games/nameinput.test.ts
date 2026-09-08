@@ -13,17 +13,20 @@ import { mulberry32, type GameContext, type GameModule } from './types'
 /** A px style value as a number. */
 const px = (v: string): number => parseFloat(v)
 
-function ctxFor(root: HTMLElement, played: string[]): GameContext {
+function ctxFor(root: HTMLElement, played: string[], scale = 1): GameContext {
   return {
     root,
     assets: { src: (id) => (id ? `asset:${id}` : ''), size: () => null },
     sfx: { play: (e) => played.push(e) },
     rng: mulberry32(3),
-    scale: () => 1,
+    scale: () => scale,
   }
 }
 
-function makeInput(params: Record<string, unknown> = {}) {
+/** The preview-text span: it follows the caret and the post-caret half of the string. */
+const ghostOf = (m: HTMLElement): HTMLElement => m.querySelector('[data-pa-caret]')!.nextElementSibling!.nextElementSibling as HTMLElement
+
+function makeInput(params: Record<string, unknown> = {}, scale = 1) {
   const root = document.createElement('div')
   root.className = 'pa-root' // the pad hangs off the stage root, as it does in a scene
   document.body.appendChild(root)
@@ -31,7 +34,7 @@ function makeInput(params: Record<string, unknown> = {}) {
   root.appendChild(mount)
   const played: string[] = []
   const mod = createNameInput()
-  mod.mount(ctxFor(mount, played), { ...NAMEINPUT_TEMPLATE.defaultParams, ...params })
+  mod.mount(ctxFor(mount, played, scale), { ...NAMEINPUT_TEMPLATE.defaultParams, ...params })
   mod.start()
   const input = mount.querySelector('input') as HTMLInputElement
   const caret = mount.querySelector('[data-pa-caret]') as HTMLElement
@@ -97,19 +100,40 @@ describe('name box', () => {
     expect(p.ghost()).toBe('type here')
   })
 
-  it('styles the preview text on its own when it is not matching the typed text', () => {
-    const matched = makeInput({ placeholder: 'type here', placeholderColor: '#9aa3b2' })
-    const ghostOf = (m: HTMLElement): HTMLElement => (m.querySelector('[data-pa-caret]')!.nextElementSibling!.nextElementSibling as HTMLElement)
-    expect(ghostOf(matched.mount).style.fontSize).toBe('') // inherits the typed size
-    expect(ghostOf(matched.mount).style.color).toBe('rgb(154, 163, 178)')
-    const own = makeInput({ placeholderMatch: false, placeholderFontSizePx: 30, placeholderWeight: 400, placeholderItalic: true, placeholderOpacity: 0.6 })
-    const g = ghostOf(own.mount)
+  it('styles the preview text independently of the typed text', () => {
+    const p = makeInput({ placeholder: 'type here', placeholderColor: '#9aa3b2', placeholderFontSizePx: 30, placeholderWeight: 300, placeholderItalic: true, placeholderOpacity: 0.6, fontSizePx: 46 })
+    const g = ghostOf(p.mount)
     // px() rather than a string compare: the CSSOM normalises what it is handed
     // ('30.00px' comes back as '30px'), and the number is what the test is about.
-    expect(px(g.style.fontSize)).toBe(30)
-    expect(g.style.fontWeight).toBe('400')
+    expect(px(g.style.fontSize)).toBe(30) // its own size, not the field's 46
+    expect(g.style.fontWeight).toBe('300')
     expect(g.style.fontStyle).toBe('italic')
     expect(g.style.opacity).toBe('0.6')
+    expect(g.style.color).toBe('rgb(154, 163, 178)')
+  })
+
+  it('leaves a preview property it was given no value for inheriting the field', () => {
+    const p = makeInput({ placeholderFontSizePx: 0, placeholderWeight: 0, placeholderFontFamily: '' })
+    const g = ghostOf(p.mount)
+    expect(g.style.fontSize).toBe('')
+    expect(g.style.fontWeight).toBe('')
+    expect(g.style.fontFamily).toBe('')
+  })
+
+  it('spaces the preview text from the cursor by its own gap, not the cursor gap', () => {
+    const p = makeInput({ placeholderGapPx: 12, caretGapPx: 2 })
+    // Empty: the cursor stands its right margin down so the preview's gap is the
+    // whole distance rather than the two adding up.
+    expect(px(ghostOf(p.mount).style.marginLeft)).toBe(12)
+    expect(px(p.caret.style.marginRight)).toBe(0)
+    p.type('Bo')
+    expect(px(p.caret.style.marginRight)).toBe(2) // typed text uses the cursor's gap
+  })
+
+  it('scales both gaps with the stage', () => {
+    const p = makeInput({ placeholderGapPx: 10, caretGapPx: 4 }, 2)
+    expect(px(ghostOf(p.mount).style.marginLeft)).toBe(20)
+    expect(px(p.caret.style.marginLeft)).toBe(8)
   })
 
   it('draws the cursor as a bar, a block or an underline', () => {

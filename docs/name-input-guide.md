@@ -18,11 +18,17 @@ like any other element.
 1. Add a game mount, template **Name box (type in)**. Size it to the white field.
 2. Style it exactly like a text element: font, size, weight, colour, alignment, plus
    the field's own fill, corner radius, border and inset under **Field box**.
-3. **Preview text** is the "type here" line: its own colour and opacity, and — with
-   _Match the typed text_ off — its own font, size, weight, spacing and slant. It
-   disappears on the first keystroke and comes back if the player clears the field.
+3. **Preview text** is the "type here" line, styled independently of the typed text:
+   its own font, size, weight, letter spacing, italic, colour and opacity, plus
+   _Gap from the cursor_. It is a different piece of copy doing a different job, so it
+   is not tied to the answer's styling — it defaults to a lighter weight for exactly
+   that reason. Leave font / size / weight at blank-or-0 and that one property follows
+   the field instead. The line disappears on the first keystroke and comes back if the
+   player clears the field.
 4. **Cursor** is the caret: shape (bar / block / underline), colour, weight, height
-   as a percentage of the font, and blink speed in ms (0 = steady).
+   as a percentage of the font, blink speed in ms (0 = steady), and _Gap either side
+   of the cursor_ — the space between it and the typed text. Both gaps take negative
+   numbers, which tucks the cursor closer to the letters.
 5. The **arrow button is not part of this mechanic.** Place it as an ordinary button
    or image element on top of the field and give it whatever navigation you want. The
    name box never ends the scene by itself, so the player can keep editing until they
