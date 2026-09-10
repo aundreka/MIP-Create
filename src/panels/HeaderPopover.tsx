@@ -162,7 +162,7 @@ export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): 
                 <Row label="Format">
                   <input
                     value={h.dateFormat ?? ''}
-                    placeholder="e.g. {date}, dddd, MMMM D, YYYY or {holiday}"
+                    placeholder="e.g. {date}, dddd, MMMM D, YYYY, {holiday} or {device}"
                     onChange={(e) => set({ dateFormat: e.target.value || undefined })}
                   />
                 </Row>
@@ -361,7 +361,7 @@ export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): 
                 ? h.countdownTarget === 'midnight'
                   ? 'Counts down to the viewer’s next midnight — at 5pm it shows about 7 hours left. It freezes when the first scene carrying this header is won. Format tokens: {hh} {mm} {ss} (padded), {ms} (hundredths, 00–99), or {h} {m} {s}.'
                   : 'Starts on the viewer’s first interaction and freezes when the first scene carrying this header is won. Use {ss}:{ms} for 06:99 (6.99 seconds). Other tokens: {hh} {mm} {ss} (padded) or {h} {m} {s}.'
-                : 'Shows the current date. Format tokens: {date}, dddd (Monday), ddd (Mon), MMMM (July), MMM (Jul), MM (07), M (7), DD (05), D (5), Do (5th), YYYY (2026), YY (26). Empty = localized full date, uppercased.'}{' '}
+                : 'Shows the current date. Format tokens: {date}, dddd (Monday), ddd (Mon), MMMM (July), MMM (Jul), MM (07), M (7), DD (05), D (5), Do (5th), YYYY (2026), YY (26), {device} (iOS / Android / Windows / Mac / Linux). Empty = localized full date, uppercased.'}{' '}
               Leave background as “none” for no band.
             </div>
           </>

@@ -48,6 +48,7 @@ import { headerAllowedFor } from '../../runtime/scene'
 import { autoMorphMatch, morphTargets, MORPH_DEFAULT_EASING, MORPH_DEFAULT_MS } from '../../runtime/morph'
 import { ownsSlot, patchSlot, projectLayoutPatch, resolvedLayout, seedSlot, withOwnSlot, withoutSlot, type Orient } from '../headerLayout'
 import { TAP_FADE_DEFAULT_MS } from '../../runtime/elements/button'
+import { currentDeviceLabel } from '../../runtime/elements/device'
 import { RIPPLE_DEFAULT_COLOR, RIPPLE_DEFAULT_OPACITY, RIPPLE_HAND_REF_W, RIPPLE_MAX_R } from '../../runtime/hint'
 import { GAME_TEMPLATES } from '../../runtime/games/registry'
 import { splitList } from '../../runtime/games/holdgauge'
@@ -5938,11 +5939,19 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 )
               })()}
 
+              <Row label="Device">
+                <button onClick={() => setCd({ format: cfg.format ? `${cfg.format}{device}` : '{device}' })}>Insert {'{device}'}</button>
+              </Row>
+              <div className="hint pad">
+                {'{device}'} (alias {'{os}'}) renders the viewer's platform — <b>iOS</b>, <b>Android</b>, <b>Windows</b>, <b>Mac</b> or <b>Linux</b> — read from the browser
+                when the ad loads (client hints first, then the user agent; an iPad posing as a Mac is unmasked by its touch screen). Empty when nothing matches. This machine
+                reads as <b>{currentDeviceLabel() || 'unknown'}</b>, which is what the canvas shows — exports read the viewer's real device.
+              </div>
               <div className="hint pad">
                 <b>Timer</b> tokens (live): <b>{'{hh}:{mm}:{ss}'}</b> / <b>{'{d} {h} {m} {s}'}</b>; <b>{'{ss}:{ms}'}</b> shows “06:99” for 6.99 seconds. <b>Date</b> label (no
                 ticking): <b>{'{date}'}</b>, e.g. "Order by {'{date}'}", or build your own from parts: <b>MMMM</b> July, <b>MMM</b> Jul, <b>MM/M</b> 07/7, <b>DD/D</b> day,{' '}
                 <b>Do</b> 21st, <b>dddd/ddd</b> Monday/Mon, <b>YYYY/YY</b> year (braces optional — "MM.D" → "07.16") — e.g. "Ends MMMM Do" → "Ends July 21st". <b>{'{holiday}'}</b> is the promo calendar's copy
-                for today. "Dynamic" recomputes from today whenever the ad runs.
+                for today; <b>{'{device}'}</b> the viewer's platform. "Dynamic" recomputes from today whenever the ad runs.
               </div>
             </Accordion>
           )

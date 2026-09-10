@@ -6,6 +6,7 @@
 
 import type { SceneElement } from '../scene'
 import { promoLabelFor } from './promoCalendar'
+import { currentDeviceLabel } from './device'
 
 const DAY = 86400000
 
@@ -275,7 +276,13 @@ export function renderCountdownFormat(fmt: string, deadline: number, now: number
   // Outside the calendar the label is empty, which is what a showWhen:'holiday'
   // element hides on.
   const holiday = /\{holiday\}|\{promo\}/.test(fmt) ? promoLabelFor(now) : ''
+  // {device} / {os}: the viewer's platform — "iOS", "Android", "Windows", "Mac",
+  // "Linux" — detected once from the browser (see elements/device.ts) and empty when
+  // nothing matched. Resolved first so the label can never be re-parsed as a token.
+  const device = /\{device\}|\{os\}/.test(fmt) ? currentDeviceLabel() : ''
   const out = fmt
+    .replace(/\{device\}/g, device)
+    .replace(/\{os\}/g, device)
     .replace(/\{holiday\}/g, holiday)
     .replace(/\{promo\}/g, holiday)
     .replace(/\{A\}/g, meridiem)

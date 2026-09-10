@@ -499,6 +499,9 @@ export interface BoxStyle {
 // the ordinal suffix is English-only.
 // {holiday} (alias {promo}) renders the promo calendar's copy for the VIEWER's local
 // date (see meta.promoCalendar) — "Labor Day Sale" — and is empty outside it.
+// {device} (alias {os}) renders the VIEWER's platform — "iOS", "Android", "Windows",
+// "Mac" or "Linux" — detected from the browser at load (runtime/elements/device.ts),
+// and is empty when nothing matched.
 export interface CountdownConfig {
   // 'clock' shows the CURRENT wall-clock time (default format '{hh}:{mm}' → "14:05"),
   // re-rendered every second; the other modes count toward a target instant.
