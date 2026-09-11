@@ -352,8 +352,10 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     mirror.style.opacity = '0'
     content.parentElement?.appendChild(mirror)
   }
-  // 'brush' mode: render the hand on the STAGE layer so it sits in front of the brush (the brush is
-  // itself above the scene), positioned absolutely. Remember how to put it back on stop().
+  // 'brush' / 'scratchdrag': render the hand on the STAGE layer so it is always in front of the
+  // brush, whatever layer the brush is on — the brush image is itself above the scene, and a placed
+  // scratcher can be lifted over it while dragged or parked above overlays. Positioned absolutely.
+  // Remember how to put it back on stop().
   let brushHostEl: HTMLElement | null = null
   let brushRestore: { parent: Node | null; next: Node | null; cssText: string } | null = null
   // Measure the hand's intended size BEFORE reparenting it out (the handguide element sizes to its
@@ -361,7 +363,7 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
   // can re-apply designSize × FIT-scale — otherwise the reparented <img> shows at its raw (huge) size.
   let brushHandW = 0
   let brushHandH = 0
-  if (kind === 'brush' && content) {
+  if ((kind === 'brush' || kind === 'scratchdrag') && content) {
     brushHostEl = rec.outer.closest('.pa-stage') as HTMLElement | null
     if (brushHostEl) {
       const s0 = scale() || 1
@@ -374,7 +376,8 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
       content.style.left = '0'
       content.style.top = '0'
       content.style.zIndex = '100001' // just above the brush (z-index 100000)
-      content.style.transformOrigin = 'center top'
+      // 'scratchdrag' presses about the fingertip, like every other drag mode.
+      content.style.transformOrigin = kind === 'scratchdrag' ? '22% 12%' : 'center top'
       content.style.transition = 'opacity 200ms ease'
       content.style.opacity = '0' // stay hidden until the frame has sized + positioned it (no huge flash)
       if (brushHandW > 1 && brushHandH > 1) {
@@ -711,12 +714,27 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
       }
       const toolRect = toolEl.getBoundingClientRect()
       const areaRect = areaEl.getBoundingClientRect()
-      const guideRect = rec.outer.getBoundingClientRect()
       const g = dragGesture(((now - t0) % travel) / travel)
       const fromX = toolRect.left + toolRect.width / 2
       const fromY = toolRect.top + toolRect.height / 2
       const fingerX = fromX + (areaRect.left + areaRect.width / 2 - fromX) * g.travel
       const fingerY = fromY + (areaRect.top + areaRect.height / 2 - fromY) * g.travel
+      if (brushHostEl && brushHandW > 1 && brushHandH > 1) {
+        // On the stage layer (see above): sized from its design size, and placed so the
+        // fingertip (22%/12%, the transform origin) sits on the point.
+        const w = brushHandW * s
+        const h = brushHandH * s
+        const hostRect = brushHostEl.getBoundingClientRect()
+        content.style.width = w.toFixed(1) + 'px'
+        content.style.height = h.toFixed(1) + 'px'
+        content.style.left = (fingerX - hostRect.left - w * 0.22).toFixed(1) + 'px'
+        content.style.top = (fingerY - hostRect.top - h * 0.12).toFixed(1) + 'px'
+        content.style.transform = `scale(${(1 - g.press * 0.1 + g.carry * 0.14).toFixed(3)})`
+        content.style.opacity = g.alpha.toFixed(3)
+        raf = requestAnimationFrame(frame)
+        return
+      }
+      const guideRect = rec.outer.getBoundingClientRect()
       ox = fingerX - (guideRect.left + guideRect.width * 0.22)
       oy = fingerY - (guideRect.top + guideRect.height * 0.12)
       press = g.press
@@ -852,9 +870,9 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     if (running || !content) return
     running = true
     t0 = performance.now() // replay the route from the start on each appearance
-    // 'brush' mode reveals itself inside the frame, AFTER it's sized + positioned — otherwise it
+    // 'brush' / 'scratchdrag' reveal themselves inside the frame, AFTER sized + positioned — otherwise it
     // would flash at its initial top-left (0,0) for a frame. All other modes reveal immediately.
-    if (kind !== 'brush') content.style.opacity = '1'
+    if (kind !== 'brush' && kind !== 'scratchdrag') content.style.opacity = '1'
     if (mirror) mirror.style.opacity = content.style.opacity
     // 'still': show it and stop there. No frame loop at all, so nothing ever writes a
     // transform and the hand sits exactly where it was placed.
