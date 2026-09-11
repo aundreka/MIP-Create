@@ -452,7 +452,10 @@ export function addGameHint(gameId: string): void {
     zIndex: (game.zIndex ?? 0) + 1,
     mode: 'fit',
     assetId: HAND_ASSET_ID,
-    handguide: tpl?.defaultHandguide?.mode // game-aware logic template (e.g. 'match' follows the game's next card)
+    // A scratch card worked with a placed scratcher is a drag, not a rub.
+    handguide: game.game?.templateId === 'scratch' && game.game.params?.scratcherId
+      ? { mode: 'scratchdrag', periodMs: 1800 }
+      : tpl?.defaultHandguide?.mode // game-aware logic template (e.g. 'match' follows the game's next card)
       ? { mode: tpl.defaultHandguide.mode, periodMs: tpl.defaultHandguide.periodMs ?? 900 }
       : pts.length > 1
         ? { mode: 'slide', nodes: pts.slice(1), periodMs: tpl?.defaultHandguide?.periodMs ?? 1800 }

@@ -5622,6 +5622,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                     { value: 'pinch', label: 'Pinch (two mirrored hands close on the target)' },
                     { value: 'carousel', label: 'Carousel (swipe, then tap the centre)' },
                     { value: 'brush', label: 'Point at the scratch brush (after its intro)' },
+                    { value: 'scratchdrag', label: 'Scratch card (drag the brush to the scratch area)' },
                     { value: 'still', label: 'Still (no movement at all)' },
                   ]}
                 />

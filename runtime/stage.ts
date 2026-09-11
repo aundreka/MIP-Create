@@ -211,6 +211,7 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     | 'configurator'
     | 'pinch'
     | 'brush'
+    | 'scratchdrag'
     | 'still'
     | 'hold' = 'tap'
   if (cfg.mode === 'still') {
@@ -257,6 +258,8 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     kind = 'pinch'
   } else if (cfg.mode === 'brush') {
     kind = 'brush'
+  } else if (cfg.mode === 'scratchdrag') {
+    kind = 'scratchdrag'
   }
   // A hold has to read as a HOLD, so its default cycle is longer than a tap's.
   const travel =
@@ -270,7 +273,7 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
             ? 1900
             : kind === 'pinch'
               ? 1400
-              : kind === 'dragclean'
+              : kind === 'dragclean' || kind === 'scratchdrag'
                 ? 1800
                 : kind === 'carousel'
                   ? 2600
@@ -691,6 +694,35 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
       swell = g.carry
       // Fade out after the release so the loop's jump back to the tool is unseen.
       content.style.opacity = g.alpha.toFixed(3)
+    } else if (kind === 'scratchdrag') {
+      // Grab the scratch card's brush by its middle and carry it onto the scratch
+      // area. The brush is the placed scratcher or the brush image (both carry
+      // data-pa-brush; the image only once its intro is over). It may live outside the
+      // scene root — the brush image is mounted on the stage — hence the wider search.
+      // Both rects are read every frame, so the hand starts wherever the player left
+      // the brush. Same drag curve as dragclean.
+      const scope = rec.outer.closest<HTMLElement>('.pa-stage') ?? document.body
+      const toolEl = scope.querySelector<HTMLElement>('[data-pa-brush][data-brush-ready="1"]')
+      const areaEl = root.querySelector<HTMLElement>('[data-scratch-target]')
+      if (!toolEl || !areaEl) {
+        content.style.opacity = '0'
+        raf = requestAnimationFrame(frame)
+        return
+      }
+      const toolRect = toolEl.getBoundingClientRect()
+      const areaRect = areaEl.getBoundingClientRect()
+      const guideRect = rec.outer.getBoundingClientRect()
+      const g = dragGesture(((now - t0) % travel) / travel)
+      const fromX = toolRect.left + toolRect.width / 2
+      const fromY = toolRect.top + toolRect.height / 2
+      const fingerX = fromX + (areaRect.left + areaRect.width / 2 - fromX) * g.travel
+      const fingerY = fromY + (areaRect.top + areaRect.height / 2 - fromY) * g.travel
+      ox = fingerX - (guideRect.left + guideRect.width * 0.22)
+      oy = fingerY - (guideRect.top + guideRect.height * 0.12)
+      press = g.press
+      swell = g.carry
+      // Fade out after the release so the loop's jump back to the brush is unseen.
+      content.style.opacity = g.alpha.toFixed(3)
     } else if (kind === 'carousel') {
       // One loop performs the whole gesture a carousel asks for, in the order the game
       // itself requires: a SWIPE that pulls the next choice into the centre, then a
@@ -805,7 +837,7 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     }
     // A drag softens the contact dip to leave room for the carry swell; every other
     // mode keeps the original press-only scale.
-    const dip = kind === 'combo' || kind === 'dragclean' ? 0.1 : 0.18
+    const dip = kind === 'combo' || kind === 'dragclean' || kind === 'scratchdrag' ? 0.1 : 0.18
     const squash = (1 - press * dip + swell * 0.14).toFixed(3)
     content.style.transform = `translate(${Math.round(ox)}px,${Math.round(oy)}px) scale(${squash})`
     // scaleX(-1) LAST, so it composes about the shared 22%/12% origin and pins the

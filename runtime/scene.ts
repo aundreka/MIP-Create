@@ -589,6 +589,9 @@ export interface IdleConfig {
 
 export interface HandguideConfig {
   // 'brush' points the hand at the scratch card's brush (appears only after the brush's intro).
+  // 'scratchdrag' grabs the scratch card's brush — the placed scratcher, or the brush
+  // image — by its middle and carries it onto the scratch area, the drag-to-clean
+  // gesture. Both ends are read live, so it follows the brush wherever it was left.
   // 'still' places the hand and leaves it there — no motion of any kind (idle
   // show/hide still applies; it just never moves).
   // 'radialtap' is 'tap' plus the radial ping: concentric rings spreading out of
@@ -637,6 +640,7 @@ export interface HandguideConfig {
     | 'configurator'
     | 'pinch'
     | 'brush'
+    | 'scratchdrag'
     | 'still'
     | 'hold'
   toX?: number

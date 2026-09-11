@@ -915,6 +915,16 @@ export function createScratch(): GameModule {
       ctx.root.appendChild(prize)
       positionReveal() // no cover image yet → full card; refined once the cover loads
 
+      // Where a 'scratchdrag' hand guide carries the brush to: the part of the scratch
+      // area that counts. Invisible; only its rect is read.
+      const z = measureRegion()
+      const target = document.createElement('div')
+      target.dataset.scratchTarget = '1'
+      target.style.cssText =
+        `position:absolute;left:${(z.x * 100).toFixed(2)}%;top:${(z.y * 100).toFixed(2)}%;` +
+        `width:${(z.w * 100).toFixed(2)}%;height:${(z.h * 100).toFixed(2)}%;visibility:hidden;pointer-events:none;`
+      ctx.root.appendChild(target)
+
       // Optional brush: a floating image whose authored tip does the scratching. Created hidden;
       // sized/positioned at the first touch. z-index sits above EVERYTHING — the win/lose overlay
       // (9000) and the immune header/overlayTop tiers (10000/10050) — and never eats pointer events.
