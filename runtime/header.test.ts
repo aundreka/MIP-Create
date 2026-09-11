@@ -4,6 +4,7 @@
 
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { mountHeader } from './header'
+import { shortMonthFixup } from './elements/countdown'
 import { computeMetrics, setDesign } from './responsive'
 
 setDesign(1080, 1920)
@@ -52,13 +53,13 @@ describe('header modes', () => {
     const now = new Date()
     const dd = String(now.getDate()).padStart(2, '0')
     const yy = String(now.getFullYear() % 100).padStart(2, '0')
-    expect(bandText()).toBe(`${now.toLocaleDateString('en-US', { month: 'short' })} ${dd} ${yy}`)
+    expect(bandText()).toBe(`${shortMonthFixup(now.toLocaleDateString('en-US', { month: 'short' }))} ${dd} ${yy}`)
   })
 
   it('date mode spells the weekday out with dddd/ddd', () => {
     mount({ dateFormat: 'dddd, MMM D' })
     const now = new Date()
-    expect(bandText()).toBe(`${now.toLocaleDateString('en-US', { weekday: 'long' })}, ${now.toLocaleDateString('en-US', { month: 'short' })} ${now.getDate()}`)
+    expect(bandText()).toBe(`${now.toLocaleDateString('en-US', { weekday: 'long' })}, ${shortMonthFixup(now.toLocaleDateString('en-US', { month: 'short' }))} ${now.getDate()}`)
   })
 
   it('date mode can point at a recurring day instead of today', () => {

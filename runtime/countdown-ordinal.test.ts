@@ -33,6 +33,19 @@ describe('ordinalSuffix', () => {
   })
 })
 
+describe('{MMM} September abbreviation', () => {
+  it('renders September as "Sept", not "Sep"', () => {
+    expect(render('MMM D', on(2026, 9, 11))).toBe('Sept 11')
+    expect(render('MMM Do', on(2026, 9, 1))).toBe('Sept 1st')
+  })
+
+  it('leaves the other months and the long name alone', () => {
+    expect(render('MMM D', on(2026, 8, 11))).toBe('Aug 11')
+    expect(render('MMM D', on(2026, 10, 11))).toBe('Oct 11')
+    expect(render('MMMM D', on(2026, 9, 11))).toBe('September 11')
+  })
+})
+
 describe('{Do} / {o} rendering', () => {
   it('renders the example from the request', () => {
     expect(render('MMMM Do', on(2026, 7, 21))).toBe('July 21st')

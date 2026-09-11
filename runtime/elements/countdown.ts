@@ -223,6 +223,11 @@ export function formatCountdown(el: SceneElement, deadline: number, now: number)
   })
 }
 
+/** Ad copy wants "Sept" for the abbreviated September, but en-US Intl gives "Sep".
+ * Only the exact English "Sep" is rewritten, so other locales (and en-GB, which
+ * already says "Sept") pass through untouched. */
+export const shortMonthFixup = (name: string): string => (name === 'Sep' ? 'Sept' : name)
+
 /** Element-independent core of formatCountdown — also drives the pinned header's
  * countdown mode, so both surfaces share one token vocabulary. */
 export function renderCountdownFormat(fmt: string, deadline: number, now: number, opts: CountdownFormatOpts = {}): string {
@@ -253,7 +258,7 @@ export function renderCountdownFormat(fmt: string, deadline: number, now: number
   // Localized month name for the {MMMM}/{MMM} date-part tokens.
   const monthName = (style: 'long' | 'short'): string => {
     try {
-      return target.toLocaleDateString(locale, { month: style })
+      return shortMonthFixup(target.toLocaleDateString(locale, { month: style }))
     } catch {
       return ''
     }
