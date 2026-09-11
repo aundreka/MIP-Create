@@ -71,7 +71,9 @@ function postLayout(): void {
     const id = node.dataset.id
     if (!id || node.style.display === 'none') continue
     const r = node.getBoundingClientRect()
-    rects.push({ id, type: typeById.get(id) ?? 'image', x: r.left, y: r.top, w: r.width, h: r.height })
+    const m = /^matrix\(([^,]+),([^,]+)/.exec(getComputedStyle(node).transform || '')
+    const rot = m ? Math.round((Math.atan2(Number(m[2]), Number(m[1])) * 180) / Math.PI * 100) / 100 : 0
+    rects.push({ id, type: typeById.get(id) ?? 'image', x: r.left, y: r.top, w: r.width, h: r.height, ow: node.offsetWidth, oh: node.offsetHeight, rot })
   }
   let mediaMs = 0
   for (const v of Array.from(document.querySelectorAll('video')))

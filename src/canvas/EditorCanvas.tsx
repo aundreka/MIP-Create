@@ -314,6 +314,9 @@ export function EditorCanvas(props: Props): JSX.Element {
   // Reveal-zone editor (scratch / scratch grid): which game-mount's zone is being drawn,
   // the live rect during a drag (percent of the card / cell), and the in-flight gesture.
   const [zoneEdit, setZoneEdit] = useState<string | null>(null)
+  // Which rectangle of the game the box edits, by param prefix: 'zone' (reveal zone —
+  // what counts toward the threshold) or 'area' (the scratch card's scratchable area).
+  const [zoneKey, setZoneKey] = useState<'zone' | 'area'>('zone')
   const [zoneLive, setZoneLive] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
   const zoneDrag = useRef<{
     mode: 'move' | 'resize'
@@ -326,6 +329,12 @@ export function EditorCanvas(props: Props): JSX.Element {
     last: { x: number; y: number; w: number; h: number } | null
   } | null>(null)
   const curZoneRef = useRef<{ x: number; y: number; w: number; h: number }>({ x: 0, y: 0, w: 100, h: 100 })
+  // Scratch card scratcher: `tipPick` is the scratch game waiting for a click that sets
+  // its scratcher's tip (armed from the inspector); `tipLive` is the tip (% of the
+  // scratcher) while its marker is being dragged.
+  const [tipPick, setTipPick] = useState<string | null>(null)
+  const [tipLive, setTipLive] = useState<{ x: number; y: number } | null>(null)
+  const tipDrag = useRef<{ last: { x: number; y: number } | null } | null>(null)
   // Thought-whacker spawn-zone editor: drag on empty game space to draw any
   // number of spawn rectangles; existing rectangles stay movable/resizable.
   const [thoughtZoneEdit, setThoughtZoneEdit] = useState<string | null>(null)
@@ -504,13 +513,15 @@ export function EditorCanvas(props: Props): JSX.Element {
   // Reveal-zone edit is entered from the inspector (a button dispatches this event).
   useEffect(() => {
     const onEnter = (e: Event): void => {
-      const id = (e as CustomEvent<{ elementId: string }>).detail?.elementId
+      const detail = (e as CustomEvent<{ elementId: string; key?: 'zone' | 'area' }>).detail
+      const id = detail?.elementId
       if (!id) return
       setRevealEdit(null)
       setRevealLive(null)
       setDateEdit(null)
       setDateLive(null)
       setZoneLive(null)
+      setZoneKey(detail.key === 'area' ? 'area' : 'zone')
       setZoneEdit(id)
     }
     window.addEventListener('pa:zone-edit', onEnter)
@@ -522,6 +533,21 @@ export function EditorCanvas(props: Props): JSX.Element {
       setZoneLive(null)
     }
   }, [zoneEdit, scene])
+  // Scratcher tip placement is armed from the inspector; Esc (or a click off the
+  // scratcher) cancels it.
+  useEffect(() => {
+    const onArm = (e: Event): void => setTipPick((e as CustomEvent<{ elementId: string }>).detail?.elementId ?? null)
+    window.addEventListener('pa:scratcher-tip', onArm)
+    return () => window.removeEventListener('pa:scratcher-tip', onArm)
+  }, [])
+  useEffect(() => {
+    if (!tipPick) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setTipPick(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [tipPick])
   useEffect(() => {
     if (!zoneEdit) return
     const onKey = (e: KeyboardEvent): void => {
@@ -1624,6 +1650,81 @@ export function EditorCanvas(props: Props): JSX.Element {
   // ---- render helpers (active frame) ----------------------------------------
   const single = selectedIds.length === 1 ? (scene.elements.find((e) => e.id === selectedIds[0]) ?? null) : null
   const singleRect = single ? (rects.find((r) => r.id === single.id) ?? null) : null
+
+  // ---- scratch card scratcher tip -------------------------------------------
+  // Shown while the scratch game or its scratcher is selected (or a tip click is armed).
+  const tipGame = ((): SceneElement | null => {
+    if (tipPick) return scene.elements.find((e) => e.id === tipPick) ?? null
+    if (!single) return null
+    if (single.game?.templateId === 'scratch' && single.game.params?.scratcherId) return single
+    return scene.elements.find((e) => e.game?.templateId === 'scratch' && e.game.params?.scratcherId === single.id) ?? null
+  })()
+  const tipRect = tipGame ? (rects.find((r) => r.id === String(tipGame.game?.params?.scratcherId ?? '')) ?? null) : null
+  const tipCur = tipLive ?? { x: Number(tipGame?.game?.params?.scratcherTipX ?? 50), y: Number(tipGame?.game?.params?.scratcherTipY ?? 50) }
+  /** The scratcher's own (unrotated) box: centre, size and rotation in overlay px. */
+  const tipBox = (r: FrameRect): { cx: number; cy: number; w: number; h: number; th: number } => ({
+    cx: r.x + r.w / 2,
+    cy: r.y + r.h / 2,
+    w: r.ow || r.w,
+    h: r.oh || r.h,
+    th: ((r.rot ?? 0) * Math.PI) / 180,
+  })
+  const tipToOverlay = (r: FrameRect, t: { x: number; y: number }): { x: number; y: number } => {
+    const b = tipBox(r)
+    const lx = (t.x / 100 - 0.5) * b.w
+    const ly = (t.y / 100 - 0.5) * b.h
+    return { x: b.cx + lx * Math.cos(b.th) - ly * Math.sin(b.th), y: b.cy + lx * Math.sin(b.th) + ly * Math.cos(b.th) }
+  }
+  /** An overlay point as a tip (% of the scratcher), and whether it lies inside it. */
+  const overlayToTip = (r: FrameRect, px: number, py: number): { x: number; y: number; inside: boolean } => {
+    const b = tipBox(r)
+    const dx = px - b.cx
+    const dy = py - b.cy
+    const fx = (dx * Math.cos(b.th) + dy * Math.sin(b.th)) / b.w + 0.5
+    const fy = (-dx * Math.sin(b.th) + dy * Math.cos(b.th)) / b.h + 0.5
+    const inside = fx >= -0.05 && fx <= 1.05 && fy >= -0.05 && fy <= 1.05
+    const c = (v: number): number => Math.round(Math.max(0, Math.min(1, v)) * 1000) / 10
+    return { x: c(fx), y: c(fy), inside }
+  }
+  const overlayPt = (e: React.PointerEvent): { x: number; y: number } => {
+    const o = overlayRef.current!.getBoundingClientRect()
+    const z = liveRef.current.zoom
+    return { x: (e.clientX - o.left) / z, y: (e.clientY - o.top) / z }
+  }
+  const writeTip = (t: { x: number; y: number }): void => {
+    const g = tipGame?.game
+    if (!tipGame || !g) return
+    patchElement(tipGame.id, { game: { ...g, params: { ...(g.params ?? {}), scratcherTipX: t.x, scratcherTipY: t.y } } })
+  }
+  const onTipPickDown = (e: React.PointerEvent): void => {
+    e.stopPropagation()
+    if (tipRect) {
+      const p = overlayPt(e)
+      const t = overlayToTip(tipRect, p.x, p.y)
+      if (t.inside) writeTip(t)
+    }
+    setTipPick(null)
+  }
+  const onTipMarkerDown = (e: React.PointerEvent): void => {
+    e.stopPropagation()
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    tipDrag.current = { last: null }
+  }
+  const onTipMarkerMove = (e: React.PointerEvent): void => {
+    if (!tipDrag.current || !tipRect) return
+    e.stopPropagation()
+    const p = overlayPt(e)
+    const t = overlayToTip(tipRect, p.x, p.y)
+    tipDrag.current.last = { x: t.x, y: t.y }
+    setTipLive({ x: t.x, y: t.y })
+  }
+  const onTipMarkerUp = (e: React.PointerEvent): void => {
+    e.stopPropagation()
+    const last = tipDrag.current?.last
+    tipDrag.current = null
+    if (last) writeTip(last)
+    setTipLive(null)
+  }
   const singleHandles: Handle[] = single ? (boxSizable(localizeElement(single, editLocale)) ? [...CORNERS, ...EDGES] : CORNERS) : []
   // Handguide slide path (design coords -> intrinsic) for the selected handguide:
   // a polyline from the hand's center through each waypoint.
@@ -1928,12 +2029,19 @@ export function EditorCanvas(props: Props): JSX.Element {
   const zoneParams: Record<string, unknown> = zoneEl?.game?.params ?? {}
   const basketZone = zoneEl?.game?.templateId === 'basket'
   const comboZone = zoneEl?.game?.templateId === 'combo'
-  const curZone = zoneLive ?? {
-    x: typeof zoneParams.zoneX === 'number' ? zoneParams.zoneX : basketZone ? 12 : comboZone ? 18 : 0,
-    y: typeof zoneParams.zoneY === 'number' ? zoneParams.zoneY : basketZone ? 34 : comboZone ? 60 : 0,
-    w: typeof zoneParams.zoneW === 'number' ? zoneParams.zoneW : basketZone ? 76 : comboZone ? 64 : 100,
-    h: typeof zoneParams.zoneH === 'number' ? zoneParams.zoneH : basketZone ? 43 : comboZone ? 32 : 100,
+  const readZone = (key: 'zone' | 'area'): { x: number; y: number; w: number; h: number } => {
+    const n = (k: string, fallback: number): number => (typeof zoneParams[key + k] === 'number' ? (zoneParams[key + k] as number) : fallback)
+    const own = key === 'zone'
+    return {
+      x: n('X', own && basketZone ? 12 : own && comboZone ? 18 : 0),
+      y: n('Y', own && basketZone ? 34 : own && comboZone ? 60 : 0),
+      w: n('W', own && basketZone ? 76 : own && comboZone ? 64 : 100),
+      h: n('H', own && basketZone ? 43 : own && comboZone ? 32 : 100),
+    }
   }
+  const curZone = zoneLive ?? readZone(zoneKey)
+  // The scratch card's OTHER rectangle, drawn faintly for reference while one is edited.
+  const otherZone = zoneEl?.game?.templateId === 'scratch' ? readZone(zoneKey === 'zone' ? 'area' : 'zone') : null
   curZoneRef.current = curZone
   // Cell rects (overlay space, pre-zoom — like `rects`) for a scratch_grid game-mount.
   // Mirrors the runtime's grid math (design-px padding/gaps scaled uniformly). Shared
@@ -2051,7 +2159,10 @@ export function EditorCanvas(props: Props): JSX.Element {
     const g = zoneEl?.game
     if (d?.last && zoneEl && g) {
       const r = (n: number): number => Math.round(n * 10) / 10
-      patchElement(zoneEl.id, { game: { ...g, params: { ...(g.params ?? {}), zoneX: r(d.last.x), zoneY: r(d.last.y), zoneW: r(d.last.w), zoneH: r(d.last.h) } } })
+      const k = zoneKey
+      patchElement(zoneEl.id, {
+        game: { ...g, params: { ...(g.params ?? {}), [k + 'X']: r(d.last.x), [k + 'Y']: r(d.last.y), [k + 'W']: r(d.last.w), [k + 'H']: r(d.last.h) } },
+      })
     }
   }
 
@@ -3020,9 +3131,29 @@ export function EditorCanvas(props: Props): JSX.Element {
                           />
                         )
                       })}
+                      {otherZone &&
+                        (() => {
+                          const bx = zoneBoxFor(zoneBase, otherZone)
+                          return (
+                            <div
+                              style={{
+                                position: 'absolute',
+                                left: bx.x,
+                                top: bx.y,
+                                width: bx.w,
+                                height: bx.h,
+                                border: `1.5px dashed ${zoneKey === 'zone' ? '#ff9f43' : 'var(--accent)'}`,
+                                opacity: 0.5,
+                                pointerEvents: 'none',
+                                boxSizing: 'border-box',
+                              }}
+                            />
+                          )
+                        })()}
                       {/* The editable zone box (whole card, or the top-left cell for a grid). */}
                       {(() => {
                         const bx = zoneBoxFor(zoneBase, curZone)
+                        const area = zoneKey === 'area'
                         return (
                           <div
                             style={{
@@ -3031,8 +3162,8 @@ export function EditorCanvas(props: Props): JSX.Element {
                               top: bx.y,
                               width: bx.w,
                               height: bx.h,
-                              border: '2px solid var(--accent)',
-                              background: 'rgba(80,140,255,0.12)',
+                              border: `2px solid ${area ? '#ff9f43' : 'var(--accent)'}`,
+                              background: area ? 'rgba(255,159,67,0.14)' : 'rgba(80,140,255,0.12)',
                               boxSizing: 'border-box',
                               cursor: 'move',
                               touchAction: 'none',
@@ -3057,6 +3188,60 @@ export function EditorCanvas(props: Props): JSX.Element {
                         )
                       })()}
                     </>
+                  )}
+                  {/* Scratcher tip: armed → one click on the scratcher sets it; otherwise a
+                      draggable marker whenever the game or its scratcher is selected. */}
+                  {tipPick && tipRect && (
+                    <div style={{ position: 'absolute', inset: 0, cursor: 'crosshair', zIndex: 5 }} onPointerDown={onTipPickDown}>
+                      {(() => {
+                        const b = tipBox(tipRect)
+                        return (
+                          <div
+                            style={{
+                              position: 'absolute',
+                              left: b.cx - b.w / 2,
+                              top: b.cy - b.h / 2,
+                              width: b.w,
+                              height: b.h,
+                              transform: `rotate(${tipRect.rot ?? 0}deg)`,
+                              outline: `${2 / zoom}px dashed #ff9f43`,
+                              background: 'rgba(255,159,67,0.1)',
+                              pointerEvents: 'none',
+                            }}
+                          />
+                        )
+                      })()}
+                      <div
+                        className="dim-badge"
+                        style={{ left: tipRect.x + tipRect.w / 2, top: tipRect.y - 26 / zoom, transform: `translateX(-50%) scale(${1 / zoom})`, pointerEvents: 'none' }}
+                      >
+                        Click the tip
+                      </div>
+                    </div>
+                  )}
+                  {!tipPick && tipRect && !zoneEdit && !revealEdit && !cropEdit && !shapeEdit && !trackerEdit && !spineEdit && !thoughtZoneEdit && (
+                    <div
+                      title="Scratcher tip — drag to move"
+                      onPointerDown={onTipMarkerDown}
+                      onPointerMove={onTipMarkerMove}
+                      onPointerUp={onTipMarkerUp}
+                      onPointerCancel={onTipMarkerUp}
+                      style={{
+                        position: 'absolute',
+                        left: tipToOverlay(tipRect, tipCur).x,
+                        top: tipToOverlay(tipRect, tipCur).y,
+                        width: 16,
+                        height: 16,
+                        transform: `translate(-50%,-50%) scale(${1 / zoom})`,
+                        borderRadius: '50%',
+                        border: '2px solid #fff',
+                        background: '#ff9f43',
+                        boxShadow: '0 0 0 2px rgba(0,0,0,0.55)',
+                        cursor: 'move',
+                        touchAction: 'none',
+                        zIndex: 5,
+                      }}
+                    />
                   )}
                   {thoughtZoneEdit && thoughtZoneRect && (
                     <>

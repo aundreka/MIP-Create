@@ -58,11 +58,13 @@ import { importFont } from '../bridge'
 import {
   activeSceneDef,
   addAsset,
+  addElement,
   addGameHint,
   alignSelected,
   beginTransaction,
   clearLandscapeLayout,
   endTransaction,
+  getState,
   convertElement,
   copyElementsFromScene,
   copyStyle,
@@ -96,12 +98,15 @@ import {
 } from '../store'
 import { Accordion, Chips, ColorField, NumField, Row, SearchSelect, Select, Slider, Swatches, Toggle } from '../ui'
 import { calendarRange, labelForDate, validatePromoCalendar } from '../promoCalendar'
-import { ensurePromoCalendar } from '../factories'
+import { ensurePromoCalendar, makeText } from '../factories'
+import { idealInk } from '../svgAssets'
 import { setPreviewDate, todayKey, usePreviewDate } from '../uiState'
 import {
   AlignCenterHorizontal,
+  Crosshair,
   Eye,
   EyeOff,
+  RotateCcw,
   ScanSearch,
   AlignCenterVertical,
   AlignEndHorizontal,
@@ -1485,8 +1490,12 @@ function BrushControls(props: {
   brushSrc: string
   radiusLabel: string
   cardAspect: number
+  /** A placed scratcher does the scratching: only the radius still applies. */
+  radiusOnly?: boolean
 }): JSX.Element {
   const { params, setParam, setParams, brushSrc } = props
+  if (props.radiusOnly)
+    return <NumField label={props.radiusLabel} value={Number(params.brushRadius ?? 10)} step={1} min={1} max={50} onChange={(n) => setParam('brushRadius', n)} />
   const tipX = Number(params.brushTipX ?? 50)
   const tipY = Number(params.brushTipY ?? 50)
   const introOn = !!params.brushIntro && params.brushIntro !== 'off'
@@ -1538,6 +1547,74 @@ function BrushControls(props: {
           <div className="hint pad">No path drawn = a default left-right rub at the spawn point.</div>
         </>
       )}
+    </>
+  )
+}
+
+// ---- Scratch card: the scratcher, and the two rectangles drawn on the canvas ----
+// The scratcher is an image the author already placed; picking one here arms a single
+// click on the canvas that sets its tip (the marker stays draggable after). The two
+// rectangles are edited on the canvas only: the reveal zone decides what counts toward
+// "Reveal at", the scratch area what can be scratched at all.
+interface ScratchSetupProps {
+  params: Record<string, unknown>
+  setParams: (patch: Record<string, unknown>) => void
+  elementId: string
+  siblings: SceneElement[]
+}
+function ScratchSetup({ params, setParams, elementId, siblings }: ScratchSetupProps): JSX.Element {
+  const scratcherId = String(params.scratcherId ?? '')
+  const current = siblings.find((e) => e.id === scratcherId)
+  const candidates = siblings.filter((e) => e.id !== elementId && e.type === 'image')
+  const armTip = (): void => {
+    window.dispatchEvent(new CustomEvent('pa:scratcher-tip', { detail: { elementId } }))
+  }
+  const pick = (v: string): void => {
+    setParams({ scratcherId: v })
+    // Straight to the one thing left to do: click where its tip is.
+    if (v) window.setTimeout(armTip, 0)
+  }
+  const rect = (key: 'zone' | 'area', label: string, tip: string): JSX.Element => {
+    const set = !(Number(params[key + 'X'] ?? 0) <= 0 && Number(params[key + 'Y'] ?? 0) <= 0 && Number(params[key + 'W'] ?? 100) >= 100 && Number(params[key + 'H'] ?? 100) >= 100)
+    return (
+      <div style={{ flex: 1, display: 'flex', gap: 2 }}>
+        <button className={'btn' + (set ? ' on' : '')} style={{ flex: 1 }} title={tip} onClick={() => window.dispatchEvent(new CustomEvent('pa:zone-edit', { detail: { elementId, key } }))}>
+          {label}
+        </button>
+        {set && (
+          <button className="icon-btn" title="Reset to the whole card" onClick={() => setParams({ [key + 'X']: 0, [key + 'Y']: 0, [key + 'W']: 100, [key + 'H']: 100 })}>
+            <Icon icon={RotateCcw} size={13} />
+          </button>
+        )}
+      </div>
+    )
+  }
+  return (
+    <>
+      <div className="combo-slot">
+        <span title="An image the player drags. It scratches at its tip, not its centre.">Scratcher</span>
+        <Select
+          value={current ? scratcherId : ''}
+          onChange={pick}
+          options={[{ value: '', label: '— finger —' }, ...candidates.map((e) => ({ value: e.id, label: (e.name || e.id) + (e.id === scratcherId ? ' ✓' : '') }))]}
+        />
+        <span className="combo-slot-actions">
+          {current && (
+            <button className="icon-btn" title="Set its tip — click it on the canvas" onClick={armTip}>
+              <Icon icon={Crosshair} size={13} />
+            </button>
+          )}
+          {current && (
+            <button className="icon-btn" title={`Select “${current.name || current.id}” on the canvas`} onClick={() => selectOnly(current.id)}>
+              <Icon icon={ScanSearch} size={13} />
+            </button>
+          )}
+        </span>
+      </div>
+      <div style={{ display: 'flex', gap: 6, margin: '4px 0' }}>
+        {rect('area', 'Scratch area', 'Only this part of the cover can be scratched. Drawn on the canvas; Esc when done.')}
+        {rect('zone', 'Reveal zone', 'Only scratching inside this counts toward “Reveal at”. Drawn on the canvas; Esc when done.')}
+      </div>
     </>
   )
 }
@@ -1997,8 +2074,37 @@ function ProgressBarSetup({ params, setParam, elementId, siblings, fullWidth, se
   const sources = siblings.filter((e) => e.type === 'game-mount' && e.id !== elementId && e.game?.templateId !== 'progressbar')
   const feeder = sources.find((e) => e.id === String(params.sourceGameId ?? ''))
   const decorative = String(params.sourceGameId ?? '') === 'none'
+  // `{%}` texts following this bar: linked to it by id, or unlinked while it is the
+  // first bar in the screen (what the runtime falls back to).
+  const bar = siblings.find((e) => e.id === elementId)
+  const firstBar = siblings.find((e) => e.game?.templateId === 'progressbar')?.id
+  const pctText = siblings.find(
+    (e) => e.type === 'text' && /\{%\}|\{progress\}/.test(e.text?.value ?? '') && (e.progressBarId && siblings.some((b) => b.id === e.progressBarId) ? e.progressBarId === elementId : firstBar === elementId),
+  )
+  const addPctText = (): void => {
+    const t = makeText()
+    const y = bar ? bar.y - (bar.h ?? 40) / 2 - 56 : t.y
+    // Readable on the screen it lands on, rather than the default white.
+    const st = getState()
+    const bg = st.project.scenes.find((s) => s.id === st.activeSceneId)?.bgColor || st.project.meta.bgMatchColor
+    const color = /^#[0-9a-f]{6}$/i.test(bg ?? '') ? idealInk(bg!) : t.text!.color
+    addElement({ ...t, name: '% text', x: bar?.x ?? t.x, y: Math.max(20, y), progressBarId: elementId, text: { ...t.text!, value: '{%}', fontSizePx: 40, color } })
+  }
   return (
     <>
+      <div className="combo-slot">
+        <span title="A text that counts with this bar. Put {%} anywhere in it, e.g. “COVERAGE: {%}”.">% text</span>
+        {pctText ? (
+          <button className="btn" onClick={() => selectOnly(pctText.id)} title="Select it">
+            {pctText.name || pctText.id}
+          </button>
+        ) : (
+          <button className="btn" onClick={addPctText} title="Adds a text showing {%} above the bar — edit it like any text">
+            + Add
+          </button>
+        )}
+        <span className="combo-slot-actions" />
+      </div>
       <div className="group-title2">What fills it</div>
       <Row label="Filled by">
         <Select
@@ -2018,7 +2124,7 @@ function ProgressBarSetup({ params, setParam, elementId, siblings, fullWidth, se
         {decorative
           ? 'This bar ignores every game and stays where it is. It cannot fill, so it can never win the screen or take over the redirect — use it as artwork, or as a second bar you drive by hand.'
           : sources.length === 0
-            ? 'Add a game that reports progress — Drag to clean, Tap to remove — and this bar fills as it is played.'
+            ? 'Add a game that reports progress — Drag to clean, Tap to remove, Scratch card — and this bar fills as it is played.'
             : Number(params.steps ?? 0) > 0
               ? `Counts to ${Number(params.steps)} and wins the screen. If the game feeding it has more steps than that, this bar finishes first and owns the redirect.`
               : `Counts to however many steps ${feeder ? `“${feeder.name || feeder.id}”` : 'the game feeding it'} has, so the two finish together. Set “Steps to win” to end earlier.`}
@@ -4711,6 +4817,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                   {tpl.id === 'combo' && <ComboSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
                   {tpl.id === 'combo' && <div className="group-title2">Feel &amp; timing</div>}
                   {tpl.id === 'configurator' && <ConfigSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
+                  {tpl.id === 'scratch' && <ScratchSetup params={params} setParams={setParams} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
                   {tpl.id === 'dragclean' && <DragCleanSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
                   {tpl.id === 'tapremove' && <TapRemoveSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
                   {tpl.id === 'tapreveal' && <TapRevealSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
@@ -4736,6 +4843,8 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                         (f) =>
                           !BRUSH_PARAM_KEYS.has(f.key) &&
                           !(tpl.id === 'scratch' && (f.key === 'coverColor' || f.key === 'shadowColor')) &&
+                          // Drawn on the canvas (ScratchSetup's buttons), not typed in.
+                          !(tpl.id === 'scratch' && /^zone[XYWH]$/.test(f.key)) &&
                           // ComboSetup owns both counts, right above its per-question chips.
                           !(tpl.id === 'combo' && (f.key === 'questions' || f.key === 'options')) &&
                           // ConfigSetup owns both counts, right above its per-group chips.
@@ -4793,22 +4902,8 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                       brushSrc={state.assets[(params.brushImage as string) || '']?.src ?? ''}
                       radiusLabel="Brush/scratch radius (% of card)"
                       cardAspect={cardAspect}
+                      radiusOnly={!!params.scratcherId && (activeSceneDef(state)?.elements ?? []).some((e) => e.id === params.scratcherId)}
                     />
-                  )}
-                  {tpl.id === 'scratch' && (
-                    <>
-                      <button
-                        className="btn"
-                        style={{ width: '100%', marginTop: 6 }}
-                        onClick={() => window.dispatchEvent(new CustomEvent('pa:zone-edit', { detail: { elementId: id } }))}
-                      >
-                        Edit reveal zone on canvas
-                      </button>
-                      <div className="hint pad">
-                        Only scratching inside the reveal zone counts toward the threshold — anywhere outside never contributes. Drag the box to move, corner handles to resize. Esc
-                        to finish.
-                      </div>
-                    </>
                   )}
                   {tpl.id === 'scratch' && params.fit === 'fit' && (
                     <div className="hint pad">Double-click the card on the canvas to position &amp; scale the reveal image: drag to move, corner handles to resize.</div>
@@ -6016,6 +6111,19 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 )}
               </Row>
             )}
+            {el.type === 'text' &&
+              /\{%\}|\{progress\}/.test(el.text.value) &&
+              (() => {
+                // `{%}` follows a progress bar; only a screen with several needs asking which.
+                const bars = (activeSceneDef(state)?.elements ?? []).filter((e) => e.game?.templateId === 'progressbar')
+                if (bars.length < 2) return null
+                const cur = bars.some((b) => b.id === el.progressBarId) ? el.progressBarId! : bars[0].id
+                return (
+                  <Row label="{%} follows">
+                    <Select value={cur} onChange={(v) => patchElement(id, { progressBarId: v })} options={bars.map((b) => ({ value: b.id, label: b.name || b.id }))} />
+                  </Row>
+                )
+              })()}
             {(() => {
               const fontAssets = Object.entries(state.assets).filter(([, a]) => a.kind === 'font')
               const uploadFont = async (): Promise<void> => {

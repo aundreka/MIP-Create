@@ -1,9 +1,26 @@
 // Scratch game: erase the cover (canvas destination-out) to reveal the prize
 // underneath; win at a threshold of scratched area. Hint = drag across.
+//
+// Two optional pieces shape WHERE scratching happens:
+//
+//   scratcher     a scene element the author placed (the stick, the coin) that the
+//                 player drags. It scratches at its authored TIP — a point inside the
+//                 element, rotation and all — never at its centre, and the finger no
+//                 longer scratches on its own.
+//   scratch area  a rectangle of the card (areaX/Y/W/H, % of the card). Only the
+//                 cover inside it can be scratched; the rest stays put until the win
+//                 reveals the whole card as usual. Separate from the reveal ZONE, which
+//                 only decides which pixels count toward the threshold — the two are
+//                 intersected when measuring, since cover that cannot be scratched can
+//                 never count and would otherwise make the threshold unreachable.
+//
+// Progress toward the threshold goes out over the progress channel as a fraction, so a
+// progress bar in the scene fills with the card and is full the moment it reveals.
 
 import type { GameContext, GameModule, GameTemplate, HintMove } from './types'
 import { num, str } from './types'
 import { emit } from '../emitter'
+import { emitProgress, onProgressRequest } from './progresschannel'
 
 // Parse an authored brush-intro path: a JSON list of {x,y} points, each a fraction 0..1 of the card.
 // Returns [] on anything malformed (the runtime then falls back to a default rub).
@@ -127,6 +144,40 @@ export function createScratch(): GameModule {
   let zoneY = 0
   let zoneW = 1
   let zoneH = 1
+  // Scratch area: the only part of the cover that can be scratched at all (0..1 of the
+  // card). Defaults to the whole card.
+  let areaX = 0
+  let areaY = 0
+  let areaW = 1
+  let areaH = 1
+  const areaIsFull = (): boolean => areaX <= 0 && areaY <= 0 && areaW >= 1 && areaH >= 1
+
+  // ---- progress channel ----------------------------------------------------
+  let progressGameId = ''
+  let lastMeasure = 0
+  let offRequest: (() => void) | null = null
+  /** Where the card is on the way to its threshold, for any progress bar in the scene. */
+  const announce = (): void => {
+    const pct = won ? 100 : Math.min(100, (lastMeasure / threshold) * 100)
+    emitProgress(ctx.root, { gameId: ctx.elementId ?? '', value: pct, total: 100, to: progressGameId, continuous: true })
+  }
+
+  // ---- scratcher (optional) ------------------------------------------------
+  // A placed scene element the player drags; it scratches at its tip. Found by id at
+  // start(), so on the editor canvas it is just an ordinary element.
+  let scratcherId = ''
+  let scratcher: HTMLElement | null = null
+  let scratcherTipX = 0.5
+  let scratcherTipY = 0.5
+  /** A 0×0 node at the tip, inside the element's innermost box: its client rect IS the
+   * tip on screen, through every rotation, scale and animation the element carries. */
+  let tipMark: HTMLElement | null = null
+  let sdx = 0
+  let sdy = 0
+  let scratcherDragging = false
+  let scratcherHomeZ = ''
+  let scratcherRestPE = ''
+  let offScratcher: (() => void) | null = null
 
   // ---- brush (optional) ----------------------------------------------------
   // An image that follows the finger/cursor while scratching. The SCRATCH happens at the
@@ -448,6 +499,15 @@ export function createScratch(): GameModule {
     c2d.fillStyle = '#000'
     c2d.strokeStyle = '#000'
     const r = Math.max(14, Math.min(canvas.width, canvas.height) * brushRadiusFrac)
+    // Clipped rather than gated on where the tip is: a stroke along the area's edge
+    // still clears the part of the brush that is inside it.
+    const clip = !areaIsFull()
+    if (clip) {
+      c2d.save()
+      c2d.beginPath()
+      c2d.rect(areaX * canvas.width, areaY * canvas.height, areaW * canvas.width, areaH * canvas.height)
+      c2d.clip()
+    }
     if (lastPt) {
       c2d.lineWidth = r * 2
       c2d.lineCap = 'round'
@@ -459,8 +519,21 @@ export function createScratch(): GameModule {
     c2d.beginPath()
     c2d.arc(x, y, r, 0, Math.PI * 2)
     c2d.fill()
+    if (clip) c2d.restore()
     lastPt = { x, y }
     scheduleMask() // the cover just changed — reshape the prize to match what's been cleared
+  }
+
+  /** The region the threshold is measured over: the reveal zone, cut down to the scratch
+   * area (cover outside the area can never be cleared, so counting it would put the
+   * threshold out of reach). Zone and area not overlapping falls back to the area. */
+  const measureRegion = (): { x: number; y: number; w: number; h: number } => {
+    const x = Math.max(zoneX, areaX)
+    const y = Math.max(zoneY, areaY)
+    const r = Math.min(zoneX + zoneW, areaX + areaW)
+    const b = Math.min(zoneY + zoneH, areaY + areaH)
+    if (r - x < 0.005 || b - y < 0.005) return { x: areaX, y: areaY, w: areaW, h: areaH }
+    return { x, y, w: r - x, h: b - y }
   }
 
   // Fraction of the reveal ZONE that has been scratched clear (alpha < 128). Pixels
@@ -474,10 +547,11 @@ export function createScratch(): GameModule {
     const oc = o.getContext('2d')!
     oc.drawImage(canvas, 0, 0, S, S)
     const data = oc.getImageData(0, 0, S, S).data
-    const x0 = Math.max(0, Math.floor(zoneX * S))
-    const y0 = Math.max(0, Math.floor(zoneY * S))
-    const x1 = Math.min(S, Math.ceil((zoneX + zoneW) * S))
-    const y1 = Math.min(S, Math.ceil((zoneY + zoneH) * S))
+    const z = measureRegion()
+    const x0 = Math.max(0, Math.floor(z.x * S))
+    const y0 = Math.max(0, Math.floor(z.y * S))
+    const x1 = Math.min(S, Math.ceil((z.x + z.w) * S))
+    const y1 = Math.min(S, Math.ceil((z.y + z.h) * S))
     let clear = 0
     let total = 0
     for (let y = y0; y < y1; y++) {
@@ -486,12 +560,14 @@ export function createScratch(): GameModule {
         if (data[(y * S + x) * 4 + 3] < 128) clear++
       }
     }
-    return total > 0 ? clear / total : 0
+    lastMeasure = total > 0 ? clear / total : 0
+    return lastMeasure
   }
 
   const reveal = (): void => {
     if (won) return
     won = true
+    announce() // full — a progress bar in the scene lands on 100% with the card
     // Stop masking and repaint the prize whole BEFORE the cover starts fading. The cover fades
     // via CSS opacity, which doesn't change its bitmap — so a still-masked prize would dissolve
     // into a prize-shaped hole instead of the prize.
@@ -521,6 +597,233 @@ export function createScratch(): GameModule {
     window.setTimeout(finish, 650) // fallback if transitionend never fires
   }
 
+  // ---- scratcher -------------------------------------------------------------
+  const toCanvasPt = (clientX: number, clientY: number): { x: number; y: number } => {
+    const r = canvas.getBoundingClientRect()
+    return {
+      x: ((clientX - r.left) / Math.max(1, r.width)) * canvas.width,
+      y: ((clientY - r.top) / Math.max(1, r.height)) * canvas.height,
+    }
+  }
+
+  /** The element's innermost animation box — where its content lives, so a node
+   * placed in it moves with every transform the element carries. */
+  const innermostBox = (el: HTMLElement): HTMLElement => {
+    let n: HTMLElement = el
+    for (;;) {
+      const next = Array.from(n.children).find((c) => c.classList.contains('pa-el-anim') || c.classList.contains('pa-el-anim-l')) as HTMLElement | undefined
+      if (!next) return n
+      n = next
+    }
+  }
+
+  const findScratcher = (): HTMLElement | null => {
+    if (!scratcherId) return null
+    // Any .pa-el in the document, not only this scene root: an element can be parked
+    // outside it (overlay-immune tiers).
+    for (const el of Array.from(document.querySelectorAll<HTMLElement>('.pa-el'))) {
+      if (el.dataset.id === scratcherId && el !== ctx.root.closest('.pa-el')) return el
+    }
+    return null
+  }
+
+  /** The rectangle the scratcher's centre has to stay inside: the scene, clipped to
+   * the window (a playable can be framed smaller than either). */
+  const screenBounds = (): DOMRect => {
+    const r = ctx.root.closest<HTMLElement>('.pa-root')?.getBoundingClientRect()
+    const vw = window.innerWidth || document.documentElement.clientWidth || 0
+    const vh = window.innerHeight || document.documentElement.clientHeight || 0
+    if (!r || r.width < 1 || r.height < 1) return new DOMRect(0, 0, vw, vh)
+    const left = Math.max(0, r.left)
+    const top = Math.max(0, r.top)
+    const right = vw > 0 ? Math.min(vw, r.right) : r.right
+    const bottom = vh > 0 ? Math.min(vh, r.bottom) : r.bottom
+    return new DOMRect(left, top, Math.max(1, right - left), Math.max(1, bottom - top))
+  }
+
+  /** Move the scratcher to an offset from where the author placed it, keeping its
+   * centre on screen so a hard flick can never lose the only tool off the edge. */
+  const placeScratcher = (wantX: number, wantY: number): void => {
+    if (!scratcher) return
+    const r = scratcher.getBoundingClientRect()
+    const homeX = r.left + r.width / 2 - sdx
+    const homeY = r.top + r.height / 2 - sdy
+    const b = screenBounds()
+    sdx = Math.max(b.left - homeX, Math.min(b.right - homeX, wantX))
+    sdy = Math.max(b.top - homeY, Math.min(b.bottom - homeY, wantY))
+    scratcher.style.translate = `${sdx.toFixed(1)}px ${sdy.toFixed(1)}px`
+  }
+
+  const scratcherHit = (clientX: number, clientY: number): boolean => {
+    if (!scratcher) return false
+    const r = scratcher.getBoundingClientRect()
+    const pad = 12 // generous on touch
+    return clientX >= r.left - pad && clientX <= r.right + pad && clientY >= r.top - pad && clientY <= r.bottom + pad
+  }
+
+  const scratchAtTip = (): void => {
+    if (!tipMark || won) return
+    const t = tipMark.getBoundingClientRect()
+    const p = toCanvasPt(t.left, t.top)
+    erodeAt(p.x, p.y)
+  }
+
+  /** Wire the scratcher: drag it anywhere on screen, and it scratches at its tip. */
+  const armScratcher = (): void => {
+    scratcher = findScratcher()
+    if (!scratcher) return
+    const el = scratcher
+    tipMark = document.createElement('div')
+    tipMark.style.cssText = `position:absolute;left:${(scratcherTipX * 100).toFixed(2)}%;top:${(scratcherTipY * 100).toFixed(2)}%;width:0;height:0;pointer-events:none;`
+    innermostBox(el).appendChild(tipMark)
+    // The same marker the brush carries, so a handguide in 'brush' mode points at it.
+    el.dataset.paBrush = '1'
+    el.dataset.brushReady = '1'
+    scratcherHomeZ = el.style.zIndex
+    scratcherRestPE = el.style.pointerEvents
+    // Decorative images are stepped out of hit-testing by the stage; this one is the
+    // tool, so it has to catch the press (and shield whatever is under it).
+    el.style.pointerEvents = 'auto'
+    for (const n of Array.from(el.querySelectorAll<HTMLElement>('.pa-el-anim,.pa-el-anim-l'))) n.style.pointerEvents = 'auto'
+    el.style.cursor = 'grab'
+    el.style.setProperty('-webkit-touch-callout', 'none')
+    el.style.setProperty('-webkit-tap-highlight-color', 'transparent')
+
+    let grabX = 0
+    let grabY = 0
+    let baseX = 0
+    let baseY = 0
+    const begin = (x: number, y: number): boolean => {
+      if (won || scratcherDragging || !scratcherHit(x, y)) return false
+      scratcherDragging = true
+      scratching = true
+      grabX = x
+      grabY = y
+      baseX = sdx
+      baseY = sdy
+      lastPt = null
+      el.style.zIndex = '99999'
+      el.style.cursor = 'grabbing'
+      ctx.sfx.loopStart?.('drag')
+      scratchAtTip()
+      return true
+    }
+    const move = (x: number, y: number): void => {
+      if (!scratcherDragging) return
+      placeScratcher(baseX + x - grabX, baseY + y - grabY)
+      if (won) return
+      scratchAtTip()
+      if ((moves++ & 7) === 0) {
+        const m = measure()
+        emit('scratch-progress', m)
+        announce()
+        if (m >= threshold) reveal()
+      }
+    }
+    const end = (): void => {
+      if (!scratcherDragging) return
+      scratcherDragging = false
+      scratching = false
+      el.style.zIndex = scratcherHomeZ
+      el.style.cursor = 'grab'
+      ctx.sfx.loopStop?.('drag')
+      lastPt = null
+      if (won) return
+      const m = measure()
+      emit('scratch-progress', m)
+      announce()
+      if (m >= threshold) reveal()
+    }
+
+    // Touch first — the path ad containers deliver reliably from the very first
+    // interaction (see the card's own handlers below). Not preventDefault'ed on start:
+    // that would stop the touch counting as the user activation audio needs.
+    const hasTouch = 'ontouchstart' in window
+    let touchId: number | null = null
+    const onTouchMove = (e: TouchEvent): void => {
+      const t = Array.from(e.changedTouches).find((c) => c.identifier === touchId)
+      if (!t) return
+      e.preventDefault()
+      move(t.clientX, t.clientY)
+    }
+    const onTouchEnd = (e: TouchEvent): void => {
+      if (!Array.from(e.changedTouches).some((c) => c.identifier === touchId)) return
+      touchId = null
+      window.removeEventListener('touchmove', onTouchMove)
+      window.removeEventListener('touchend', onTouchEnd)
+      window.removeEventListener('touchcancel', onTouchEnd)
+      end()
+    }
+    const onTouchStart = (e: TouchEvent): void => {
+      if (touchId != null) return
+      const t = e.changedTouches[0]
+      if (!t || !begin(t.clientX, t.clientY)) return
+      touchId = t.identifier
+      window.addEventListener('touchmove', onTouchMove, { passive: false })
+      window.addEventListener('touchend', onTouchEnd)
+      window.addEventListener('touchcancel', onTouchEnd)
+    }
+    // Pointer — mouse and pen, and touch where touch events don't exist.
+    let pid: number | null = null
+    const onPointerMove = (e: PointerEvent): void => {
+      if (e.pointerId === pid) move(e.clientX, e.clientY)
+    }
+    const onPointerUp = (e: PointerEvent): void => {
+      if (e.pointerId !== pid) return
+      pid = null
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', onPointerUp)
+      window.removeEventListener('pointercancel', onPointerUp)
+      end()
+    }
+    const onPointerDown = (e: PointerEvent): void => {
+      if (pid != null || (e.pointerType === 'touch' && hasTouch)) return
+      if (!begin(e.clientX, e.clientY)) return
+      e.preventDefault() // no text selection / native image drag
+      pid = e.pointerId
+      window.addEventListener('pointermove', onPointerMove)
+      window.addEventListener('pointerup', onPointerUp)
+      window.addEventListener('pointercancel', onPointerUp)
+    }
+    // Capture on window, hit-tested by rect: the press lands wherever the scratcher is
+    // in the layer order — above the card, below it, or parked outside the scene root.
+    window.addEventListener('touchstart', onTouchStart, { capture: true, passive: true })
+    window.addEventListener('pointerdown', onPointerDown, true)
+    offScratcher = () => {
+      window.removeEventListener('touchstart', onTouchStart, true)
+      window.removeEventListener('pointerdown', onPointerDown, true)
+      window.removeEventListener('touchmove', onTouchMove)
+      window.removeEventListener('touchend', onTouchEnd)
+      window.removeEventListener('touchcancel', onTouchEnd)
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', onPointerUp)
+      window.removeEventListener('pointercancel', onPointerUp)
+    }
+  }
+
+  const disarmScratcher = (): void => {
+    offScratcher?.()
+    offScratcher = null
+    tipMark?.remove()
+    tipMark = null
+    if (scratcher) {
+      const el = scratcher
+      el.style.translate = ''
+      el.style.zIndex = scratcherHomeZ
+      el.style.pointerEvents = scratcherRestPE
+      for (const n of Array.from(el.querySelectorAll<HTMLElement>('.pa-el-anim,.pa-el-anim-l'))) n.style.pointerEvents = scratcherRestPE
+      el.style.cursor = ''
+      el.style.removeProperty('-webkit-touch-callout')
+      el.style.removeProperty('-webkit-tap-highlight-color')
+      delete el.dataset.paBrush
+      delete el.dataset.brushReady
+    }
+    scratcher = null
+    scratcherDragging = false
+    sdx = 0
+    sdy = 0
+  }
+
   return {
     mount(c, params) {
       ctx = c
@@ -534,6 +837,14 @@ export function createScratch(): GameModule {
       zoneY = Math.max(0, Math.min(1, num(params.zoneY, 0) / 100))
       zoneW = Math.max(0.02, Math.min(1 - zoneX, num(params.zoneW, 100) / 100))
       zoneH = Math.max(0.02, Math.min(1 - zoneY, num(params.zoneH, 100) / 100))
+      areaX = Math.max(0, Math.min(1, num(params.areaX, 0) / 100))
+      areaY = Math.max(0, Math.min(1, num(params.areaY, 0) / 100))
+      areaW = Math.max(0.02, Math.min(1 - areaX, num(params.areaW, 100) / 100))
+      areaH = Math.max(0.02, Math.min(1 - areaY, num(params.areaH, 100) / 100))
+      progressGameId = str(params.progressGameId, '').trim()
+      scratcherId = str(params.scratcherId, '').trim()
+      scratcherTipX = Math.max(0, Math.min(1, num(params.scratcherTipX, 50) / 100))
+      scratcherTipY = Math.max(0, Math.min(1, num(params.scratcherTipY, 50) / 100))
       brushTipX = Math.max(0, Math.min(1, num(params.brushTipX, 50) / 100))
       brushTipY = Math.max(0, Math.min(1, num(params.brushTipY, 50) / 100))
       brushRadiusFrac = Math.max(1, Math.min(50, num(params.brushRadius, 9))) / 100
@@ -607,7 +918,8 @@ export function createScratch(): GameModule {
       // Optional brush: a floating image whose authored tip does the scratching. Created hidden;
       // sized/positioned at the first touch. z-index sits above EVERYTHING — the win/lose overlay
       // (9000) and the immune header/overlayTop tiers (10000/10050) — and never eats pointer events.
-      const brushSrc = ctx.assets.src(str(params.brushImage, ''))
+      // A placed scratcher replaces the brush outright — two tools would fight.
+      const brushSrc = scratcherId ? '' : ctx.assets.src(str(params.brushImage, ''))
       if (brushSrc) {
         brushImg = new Image()
         brushImg.src = brushSrc
@@ -710,6 +1022,11 @@ export function createScratch(): GameModule {
       if (started) return
       started = true
       parkBrush() // show the brush at rest from the start — it's a persistent draggable tool
+      armScratcher()
+      // A bar placed above this card in the layer stack starts listening after the
+      // first announcement would have gone out, so answer when it asks.
+      offRequest = onProgressRequest(ctx.root, announce)
+      announce()
 
       const toCanvas = (clientX: number, clientY: number): { x: number; y: number } => {
         const r = canvas.getBoundingClientRect()
@@ -723,6 +1040,7 @@ export function createScratch(): GameModule {
       let grabDY = 0
       // Begin a stroke: require grabbing the brush (if any). Returns false if the press missed it.
       const beginStroke = (clientX: number, clientY: number): boolean => {
+        if (scratcher) return false // the scratcher's tip does the scratching, never the bare finger
         if (brushEl && !brushFollow && !brushHit(clientX, clientY)) return false // must grab the brush, not tap anywhere
         brushIntroAnim?.cancel()
         brushIntroAnim = null
@@ -755,6 +1073,7 @@ export function createScratch(): GameModule {
         if ((moves++ & 7) === 0) {
           const m = measure()
           emit('scratch-progress', m) // fade scene elements in/out at progress thresholds
+          announce()
           if (m >= threshold) reveal()
         }
       }
@@ -765,7 +1084,10 @@ export function createScratch(): GameModule {
         // mode: it only exists under the finger, so it fades out on release.
         if (brushEl && brushFollow) brushEl.style.opacity = '0'
         lastPt = null
-        if (!won && measure() >= threshold) reveal()
+        if (won) return
+        const m = measure()
+        announce()
+        if (m >= threshold) reveal()
       }
 
       // Touch events — primary path on mobile. MRAID/AppLovin reliably delivers
@@ -804,7 +1126,7 @@ export function createScratch(): GameModule {
       // Pointer events — fallback for mouse / pen (desktop). Skipped when a touch
       // gesture is already active (touchstart has already handled it).
       canvas.addEventListener('pointerdown', (e) => {
-        if (won || touchActive || e.pointerType === 'touch') return
+        if (won || touchActive || e.pointerType === 'touch' || scratcher) return
         lastPt = null
         if (brushEl && !brushFollow && !brushHit(e.clientX, e.clientY)) return // must grab the brush, not tap anywhere
         e.preventDefault() // prevent native drag-start on the canvas element
@@ -824,14 +1146,33 @@ export function createScratch(): GameModule {
         canvas.addEventListener('pointercancel', onUp)
       })
     },
-    relayout: sizeCanvas,
+    relayout() {
+      sizeCanvas()
+      // The scratcher stays where the player left it, but the screen it must stay on
+      // may just have shrunk (a rotation), so re-clamp rather than reset.
+      if (scratcher && !scratcherDragging) placeScratcher(sdx, sdy)
+    },
     getHint(): HintMove | null {
+      if (won || scratching) return null
+      const r = canvas.getBoundingClientRect()
+      if (scratcher) {
+        // Carry the scratcher onto the middle of what is left to scratch.
+        const s = scratcher.getBoundingClientRect()
+        const z = measureRegion()
+        return {
+          from: { x: s.left + s.width / 2, y: s.top + s.height / 2 },
+          to: { x: r.left + (z.x + z.w / 2) * r.width, y: r.top + (z.y + z.h / 2) * r.height },
+          kind: 'drag',
+        }
+      }
       // A grab-mode brush is itself the on-screen tool (point-at-brush is a handguide
       // mode); a follow-mode brush is invisible at rest, so the slide hint still helps.
-      if (won || scratching || (brushEl && !brushFollow)) return null
-      const r = canvas.getBoundingClientRect()
-      const y = r.top + r.height / 2
-      return { from: { x: r.left + r.width * 0.22, y }, to: { x: r.left + r.width * 0.78, y }, kind: 'slide' }
+      if (brushEl && !brushFollow) return null
+      // Across the scratch area — the whole card unless one was drawn.
+      const y = r.top + (areaY + areaH / 2) * r.height
+      const x0 = r.left + (areaX + areaW * 0.22) * r.width
+      const x1 = r.left + (areaX + areaW * 0.78) * r.width
+      return { from: { x: x0, y }, to: { x: x1, y }, kind: 'slide' }
     },
     onComplete(cb) {
       completeCb = cb
@@ -841,6 +1182,9 @@ export function createScratch(): GameModule {
     },
     destroy() {
       ro?.disconnect()
+      offRequest?.()
+      offRequest = null
+      disarmScratcher()
       if (maskRaf) { cancelAnimationFrame(maskRaf); maskRaf = 0 }
       dprCleanup?.()
       dprCleanup = null
@@ -886,7 +1230,10 @@ export const SCRATCH_TEMPLATE: GameTemplate = {
   ],
   // revealScale/X/Y are edited by double-clicking the card on the canvas (no inspector
   // field) — they only apply when fit = 'fit'.
-  defaultParams: { label: 'YOU WIN!', coverColor: '#9aa3b2', threshold: 0.6, zoneX: 0, zoneY: 0, zoneW: 100, zoneH: 100, fit: 'follow', revealScale: 1, revealX: 0, revealY: 0, revealBgColor: '', prize: '', cover: '', brushImage: '', brushRadius: 9, brushScale: 40, brushTipX: 50, brushTipY: 50, brushSpawnX: 50, brushSpawnY: 50, brushFollow: false, brushIntro: false, brushIntroPath: '', brushIntroDurationMs: 1600, brushIntroLoops: 2, cursor: 'inherit', cursorAsset: '', shadowBlur: 0, shadowX: 0, shadowY: 4, shadowColor: '#000000' },
+  // zone* = what counts toward the threshold; area* = what can be scratched at all; both
+  // drawn on the canvas. scratcherId names a placed element the player drags, which
+  // scratches at scratcherTipX/Y (% of that element) — see the header comment.
+  defaultParams: { label: 'YOU WIN!', coverColor: '#9aa3b2', threshold: 0.6, zoneX: 0, zoneY: 0, zoneW: 100, zoneH: 100, areaX: 0, areaY: 0, areaW: 100, areaH: 100, scratcherId: '', scratcherTipX: 50, scratcherTipY: 50, progressGameId: '', fit: 'follow', revealScale: 1, revealX: 0, revealY: 0, revealBgColor: '', prize: '', cover: '', brushImage: '', brushRadius: 9, brushScale: 40, brushTipX: 50, brushTipY: 50, brushSpawnX: 50, brushSpawnY: 50, brushFollow: false, brushIntro: false, brushIntroPath: '', brushIntroDurationMs: 1600, brushIntroLoops: 2, cursor: 'inherit', cursorAsset: '', shadowBlur: 0, shadowX: 0, shadowY: 4, shadowColor: '#000000' },
   // Zig-zag scratch motion across the card (the editable hint's starting route).
   defaultHandguide: {
     nodes: [

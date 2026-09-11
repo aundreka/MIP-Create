@@ -1273,6 +1273,10 @@ export interface SceneElement {
   // the value. Set both for a visible window [showAt, hideAt). Unset = always visible (default).
   scratchShowAt?: number
   scratchHideAt?: number
+  // A text containing `{%}` (or `{progress}`) shows a progress bar's fill, counting
+  // along with it. This names the bar; unset (or a bar that is gone) = the first bar
+  // in the scene.
+  progressBarId?: string
   // Show this element ONLY while the given page of a flipbook in the scene is open —
   // 1-based, page 1 being the shut cover when the book has one. Unset = always
   // visible. The editor canvas ignores it so every page's elements stay placeable.

@@ -22,10 +22,17 @@
 // that source says its total is, so wiring a bar to a drag-to-clean board is: place
 // the bar. `steps` overrides the count — set it to 4 on a six-obstacle board and the
 // bar (and so the scene) finishes two obstacles early.
+//
+// A scratch card has no steps, only an area; it reports a fraction (`continuous`) of
+// the way to its reveal threshold, and the bar fills to exactly that — full at the
+// moment the card reveals.
+//
+// Whatever the bar shows is re-broadcast (emitProgressShown) with its animation
+// length, which is what a `{%}` text element counts along with.
 
 import type { GameContext, GameModule, GameTemplate, HintMove } from './types'
 import { num, str } from './types'
-import { onProgress, PROGRESS_SOURCE_NONE, progressMatches, requestProgress, type ProgressDetail } from './progresschannel'
+import { emitProgressShown, onProgress, PROGRESS_SOURCE_NONE, progressMatches, requestProgress, type ProgressDetail } from './progresschannel'
 
 /** Fold an opacity into a colour so the TRACK can be translucent without dragging
  * the fill sitting inside it down with it (an `opacity` on the track element would).
@@ -92,6 +99,14 @@ export function createProgressBar(): GameModule {
   let sourceTotal = 0
   let sourceGameId = ''
   let value = 0
+  /** How full the bar is, 0..1 — the truth the continuous fill and `{%}` texts draw.
+   * A stepped source keeps it at value / steps; a continuous one (a scratch card)
+   * sets it directly and `value` is derived from it for the segments. */
+  let frac = 0
+  /** The live source reports a fraction rather than steps. */
+  let continuous = false
+  /** Last % broadcast, so a resize that changes nothing stays quiet. */
+  let shownPct = -1
 
   // ---- visuals ----
   let heightPx = 0
@@ -137,7 +152,9 @@ export function createProgressBar(): GameModule {
   /** How many steps this bar is counting to. The author's number wins; failing that
    * it is whatever the source says it has, and failing THAT it is 1 — a bar nothing
    * is feeding yet still has to render as an empty bar rather than divide by zero. */
-  const steps = (): number => Math.max(1, stepsParam || sourceTotal || 1)
+  // A continuous source has no count of its own to lend (its "total" is just 100), so
+  // a segmented bar fed by one draws ten segments unless the author says otherwise.
+  const steps = (): number => Math.max(1, stepsParam || (continuous ? 10 : sourceTotal) || 1)
 
   // ---- painting ------------------------------------------------------------
   /** What `inner` currently holds. Tracked explicitly rather than inferred from
@@ -238,9 +255,15 @@ export function createProgressBar(): GameModule {
     track.dataset.progressValue = String(shown)
     track.dataset.progressTotal = String(n)
     const ms = animate ? fillMs : 0
+    const f = Math.max(0, Math.min(1, frac))
     if (fill) {
       fill.style.transition = ms > 0 ? `width ${ms}ms ${fillEasing}` : ''
-      fill.style.width = ((shown / n) * 100).toFixed(3) + '%'
+      fill.style.width = (f * 100).toFixed(3) + '%'
+    }
+    const pct = Math.round(f * 1000) / 10
+    if (pct !== shownPct) {
+      shownPct = pct
+      emitProgressShown(ctx.root, { barId: ctx.elementId ?? '', pct, ms })
     }
     segs.forEach((seg, i) => {
       const on = i < shown
@@ -291,6 +314,15 @@ export function createProgressBar(): GameModule {
   const receive = (d: ProgressDetail): void => {
     const { gameId, value: next, total } = d
     if (!progressMatches(sourceGameId, gameId, d.to ?? '', ctx.elementId ?? '')) return
+    if (!!d.continuous !== continuous) {
+      continuous = !!d.continuous
+      buildFill()
+      layout()
+    }
+    if (continuous) {
+      receiveFraction(total > 0 ? next / total : 0)
+      return
+    }
     // A source's total is what the bar counts to when the author left `steps` at 0,
     // so a changed total has to rebuild the segments before the value is painted.
     if (total > 0 && total !== sourceTotal) {
@@ -302,12 +334,31 @@ export function createProgressBar(): GameModule {
     if (clamped === value) return
     const gained = clamped > value
     value = clamped
+    frac = value / steps()
     paintValue(true)
     if (gained) {
       pop()
       ctx.sfx.play('progressStep')
     }
     if (value >= steps()) after(fillMs, finish)
+  }
+
+  /** A continuous source moved. The fill follows the fraction itself; segments light
+   * as it crosses them, and only a newly lit segment pops and sounds — a scratch card
+   * reports many times a second, and a beat on every report would be noise. */
+  const receiveFraction = (raw: number): void => {
+    const next = Math.max(0, Math.min(1, raw))
+    if (done || Math.abs(next - frac) < 0.001) return
+    frac = next
+    const lit = Math.floor(frac * steps() + 1e-6)
+    const gained = lit > value
+    value = lit
+    paintValue(true)
+    if (gained && fillStyle === 'segmented') {
+      pop()
+      ctx.sfx.play('progressStep')
+    }
+    if (frac >= 1) after(fillMs, finish)
   }
 
   return {
@@ -354,6 +405,7 @@ export function createProgressBar(): GameModule {
       popMs = Math.max(0, Math.min(2000, num(params.popMs, 260)))
       // The editor canvas shows the bar part-filled so its colours are judgeable
       // without playing the scene; start() zeroes it for real play.
+      frac = 0.5
       value = Math.round(steps() / 2)
 
       track = document.createElement('div')
@@ -386,6 +438,7 @@ export function createProgressBar(): GameModule {
       if (started) return
       started = true
       value = 0
+      frac = 0
       paintValue(false)
       // A decorative bar subscribes to nothing and asks nobody: it never fills, and
       // so — since finish() is only ever reached through receive() — it can never win
@@ -422,6 +475,9 @@ export function createProgressBar(): GameModule {
       segs = []
       fill = null
       value = 0
+      frac = 0
+      continuous = false
+      shownPct = -1
       sourceTotal = 0
       started = false
       done = false

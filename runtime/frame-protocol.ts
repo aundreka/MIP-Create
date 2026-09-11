@@ -11,6 +11,11 @@ export interface FrameRect {
   y: number
   w: number
   h: number
+  /** The element's own box before rotation (x/y/w/h above are its rotated bounds),
+   * and that rotation in degrees — for overlays that mark a point INSIDE the element. */
+  ow?: number
+  oh?: number
+  rot?: number
 }
 
 export interface FrameMetrics {

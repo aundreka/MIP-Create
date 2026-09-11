@@ -28,6 +28,21 @@ export interface ProgressDetail {
    * bar in the scene. Filtering exists on both ends because either side may be the
    * one there are two of. */
   to?: string
+  /** The source has no steps, only a fraction (value / total) — a scratch card's
+   * cleared area. The bar then fills to that fraction instead of counting steps, so
+   * its own `steps` only decides how many segments a segmented bar draws. */
+  continuous?: boolean
+}
+
+/** What a bar is currently SHOWING — broadcast so a `{%}` text can count along with
+ * the fill instead of jumping ahead of it. */
+export interface ProgressShownDetail {
+  /** Element id of the bar. */
+  barId: string
+  /** 0..100. */
+  pct: number
+  /** How long the bar takes to animate to it; 0 = snap. */
+  ms: number
 }
 
 /** `sourceGameId` for a bar that is deliberately fed by nothing at all. Not the empty
@@ -36,6 +51,7 @@ export const PROGRESS_SOURCE_NONE = 'none'
 
 const PROGRESS_EVENT = 'pa-progress'
 const REQUEST_EVENT = 'pa-progress-request'
+const SHOWN_EVENT = 'pa-progress-shown'
 
 /** The node both ends meet on: the scene root, or the game's own slot if it is
  * somehow unparented (a unit test mounting a game in isolation). */
@@ -72,6 +88,17 @@ export function onProgressRequest(root: HTMLElement, fn: () => void): () => void
   const host = progressHost(root)
   host.addEventListener(REQUEST_EVENT, fn)
   return () => host.removeEventListener(REQUEST_EVENT, fn)
+}
+
+/** A bar reporting what it now shows. */
+export function emitProgressShown(root: HTMLElement, detail: ProgressShownDetail): void {
+  progressHost(root).dispatchEvent(new CustomEvent<ProgressShownDetail>(SHOWN_EVENT, { detail }))
+}
+
+export function onProgressShown(host: HTMLElement, fn: (d: ProgressShownDetail) => void): () => void {
+  const handler = (e: Event): void => fn((e as CustomEvent<ProgressShownDetail>).detail)
+  host.addEventListener(SHOWN_EVENT, handler)
+  return () => host.removeEventListener(SHOWN_EVENT, handler)
 }
 
 /**

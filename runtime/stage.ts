@@ -52,6 +52,7 @@ import { promoLabelFor } from './elements/promoCalendar'
 import { createGameHost, type GameHost } from './gameHost'
 import { mulberry32 } from './games/types'
 import { COMBO_OFF_CLASS } from './games/combo'
+import { onProgressShown } from './games/progresschannel'
 import { attachScratchCover } from './reveal'
 import { emit, on } from './emitter'
 
@@ -98,6 +99,10 @@ interface Rec {
   // so a resize mid-type re-slices the live text instead of snapping to the full value.
   typeShown?: number | null
   typeTimer?: number
+  // `{%}` text: the percentage currently drawn (it counts toward the bar's value on the
+  // bar's own clock) and the frame driving that count.
+  progressPct?: number
+  progressRaf?: number
   // Interactive playback (Preview / the exported ad) vs. the static editor canvas.
   // Set by startGames; applyLightray reads it so a one-shot reflection previews
   // ambiently on the canvas but stays an event during real playback.
@@ -1334,7 +1339,45 @@ function runTapRevealEvent(rec: Rec): void {
 function fullTextOf(rec: Rec): string {
   const el = rec.el
   if (el.type === 'countdown') return formatCountdown(el, rec.deadline ?? Date.now(), Date.now())
-  return localize(el.text)
+  return withProgress(rec, localize(el.text))
+}
+
+// ---------------------------------------------------------------------------
+// Progress text: `{%}` renders a progress bar's fill as "42%", `{progress}` as the
+// bare "42". The bar broadcasts what it SHOWS (emitProgressShown) with its animation
+// length, and the number counts there on the same clock, so the text never runs ahead
+// of the fill.
+// ---------------------------------------------------------------------------
+const PROGRESS_TOKEN = /\{%\}|\{progress\}/
+function hasProgressToken(el: SceneElement): boolean {
+  return el.type === 'text' && PROGRESS_TOKEN.test(localize(el.text))
+}
+function withProgress(rec: Rec, s: string): string {
+  if (!PROGRESS_TOKEN.test(s)) return s
+  const pct = String(Math.round(rec.progressPct ?? 0))
+  return s.replace(/\{%\}/g, pct + '%').replace(/\{progress\}/g, pct)
+}
+function countProgressTo(rec: Rec, to: number, ms: number): void {
+  if (rec.progressRaf) cancelAnimationFrame(rec.progressRaf)
+  rec.progressRaf = 0
+  const from = rec.progressPct ?? 0
+  const paint = (): void => {
+    paintTyped(rec)
+    rec.refit?.()
+  }
+  if (ms <= 0 || Math.round(from) === Math.round(to)) {
+    rec.progressPct = to
+    paint()
+    return
+  }
+  const t0 = performance.now()
+  const step = (now: number): void => {
+    const k = Math.min(1, (now - t0) / ms)
+    rec.progressPct = from + (to - from) * (1 - Math.pow(1 - k, 3))
+    paint()
+    rec.progressRaf = k < 1 ? requestAnimationFrame(step) : 0
+  }
+  rec.progressRaf = requestAnimationFrame(step)
 }
 const textChars = (s: string): string[] => Array.from(s)
 const sliceText = (s: string, chars: number): string => textChars(s).slice(0, chars).join('')
@@ -1843,6 +1886,27 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     const inner = rec.content?.firstElementChild as HTMLElement | null
     if (inner) inner.textContent = String(value)
   })
+
+  // `{%}` texts follow a progress bar. One linked by progressBarId follows that bar;
+  // any other follows the first bar in the scene. Resolved per report rather than at
+  // build, since the editor swaps rec.el in place as the text is typed.
+  const barShown = new Map<string, number>()
+  const progressBarOf = (rec: Rec): string | undefined => {
+    const bars = recs.filter((r) => r.el.type === 'game-mount' && r.el.game?.templateId === 'progressbar')
+    const id = rec.el.progressBarId
+    return id && bars.some((b) => b.el.id === id) ? id : bars[0]?.el.id
+  }
+  const offProgressShown = onProgressShown(root, (d) => {
+    barShown.set(d.barId, d.pct)
+    for (const rec of recs) if (hasProgressToken(rec.el) && progressBarOf(rec) === d.barId) countProgressTo(rec, d.pct, d.ms)
+  })
+  /** A text that only just gained `{%}` (typed in on the canvas) starts at what its bar
+   * already shows instead of 0 until the bar next moves. */
+  const seedProgress = (rec: Rec): void => {
+    if (rec.progressPct != null || !hasProgressToken(rec.el)) return
+    const bar = progressBarOf(rec)
+    if (bar && barShown.has(bar)) rec.progressPct = barShown.get(bar)
+  }
 
   // Fade elements in/out as the scratch game progresses. scratchShowAt = fade IN once progress
   // reaches it; scratchHideAt = fade OUT once progress reaches it; both = a visible window. The
@@ -2883,6 +2947,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
         if (!nel.typing && !phaseTypingConfig(nel, 'entrance') && !phaseTypingConfig(nel, 'exit') && rec.typeShown != null) stopTyping(rec, true)
         // text value/style + all geometry are re-applied by layoutRec below.
       }
+      for (const rec of recs) seedProgress(rec)
       for (const rec of recs) layoutRec(rec)
       // Same second pass layoutAll() does: layoutRec resizes the game-mount's BOX, but
       // a mounted game lays itself out from that box's pixel size and only finds out it
@@ -2902,6 +2967,8 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     get: (id) => byId.get(id),
     destroy() {
       offSetText()
+      offProgressShown()
+      for (const rec of recs) if (rec.progressRaf) cancelAnimationFrame(rec.progressRaf)
       offScratchProgress?.()
       offBookPage?.()
       picksOff?.()
@@ -3774,7 +3841,7 @@ function layoutText(rec: Rec, e: Effective): void {
   // Countdown elements show the live formatted time, not the static value.
   // Mid-typewriter, re-slice the LIVE string rather than snapping to the full value —
   // otherwise a resize (or a countdown tick) during the type-out would finish it early.
-  const fullText = rec.el.type === 'countdown' ? formatCountdown(rec.el, rec.deadline ?? Date.now(), Date.now()) : localize(t)
+  const fullText = rec.el.type === 'countdown' ? formatCountdown(rec.el, rec.deadline ?? Date.now(), Date.now()) : withProgress(rec, localize(t))
   inner.textContent = rec.typeShown != null ? fullText.slice(0, rec.typeShown) : fullText
   inner.style.fontFamily = cssFontFamily(t.fontFamily)
   inner.style.fontWeight = String(t.fontWeight ?? 400)
