@@ -79,8 +79,17 @@ describe('progress text', () => {
     const { host, root } = stageWith([bar('bar', { fillStyle: 'segmented', steps: 4 })], true)
     emitProgress(root, { gameId: 'card', value: 60, total: 100, continuous: true })
     const segs = Array.from(host.querySelectorAll<HTMLElement>('[data-id="bar"] [data-progress-seg]'))
+    const fills = Array.from(host.querySelectorAll<HTMLElement>('[data-id="bar"] [data-progress-seg-fill]'))
     expect(segs.length).toBe(4)
-    expect(segs.filter((s) => s.style.opacity === '1').length).toBe(2)
+    expect(fills.map((s) => s.style.width)).toEqual(['100%', '100%', '0%', '0%'])
+  })
+
+  it('keeps every empty segment on screen in its own empty-bar colour', () => {
+    const { host, root } = stageWith([bar('bar', { fillStyle: 'segmented', steps: 4, trackColor: '#ff0000', trackOpacity: 1 })], true)
+    emitProgress(root, { gameId: 'card', value: 1, total: 4 })
+    const segs = Array.from(host.querySelectorAll<HTMLElement>('[data-id="bar"] [data-progress-seg]'))
+    expect(segs.map((s) => s.style.opacity)).toEqual(['', '', '', ''])
+    expect(segs.every((s) => s.style.background.includes('#ff0000') || s.style.background.includes('rgb(255, 0, 0)'))).toBe(true)
   })
 
   it('follows the bar it is linked to when there are two', () => {
