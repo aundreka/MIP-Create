@@ -55,6 +55,7 @@ import { splitList } from '../../runtime/games/holdgauge'
 import type { ParamField } from '../../runtime/games/types'
 import type { AssetMap } from '../../runtime/types'
 import { importFont } from '../bridge'
+import { GradientField } from './GradientField'
 import {
   activeSceneDef,
   addAsset,
@@ -6406,7 +6407,8 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               <NumField label="Size" value={el.text.fontSizePx} onChange={(n) => setText({ fontSizePx: n })} />
               <NumField label="Weight" value={el.text.fontWeight ?? 700} step={100} onChange={(n) => setText({ fontWeight: n })} />
             </div>
-            <Swatches label="Text color" value={el.text.color} onChange={(c) => setText({ color: c ?? '#ffffff' })} />
+            {!(el.type === 'countdown' && el.text.gradient) && <Swatches label="Text color" value={el.text.color} onChange={(c) => setText({ color: c ?? '#ffffff' })} />}
+            {el.type === 'countdown' && <GradientField value={el.text.gradient} onChange={(g) => setText({ gradient: g })} />}
             <Row label="Align">
               <Select
                 value={el.text.align ?? 'center'}

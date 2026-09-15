@@ -38,6 +38,7 @@ import type { OneShotPhase, Phase } from './anim'
 import { applyImageCrop, createContainerContent, createImageContent, styleContainer } from './elements/image'
 import { applyBarFill, createBarContent } from './elements/bar'
 import { createTextContent } from './elements/text'
+import { applyTextGradient } from './elements/textGradient'
 import { createCtaContent } from './elements/cta'
 import { createButtonContent, tapFeedbackByNode, wireSceneNav, type TapFeedback } from './elements/button'
 import { createChoiceContent } from './elements/choice'
@@ -4000,6 +4001,9 @@ function layoutText(rec: Rec, e: Effective): void {
   inner.style.fontSize = t.fontSizePx * s + 'px'
   inner.style.letterSpacing = (t.letterSpacingPx ?? 0) * s + 'px'
   inner.style.setProperty('-webkit-text-stroke', t.strokePx ? t.strokePx * s + 'px ' + (t.strokeColor ?? '#000') : '')
+  // Gradient fill: clips a linear-gradient to the glyphs and moves the shadow into a
+  // drop-shadow filter so it sits behind the fill instead of over it.
+  applyTextGradient(inner, t.gradient, t.shadow)
   inner.style.whiteSpace = e.w != null || t.maxWidthPx ? 'pre-line' : 'pre'
   inner.style.maxWidth = t.maxWidthPx ? t.maxWidthPx * s + 'px' : ''
 

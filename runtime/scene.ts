@@ -376,6 +376,25 @@ export interface TextConfig {
   strokeColor?: string
   shadow?: string
   maxWidthPx?: number
+  // Gradient fill clipped to the glyphs. When set it replaces `color` (which stays
+  // as the solid fallback if the gradient is removed). See elements/textGradient.ts.
+  gradient?: TextGradient
+}
+
+// One colour stop: position along the gradient line (0–100 %), a hex colour and
+// its opacity (0–100 %, default 100).
+export interface GradientStop {
+  pos: number
+  color: string
+  opacity?: number
+}
+
+// A linear gradient: CSS angle in degrees (90 = left → right, the default) and
+// its stops in any order — the renderer sorts them by position.
+export interface TextGradient {
+  type: 'linear'
+  angleDeg?: number
+  stops: GradientStop[]
 }
 
 export type CtaPulsePreset = 'calm' | 'medium' | 'strong' | 'custom'
