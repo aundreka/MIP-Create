@@ -143,6 +143,13 @@ export interface ElementAnimations {
   // image can pop on 'configChange' while a price line or a headline reacts to the tap.
   configSelect?: AnimSpec
   configChange?: AnimSpec
+  // Replayed when a Swipe cards game in the same scene emits its three gameplay events:
+  // a card is swiped right, a card is swiped left, and the next card comes up. Like the
+  // combo ones these are authorable on ANY scene element, so a headline can pop on a like
+  // while the pile's backdrop reacts to every card.
+  swipeLike?: AnimSpec
+  swipeNope?: AnimSpec
+  swipeNext?: AnimSpec
   // Additional specs stacked ON TOP of the primary one in each phase, played together with it
   // (e.g. entrance = pop + shine). Empty/absent = just the primary. The primary must exist for
   // extras to apply; extras share the primary entrance's trigger.
@@ -163,6 +170,9 @@ export interface ElementAnimations {
   tapRevealExtra?: AnimSpec[]
   configSelectExtra?: AnimSpec[]
   configChangeExtra?: AnimSpec[]
+  swipeLikeExtra?: AnimSpec[]
+  swipeNopeExtra?: AnimSpec[]
+  swipeNextExtra?: AnimSpec[]
 }
 
 // ---- colour adjustment -----------------------------------------------------
@@ -603,6 +613,8 @@ export interface HandguideConfig {
   // (the start counts as a stop, so it taps there too before setting off again).
   // `periodMs` is the travel time of ONE leg and `tapMs` the length of one tap, so
   // the two halves of the gesture are timed independently.
+  // 'swipecards' presses on the card on top of a Swipe cards pile and mimes dragging it
+  // off to one side (`swipeDir`), walking down the pile as cards are swiped away.
   // 'combo' follows the Combo builder's live option and mimes dragging it into the
   // drop area, advancing to the next question's option on its own.
   // 'carousel' mimes the whole gesture a carousel asks for, in one loop: a swipe that
@@ -641,6 +653,7 @@ export interface HandguideConfig {
     | 'pinch'
     | 'brush'
     | 'scratchdrag'
+    | 'swipecards'
     | 'still'
     | 'hold'
   toX?: number
@@ -670,6 +683,9 @@ export interface HandguideConfig {
   // and most pointing-hand art, does). Art drawn the other way round points the pair
   // outward, and this puts it right without editing the image.
   pinchFlip?: boolean
+  // 'swipecards' only: which way the hand swipes. Absent = 'right' (the like gesture);
+  // 'alternate' swipes right on one loop and left on the next.
+  swipeDir?: 'right' | 'left' | 'alternate'
   // 'brush' mode only: extra offset of the hand from the brush (screen px; the hand already sits
   // BELOW the brush by default), and a rotation. The hand mimes a drag across the card.
   brushOffsetX?: number
@@ -955,6 +971,17 @@ export interface RevealRoleConfig {
    * being positioned. Play always starts with every one of them hidden, so this can
    * never leak into the playable. */
   showOnCanvas?: boolean
+}
+
+// Swipe cards: which part an ordinary placed element plays. Assigned from the GAME's
+// panel (see src/swipeSlots.ts), like the rest of this family.
+export interface SwipeRoleConfig {
+  gameId?: string
+  /** 'card' is one card of the pile; 'result' is an image — on any scene, usually the end
+   * card — replaced by the first card the player swipes right on. */
+  role: 'card' | 'result'
+  /** 'card' only: its place in the play order, 1-based (1 = the first card up). */
+  index?: number
 }
 
 // Catch: which part an ordinary placed element plays in a Catch game. Assigned from
@@ -1341,6 +1368,7 @@ export interface SceneElement {
   tapRole?: TapRoleConfig
   revealRole?: RevealRoleConfig
   catchRole?: CatchRoleConfig
+  swipeRole?: SwipeRoleConfig
   slot?: SlotConfig
   pick?: PickConfig
   fill?: FillConfig

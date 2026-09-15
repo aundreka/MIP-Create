@@ -23,6 +23,9 @@
 // the bar. `steps` overrides the count — set it to 4 on a six-obstacle board and the
 // bar (and so the scene) finishes two obstacles early.
 //
+// `fillStyle: 'bars'` draws one separate bar per step — each with its own empty track
+// and its own fill sweeping across it — rather than segments inside one shared track.
+//
 // A scratch card has no steps, only an area; it reports a fraction (`continuous`) of
 // the way to its reveal threshold, and the bar fills to exactly that — full at the
 // moment the card reveals.
@@ -91,6 +94,8 @@ export function createProgressBar(): GameModule {
   let fill: HTMLDivElement | null = null
   /** The segments, or empty in continuous mode. */
   let segs: HTMLDivElement[] = []
+  /** 'bars' only: each segment's own fill, index-aligned with `segs`. */
+  let segFills: HTMLDivElement[] = []
 
   // ---- logic ----
   /** 0 = however many the source says there are. */
@@ -118,7 +123,7 @@ export function createProgressBar(): GameModule {
   let trackBorderColor = '#ffffff'
   let trackPadPx = 0
   let trackShadow = ''
-  let fillStyle: 'continuous' | 'segmented' = 'continuous'
+  let fillStyle: 'continuous' | 'segmented' | 'bars' = 'continuous'
   let segmentGapPx = 6
   let fillColor = '#3ddc84'
   let fillColor2 = ''
@@ -161,23 +166,37 @@ export function createProgressBar(): GameModule {
    * segs.length, which cannot tell "a continuous fill is already built" apart from
    * "nothing is built yet" — both read as zero segments, and the early-out then
    * skipped building the fill at all, leaving an empty track on screen. */
-  let built: { style: 'continuous' | 'segmented'; count: number } | null = null
+  let built: { style: 'continuous' | 'segmented' | 'bars'; count: number } | null = null
 
   /** Rebuild the fill children. Only does work when the shape actually changes — a
    * source announcing its total for the first time, or the style being switched — so
    * the common case repaints nothing. */
   const buildFill = (): void => {
-    const want = fillStyle === 'segmented' ? steps() : 0
+    const want = fillStyle !== 'continuous' ? steps() : 0
     if (built && built.style === fillStyle && built.count === want) return
     built = { style: fillStyle, count: want }
     inner.textContent = ''
     segs = []
+    segFills = []
     fill = null
     if (want > 0) {
       for (let i = 0; i < want; i++) {
         const seg = document.createElement('div')
         seg.dataset.progressSeg = String(i + 1)
         seg.style.cssText = 'flex:1 1 0;min-width:0;box-sizing:border-box;transform-origin:center;'
+        if (fillStyle === 'bars') {
+          // A bar of its own: this node is its empty track, `box` is the padded window
+          // inside it, and the fill sweeps across that window.
+          seg.style.position = 'relative'
+          const box = document.createElement('div')
+          box.style.cssText = 'position:absolute;overflow:hidden;box-sizing:border-box;'
+          const f = document.createElement('div')
+          f.dataset.progressSegFill = String(i + 1)
+          f.style.cssText = 'position:absolute;top:0;bottom:0;box-sizing:border-box;width:0;'
+          box.appendChild(f)
+          seg.appendChild(box)
+          segFills.push(f)
+        }
         inner.appendChild(seg)
         segs.push(seg)
       }
@@ -208,12 +227,21 @@ export function createProgressBar(): GameModule {
     track.style.top = ((boxH - h) / 2).toFixed(1) + 'px'
     track.style.width = w.toFixed(1) + 'px'
     track.style.height = h.toFixed(1) + 'px'
-    track.style.background = withAlpha(trackColor, trackOpacity)
-    track.style.border = trackBorderPx > 0 ? `${(trackBorderPx * k).toFixed(1)}px solid ${withAlpha(trackBorderColor, trackOpacity)}` : ''
-    track.style.borderRadius = radiusPx(trackRadiusPx, w, h, k)
-    track.style.boxShadow = trackShadow ? shadowCssScaled(trackShadow, k) : ''
+    const bars = fillStyle === 'bars'
+    const trackBg = withAlpha(trackColor, trackOpacity)
+    const trackBorder = trackBorderPx > 0 ? `${(trackBorderPx * k).toFixed(1)}px solid ${withAlpha(trackBorderColor, trackOpacity)}` : ''
+    const trackShadowPx = trackShadow ? shadowCssScaled(trackShadow, k) : ''
+    // Separate bars: the empty-bar look moves onto every segment, and the box around
+    // them is only the row they sit in — unclipped, so each bar's own shadow shows.
+    track.style.background = bars ? '' : trackBg
+    track.style.border = bars ? '' : trackBorder
+    track.style.borderRadius = bars ? '' : radiusPx(trackRadiusPx, w, h, k)
+    track.style.boxShadow = bars ? '' : trackShadowPx
+    track.style.overflow = bars ? 'visible' : 'hidden'
+    inner.style.overflow = bars ? 'visible' : 'hidden'
 
-    const pad = trackPadPx * k
+    // Bars carry the padding inside each one instead; the row itself runs edge to edge.
+    const pad = bars ? 0 : trackPadPx * k
     // Explicit sides rather than the `inset` shorthand: the oldest WebViews these
     // playables land in do not know it, and a bar that ignores its padding there is
     // a silent visual regression rather than a crash.
@@ -221,7 +249,7 @@ export function createProgressBar(): GameModule {
     inner.style.right = pad.toFixed(1) + 'px'
     inner.style.top = pad.toFixed(1) + 'px'
     inner.style.bottom = pad.toFixed(1) + 'px'
-    inner.style.gap = fillStyle === 'segmented' ? (segmentGapPx * k).toFixed(1) + 'px' : ''
+    inner.style.gap = fillStyle !== 'continuous' ? (segmentGapPx * k).toFixed(1) + 'px' : ''
     inner.style.flexDirection = direction === 'rtl' ? 'row-reverse' : 'row'
 
     const paint = fillPaint(fillColor, fillColor2, fillAngleDeg)
@@ -230,11 +258,38 @@ export function createProgressBar(): GameModule {
     // box — otherwise a padded bar's fill would be rounder than the bar around it.
     const radius = radiusPx(fillRadiusPx, Math.max(0, w - pad * 2), Math.max(0, h - pad * 2), k)
     const shadow = fillShadow ? shadowCssScaled(fillShadow, k) : ''
-    for (const seg of segs) {
-      seg.style.background = paint
-      seg.style.border = border
-      seg.style.borderRadius = radius
-      seg.style.boxShadow = shadow
+    if (bars) {
+      const n = Math.max(1, segs.length)
+      const segW = Math.max(0, (w - segmentGapPx * k * (n - 1)) / n)
+      const segPad = (trackPadPx * k).toFixed(1) + 'px'
+      const segRadius = radiusPx(fillRadiusPx, Math.max(0, segW - trackPadPx * k * 2), Math.max(0, h - trackPadPx * k * 2), k)
+      segs.forEach((seg, i) => {
+        seg.style.background = trackBg
+        seg.style.border = trackBorder
+        seg.style.borderRadius = radiusPx(trackRadiusPx, segW, h, k)
+        seg.style.boxShadow = trackShadowPx
+        const f = segFills[i]
+        const box = f?.parentElement
+        if (!f || !box) return
+        box.style.left = segPad
+        box.style.right = segPad
+        box.style.top = segPad
+        box.style.bottom = segPad
+        box.style.borderRadius = segRadius
+        f.style.left = direction === 'rtl' ? 'auto' : '0'
+        f.style.right = direction === 'rtl' ? '0' : 'auto'
+        f.style.background = paint
+        f.style.border = border
+        f.style.borderRadius = segRadius
+        f.style.boxShadow = shadow
+      })
+    } else {
+      for (const seg of segs) {
+        seg.style.background = paint
+        seg.style.border = border
+        seg.style.borderRadius = radius
+        seg.style.boxShadow = shadow
+      }
     }
     if (fill) {
       fill.style.background = paint
@@ -266,6 +321,17 @@ export function createProgressBar(): GameModule {
       emitProgressShown(ctx.root, { barId: ctx.elementId ?? '', pct, ms })
     }
     segs.forEach((seg, i) => {
+      if (fillStyle === 'bars') {
+        // Every bar sweeps its own fill across. A continuous source can leave the bar it
+        // is currently crossing part-way full; a stepped one lands each bar whole.
+        const part = Math.max(0, Math.min(1, f * segs.length - i))
+        const sf = segFills[i]
+        if (sf) {
+          sf.style.transition = ms > 0 ? `width ${ms}ms ${fillEasing}` : ''
+          sf.style.width = (part * 100).toFixed(3) + '%'
+        }
+        return
+      }
       const on = i < shown
       seg.style.transition = ms > 0 ? `opacity ${ms}ms ease, scale ${ms}ms ${fillEasing}` : ''
       seg.style.opacity = on ? '1' : '0'
@@ -354,7 +420,7 @@ export function createProgressBar(): GameModule {
     const gained = lit > value
     value = lit
     paintValue(true)
-    if (gained && fillStyle === 'segmented') {
+    if (gained && fillStyle !== 'continuous') {
       pop()
       ctx.sfx.play('progressStep')
     }
@@ -382,7 +448,8 @@ export function createProgressBar(): GameModule {
         str(params.trackShadowColor, ''),
         params.trackShadowInset === true || params.trackShadowInset === 'true' ? '1' : '0',
       ].join('|')
-      fillStyle = str(params.fillStyle, 'continuous') === 'segmented' ? 'segmented' : 'continuous'
+      const style = str(params.fillStyle, 'continuous')
+      fillStyle = style === 'segmented' || style === 'bars' ? style : 'continuous'
       segmentGapPx = Math.max(0, Math.min(80, num(params.segmentGapPx, 6)))
       fillColor = str(params.fillColor, '#3ddc84')
       fillColor2 = str(params.fillColor2, '')
@@ -473,6 +540,7 @@ export function createProgressBar(): GameModule {
       ctx.root.innerHTML = ''
       built = null
       segs = []
+      segFills = []
       fill = null
       value = 0
       frac = 0
@@ -507,8 +575,8 @@ export const PROGRESSBAR_TEMPLATE: GameTemplate = {
     { key: 'trackShadowSpread', label: 'Shadow spread', type: 'number', min: -80, max: 80, step: 1, group: 'Empty bar', showIf: (p) => !!p.trackShadowColor },
     { key: 'trackShadowInset', label: 'Shadow inside the bar', type: 'boolean', group: 'Empty bar', showIf: (p) => !!p.trackShadowColor },
 
-    { key: 'fillStyle', label: 'Fill style', type: 'select', options: ['continuous', 'segmented'], group: 'Fill' },
-    { key: 'segmentGapPx', label: 'Gap between segments', type: 'number', min: 0, max: 80, step: 1, group: 'Fill', showIf: (p) => p.fillStyle === 'segmented' },
+    { key: 'fillStyle', label: 'Fill style (bars = a separate bar per step)', type: 'select', options: ['continuous', 'segmented', 'bars'], group: 'Fill' },
+    { key: 'segmentGapPx', label: 'Gap between segments', type: 'number', min: 0, max: 80, step: 1, group: 'Fill', showIf: (p) => p.fillStyle === 'segmented' || p.fillStyle === 'bars' },
     { key: 'fillColor', label: 'Fill colour', type: 'color', group: 'Fill' },
     { key: 'fillColor2', label: 'Fill colour 2 (none = flat)', type: 'color', group: 'Fill' },
     { key: 'fillAngleDeg', label: 'Gradient angle', type: 'number', min: 0, max: 360, step: 5, group: 'Fill', showIf: (p) => !!p.fillColor2 },

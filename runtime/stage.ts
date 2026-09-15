@@ -52,6 +52,7 @@ import { promoLabelFor } from './elements/promoCalendar'
 import { createGameHost, type GameHost } from './gameHost'
 import { mulberry32 } from './games/types'
 import { COMBO_OFF_CLASS } from './games/combo'
+import { onSwipeResult, readSwipeResult, type SwipeResult } from './games/swipechannel'
 import { onProgressShown } from './games/progresschannel'
 import { attachScratchCover } from './reveal'
 import { emit, on } from './emitter'
@@ -212,6 +213,7 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     | 'pinch'
     | 'brush'
     | 'scratchdrag'
+    | 'swipecards'
     | 'still'
     | 'hold' = 'tap'
   if (cfg.mode === 'still') {
@@ -260,6 +262,8 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     kind = 'brush'
   } else if (cfg.mode === 'scratchdrag') {
     kind = 'scratchdrag'
+  } else if (cfg.mode === 'swipecards') {
+    kind = 'swipecards'
   }
   // A hold has to read as a HOLD, so its default cycle is longer than a tap's.
   const travel =
@@ -271,15 +275,17 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
           ? 1500
           : kind === 'combo'
             ? 1900
-            : kind === 'pinch'
-              ? 1400
-              : kind === 'dragclean' || kind === 'scratchdrag'
-                ? 1800
-                : kind === 'carousel'
-                  ? 2600
-                  : kind === 'hold'
-                    ? 2000
-                    : 900
+            : kind === 'swipecards'
+              ? 1600
+              : kind === 'pinch'
+                ? 1400
+                : kind === 'dragclean' || kind === 'scratchdrag'
+                  ? 1800
+                  : kind === 'carousel'
+                    ? 2600
+                    : kind === 'hold'
+                      ? 2000
+                      : 900
   const cubic = (t: number): number => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
   const EASE: Record<string, (t: number) => number> = {
     linear: (t) => t,
@@ -665,6 +671,33 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
       swell = g.carry
       // Fade out after the release so the loop's jump back to the option is unseen.
       content.style.opacity = g.alpha.toFixed(3)
+    } else if (kind === 'swipecards') {
+      // Mime a swipe on the card on top of a Swipe cards pile: press on its middle, drag
+      // off toward one side, lift. The game re-points data-swipe-hint at the next card
+      // after every swipe, so the hand walks down the pile by itself. Only the HAND moves —
+      // the card stays put, so the hint never looks like a swipe that already happened.
+      const cardEl = root.querySelector<HTMLElement>('[data-swipe-hint]')
+      if (!cardEl) {
+        content.style.opacity = '0'
+        raf = requestAnimationFrame(frame)
+        return
+      }
+      const cardRect = cardEl.getBoundingClientRect()
+      const guideRect = rec.outer.getBoundingClientRect()
+      const loop = Math.floor((now - t0) / travel)
+      const dir = cfg.swipeDir === 'left' || (cfg.swipeDir === 'alternate' && loop % 2 === 1) ? -1 : 1
+      const g = dragGesture(((now - t0) % travel) / travel)
+      const fromX = cardRect.left + cardRect.width / 2
+      const fromY = cardRect.top + cardRect.height / 2
+      // A little over half a card width, with a slight rise: a thumb swiping arcs upward.
+      const fingerX = fromX + dir * cardRect.width * 0.55 * g.travel
+      const fingerY = fromY - cardRect.height * 0.05 * g.travel
+      ox = fingerX - (guideRect.left + guideRect.width * 0.22)
+      oy = fingerY - (guideRect.top + guideRect.height * 0.12)
+      press = g.press
+      swell = g.carry
+      // Fade out after the lift so the loop's jump back to the card's middle is unseen.
+      content.style.opacity = g.alpha.toFixed(3)
     } else if (kind === 'dragclean') {
       // Carry the Drag to clean tool onto the obstacle it is nearest to and wipe.
       //
@@ -855,7 +888,7 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     }
     // A drag softens the contact dip to leave room for the carry swell; every other
     // mode keeps the original press-only scale.
-    const dip = kind === 'combo' || kind === 'dragclean' || kind === 'scratchdrag' ? 0.1 : 0.18
+    const dip = kind === 'combo' || kind === 'dragclean' || kind === 'scratchdrag' || kind === 'swipecards' ? 0.1 : 0.18
     const squash = (1 - press * dip + swell * 0.14).toFixed(3)
     content.style.transform = `translate(${Math.round(ox)}px,${Math.round(oy)}px) scale(${squash})`
     // scaleX(-1) LAST, so it composes about the shared 22%/12% origin and pins the
@@ -1362,6 +1395,38 @@ function runComboEvent(rec: Rec, event: 'comboPick' | 'comboDrop' | 'comboNext')
   applyLightray(rec, event)
 }
 
+function runSwipeEvent(rec: Rec, event: 'swipeLike' | 'swipeNope' | 'swipeNext'): void {
+  runOneShot(rec, event)
+  applyLightray(rec, event)
+}
+
+/**
+ * Point a Swipe cards RESULT image at the card the player liked, now and whenever that
+ * changes. The pick travels over the swipe result channel, so this works the same for a
+ * result beside the pile and one on a later end card built long after the swipe.
+ *
+ * Until something is liked — and if nothing ever is — the image keeps its own
+ * placeholder picture. Returns the unsubscribe.
+ */
+function bindSwipeResult(img: HTMLImageElement, gameId: string): () => void {
+  const placeholder = img.getAttribute('src') ?? ''
+  const apply = (r: SwipeResult): void => {
+    if (r.src) {
+      img.src = r.src
+      img.style.objectFit = r.fit
+      img.dataset.swipeResult = '1'
+    } else {
+      if (placeholder) img.src = placeholder
+      else img.removeAttribute('src')
+      img.style.objectFit = ''
+      delete img.dataset.swipeResult
+    }
+  }
+  const current = readSwipeResult(gameId)
+  if (current.src) apply(current)
+  return onSwipeResult(gameId, apply)
+}
+
 function runConfigEvent(rec: Rec, event: 'configSelect' | 'configChange'): void {
   runOneShot(rec, event)
   applyLightray(rec, event)
@@ -1726,6 +1791,8 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
   let picksOff: (() => void) | null = null // selection-store subscription for fill slots
   let scratchWired = false // scratch-cover coatings attached once
   const scratchDisposers: (() => void)[] = []
+  /** Swipe cards result images listening for the liked card. */
+  const swipeResultDisposers: (() => void)[] = []
   const tallies = new Map<string, number>() // running reveal totals, keyed by text element id
 
   // Built-in full-screen dim / blur overlay for win/lose scenes.
@@ -1842,6 +1909,13 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       if (el.cleanRole.gameId) outer.dataset.cleanGameId = el.cleanRole.gameId
       if (el.cleanRole.ofId) outer.dataset.cleanOf = el.cleanRole.ofId
     }
+    if (el.swipeRole) {
+      // Swipe cards tags. Nothing starts hidden: the cards are the pile the author is
+      // arranging, and a result shows its own placeholder until a card is liked.
+      outer.dataset.swipeRole = el.swipeRole.role
+      if (el.swipeRole.gameId) outer.dataset.swipeGameId = el.swipeRole.gameId
+      if (el.swipeRole.index) outer.dataset.swipeIndex = String(el.swipeRole.index)
+    }
 
     const anim = document.createElement('div')
     anim.className = 'pa-el-anim'
@@ -1894,6 +1968,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       el.tapRole?.role !== 'obstacle' &&
       el.catchRole?.role !== 'box' &&
       el.revealRole?.role !== 'cover' &&
+      el.swipeRole?.role !== 'card' &&
       !hasTapAnim(el)
     if (nonInteractive) {
       outer.style.pointerEvents = 'none'
@@ -1908,6 +1983,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     if (el.type === 'confetti' && content) rec.confetti = createConfetti(content as HTMLCanvasElement, () => rec.el)
     recs.push(rec)
     byId.set(el.id, rec)
+    if (el.swipeRole?.role === 'result' && content instanceof HTMLImageElement) swipeResultDisposers.push(bindSwipeResult(content, el.swipeRole.gameId ?? ''))
     recByOuter.set(outer, rec)
   }
 
@@ -1999,7 +2075,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
   }
   /** Templates whose win IS the player's own action, so their win sound plays at once
    * instead of waiting for the win animation's lead-in. */
-  const WIN_SFX_ON_THE_BEAT = new Set(['basket', 'carousel', 'catch', 'dragclean', 'tapremove', 'tapreveal'])
+  const WIN_SFX_ON_THE_BEAT = new Set(['basket', 'carousel', 'catch', 'dragclean', 'tapremove', 'tapreveal', 'swipecards'])
   const GAME_WIN_SFX_BIAS_MS = 500
   const gameWinSoundDelayMs = (rec?: Rec): number => {
     const phaseDelay = rec ? phaseLeadDelayMs(rec.el, 'gameWin') : 0
@@ -2023,6 +2099,11 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
   // art and any supporting copy can animate on pick / drop / next-question.
   const fireComboEvent = (event: 'comboPick' | 'comboDrop' | 'comboNext'): void => {
     broadcastGameEvent(event, (target) => runComboEvent(target, event))
+  }
+
+  // Swipe cards: a like, a pass, and the next card coming up.
+  const fireSwipeEvent = (event: 'swipeLike' | 'swipeNope' | 'swipeNext'): void => {
+    broadcastGameEvent(event, (target) => runSwipeEvent(target, event))
   }
 
   // The Configurator broadcasts the same way: 'configSelect' every time an option is
@@ -2057,7 +2138,10 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       | 'cleanWipe'
       | 'cleanDrop'
       | 'tapRemove'
-      | 'tapReveal',
+      | 'tapReveal'
+      | 'swipeLike'
+      | 'swipeNope'
+      | 'swipeNext',
     run: (target: Rec) => void,
   ): void {
     for (const target of recs) {
@@ -2434,6 +2518,10 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
               }
               if (event === 'comboPick' || event === 'comboDrop' || event === 'comboNext') {
                 fireComboEvent(event)
+                return
+              }
+              if (event === 'swipeLike' || event === 'swipeNope' || event === 'swipeNext') {
+                fireSwipeEvent(event)
                 return
               }
               if (event === 'configSelect' || event === 'configChange') {
@@ -3027,6 +3115,8 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       enterSfxTimers.length = 0
       for (const dispose of scratchDisposers) dispose()
       scratchDisposers.length = 0
+      for (const dispose of swipeResultDisposers) dispose()
+      swipeResultDisposers.length = 0
       document.removeEventListener('visibilitychange', onVisible)
       fontsAlive = false
       for (const rec of recs) {

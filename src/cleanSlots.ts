@@ -58,6 +58,7 @@ export function assignCleanSlot(args: AssignCleanArgs): CleanSlotEdit[] {
       basketItem: undefined,
       configRole: undefined,
       catchRole: undefined,
+      swipeRole: undefined,
       drag: undefined,
     },
   })

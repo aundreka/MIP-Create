@@ -277,6 +277,9 @@ export type Phase =
   | 'tapReveal'
   | 'configSelect'
   | 'configChange'
+  | 'swipeLike'
+  | 'swipeNope'
+  | 'swipeNext'
 export function phaseSpecs(el: SceneElement, phase: Phase): AnimSpec[] {
   const a = el.animations
   if (!a) return []
@@ -310,6 +313,9 @@ export function phaseSpecs(el: SceneElement, phase: Phase): AnimSpec[] {
             | 'tapRevealExtra'
             | 'configSelectExtra'
             | 'configChangeExtra'
+            | 'swipeLikeExtra'
+            | 'swipeNopeExtra'
+            | 'swipeNextExtra'
         ] ?? legacyExtra)
   if (Array.isArray(extra)) for (const s of extra) if (s) out.push(s)
   return out
@@ -336,6 +342,9 @@ const LIGHTRAY_PHASES: Phase[] = [
   'tapReveal',
   'configSelect',
   'configChange',
+  'swipeLike',
+  'swipeNope',
+  'swipeNext',
 ]
 
 /** The lightray spec from ANY phase, WITH the phase that authored it — drives the .pa-lightray
@@ -531,6 +540,9 @@ export type OneShotPhase =
   | 'tapReveal'
   | 'configSelect'
   | 'configChange'
+  | 'swipeLike'
+  | 'swipeNope'
+  | 'swipeNext'
 function composeOneShotAnim(el: SceneElement, phase: OneShotPhase): string {
   return composeOneShotAnimParts(el, phase).join(', ') || 'none'
 }
@@ -550,6 +562,9 @@ const ONE_SHOT_PHASES: OneShotPhase[] = [
   'tapReveal',
   'configSelect',
   'configChange',
+  'swipeLike',
+  'swipeNope',
+  'swipeNext',
 ]
 
 /**

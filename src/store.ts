@@ -333,6 +333,17 @@ export function patchElement(id: string, patch: Partial<SceneElement>): void {
   if (el?.sync && !('sync' in patch)) return patchSynced(el.sync.key, patch)
   mapEl(id, (e) => ({ ...e, ...patch }))
 }
+/**
+ * Patch an element wherever it lives. The active scene goes through patchElement, so
+ * variants, sync and locale editing all behave as usual; an element on another scene is
+ * edited directly. For the few wirings that reach across scenes — a Swipe cards result
+ * shown on the end card is assigned from the game's panel on the scene before it.
+ */
+export function patchElementAnywhere(id: string, patch: Partial<SceneElement>): void {
+  if (activeSceneDef().elements.some((e) => e.id === id)) return patchElement(id, patch)
+  const scenes = state.project.scenes.map((sd) => (sd.elements.some((e) => e.id === id) ? { ...sd, elements: sd.elements.map((e) => (e.id === id ? { ...e, ...patch } : e)) } : sd))
+  set({ dirty: true, project: { ...state.project, scenes } })
+}
 export function patchLandscape(id: string, patch: OrientationOverride): void {
   const vid = getActiveVariant()
   if (vid) {

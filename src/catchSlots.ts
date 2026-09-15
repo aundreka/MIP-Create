@@ -67,6 +67,7 @@ export function assignCatchSlot(args: AssignCatchArgs): CatchSlotEdit[] {
       cleanRole: undefined,
       tapRole: undefined,
       revealRole: undefined,
+      swipeRole: undefined,
       basketItem: undefined,
       configRole: undefined,
       drag: undefined,

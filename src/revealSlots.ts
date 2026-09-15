@@ -59,6 +59,7 @@ export function assignRevealSlot(args: AssignRevealArgs): RevealSlotEdit[] {
       basketItem: undefined,
       configRole: undefined,
       catchRole: undefined,
+      swipeRole: undefined,
       drag: undefined,
     },
   })
@@ -113,6 +114,7 @@ export function ensureCover(elements: SceneElement[], gameId: string, nextId: st
         tapRole: undefined,
         basketItem: undefined,
         catchRole: undefined,
+        swipeRole: undefined,
         drag: undefined,
       },
     },

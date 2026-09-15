@@ -69,6 +69,7 @@ export function assignConfigSlot(args: AssignConfigArgs): ConfigSlotEdit[] {
       tapRole: undefined,
       revealRole: undefined,
       catchRole: undefined,
+      swipeRole: undefined,
       drag: undefined,
     },
   })

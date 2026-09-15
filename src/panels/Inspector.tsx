@@ -72,6 +72,7 @@ import {
   groupSelected,
   pasteStyle,
   patchElement,
+  patchElementAnywhere,
   patchGeometry,
   patchHeader,
   resetLocaleLayout,
@@ -103,6 +104,8 @@ import { idealInk } from '../svgAssets'
 import { setPreviewDate, todayKey, usePreviewDate } from '../uiState'
 import {
   AlignCenterHorizontal,
+  ArrowDown,
+  ArrowUp,
   Crosshair,
   Eye,
   EyeOff,
@@ -136,6 +139,19 @@ import {
   setCanvasVisible,
   type ComboSlotEdit,
 } from '../comboSlots'
+import {
+  assignSwipeCard,
+  assignSwipeResult,
+  moveSwipeCard,
+  nextSwipeIndex,
+  swipeCandidates,
+  swipeCards,
+  swipeOptionLabel,
+  swipeResultCandidates,
+  swipeResults,
+  swipeSlotSummary,
+  type SwipeSlotEdit,
+} from '../swipeSlots'
 import {
   assignConfigSlot,
   configActiveKey,
@@ -676,6 +692,8 @@ function ElementSound(props: { el: SceneElement }): JSX.Element {
   const hasTapRemove = scene.elements.some((candidate) => candidate.game?.templateId === 'tapremove')
   const isTapReveal = el.game?.templateId === 'tapreveal'
   const hasTapReveal = scene.elements.some((candidate) => candidate.game?.templateId === 'tapreveal')
+  const isSwipeCards = el.game?.templateId === 'swipecards'
+  const hasSwipeCards = scene.elements.some((candidate) => candidate.game?.templateId === 'swipecards')
   const isProgressBar = el.game?.templateId === 'progressbar'
   const hasProgressBar = scene.elements.some((candidate) => candidate.game?.templateId === 'progressbar')
   const isNameInput = el.game?.templateId === 'nameinput'
@@ -754,6 +772,14 @@ function ElementSound(props: { el: SceneElement }): JSX.Element {
     ...(isTapRemove ? [{ value: 'onReveal', label: 'When the game is won' }] : []),
     ...(hasTapReveal ? [{ value: 'tapReveal', label: 'When a cover is tapped open' }] : []),
     ...(isTapReveal ? [{ value: 'onReveal', label: 'When the game is won' }] : []),
+    ...(hasSwipeCards
+      ? [
+          { value: 'swipeLike', label: 'When a card is swiped right' },
+          { value: 'swipeNope', label: 'When a card is swiped left' },
+          { value: 'swipeNext', label: 'When the next card comes up' },
+        ]
+      : []),
+    ...(isSwipeCards ? [{ value: 'onReveal', label: 'When the game is won' }] : []),
     ...(hasProgressBar ? [{ value: 'progressStep', label: 'When the progress bar gains a step' }] : []),
     ...(isProgressBar ? [{ value: 'onReveal', label: 'When the bar fills up' }] : []),
     ...(isNameInput
@@ -2047,6 +2073,119 @@ function TapRevealSetup({ params, setParam, elementId, siblings }: TapRevealSetu
             />
           </Row>
           <div className="hint pad">One step per tap. Leave it on “every bar” unless this screen has more than one.</div>
+        </>
+      )}
+      <div className="group-title2">Feel &amp; timing</div>
+    </>
+  )
+}
+
+// ---- Swipe cards: the pile, and where the liked card is shown ----------------
+// Cards are elements already placed on the canvas, listed here in play order — card 1 is
+// the first one up. Where each sits on the canvas is its slot in the pile, so a fanned or
+// tilted stack is arranged by eye rather than typed in.
+//
+// The RESULT is picked from EVERY scene, because it normally lives on the end card rather
+// than beside the pile; the liked card's picture reaches it over the swipe result channel.
+interface SwipeCardsSetupProps {
+  params: Record<string, unknown>
+  setParam: (k: string, v: unknown) => void
+  elementId: string
+  siblings: SceneElement[]
+}
+function SwipeCardsSetup({ params, setParam, elementId, siblings }: SwipeCardsSetupProps): JSX.Element {
+  const { project, activeSceneId } = useEditorState()
+  const cards = swipeCards(siblings, elementId)
+  const candidates = swipeCandidates(siblings)
+  const bars = siblings.filter((e) => e.type === 'game-mount' && e.game?.templateId === 'progressbar')
+  const result = swipeResults(project.scenes, elementId)[0]
+  const resultChoices = swipeResultCandidates(project.scenes)
+  const win = Number(params.winSwipes ?? 0)
+
+  const apply = (edits: SwipeSlotEdit[]): void => {
+    if (!edits.length) return
+    beginTransaction()
+    for (const e of edits) patchElementAnywhere(e.id, e.patch)
+    endTransaction()
+  }
+
+  const choices = (current: SceneElement | undefined): { value: string; label: string }[] => [
+    { value: '', label: current ? '— remove —' : '— none —' },
+    ...candidates.map((e) => ({ value: e.id, label: swipeOptionLabel(e) + (current && e.id === current.id ? ' ✓' : '') })),
+  ]
+
+  const hint = 'An element placed on the canvas. Where it sits is its place in the pile; card 1 is on top and swiped first.'
+  const row = (label: string, current: SceneElement | undefined, index: number, i: number): JSX.Element => (
+    <div className="combo-slot" key={current?.id ?? 'add'}>
+      <span title={hint}>{label}</span>
+      <Select value={current?.id ?? ''} onChange={(v) => apply(assignSwipeCard({ nextId: v, current, gameId: elementId, index }))} options={choices(current)} title={hint} />
+      <span className="combo-slot-actions">
+        {current && i > 0 && (
+          <button className="icon-btn" title="Earlier in the pile" onClick={() => apply(moveSwipeCard(cards, i, i - 1))}>
+            <Icon icon={ArrowUp} size={13} />
+          </button>
+        )}
+        {current && i < cards.length - 1 && (
+          <button className="icon-btn" title="Later in the pile" onClick={() => apply(moveSwipeCard(cards, i, i + 1))}>
+            <Icon icon={ArrowDown} size={13} />
+          </button>
+        )}
+        {current && (
+          <button className="icon-btn" title={`Select “${current.name || current.id}” on the canvas`} onClick={() => selectOnly(current.id)}>
+            <Icon icon={ScanSearch} size={13} />
+          </button>
+        )}
+      </span>
+    </div>
+  )
+
+  const resultHint = 'An image on any screen — usually the end card — replaced by the first card the player swipes right on. If they like none, it keeps its own picture.'
+  return (
+    <>
+      <div className="group-title2">Cards</div>
+      {cards.map((c, i) => row(`Card ${i + 1}`, c, c.swipeRole?.index ?? i + 1, i))}
+      {row(`Card ${cards.length + 1}`, undefined, nextSwipeIndex(siblings, elementId), cards.length)}
+      <div className="hint pad">
+        {cards.length === 0
+          ? 'Pick the elements to swipe through, top card first. Stack or fan them on the canvas the way the pile should look.'
+          : `${win > 0 && win < cards.length ? win : cards.length} swipe${cards.length === 1 ? '' : 's'} to finish. Card 1 is on top; the order here decides the stacking, whatever the layer order.`}
+      </div>
+      <div className="group-title2">Result</div>
+      <div className="combo-slot">
+        <span title={resultHint}>Liked card</span>
+        <Select
+          value={result?.el.id ?? ''}
+          onChange={(v) => apply(assignSwipeResult(project.scenes, elementId, v))}
+          title={resultHint}
+          options={[
+            { value: '', label: result ? '— remove —' : '— none —' },
+            ...resultChoices.map(({ scene, el }) => ({ value: el.id, label: `${scene.name || scene.id} · ${swipeOptionLabel(el)}` + (el.id === result?.el.id ? ' ✓' : '') })),
+          ]}
+        />
+        <span className="combo-slot-actions">
+          {result && result.scene.id === activeSceneId && (
+            <button className="icon-btn" title={`Select “${result.el.name || result.el.id}” on the canvas`} onClick={() => selectOnly(result.el.id)}>
+              <Icon icon={ScanSearch} size={13} />
+            </button>
+          )}
+        </span>
+      </div>
+      <div className="hint pad">
+        {result
+          ? `On “${result.scene.name || result.scene.id}”. It keeps its own picture until a card is swiped right on. Leave it uncropped so the card fits it cleanly.`
+          : 'Optional. An image — usually on the end card — that shows the first look the player liked.'}
+      </div>
+      {bars.length > 0 && (
+        <>
+          <div className="group-title2">Progress bar</div>
+          <Row label="Fills which bar">
+            <Select
+              value={String(params.progressGameId ?? '')}
+              onChange={(v) => setParam('progressGameId', v)}
+              options={[{ value: '', label: 'Every bar in this screen' }, ...bars.map((b) => ({ value: b.id, label: b.name || b.id }))]}
+            />
+          </Row>
+          <div className="hint pad">One step per swipe, either direction. Set the bar&rsquo;s Fill style to “bars” for a separate bar per card.</div>
         </>
       )}
       <div className="group-title2">Feel &amp; timing</div>
@@ -3715,6 +3854,9 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
         | 'cleanDrop'
         | 'tapRemove'
         | 'tapReveal'
+        | 'swipeLike'
+        | 'swipeNope'
+        | 'swipeNext'
         | 'configSelect'
         | 'configChange',
       primary: AnimSpec | undefined,
@@ -3880,6 +4022,26 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               onChange={(primary, ex) => patchAllPhase('tapReveal', primary, ex)}
             />
           )}
+          {state.scene.elements.some((e) => e.game?.templateId === 'swipecards') &&
+            (
+              [
+                ['swipeLike', 'On card swiped right'],
+                ['swipeNope', 'On card swiped left'],
+                ['swipeNext', 'On next card up'],
+              ] as const
+            ).map(([phase, title]) => (
+              <AnimPhase
+                key={phase}
+                title={title}
+                primary={first?.animations?.[phase]}
+                extra={first?.animations?.[`${phase}Extra`]}
+                presets={NODE_PRESETS}
+                extraPresets={NODE_PRESETS}
+                defaultSpec={{ preset: 'pop', durationMs: 300, delayMs: 0, easing: 'ease-out' }}
+                defaultExtraSpec={{ preset: 'shine', durationMs: 700, delayMs: 0, easing: 'ease-in-out' }}
+                onChange={(primary, ex) => patchAllPhase(phase, primary, ex)}
+              />
+            ))}
           {state.scene.elements.some((e) => e.game?.templateId === 'configurator') && (
             <>
               <AnimPhase
@@ -4821,6 +4983,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                   {tpl.id === 'dragclean' && <DragCleanSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
                   {tpl.id === 'tapremove' && <TapRemoveSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
                   {tpl.id === 'tapreveal' && <TapRevealSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
+                  {tpl.id === 'swipecards' && <SwipeCardsSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
                   {tpl.id === 'progressbar' && (
                     <ProgressBarSetup
                       params={params}
@@ -5275,6 +5438,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                         tapRole: v ? undefined : el.tapRole,
                         revealRole: v ? undefined : el.revealRole,
                         catchRole: v ? undefined : el.catchRole,
+                        swipeRole: v ? undefined : el.swipeRole,
                       })
                     }
                   />
@@ -5330,6 +5494,26 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                       Tap to reveal: this element is <b>{where}</b>.
                     </div>
                     {game && (
+                      <button className="btn" style={{ width: '100%', marginTop: 4 }} onClick={() => selectOnly(game.id)}>
+                        Edit in “{game.name || game.id}”
+                      </button>
+                    )}
+                  </>
+                )
+              })()}
+            {el.swipeRole &&
+              (() => {
+                // Read-only on purpose: which element plays which part is chosen in the
+                // Swipe cards game's own panel, so one screen owns the whole wiring.
+                const where = swipeSlotSummary(el.swipeRole)
+                const game = state.project.scenes.flatMap((sd) => sd.elements).find((c) => c.id === el.swipeRole?.gameId)
+                const here = activeSceneDef(state)?.elements.some((c) => c.id === game?.id)
+                return (
+                  <>
+                    <div className="hint pad">
+                      Swipe cards: this element is <b>{where}</b>.
+                    </div>
+                    {game && here && (
                       <button className="btn" style={{ width: '100%', marginTop: 4 }} onClick={() => selectOnly(game.id)}>
                         Edit in “{game.name || game.id}”
                       </button>
@@ -5407,6 +5591,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                   cleanRole: v ? undefined : el.cleanRole,
                   tapRole: v ? undefined : el.tapRole,
                   revealRole: v ? undefined : el.revealRole,
+                  swipeRole: v ? undefined : el.swipeRole,
                 })
               }
             />
@@ -5621,6 +5806,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                     { value: 'configurator', label: 'Configurator (tap through the groups)' },
                     { value: 'pinch', label: 'Pinch (two mirrored hands close on the target)' },
                     { value: 'carousel', label: 'Carousel (swipe, then tap the centre)' },
+                    { value: 'swipecards', label: 'Swipe cards (swipe the top card left or right)' },
                     { value: 'brush', label: 'Point at the scratch brush (after its intro)' },
                     { value: 'scratchdrag', label: 'Scratch card (drag the brush to the scratch area)' },
                     { value: 'still', label: 'Still (no movement at all)' },
@@ -5634,6 +5820,24 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                     The second hand is a mirrored copy of this one, so both use the same image — swap it above and both change. They point INWARD when the hand art has its body to
                     the right of its fingertip, which most pointing-hand art does; turn this on if yours is drawn the other way round and the pair points outward. It follows
                     whatever the screen&rsquo;s Tap to reveal, Tap to remove or Drag to clean board still has waiting.
+                  </div>
+                </>
+              )}
+              {hg.mode === 'swipecards' && (
+                <>
+                  <Row label="Swipes">
+                    <Select
+                      value={hg.swipeDir ?? 'right'}
+                      onChange={(v) => setHg({ swipeDir: v === 'right' ? undefined : (v as NonNullable<HandguideConfig['swipeDir']>) })}
+                      options={[
+                        { value: 'right', label: 'Right (like)' },
+                        { value: 'left', label: 'Left (pass)' },
+                        { value: 'alternate', label: 'Right, then left, alternating' },
+                      ]}
+                    />
+                  </Row>
+                  <div className="hint pad">
+                    Presses on the card on top of the screen&rsquo;s Swipe cards pile and mimes dragging it off that side, moving down the pile as cards go. Only the hand moves.
                   </div>
                 </>
               )}
@@ -6885,6 +7089,33 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
             <div className="hint pad">
               Fires while the cover is still visible, so an animation here plays before it leaves. The revealed image has its own fade-in under the game&rsquo;s settings; give it
               an “Entrance” only if you want something on top of that.
+            </div>
+          </>
+        )}
+        {state.scene.elements.some((e) => e.game?.templateId === 'swipecards') && (
+          <>
+            {(
+              [
+                ['swipeLike', 'On card swiped right'],
+                ['swipeNope', 'On card swiped left'],
+                ['swipeNext', 'On next card up'],
+              ] as const
+            ).map(([phase, title]) => (
+              <AnimPhase
+                key={phase}
+                title={title}
+                primary={el.animations?.[phase]}
+                extra={el.animations?.[`${phase}Extra`]}
+                presets={NODE_PRESETS}
+                extraPresets={NODE_PRESETS}
+                defaultSpec={{ preset: 'pop', durationMs: 300, delayMs: 0, easing: 'ease-out' }}
+                defaultExtraSpec={{ preset: 'shine', durationMs: 700, delayMs: 0, easing: 'ease-in-out' }}
+                onChange={(primary, ex) => patchElement(id, { animations: { ...(el.animations ?? {}), [phase]: primary, [`${phase}Extra`]: ex.length ? ex : undefined } })}
+              />
+            ))}
+            <div className="hint pad">
+              Fire on every element in the screen, not just the cards. A swiped card is already flying off when these play, so animate the headline, the next card or the
+              backdrop rather than the card that left.
             </div>
           </>
         )}

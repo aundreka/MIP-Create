@@ -41,6 +41,7 @@ import { TAPREVEAL_TEMPLATE } from './tapreveal'
 import { PROGRESSBAR_TEMPLATE } from './progressbar'
 import { NAMEINPUT_TEMPLATE } from './nameinput'
 import { NAMERESULT_TEMPLATE } from './nameresult'
+import { SWIPECARDS_TEMPLATE } from './swipecards'
 
 export const GAME_TEMPLATES: GameTemplate[] = [
   FLIPBOOK_TEMPLATE,
@@ -70,6 +71,7 @@ export const GAME_TEMPLATES: GameTemplate[] = [
   SLIDER_TEMPLATE,
   HOLDGAUGE_TEMPLATE,
   SWIPE_TEMPLATE,
+  SWIPECARDS_TEMPLATE,
   CAROUSEL_TEMPLATE,
   WHACK_TEMPLATE,
   THOUGHTWHACK_TEMPLATE,
