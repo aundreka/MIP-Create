@@ -42,6 +42,33 @@ export function assignSwipeCard(args: { nextId: string; current: SceneElement | 
   return edits
 }
 
+/** The roles that are lists rather than a slot: the marks, and the Yes / No buttons. */
+export type SwipeExtraRole = 'like' | 'nope' | 'yes' | 'no'
+
+/** Put `nextId` in the mark or button slot `current` holds, or add it as one more of
+ * `role`; '' releases `current`. Buttons stay visible — they are part of the screen. */
+export function assignSwipeMark(args: { nextId: string; current: SceneElement | undefined; gameId: string; role: SwipeExtraRole }): SwipeSlotEdit[] {
+  const { nextId, current, gameId, role } = args
+  if (current?.id === nextId) return []
+  const edits: SwipeSlotEdit[] = []
+  if (current) edits.push({ id: current.id, patch: { swipeRole: undefined } })
+  if (!nextId) return edits
+  // Shown on the canvas from the start: a mark is placed by eye over a card, so it has to
+  // be visible to be placed. The eye in the panel hides it again once it sits right.
+  edits.push({ id: nextId, patch: { swipeRole: { gameId, role, showOnCanvas: role === 'like' || role === 'nope' ? true : undefined }, ...OTHER_ROLES } })
+  return edits
+}
+
+/** Show or hide a mark on the editor canvas. Play always hides it, so this never leaks. */
+export function setSwipeMarkCanvasVisible(el: SceneElement, visible: boolean): SwipeSlotEdit {
+  return { id: el.id, patch: { swipeRole: { ...(el.swipeRole ?? { role: 'like' }), showOnCanvas: visible || undefined } } }
+}
+
+/** This game's marks or buttons of one kind, in scene order. */
+export function swipeMarks(elements: SceneElement[], gameId: string, role: SwipeExtraRole): SceneElement[] {
+  return elements.filter((e) => mine(e, gameId) && e.swipeRole?.role === role)
+}
+
 /** Make `nextId` this game's result, releasing any previous one on any scene. */
 export function assignSwipeResult(scenes: SceneDef[], gameId: string, nextId: string): SwipeSlotEdit[] {
   const edits: SwipeSlotEdit[] = swipeResults(scenes, gameId)
@@ -100,6 +127,10 @@ export function swipeOptionLabel(el: SceneElement): string {
   const r = el.swipeRole
   if (r?.role === 'card') return `${base} — card ${r.index ?? 1}`
   if (r?.role === 'result') return `${base} — swipe result`
+  if (r?.role === 'like') return `${base} — swipe-right mark`
+  if (r?.role === 'nope') return `${base} — swipe-left mark`
+  if (r?.role === 'yes') return `${base} — yes button`
+  if (r?.role === 'no') return `${base} — no button`
   if (el.comboRole) return `${base} — in the combo board`
   if (el.revealRole) return `${base} — in the tap-to-reveal board`
   if (el.tapRole) return `${base} — in the tap-to-remove board`
@@ -113,5 +144,9 @@ export function swipeOptionLabel(el: SceneElement): string {
 /** Plain-language name for the job an element holds, for its read-only status line. */
 export function swipeSlotSummary(role: SwipeRoleConfig): string {
   if (role.role === 'result') return 'the image replaced by the first card swiped right on'
+  if (role.role === 'like') return 'the mark shown on a card while it is dragged right'
+  if (role.role === 'nope') return 'the mark shown on a card while it is dragged left'
+  if (role.role === 'yes') return 'a button that swipes the top card right'
+  if (role.role === 'no') return 'a button that swipes the top card left'
   return `card ${role.index ?? 1} of the pile`
 }

@@ -141,6 +141,9 @@ import {
 } from '../comboSlots'
 import {
   assignSwipeCard,
+  assignSwipeMark,
+  setSwipeMarkCanvasVisible,
+  swipeMarks,
   assignSwipeResult,
   moveSwipeCard,
   nextSwipeIndex,
@@ -2139,6 +2142,38 @@ function SwipeCardsSetup({ params, setParam, elementId, siblings }: SwipeCardsSe
     </div>
   )
 
+  const markHints = {
+    like: 'Fades in on a card as it is dragged RIGHT — a heart in the top-left corner, say. Place it over any card on the canvas exactly where it should sit; every card shows it in that same spot, and it tilts and flies off with the card.',
+    nope: 'Fades in on a card as it is dragged LEFT — an X in the top-right corner, say. Place it over any card on the canvas exactly where it should sit; every card shows it in that same spot, and it tilts and flies off with the card.',
+    yes: 'Tapping it swipes the top card RIGHT, exactly as a swipe would — the mark, the progress bar and the liked-card result all follow.',
+    no: 'Tapping it swipes the top card LEFT, exactly as a swipe would.',
+  }
+  const markRow = (kind: 'like' | 'nope' | 'yes' | 'no', current: SceneElement | undefined, i: number): JSX.Element => (
+    <div className="combo-slot" key={`${kind}-${current?.id ?? 'add'}`}>
+      <span title={markHints[kind]}>
+        {{ like: 'Right mark', nope: 'Left mark', yes: 'Yes button', no: 'No button' }[kind]}
+        {i > 0 ? ` ${i + 1}` : ''}
+      </span>
+      <Select value={current?.id ?? ''} onChange={(v) => apply(assignSwipeMark({ nextId: v, current, gameId: elementId, role: kind }))} options={choices(current)} title={markHints[kind]} />
+      <span className="combo-slot-actions">
+        {current && (kind === 'like' || kind === 'nope') && (
+          <button
+            className={'icon-btn' + (current.swipeRole?.showOnCanvas ? ' on' : '')}
+            title={current.swipeRole?.showOnCanvas ? 'Showing on the canvas while you position it (play shows it only on the cards)' : 'Hidden — show it on the canvas to position it'}
+            onClick={() => apply([setSwipeMarkCanvasVisible(current, !current.swipeRole?.showOnCanvas)])}
+          >
+            <Icon icon={current.swipeRole?.showOnCanvas ? Eye : EyeOff} size={13} />
+          </button>
+        )}
+        {current && (
+          <button className="icon-btn" title={`Select “${current.name || current.id}” on the canvas`} onClick={() => selectOnly(current.id)}>
+            <Icon icon={ScanSearch} size={13} />
+          </button>
+        )}
+      </span>
+    </div>
+  )
+
   const resultHint = 'An image on any screen — usually the end card — replaced by the first card the player swipes right on. If they like none, it keeps its own picture.'
   return (
     <>
@@ -2150,6 +2185,15 @@ function SwipeCardsSetup({ params, setParam, elementId, siblings }: SwipeCardsSe
           ? 'Pick the elements to swipe through, top card first. Stack or fan them on the canvas the way the pile should look.'
           : `${win > 0 && win < cards.length ? win : cards.length} swipe${cards.length === 1 ? '' : 's'} to finish. Card 1 is on top; the order here decides the stacking, whatever the layer order.`}
       </div>
+      <div className="group-title2">Swipe marks</div>
+      {(['like', 'nope'] as const).map((kind) => [...swipeMarks(siblings, elementId, kind), undefined].map((m, i) => markRow(kind, m, i)))}
+      <div className="hint pad">
+        Optional. Put the heart (and the X) over any card on the canvas, where it should appear on that card; each card shows it in the same corner, fading in as the card is
+        dragged that way. Use the eye to hide it once it sits right.
+      </div>
+      <div className="group-title2">Buttons</div>
+      {(['yes', 'no'] as const).map((kind) => [...swipeMarks(siblings, elementId, kind), undefined].map((m, i) => markRow(kind, m, i)))}
+      <div className="hint pad">Optional. Any placed element — the heart and X under the pile, say. A tap leans the top card that way and swipes it.</div>
       <div className="group-title2">Result</div>
       <div className="combo-slot">
         <span title={resultHint}>Liked card</span>

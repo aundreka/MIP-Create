@@ -12,6 +12,18 @@
 //           any scene — usually the end card — because the pick travels over the swipe
 //           result channel (swipechannel.ts) rather than through this game. Stage.ts is
 //           what applies it; nothing here touches the result element.
+//   like    a MARK that fades in on a card while it is dragged right — a heart in its
+//   nope    top-left corner, say — and its mirror for a drag left. The author places the
+//           mark over ANY card on the canvas, exactly where it should sit on that card;
+//           at play the element itself is hidden and a copy of it is put INSIDE every
+//           card at the same spot, relative to the card's own box. Being inside, it
+//           tilts, scales and flies off with the card with no maths per frame. Any number
+//           of each, so a mark can be a badge plus a glow.
+//   yes     BUTTONS that swipe the top card for the player: yes throws it right, no
+//   no      throws it left. The card leans toward that side for a beat — its mark coming
+//           up — before it goes, so a tap reads as the card being swiped rather than
+//           vanishing. Everything after that is the ordinary swipe: marks, progress,
+//           the result pick and the swipe events.
 //
 // Two ways to show the pile (`display`):
 //   'stack' every card is visible, so the player sees how many are left.
@@ -53,6 +65,8 @@ interface Slot {
   cy: number
   /** Untransformed box width, screen px. */
   w: number
+  /** Untransformed box height, screen px. */
+  h: number
   /** Authored rotation, degrees. */
   rot: number
 }
@@ -65,6 +79,25 @@ interface Card {
   gone: boolean
   restOpacity: string
   homePointer: string
+  /** This card's copies of the marks, index-aligned with `marks`. */
+  stamps: HTMLElement[]
+  /** The inline position its inner node had before stamps needed it positioned. */
+  hostPosition: string
+}
+
+/** A like / nope mark as the author placed it. Never shown in play — only copied. */
+interface Mark {
+  el: HTMLElement
+  kind: 'like' | 'nope'
+  canvasShown: boolean
+}
+
+/** A Yes / No button. */
+interface SwipeButton {
+  el: HTMLElement
+  dir: 1 | -1
+  homePointer: string
+  off: (() => void) | null
 }
 
 /** Where a card currently sits relative to its own slot. */
@@ -116,8 +149,12 @@ export function createSwipeCards(): GameModule {
   let hintDir: 1 | -1 = 1
   let resultFit: SwipeResultFit = 'contain'
   let progressGameId = ''
+  /** The scale a mark grows in FROM as it fades up. 1 = a plain fade. */
+  let markFrom = 1.2
 
   const cards: Card[] = []
+  const marks: Mark[] = []
+  const buttons: SwipeButton[] = []
   const timers: number[] = []
   let offRequest: (() => void) | null = null
   let endDrag: (() => void) | null = null
@@ -172,7 +209,7 @@ export function createSwipeCards(): GameModule {
     const p = center(el)
     el.style.translate = translate
     el.style.transition = transition
-    c.slot = { cx: p.x, cy: p.y, w: parseFloat(el.style.width) || el.offsetWidth || 1, rot: authoredRotation(el) }
+    c.slot = { cx: p.x, cy: p.y, w: parseFloat(el.style.width) || el.offsetWidth || 1, h: parseFloat(el.style.height) || el.offsetHeight || 1, rot: authoredRotation(el) }
   }
 
   /** The pose that puts `c` into the slot of the card originally at `position`
@@ -218,6 +255,91 @@ export function createSwipeCards(): GameModule {
   const stackOrder = (): void => {
     const zs = cards.map((c) => Number(c.el.style.zIndex) || 0).sort((a, b) => b - a)
     cards.forEach((c, i) => (c.el.style.zIndex = String(zs[i] ?? 0)))
+  }
+
+  // ---- marks ---------------------------------------------------------------
+  /**
+   * Copy every mark into every card.
+   *
+   * The copy is the mark's own inner node — its picture, crop and any looping animation —
+   * dropped into the card's inner node, which is exactly where this game writes the drag's
+   * rotate and scale. So the mark rides the card for free: tilt, lift, fling and the
+   * pile moving up all carry it, and there is nothing to keep in step per frame.
+   */
+  const buildStamps = (): void => {
+    for (const m of marks) m.el.classList.add(OFF_CLASS)
+    for (const c of cards) {
+      const host = scaleNode(c.el)
+      c.hostPosition = host.style.position
+      if (!host.style.position) host.style.position = 'relative'
+      for (const m of marks) {
+        const stamp = scaleNode(m.el).cloneNode(true) as HTMLElement
+        // Not an animation box of the CARD — scaleNode() looks for that class.
+        stamp.classList.remove('pa-el-anim')
+        stamp.dataset.swipeMark = m.kind
+        stamp.style.position = 'absolute'
+        stamp.style.pointerEvents = 'none'
+        stamp.style.zIndex = '2'
+        stamp.style.opacity = '0'
+        stamp.style.transformOrigin = 'center center'
+        host.appendChild(stamp)
+        c.stamps.push(stamp)
+      }
+    }
+    placeStamps()
+  }
+
+  /**
+   * Lay each mark into the cards where the author put it — in the frame of the card it
+   * was placed over, as percentages of that card's box, so a card of another size gets it
+   * in the same corner at the same proportion. Rotation is relative to that card too: a
+   * mark placed level on a tilted card stays level with the card's edges, not the screen.
+   */
+  const placeStamps = (): void => {
+    marks.forEach((m, j) => {
+      const r = m.el.getBoundingClientRect()
+      const mx = r.left + r.width / 2
+      const my = r.top + r.height / 2
+      const mw = parseFloat(m.el.style.width) || r.width
+      const mh = parseFloat(m.el.style.height) || r.height
+      // The card it sits over is the one whose centre is nearest.
+      let host = cards[0]
+      for (const c of cards) if (Math.hypot(c.slot.cx - mx, c.slot.cy - my) < Math.hypot(host.slot.cx - mx, host.slot.cy - my)) host = c
+      if (!host) return
+      const s = host.slot
+      const a = (s.rot * Math.PI) / 180
+      const dx = mx - s.cx
+      const dy = my - s.cy
+      // Undo the card's rotation to land in its own, upright frame.
+      const lx = dx * Math.cos(a) + dy * Math.sin(a)
+      const ly = -dx * Math.sin(a) + dy * Math.cos(a)
+      const left = ((s.w / 2 + lx - mw / 2) / s.w) * 100
+      const topPct = ((s.h / 2 + ly - mh / 2) / s.h) * 100
+      const rot = authoredRotation(m.el) - s.rot
+      for (const c of cards) {
+        const st = c.stamps[j]
+        if (!st) continue
+        st.style.left = left.toFixed(3) + '%'
+        st.style.top = topPct.toFixed(3) + '%'
+        st.style.width = ((mw / s.w) * 100).toFixed(3) + '%'
+        st.style.height = ((mh / s.h) * 100).toFixed(3) + '%'
+        st.style.rotate = rot ? rot.toFixed(3) + 'deg' : ''
+      }
+    })
+  }
+
+  /** Show a card's marks for a lean of -1..1 (left..right) — how far the drag is toward
+   * committing, so a mark is fully up exactly when letting go would count. */
+  const setStamps = (c: Card, lean: number, ms: number): void => {
+    c.stamps.forEach((st, j) => {
+      const m = marks[j]
+      if (!m) return
+      const v = clamp(m.kind === 'like' ? lean : -lean, 0, 1)
+      const base = m.el.style.opacity === '' ? 1 : clamp(Number(m.el.style.opacity), 0, 1)
+      st.style.transition = ms > 0 ? `opacity ${ms}ms ease, scale ${ms}ms ease` : ''
+      st.style.opacity = (v * base).toFixed(3)
+      st.style.scale = markFrom !== 1 ? lerp(markFrom, 1, v).toFixed(3) : ''
+    })
   }
 
   // ---- play ----------------------------------------------------------------
@@ -320,6 +442,37 @@ export function createSwipeCards(): GameModule {
     })
   }
 
+  /** A Yes / No tap: lean the top card toward `dir` with its mark coming up, then throw
+   * it exactly as a released drag would. `busy` goes up at once, so a double tap — or a
+   * tap on the other button mid-lean — cannot swipe two cards or reverse this one. */
+  const swipeByButton = (dir: 1 | -1): void => {
+    const c = top()
+    if (!c || busy || dragging) return
+    busy = true
+    markHint()
+    const base = slotPose(c, 0)
+    const lean: Pose = { dx: base.dx + dir * c.slot.w * 0.18, dy: base.dy - c.slot.h * 0.01, rot: base.rot + dir * tiltDeg * 0.5, scale: base.scale * liftScale }
+    const ms = Math.round(clamp(flingMs * 0.4, 60, 220))
+    setPose(c, lean, ms, 'cubic-bezier(.3,.7,.4,1)')
+    setStamps(c, dir, ms)
+    if (display !== 'one') layPile(ms, 0.6)
+    // Thrown with some speed, so it leaves as briskly as a confident swipe would.
+    after(ms, () => swipe(c, dir, lean, dir * 1.4, 0))
+  }
+
+  const attachButton = (b: SwipeButton): void => {
+    b.el.style.pointerEvents = 'auto'
+    b.el.style.cursor = 'pointer'
+    b.el.style.touchAction = 'manipulation'
+    b.el.style.setProperty('-webkit-touch-callout', 'none')
+    b.el.style.setProperty('-webkit-tap-highlight-color', 'transparent')
+    // pointerdown, like the tap boards: a beat faster than click, it survives the small
+    // drag a real thumb makes, and it lands with the element's own on-tap animation.
+    const onDown = (): void => swipeByButton(b.dir)
+    b.el.addEventListener('pointerdown', onDown)
+    b.off = () => b.el.removeEventListener('pointerdown', onDown)
+  }
+
   // ---- dragging ------------------------------------------------------------
   const attach = (c: Card): void => {
     c.el.style.cursor = 'grab'
@@ -371,6 +524,7 @@ export function createSwipeCards(): GameModule {
         setPose(c, pose(), 0)
         const lean = clamp(Math.abs(dx) / (w * (thresholdPct / 100)), 0, 1)
         c.el.dataset.swipeLean = dx > 0 ? 'right' : dx < 0 ? 'left' : ''
+        setStamps(c, dx / (w * (thresholdPct / 100)), 0)
         if (display !== 'one') layPile(0, lean)
       }
 
@@ -394,10 +548,12 @@ export function createSwipeCards(): GameModule {
         const far = Math.abs(dx) >= w * (thresholdPct / 100)
         const flick = flickSpeed > 0 && Math.abs(vx) >= flickSpeed && Math.sign(vx) === Math.sign(dx) && Math.abs(dx) >= w * 0.06
         if (commit && dx !== 0 && (far || flick)) {
+          setStamps(c, dx > 0 ? 1 : -1, 120)
           swipe(c, dx > 0 ? 1 : -1, pose(), vx, vy)
         } else {
           // Spring home with a little overshoot, and the pile leans back with it.
           setPose(c, base, returnMs, 'cubic-bezier(.34,1.45,.55,1)')
+          setStamps(c, 0, returnMs)
           if (display !== 'one') layPile(returnMs)
         }
         if (staleSlots) after(Math.max(returnMs, flingMs), relayoutPile)
@@ -424,6 +580,7 @@ export function createSwipeCards(): GameModule {
     staleSlots = false
     stackOrder()
     for (const c of cards) measure(c)
+    placeStamps()
     remaining().forEach((c, k) => setPose(c, slotPose(c, k), 0))
   }
 
@@ -441,16 +598,32 @@ export function createSwipeCards(): GameModule {
         el,
         index: Math.max(1, Math.round(Number(el.dataset.swipeIndex) || 0)) || 9999,
         seq: seq++,
-        slot: { cx: 0, cy: 0, w: 1, rot: 0 },
+        slot: { cx: 0, cy: 0, w: 1, h: 1, rot: 0 },
         gone: false,
         restOpacity: el.style.opacity,
         homePointer: el.style.pointerEvents,
+        stamps: [],
+        hostPosition: '',
       })
     }
     // Play order is the index; scene order breaks ties, so two cards that somehow share
     // a number still both play instead of one shadowing the other.
     found.sort((a, b) => a.index - b.index || a.seq - b.seq)
     cards.push(...found)
+
+    for (const el of Array.from(stageRoot.querySelectorAll<HTMLElement>('[data-swipe-role="like"], [data-swipe-role="nope"]'))) {
+      const wanted = el.dataset.swipeGameId
+      if (wanted ? wanted !== ctx.elementId : !!el.dataset.swipeClaimedBy) continue
+      el.dataset.swipeClaimedBy = ctx.elementId ?? 'swipecards'
+      marks.push({ el, kind: el.dataset.swipeRole === 'nope' ? 'nope' : 'like', canvasShown: el.dataset.swipeCanvasShow === '1' })
+    }
+
+    for (const el of Array.from(stageRoot.querySelectorAll<HTMLElement>('[data-swipe-role="yes"], [data-swipe-role="no"]'))) {
+      const wanted = el.dataset.swipeGameId
+      if (wanted ? wanted !== ctx.elementId : !!el.dataset.swipeClaimedBy) continue
+      el.dataset.swipeClaimedBy = ctx.elementId ?? 'swipecards'
+      buttons.push({ el, dir: el.dataset.swipeRole === 'no' ? -1 : 1, homePointer: el.style.pointerEvents, off: null })
+    }
   }
 
   return {
@@ -471,6 +644,7 @@ export function createSwipeCards(): GameModule {
       const fit = str(params.resultFit, 'contain')
       resultFit = fit === 'cover' || fit === 'fill' ? fit : 'contain'
       progressGameId = str(params.progressGameId, '').trim()
+      markFrom = clamp(num(params.markFrom, 1.2), 0.2, 3)
 
       // Out of hit-testing, like the rest of this family: every card is a scene element
       // outside this box, and an invisible mount above them would eat their touches.
@@ -498,11 +672,13 @@ export function createSwipeCards(): GameModule {
       }
       stackOrder()
       for (const c of cards) measure(c)
+      buildStamps()
       cards.forEach((card, k) => {
         if (display === 'one' && k > 0) card.el.classList.add(OFF_CLASS)
         setPose(card, slotPose(card, k), 0)
         attach(card)
       })
+      buttons.forEach(attachButton)
       markHint()
     },
     relayout() {
@@ -541,7 +717,26 @@ export function createSwipeCards(): GameModule {
         delete c.el.dataset.swipeHint
         delete c.el.dataset.swipeLean
         delete c.el.dataset.swipeClaimedBy
+        for (const st of c.stamps) st.remove()
+        c.stamps = []
+        scaleNode(c.el).style.position = c.hostPosition
       }
+      for (const m of marks) {
+        // Put the canvas back as the author left it: shown while positioning, or hidden.
+        if (m.canvasShown) m.el.classList.remove(OFF_CLASS)
+        else m.el.classList.add(OFF_CLASS)
+        delete m.el.dataset.swipeClaimedBy
+      }
+      marks.length = 0
+      for (const b of buttons) {
+        b.off?.()
+        b.el.style.pointerEvents = b.homePointer
+        b.el.style.cursor = ''
+        b.el.style.removeProperty('-webkit-touch-callout')
+        b.el.style.removeProperty('-webkit-tap-highlight-color')
+        delete b.el.dataset.swipeClaimedBy
+      }
+      buttons.length = 0
       cards.length = 0
       started = false
       done = false
@@ -568,6 +763,7 @@ export const SWIPECARDS_TEMPLATE: GameTemplate = {
     { key: 'returnMs', label: 'Spring back (ms)', type: 'number', min: 0, max: 3000, step: 20, group: 'Animation' },
     { key: 'settleMs', label: 'Pile moves up (ms)', type: 'number', min: 0, max: 3000, step: 20, group: 'Animation', showIf: (p) => p.advance !== 'stay' },
     { key: 'revealMs', label: 'Next card fades in (ms)', type: 'number', min: 0, max: 3000, step: 20, group: 'Animation', showIf: (p) => p.display === 'one' },
+    { key: 'markFrom', label: 'Swipe marks grow in from (1 = plain fade)', type: 'number', min: 0.2, max: 3, step: 0.05, group: 'Swipe feel' },
     { key: 'resultFit', label: 'Liked card in the result box', type: 'select', options: ['contain', 'cover', 'fill'], group: 'Result' },
     { key: 'hintDir', label: 'Hint hand swipes', type: 'select', options: ['right', 'left'], group: 'Result' },
   ],
@@ -585,6 +781,7 @@ export const SWIPECARDS_TEMPLATE: GameTemplate = {
     returnMs: 380,
     settleMs: 340,
     revealMs: 280,
+    markFrom: 1.2,
     resultFit: 'contain',
     hintDir: 'right',
     // '' = every progress bar in the scene hears this game.

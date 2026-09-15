@@ -82,6 +82,23 @@ function result(id = 'result'): SceneElement {
   } as SceneElement
 }
 
+function mark(id: string, role: 'like' | 'nope' | 'yes' | 'no', showOnCanvas?: boolean): SceneElement {
+  return {
+    id,
+    type: 'image',
+    name: id,
+    assetId: 'placeholder',
+    x: 400,
+    y: 700,
+    w: 100,
+    h: 100,
+    anchor: 'center',
+    zIndex: 40,
+    mode: 'fit',
+    swipeRole: { gameId: 'swipe-game', role, showOnCanvas },
+  } as SceneElement
+}
+
 const ASSETS = {
   c1: { src: 'c1.png', w: 600, h: 800 },
   c2: { src: 'c2.png', w: 600, h: 800 },
@@ -261,6 +278,64 @@ describe('swipe cards', () => {
     vi.runAllTimers()
     expect(fills.map(widthOf)).toEqual([100, 100, 100])
     expect(seen.length).toBeGreaterThan(0)
+  })
+
+  it('copies the swipe marks into every card and fades the right one in with the drag', () => {
+    const stage = build([game(), card('c1', 1), card('c2', 2), mark('heart', 'like'), mark('cross', 'nope')])
+    stage.startGames(true)
+    expect(hidden(q(stage, 'heart'))).toBe(true)
+    const c1 = q(stage, 'c1')
+    const like = c1.querySelector<HTMLElement>('[data-swipe-mark="like"]')!
+    const nope = c1.querySelector<HTMLElement>('[data-swipe-mark="nope"]')!
+    expect(q(stage, 'c2').querySelectorAll('[data-swipe-mark]')).toHaveLength(2)
+    expect(like.style.opacity).toBe('0')
+
+    c1.dispatchEvent(pointer('pointerdown', 500, 900))
+    vi.advanceTimersByTime(100)
+    window.dispatchEvent(pointer('pointermove', 580, 900))
+    expect(Number(like.style.opacity)).toBeGreaterThan(0)
+    expect(Number(nope.style.opacity)).toBe(0)
+
+    vi.advanceTimersByTime(100)
+    window.dispatchEvent(pointer('pointermove', 420, 900))
+    expect(Number(like.style.opacity)).toBe(0)
+    expect(Number(nope.style.opacity)).toBeGreaterThan(0)
+
+    vi.advanceTimersByTime(300)
+    window.dispatchEvent(pointer('pointerup', 500, 900))
+    vi.runAllTimers()
+    expect(Number(nope.style.opacity)).toBe(0)
+
+    stage.destroy()
+    expect(c1.querySelectorAll('[data-swipe-mark]')).toHaveLength(0)
+  })
+
+  it('hides a mark on the canvas unless it is being positioned', () => {
+    const stage = build([game(), card('c1', 1), mark('heart', 'like', true), mark('cross', 'nope')])
+    stage.startGames(false)
+    expect(hidden(q(stage, 'heart'))).toBe(false)
+    expect(hidden(q(stage, 'cross'))).toBe(true)
+  })
+
+  it('swipes the top card from the Yes and No buttons, one card per tap', () => {
+    const stage = build([game(), bar(), card('c1', 1), card('c2', 2), card('c3', 3), result(), mark('yes', 'yes'), mark('no', 'no')])
+    stage.startGames(true)
+    const track = stage.root.querySelector<HTMLElement>('[data-progress-bar]')!
+    const tap = (id: string): void => void q(stage, id).dispatchEvent(pointer('pointerdown', 10, 10))
+    expect(q(stage, 'yes').style.pointerEvents).toBe('auto')
+
+    tap('no')
+    tap('yes') // mid-lean: must not swipe a second card or reverse the first
+    vi.runAllTimers()
+    expect(hidden(q(stage, 'c1'))).toBe(true)
+    expect(hidden(q(stage, 'c2'))).toBe(false)
+    expect(track.dataset.progressValue).toBe('1')
+    expect(resultSrc(stage)).toBe('placeholder.png')
+
+    tap('yes')
+    vi.runAllTimers()
+    expect(hidden(q(stage, 'c2'))).toBe(true)
+    expect(resultSrc(stage)).toBe('c2.png')
   })
 
   it('wins early on a swipe target', () => {

@@ -1915,6 +1915,12 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       outer.dataset.swipeRole = el.swipeRole.role
       if (el.swipeRole.gameId) outer.dataset.swipeGameId = el.swipeRole.gameId
       if (el.swipeRole.index) outer.dataset.swipeIndex = String(el.swipeRole.index)
+      // A swipe MARK is only ever seen as the copies the game puts into each card, so the
+      // element itself starts hidden unless the author is keeping it up to position it.
+      if (el.swipeRole.role === 'like' || el.swipeRole.role === 'nope') {
+        if (el.swipeRole.showOnCanvas) outer.dataset.swipeCanvasShow = '1'
+        else outer.classList.add(COMBO_OFF_CLASS)
+      }
     }
 
     const anim = document.createElement('div')
@@ -1969,6 +1975,8 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       el.catchRole?.role !== 'box' &&
       el.revealRole?.role !== 'cover' &&
       el.swipeRole?.role !== 'card' &&
+      el.swipeRole?.role !== 'yes' &&
+      el.swipeRole?.role !== 'no' &&
       !hasTapAnim(el)
     if (nonInteractive) {
       outer.style.pointerEvents = 'none'

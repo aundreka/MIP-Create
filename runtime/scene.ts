@@ -978,10 +978,16 @@ export interface RevealRoleConfig {
 export interface SwipeRoleConfig {
   gameId?: string
   /** 'card' is one card of the pile; 'result' is an image — on any scene, usually the end
-   * card — replaced by the first card the player swipes right on. */
-  role: 'card' | 'result'
+   * card — replaced by the first card the player swipes right on. 'like' / 'nope' are
+   * MARKS shown on a card while it is dragged right / left: placed over any card on the
+   * canvas, and copied into every card at that same spot when play starts. 'yes' / 'no'
+   * are buttons that swipe the top card right / left when tapped. */
+  role: 'card' | 'result' | 'like' | 'nope' | 'yes' | 'no'
   /** 'card' only: its place in the play order, 1-based (1 = the first card up). */
   index?: number
+  /** 'like' / 'nope' only, authoring-only: keep the mark visible on the editor canvas
+   * while it is positioned. Play always hides the element itself and shows its copies. */
+  showOnCanvas?: boolean
 }
 
 // Catch: which part an ordinary placed element plays in a Catch game. Assigned from
