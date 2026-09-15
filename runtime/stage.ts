@@ -48,7 +48,7 @@ import { getPicks, isPicked, onPicksChanged, togglePick } from './selection'
 import { createEndsceneContent, updateEndsceneMedia, htmlEndsceneMediaEl, mediaNaturalSize, endsceneCoverFrame } from './elements/endscene'
 import { applyUnboxingImages, createUnboxingContent } from './elements/unboxing'
 import { createConfetti, createConfettiContent, type ConfettiController } from './elements/confetti'
-import { computeDeadline, formatCountdown, formatTickerIntervalMs, needsMidnightRefresh, needsTicker, nextMidnight, runtimeNow } from './elements/countdown'
+import { computeDeadline, formatCountdown, formatTickerIntervalMs, needsMidnightRefresh, needsTicker, nextMidnight, runtimeNow, countsToMidnight, msToNextSecond } from './elements/countdown'
 import { promoLabelFor } from './elements/promoCalendar'
 import { createGameHost, type GameHost } from './gameHost'
 import { mulberry32 } from './games/types'
@@ -1002,6 +1002,9 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
 function tickCountdown(rec: Rec): void {
   const inner = rec.content?.firstElementChild as HTMLElement | null
   if (!inner) return
+  // A to-midnight deadline is a pure function of the local date, so recomputing it every
+  // tick is how it rolls over at 12:00 AM (and follows a day change) without a rebuild.
+  if (countsToMidnight(rec.el)) rec.deadline = computeDeadline(rec.el, Date.now())
   const full = formatCountdown(rec.el, rec.deadline ?? Date.now(), Date.now())
   // A type-out in progress owns the visible string; the ticker still refreshes the
   // underlying value so the reveal keeps typing the CURRENT time, not a stale one.
@@ -1043,6 +1046,7 @@ function scheduleDayTimer(rec: Rec): void {
 function startTicker(rec: Rec): void {
   if (rec.ticker) {
     window.clearInterval(rec.ticker)
+    window.clearTimeout(rec.ticker)
     rec.ticker = 0
   }
   if (rec.dayTimer) {
@@ -1054,7 +1058,19 @@ function startTicker(rec: Rec): void {
   // a pure date label ({date}/{d}) doesn't change second-to-second — render once.
   if (needsTicker(rec.el)) {
     const intervalMs = formatTickerIntervalMs(rec.el.countdown?.format || '') || 1000
-    rec.ticker = window.setInterval(() => tickCountdown(rec), intervalMs)
+    if (countsToMidnight(rec.el) && intervalMs === 1000) {
+      // Tick just past each whole second of the remaining time rather than on a free
+      // interval, so an {hh}, an {mm} and an {ss} element built as separate boxes all
+      // change on the same frame instead of up to a second apart.
+      const next = (): number => msToNextSecond(rec.deadline ?? Date.now(), Date.now()) + 15
+      const step = (): void => {
+        tickCountdown(rec)
+        rec.ticker = window.setTimeout(step, next())
+      }
+      rec.ticker = window.setTimeout(step, next())
+    } else {
+      rec.ticker = window.setInterval(() => tickCountdown(rec), intervalMs)
+    }
   }
   if (needsDayTimer(rec.el)) scheduleDayTimer(rec)
 }
@@ -3133,7 +3149,10 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
         rec.hg?.stop()
         rec.idle?.stop()
         rec.confetti?.destroy()
-        if (rec.ticker) window.clearInterval(rec.ticker)
+        if (rec.ticker) {
+          window.clearInterval(rec.ticker)
+          window.clearTimeout(rec.ticker)
+        }
         if (rec.dayTimer) window.clearTimeout(rec.dayTimer)
         if (rec.typeTimer) window.clearTimeout(rec.typeTimer)
       }

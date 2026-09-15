@@ -544,6 +544,11 @@ export interface CountdownConfig {
   // Friday" and [1, 3, 5] for "Mon, Wed or Fri". `dynamicDays` stays a head start
   // applied BEFORE the snap, so 0 can land on today and 1 always skips it.
   recur?: 'weekday' | 'weekend' | number[]
+  // Where a 'dynamic' countdown ends. Unset = the exact instant (now + dynamicDays, same
+  // time of day). 'midnight' = 12:00 AM starting the target day, so with the target on
+  // tomorrow {hh}/{mm}/{ss} are the hours, minutes and seconds left in today, rounded
+  // down and live; it rolls over to the next midnight on its own.
+  target?: 'midnight'
   format: string
   dateStyle?: 'short' | 'long' | 'numeric' | 'monthDay' // how {date} renders
   dateLocale?: string // BCP-47 tag for {date} rendering (default 'en-US')

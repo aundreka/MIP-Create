@@ -90,6 +90,28 @@ export function resolveDynamicTarget(now: number, days: number | undefined, recu
   return set ? nextRecurrence(start, set) : start
 }
 
+/** A dynamic countdown that runs to MIDNIGHT: the start of its target day, so with the
+ * target on tomorrow {hh}:{mm}:{ss} reads the time left in today ("11:00:00" at 1pm). */
+export function countsToMidnight(el: SceneElement): boolean {
+  return el.countdown?.mode === 'dynamic' && el.countdown.target === 'midnight'
+}
+
+/** 12:00 AM on the local day of `target`. A day that has already begun (a 0-day offset
+ * landing on today) counts to tonight's midnight instead, never to a moment in the past. */
+export function startOfTargetDay(target: number, now: number): number {
+  const d = new Date(target)
+  d.setHours(0, 0, 0, 0)
+  return d.getTime() > now ? d.getTime() : nextMidnight(now)
+}
+
+/** How long until the remaining time (deadline - now) next drops to a lower whole
+ * second. Ticking on that edge instead of on a free-running interval is what keeps
+ * separate {hh}, {mm} and {ss} elements flipping on the same instant. */
+export function msToNextSecond(deadline: number, now: number): number {
+  const r = (deadline - now) % 1000
+  return r > 0 ? r : 1000
+}
+
 /** Resolve the target instant (ms epoch) for the element, given the load time. */
 export function computeDeadline(el: SceneElement, now: number): number {
   const cd = el.countdown
@@ -98,7 +120,10 @@ export function computeDeadline(el: SceneElement, now: number): number {
   // `now` directly and the deadline is only a placeholder.
   if (cd.mode === 'clock') return now
   if (cd.mode === 'timer') return now + Math.max(0, cd.seconds ?? 60) * 1000
-  if (cd.mode === 'dynamic') return resolveDynamicTarget(now, cd.dynamicDays ?? 3, cd.recur)
+  if (cd.mode === 'dynamic') {
+    const target = resolveDynamicTarget(now, cd.dynamicDays ?? 3, cd.recur)
+    return cd.target === 'midnight' ? startOfTargetDay(target, now) : target
+  }
   const t = cd.targetIso ? Date.parse(cd.targetIso) : NaN
   return isFinite(t) ? t : now
 }

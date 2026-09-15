@@ -56,6 +56,7 @@ import type { ParamField } from '../../runtime/games/types'
 import type { AssetMap } from '../../runtime/types'
 import { importFont } from '../bridge'
 import { GradientField } from './GradientField'
+import { computeDeadline } from '../../runtime/elements/countdown'
 import {
   activeSceneDef,
   addAsset,
@@ -6110,6 +6111,24 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                       setCd(recur && !cfg.recur ? { recur, dynamicDays: 0 } : { recur })
                     }
                   />
+                  <Row label="Count to">
+                    <Select
+                      value={cfg.target ?? 'exact'}
+                      onChange={(v) => setCd({ target: v === 'midnight' ? 'midnight' : undefined })}
+                      options={[
+                        { value: 'exact', label: 'Same time as now (now + days)' },
+                        { value: 'midnight', label: 'Midnight — start of that day' },
+                      ]}
+                    />
+                  </Row>
+                  {cfg.target === 'midnight' && (
+                    <div className="hint pad">
+                      Counts down to <b>{new Date(computeDeadline(el, Date.now())).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</b>.
+                      With the date on tomorrow, <b>{'{hh}'}</b> / <b>{'{mm}'}</b> / <b>{'{ss}'}</b> are the hours, minutes and seconds left in today — rounded down, live, and
+                      rolling over at midnight. Give hours, minutes and seconds their own element (format <b>{'{hh}'}</b>, <b>{'{mm}'}</b>, <b>{'{ss}'}</b>) and they tick on
+                      the same second.
+                    </div>
+                  )}
                 </>
               )}
               {cfg.mode === 'timer' && <NumField label="Seconds" value={cfg.seconds ?? 3600} step={60} min={0} onChange={(n) => setCd({ seconds: n })} />}

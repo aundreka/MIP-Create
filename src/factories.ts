@@ -181,7 +181,8 @@ export function makeCountdownTimer(): SceneElement {
     zIndex: topZ(),
     mode: 'fit',
     text: { value: '', fontSizePx: 96, fontWeight: 800, color: '#ffffff', align: 'center' },
-    countdown: { mode: 'dynamic', dynamicDays: 1, format: '{hh}:{mm}:{ss}' },
+    // Counts to tonight's midnight: {hh}:{mm}:{ss} is the time left in today, live.
+    countdown: { mode: 'dynamic', dynamicDays: 1, target: 'midnight', format: '{hh}:{mm}:{ss}' },
   }
 }
 
