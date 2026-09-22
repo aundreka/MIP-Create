@@ -5531,3 +5531,23 @@ svg {
 .brand-filter.proj-game-filter {
   margin: 0 10px 12px;
 }
+/* Hover-and-hold live preview of a project's first scene on Home: a centered modal
+   that ignores the pointer, so hovering "through" it keeps the card's hover alive. */
+.proj-hover-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+  animation: modal-fade var(--t-mid) var(--ease);
+}
+.proj-hover-preview {
+  overflow: hidden;
+  border-radius: var(--r-md);
+  border: 1px solid var(--glass-border);
+  background: var(--bg);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}

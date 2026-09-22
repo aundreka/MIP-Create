@@ -8,6 +8,7 @@ import { createProject, currentProjectId, deleteProject, listProjects, loadProje
 import type { ProjectData } from '../bridge'
 import { gameTemplateStarters, STARTERS, type Starter } from '../templates'
 import { SceneThumb } from '../preview/SceneThumb'
+import { previewNowMs } from '../uiState'
 import { getTemplate } from '../../runtime/games/registry'
 import { allBrands, brandsFor, usagesFor } from '../templateUsage'
 import { TemplateCard } from './TemplateCard'
@@ -77,6 +78,57 @@ function ProjectThumb({ id }: { id: string }): JSX.Element {
   )
 }
 
+const HOVER_DELAY_MS = 2000
+
+// Live preview of a project's first (start) scene, shown after hovering a card for
+// HOVER_DELAY_MS, as a centered modal. Plays in the real runtime (pa:play) so intro
+// animations run; the start scene's advance is forced to manual so the preview stays
+// on that scene. The modal ignores the pointer, so the card underneath keeps its hover
+// and the preview closes as soon as the mouse leaves the card.
+function HoverPreview(props: { id: string }): JSX.Element | null {
+  const ref = useRef<HTMLIFrameElement>(null)
+  const [data, setData] = useState<ProjectData | null>(null)
+  useEffect(() => {
+    let alive = true
+    void loadProjectPreview(props.id).then((d) => { if (alive) setData(d) })
+    return () => { alive = false }
+  }, [props.id])
+  const post = (): void => {
+    if (!data) return
+    const p = data.project
+    const startId = p.scenes.some((s) => s.id === p.startSceneId) ? p.startSceneId : p.scenes[0]?.id
+    const project = { ...p, startSceneId: startId, scenes: p.scenes.map((s) => (s.id === startId ? { ...s, advance: { on: 'manual' as const } } : s)) }
+    ref.current?.contentWindow?.postMessage({ type: 'pa:play', project, assets: data.assets, previewNow: previewNowMs() }, '*')
+  }
+  useEffect(() => {
+    const onMsg = (e: MessageEvent): void => {
+      if (e.source === ref.current?.contentWindow && (e.data as { type?: string })?.type === 'pa:ready') post()
+    }
+    window.addEventListener('message', onMsg)
+    return () => window.removeEventListener('message', onMsg)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data])
+  if (!data) return null
+  const bw = data.project.meta.baseW || 1080
+  const bh = data.project.meta.baseH || 1920
+  // As large as the viewport allows (whole scene, letterboxed), centered.
+  const scale = Math.min((window.innerHeight * 0.9) / bh, (window.innerWidth * 0.9) / bw)
+  return (
+    <div className="proj-hover-backdrop">
+      <div className="proj-hover-preview" style={{ width: Math.round(bw * scale), height: Math.round(bh * scale) }}>
+        <iframe
+          ref={ref}
+          src="./runtime-frame.html"
+          title="Scene preview"
+          onLoad={post}
+          tabIndex={-1}
+          style={{ width: bw, height: bh, border: 0, transform: `scale(${scale})`, transformOrigin: '0 0', pointerEvents: 'none' }}
+        />
+      </div>
+    </div>
+  )
+}
+
 function when(ts: number): string {
   const d = new Date(ts)
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
@@ -123,6 +175,17 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
   const [query, setQuery] = useState('')
   const [projQuery, setProjQuery] = useState('')
   const [gameType, setGameType] = useState<string | null>(null)
+  const [hover, setHover] = useState<string | null>(null)
+  const hoverTimer = useRef<number | undefined>(undefined)
+  const startHover = (id: string): void => {
+    window.clearTimeout(hoverTimer.current)
+    hoverTimer.current = window.setTimeout(() => setHover(id), HOVER_DELAY_MS)
+  }
+  const endHover = (): void => {
+    window.clearTimeout(hoverTimer.current)
+    setHover(null)
+  }
+  useEffect(() => () => window.clearTimeout(hoverTimer.current), [])
   const [brand, setBrand] = useState<string | null>(null)
   const gameCards = useMemo(() => gameTemplateStarters().map((s) => ({ starter: s, data: s.build() })), [])
   // Distinct brands (recomputed when usage tags change via `refresh`).
@@ -233,7 +296,13 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
 
   const renderCard = (p: (typeof projects)[number]): JSX.Element => (
     <div key={p.id} className={'proj-card' + (p.id === curId ? ' current' : '')}>
-      <button className="proj-open" onClick={() => open(p.id)} title="Open">
+      <button
+        className="proj-open"
+        onClick={() => { endHover(); void open(p.id) }}
+        title="Open"
+        onMouseEnter={() => startHover(p.id)}
+        onMouseLeave={endHover}
+      >
         <ProjectThumb id={p.id} />
       </button>
       <div className="proj-meta">
@@ -529,6 +598,7 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
           )}
         </div>
       </div>
+      {hover && <HoverPreview key={hover} id={hover} />}
       {assetFlipSource !== null && projects.length > 0 && (
         <AssetFlipModal
           projects={projects}
