@@ -60,6 +60,21 @@ function writeIndex(list: ProjectRecord[]): void {
 export function listProjects(): ProjectRecord[] {
   return readIndex().sort((a, b) => b.updatedAt - a.updatedAt)
 }
+// Minigame template ids per project, cached by updatedAt so Home doesn't re-parse
+// every project's JSON on each render.
+const gameTypeCache = new Map<string, { at: number; ids: string[] }>()
+/** Distinct minigame template ids used anywhere in a project (for Home's filter). */
+export function projectGameTypes(rec: ProjectRecord): string[] {
+  const hit = gameTypeCache.get(rec.id)
+  if (hit && hit.at === rec.updatedAt) return hit.ids
+  const ids = new Set<string>()
+  for (const sd of loadProjectData(rec.id)?.project.scenes ?? []) {
+    for (const el of sd.elements) if (el.game?.templateId) ids.add(el.game.templateId)
+  }
+  const out = [...ids]
+  gameTypeCache.set(rec.id, { at: rec.updatedAt, ids: out })
+  return out
+}
 export function currentProjectId(): string | null {
   return currentId
 }

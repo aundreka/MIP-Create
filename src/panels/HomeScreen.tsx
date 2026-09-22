@@ -4,10 +4,11 @@
 // editor to that project (persisting the current one first).
 
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { createProject, currentProjectId, deleteProject, listProjects, loadProjectPreview, openProject, renameProject, saveCurrent, type ProjectRecord } from '../projects'
+import { createProject, currentProjectId, deleteProject, listProjects, loadProjectPreview, projectGameTypes, openProject, renameProject, saveCurrent, type ProjectRecord } from '../projects'
 import type { ProjectData } from '../bridge'
 import { gameTemplateStarters, STARTERS, type Starter } from '../templates'
 import { SceneThumb } from '../preview/SceneThumb'
+import { getTemplate } from '../../runtime/games/registry'
 import { allBrands, brandsFor, usagesFor } from '../templateUsage'
 import { TemplateCard } from './TemplateCard'
 import { AssetFlipModal } from './AssetFlipModal'
@@ -121,6 +122,7 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
   }
   const [query, setQuery] = useState('')
   const [projQuery, setProjQuery] = useState('')
+  const [gameType, setGameType] = useState<string | null>(null)
   const [brand, setBrand] = useState<string | null>(null)
   const gameCards = useMemo(() => gameTemplateStarters().map((s) => ({ starter: s, data: s.build() })), [])
   // Distinct brands (recomputed when usage tags change via `refresh`).
@@ -189,9 +191,18 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
     | { kind: 'group'; id: string; name: string; items: ProjectRecord[] }
   // Project search matches the MIP's own name or its project group's name.
   const pq = projQuery.trim().toLowerCase()
-  const shownProjects = pq
-    ? projects.filter((p) => p.name.toLowerCase().includes(pq) || (p.projectName ?? '').toLowerCase().includes(pq))
-    : projects
+  // Minigame chips: every template used across the library, with how many MIPs use it.
+  const gameTypeCounts = new Map<string, number>()
+  for (const p of projects) for (const t of projectGameTypes(p)) gameTypeCounts.set(t, (gameTypeCounts.get(t) ?? 0) + 1)
+  const gameTypeChips = [...gameTypeCounts]
+    .map(([id, count]) => ({ id, count, label: getTemplate(id)?.label ?? id }))
+    .sort((a, b) => a.label.localeCompare(b.label))
+  const activeGameType = gameType && gameTypeCounts.has(gameType) ? gameType : null
+  const shownProjects = projects.filter((p) => {
+    if (activeGameType && !projectGameTypes(p).includes(activeGameType)) return false
+    return !pq || p.name.toLowerCase().includes(pq) || (p.projectName ?? '').toLowerCase().includes(pq)
+  })
+  const filteringProjects = !!pq || !!activeGameType
   const blocks: Block[] = []
   const groupBlock = new Map<string, Block & { kind: 'group' }>()
   for (const p of shownProjects) {
@@ -385,7 +396,7 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
               )}
             </div>
 
-            <div className="group-title">Your playables ({pq ? `${shownProjects.length} of ${projects.length}` : projects.length})</div>
+            <div className="group-title">Your playables ({filteringProjects ? `${shownProjects.length} of ${projects.length}` : projects.length})</div>
             <label className="home-search proj-search">
               <Icon icon={Search} size={15} />
               <input value={projQuery} placeholder="Search your playables…" onChange={(e) => setProjQuery(e.target.value)} />
@@ -395,7 +406,29 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
                 </button>
               )}
             </label>
-            {pq && !shownProjects.length && <div className="hint pad">No playables match “{projQuery}”.</div>}
+            {gameTypeChips.length > 0 && (
+              <div className="brand-filter proj-game-filter" role="group" aria-label="Filter playables by minigame type">
+                <button className={'brand-chip' + (activeGameType === null ? ' on' : '')} onClick={() => setGameType(null)}>
+                  All <span className="brand-count">{projects.length}</span>
+                </button>
+                {gameTypeChips.map((g) => (
+                  <button
+                    key={g.id}
+                    className={'brand-chip' + (activeGameType === g.id ? ' on' : '')}
+                    onClick={() => setGameType(activeGameType === g.id ? null : g.id)}
+                    title={`Show playables with a ${g.label} minigame`}
+                  >
+                    {g.label} <span className="brand-count">{g.count}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {filteringProjects && !shownProjects.length && (
+              <div className="hint pad">
+                No playables match{pq ? ` “${projQuery}”` : ''}
+                {activeGameType ? ` with a ${getTemplate(activeGameType)?.label ?? activeGameType} minigame` : ''}.
+              </div>
+            )}
           {blocks.map((b) =>
             b.kind === 'group' ? (
               <div key={'g:' + b.id} className="proj-group">
