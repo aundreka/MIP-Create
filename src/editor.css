@@ -5525,3 +5525,6 @@ svg {
   opacity: 0;
   cursor: pointer;
 }
+.home-search.proj-search {
+  margin: 8px 10px 12px;
+}

@@ -61,9 +61,9 @@ function ProjectThumb({ id }: { id: string }): JSX.Element {
     return () => { alive = false }
   }, [visible, id])
 
-  // Pick the most visually rich scene: prefer endscene or win, fall back to first
-  const scene = data?.project.scenes.find((s) => s.kind === 'endscene') ??
-    data?.project.scenes.find((s) => s.kind === 'overlay' || (s.kind as string) === 'win') ??
+  // Show the first game scene; fall back to the start scene, then the first scene.
+  const scene = data?.project.scenes.find((s) => s.kind === 'game') ??
+    data?.project.scenes.find((s) => s.id === data.project.startSceneId) ??
     data?.project.scenes[0]
   return (
     <span ref={ref} className="proj-thumb">
@@ -120,6 +120,7 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
     return curId ? [curId] : projects[0] ? [projects[0].id] : []
   }
   const [query, setQuery] = useState('')
+  const [projQuery, setProjQuery] = useState('')
   const [brand, setBrand] = useState<string | null>(null)
   const gameCards = useMemo(() => gameTemplateStarters().map((s) => ({ starter: s, data: s.build() })), [])
   // Distinct brands (recomputed when usage tags change via `refresh`).
@@ -186,9 +187,14 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
   type Block =
     | { kind: 'loose'; items: ProjectRecord[] }
     | { kind: 'group'; id: string; name: string; items: ProjectRecord[] }
+  // Project search matches the MIP's own name or its project group's name.
+  const pq = projQuery.trim().toLowerCase()
+  const shownProjects = pq
+    ? projects.filter((p) => p.name.toLowerCase().includes(pq) || (p.projectName ?? '').toLowerCase().includes(pq))
+    : projects
   const blocks: Block[] = []
   const groupBlock = new Map<string, Block & { kind: 'group' }>()
-  for (const p of projects) {
+  for (const p of shownProjects) {
     if (!p.projectId) {
       const last = blocks[blocks.length - 1]
       if (last?.kind === 'loose') last.items.push(p)
@@ -379,7 +385,17 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
               )}
             </div>
 
-            <div className="group-title">Your playables ({projects.length})</div>
+            <div className="group-title">Your playables ({pq ? `${shownProjects.length} of ${projects.length}` : projects.length})</div>
+            <label className="home-search proj-search">
+              <Icon icon={Search} size={15} />
+              <input value={projQuery} placeholder="Search your playables…" onChange={(e) => setProjQuery(e.target.value)} />
+              {projQuery && (
+                <button className="home-search-x" onClick={() => setProjQuery('')} title="Clear">
+                  <Icon icon={X} size={13} />
+                </button>
+              )}
+            </label>
+            {pq && !shownProjects.length && <div className="hint pad">No playables match “{projQuery}”.</div>}
           {blocks.map((b) =>
             b.kind === 'group' ? (
               <div key={'g:' + b.id} className="proj-group">
