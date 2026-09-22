@@ -5551,3 +5551,22 @@ svg {
   background: var(--bg);
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
 }
+.proj-hover-row {
+  display: flex;
+  align-items: flex-start;
+}
+.proj-hover-scene {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.proj-hover-name {
+  font-size: var(--fs-sm);
+  color: #fff;
+  line-height: 18px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

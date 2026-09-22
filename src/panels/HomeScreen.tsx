@@ -6,6 +6,8 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { createProject, currentProjectId, deleteProject, listProjects, loadProjectPreview, projectGameTypes, openProject, renameProject, saveCurrent, type ProjectRecord } from '../projects'
 import type { ProjectData } from '../bridge'
+import type { Project } from '../../runtime/scene'
+import type { AssetMap } from '../../runtime/types'
 import { gameTemplateStarters, STARTERS, type Starter } from '../templates'
 import { SceneThumb } from '../preview/SceneThumb'
 import { previewNowMs } from '../uiState'
@@ -80,25 +82,16 @@ function ProjectThumb({ id }: { id: string }): JSX.Element {
 
 const HOVER_DELAY_MS = 2000
 
-// Live preview of a project's first (start) scene, shown after hovering a card for
-// HOVER_DELAY_MS, as a centered modal. Plays in the real runtime (pa:play) so intro
-// animations run; the start scene's advance is forced to manual so the preview stays
-// on that scene. The modal ignores the pointer, so the card underneath keeps its hover
-// and the preview closes as soon as the mouse leaves the card.
-function HoverPreview(props: { id: string }): JSX.Element | null {
+const HOVER_SCENES = 5
+
+// One scene playing live in the real runtime (pa:play with this scene as the start
+// and its advance forced to manual), so its intro animations run and it stays put.
+function LiveScene(props: { project: Project; assets: AssetMap; sceneId: string; scale: number }): JSX.Element {
+  const { project, assets, sceneId, scale } = props
   const ref = useRef<HTMLIFrameElement>(null)
-  const [data, setData] = useState<ProjectData | null>(null)
-  useEffect(() => {
-    let alive = true
-    void loadProjectPreview(props.id).then((d) => { if (alive) setData(d) })
-    return () => { alive = false }
-  }, [props.id])
   const post = (): void => {
-    if (!data) return
-    const p = data.project
-    const startId = p.scenes.some((s) => s.id === p.startSceneId) ? p.startSceneId : p.scenes[0]?.id
-    const project = { ...p, startSceneId: startId, scenes: p.scenes.map((s) => (s.id === startId ? { ...s, advance: { on: 'manual' as const } } : s)) }
-    ref.current?.contentWindow?.postMessage({ type: 'pa:play', project, assets: data.assets, previewNow: previewNowMs() }, '*')
+    const p = { ...project, startSceneId: sceneId, scenes: project.scenes.map((s) => (s.id === sceneId ? { ...s, advance: { on: 'manual' as const } } : s)) }
+    ref.current?.contentWindow?.postMessage({ type: 'pa:play', project: p, assets, previewNow: previewNowMs() }, '*')
   }
   useEffect(() => {
     const onMsg = (e: MessageEvent): void => {
@@ -107,23 +100,51 @@ function HoverPreview(props: { id: string }): JSX.Element | null {
     window.addEventListener('message', onMsg)
     return () => window.removeEventListener('message', onMsg)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data])
+  }, [])
+  const bw = project.meta.baseW || 1080
+  const bh = project.meta.baseH || 1920
+  return (
+    <div className="proj-hover-preview" style={{ width: Math.round(bw * scale), height: Math.round(bh * scale) }}>
+      <iframe
+        ref={ref}
+        src="./runtime-frame.html"
+        title="Scene preview"
+        onLoad={post}
+        tabIndex={-1}
+        style={{ width: bw, height: bh, border: 0, transform: `scale(${scale})`, transformOrigin: '0 0', pointerEvents: 'none' }}
+      />
+    </div>
+  )
+}
+
+// Hover-and-hold preview of a project's first HOVER_SCENES scenes (strip order),
+// side by side in a centered modal. The modal ignores the pointer, so the card
+// underneath keeps its hover and the preview closes when the mouse leaves the card.
+function HoverPreview(props: { id: string }): JSX.Element | null {
+  const [data, setData] = useState<ProjectData | null>(null)
+  useEffect(() => {
+    let alive = true
+    void loadProjectPreview(props.id).then((d) => { if (alive) setData(d) })
+    return () => { alive = false }
+  }, [props.id])
   if (!data) return null
+  const scenes = data.project.scenes.slice(0, HOVER_SCENES)
   const bw = data.project.meta.baseW || 1080
   const bh = data.project.meta.baseH || 1920
-  // As large as the viewport allows (whole scene, letterboxed), centered.
-  const scale = Math.min((window.innerHeight * 0.9) / bh, (window.innerWidth * 0.9) / bw)
+  // Fit the row of scenes into 90% of the viewport (GAP px between, LABEL px for names).
+  const GAP = 16
+  const LABEL = 24
+  const n = Math.max(1, scenes.length)
+  const scale = Math.min((window.innerHeight * 0.9 - LABEL) / bh, (window.innerWidth * 0.9 - GAP * (n - 1)) / (bw * n))
   return (
     <div className="proj-hover-backdrop">
-      <div className="proj-hover-preview" style={{ width: Math.round(bw * scale), height: Math.round(bh * scale) }}>
-        <iframe
-          ref={ref}
-          src="./runtime-frame.html"
-          title="Scene preview"
-          onLoad={post}
-          tabIndex={-1}
-          style={{ width: bw, height: bh, border: 0, transform: `scale(${scale})`, transformOrigin: '0 0', pointerEvents: 'none' }}
-        />
+      <div className="proj-hover-row" style={{ gap: GAP }}>
+        {scenes.map((sd) => (
+          <div key={sd.id} className="proj-hover-scene">
+            <LiveScene project={data.project} assets={data.assets} sceneId={sd.id} scale={scale} />
+            <span className="proj-hover-name">{sd.name}</span>
+          </div>
+        ))}
       </div>
     </div>
   )
