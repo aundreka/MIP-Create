@@ -155,7 +155,10 @@ identifiers are invisible to the scan.
 ## 3. Guarded clickout
 
 Every CTA, endcard and clickout goes through one handler that checks the guard, wraps
-`open()` in `try/catch`, and falls back to the browser. For the same static-scan reason as
+`open()` in `try/catch`, and uses **`mraid.open()` only** — there is no browser fallback
+(see [mraid_clickthrough_validation_fix.md](mraid_clickthrough_validation_fix.md): validators
+reject "window.open() used — must use mraid.open() instead" on any occurrence, including
+dead code and comments). For the same static-scan reason as
 the gate, it is emitted longhand into `<head>` as `window.PA_CLICKOUT` — inside the
 minified bundle the identical code reads `Pa(tt.mraid)` and a validator sees an unguarded
 `mraid.open()`.
@@ -168,35 +171,32 @@ window.PA_CLICKOUT = function (url) {
   var clickTarget =
     url || window.clickTag || window.clickTag1 || window.clickthrough || window.clickThrough || ''
 
+  if (!clickTarget) return false   // never open without a destination
+
   if (typeof mraid.open === 'function' && window.isMraidUsable(mraid)) {
     try {
-      if (clickTarget) mraid.open(clickTarget)
-      else mraid.open('')        // container substitutes its own configured store URL
+      mraid.open(clickTarget)
       return true
     } catch (e) {
-      // fall through to the browser fallback
+      console.error('mraid.open failed', e)
     }
   }
-
-  if (!clickTarget) return false
-  try {
-    return !!window.open(clickTarget, '_blank', 'noopener')
-  } catch (e) {
-    return false
-  }
+  return false
 }
 ```
 
-It returns `true` only when something actually opened. `triggerCTA()` calls it at the MRAID
-step and treats `false` as "keep going", so a blocked popup still reaches the same-tab
-retry below it.
+It returns `true` only when the container accepted the open. `triggerCTA()` calls it at the
+MRAID step and stops there either way — `false` only leaves the click cooldown disarmed so
+the next tap gets a fresh try.
 
 This repo's `triggerCTA()` is the same contract inside a longer SDK priority chain
-(ExitApi → FbPlayableAd → Luna → playableSDK → Mintegral → click macros → Vungle →
-TikTok → **MRAID** → browser), and it passes the project's store URL rather than
-`about:blank`. Empty string is deliberate for the MRAID branch: containers substitute
-their own configured store URL, so a click still registers for `clickUrlMode: 'none'`
-creatives.
+(ExitApi → FbPlayableAd → Luna → playableSDK → Mintegral → Vungle → TikTok → **MRAID**),
+where the click macros only pick the destination handed to `mraid.open()`. When there is
+no `window.mraid` at all (editor preview, file opened directly) it navigates the current
+tab via `location.href` — never a popup. It passes the project's store URL rather than
+`about:blank`. It never calls `mraid.open` without a URL — validators flag an empty
+open, even in a comment — so a `clickUrlMode: 'none'` creative with no click macro
+registers no click inside a container.
 
 ## 4. Viewability and audio
 
@@ -232,7 +232,8 @@ including `viewableChange`, the one that silences the ad off screen.
 | --- | --- | --- |
 | `if (window.mraid) { mraid.open() }` | Ignores `getState() === 'loading'`. Violates the spec. | Check `window.isMraidUsable(mraid)` first. |
 | Only `window.clickTag` | Networks use `clickTag`, `clickTag1`, `clickthrough`, or `clickThrough`. | Use the full fallback chain. |
-| No `try/catch` around `mraid.open()` | Native containers throw on a bad URL or a failed bridge. | Wrap it; fall back to `window.open()`. |
+| Any `window.open` in the file | Validators static-scan for it — calls, dead fallbacks and comments all fail. | `mraid.open()` only; in iframe shims override `self.open`. |
+| No `try/catch` around `mraid.open()` | Native containers throw on a bad URL or a failed bridge. | Wrap it and log the failure — no browser fallback. |
 | `ready` listener attached only at page load | Some containers inject `window.mraid` asynchronously. | Re-run `trackMraidReadiness()` on every `isMraidUsable()` query. |
 | `if (mraid.getState() === "loading") waitForReady()` | Scanner reads the branch body and finds no `ready` subscription. | Inline `mraid.addEventListener("ready", …)` inside the branch. |
 | Arming a click cooldown before the redirect fires | A no-op click (blocked popup, missing SDK) blocks the user's next real tap. | Arm it only after something actually opened. |
@@ -244,7 +245,10 @@ including `viewableChange`, the one that silences the ad off screen.
       `mraid.addEventListener("ready", …)` as the release.
 - [ ] Every clickout checks `window.isMraidUsable(mraid)` before calling `mraid.open()`,
       in source a scanner can read — not only inside the bundle.
-- [ ] `mraid.open()` is wrapped in `try/catch` with a `window.open()` fallback.
+- [ ] `mraid.open()` is wrapped in `try/catch` and is the only click-through method.
+- [ ] The text `window.open` appears nowhere in the file (preflight errors on it).
+- [ ] Every `mraid.open` call passes its destination — no `mraid.open()` / `mraid.open("")`,
+      not even in a comment.
 - [ ] The `clickTag` / `clickTag1` / `clickthrough` / `clickThrough` chain is implemented.
 - [ ] No raw, unguarded `mraid.open(...)` in inline or minified scripts.
 - [ ] Video / audio respect `viewableChange` and pause off screen.

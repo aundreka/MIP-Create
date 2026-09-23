@@ -629,7 +629,7 @@ export const MRAID_HEAD = `<script src="mraid.js"></script>
       }
     }
 
-    // True when mraid.open() and the rest of the API are safe to call.
+    // True when mraid.open and the rest of the API are safe to call.
     window.isMraidUsable = function (mraid) {
       if (!mraid) return false;
       trackMraidReadiness(mraid);
@@ -649,6 +649,9 @@ export const MRAID_HEAD = `<script src="mraid.js"></script>
     // it is present). Longhand here, with mraid as the literal identifier, for the same
     // static-scan reason as the gate below: inside the minified bundle the same code reads
     // Pa(tt.mraid), and a validator sees an unguarded open.
+    // mraid.open, with a destination, is the ONLY click-through method: validators reject any
+    // other navigation API in the creative, so there is deliberately no browser fallback,
+    // and it is never called without a URL.
     window.PA_CLICKOUT = function (url) {
       var mraid = window.mraid || {};
 
@@ -656,26 +659,20 @@ export const MRAID_HEAD = `<script src="mraid.js"></script>
       var clickTarget =
         url || window.clickTag || window.clickTag1 || window.clickthrough || window.clickThrough || "";
 
-      // mraid.open() only after the readiness guard passes, and never outside try/catch —
+      // No destination (clickUrlMode 'none'): nothing to open.
+      if (!clickTarget) return false;
+
+      // Open only after the readiness guard passes, and never outside try/catch —
       // native containers throw on a bad URL or a half-built bridge.
       if (typeof mraid.open === "function" && window.isMraidUsable(mraid)) {
         try {
-          if (clickTarget) mraid.open(clickTarget);
-          // No destination (clickUrlMode 'none'): the container substitutes its own
-          // configured store URL, so the tap still registers as a click.
-          else mraid.open("");
+          mraid.open(clickTarget);
           return true;
         } catch (e) {
-          // Container refused the open — fall through to the browser.
+          console.error("mraid.open failed", e);
         }
       }
-
-      if (!clickTarget) return false;
-      try {
-        return !!window.open(clickTarget, "_blank", "noopener");
-      } catch (e) {
-        return false;
-      }
+      return false;
     };
 
     // The creative bundle below defers its own start to PA_START() because of this flag;

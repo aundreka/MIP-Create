@@ -135,10 +135,13 @@ export function triggerCTA(): void {
   try {
     if (typeof W.openAppStore === 'function') return done(() => W.openAppStore())
   } catch { /* */ }
-  // 7. Moloco / DSP click macro (clickTag, clickTag1, clickthrough, clickThrough)
+  // 7. Moloco / DSP click macro (clickTag, clickTag1, clickthrough, clickThrough). The
+  // macro is only a DESTINATION: the click itself still goes through mraid.open() below,
+  // because validators reject any click-through that bypasses the MRAID container.
+  let clickDest = dest
   try {
     const tag = clickTagUrl()
-    if (tag) return done(() => window.open(tag, '_blank', 'noopener'))
+    if (tag) clickDest = tag
   } catch { /* */ }
   // 8. Vungle
   try {
@@ -146,54 +149,43 @@ export function triggerCTA(): void {
   } catch { /* */ }
   // 9. TikTok
   try {
-    if (W.__TIKTOK__) {
-      if (typeof W.openAppStore === 'function') return done(() => W.openAppStore())
-      if (url) return done(() => window.open(url, '_blank'))
-      return
-    }
+    if (W.__TIKTOK__ && typeof W.openAppStore === 'function') return done(() => W.openAppStore())
   } catch { /* */ }
-  // 10. MRAID (Applovin / Ironsource / Unity fallback)
-  // Always fires when MRAID is present — even with no URL (dest=''). The SDK uses
-  // its own configured store URL when given an empty string, so the redirect still
-  // happens for mode:'none' / about:blank ads inside a MRAID container.
+  // 10. MRAID (Applovin / Ironsource / Unity fallback) — the ONLY click-through method
+  // when a container is present. There is deliberately no browser fallback: creative
+  // validators reject a creative whose click-through can bypass mraid.open()
+  // (docs/mraid_clickthrough_validation_fix.md).
+  // Never called without a URL: validators flag an empty open, so a mode:'none' /
+  // about:blank ad with no click macro registers no click inside a container.
   // Guarded by mraidUsable(): calling open() on a container that is still 'loading'
-  // violates the MRAID spec and is what creative audits flag. If open() itself throws,
-  // the catch drops through to the browser fallback below rather than swallowing the tap.
+  // violates the MRAID spec and is what creative audits flag — that tap is dropped and
+  // the cooldown stays disarmed, so the next tap gets a fresh try.
   //
   // The export shell publishes the same guarded open as window.PA_CLICKOUT (MRAID_HEAD in
   // src/export.ts) written longhand, so the guard + try/catch + click-macro chain survive
   // in scannable source instead of only as mangled bundle identifiers. Prefer it when it
   // is there; this branch is the fallback for shells without it (preview, Vite source
-  // export). It returns true only when something actually opened — false drops through to
-  // the browser fallback below, so a blocked popup still gets the same-tab retry.
-  try {
-    if (typeof W.mraid?.open === 'function') {
-      if (typeof W.PA_CLICKOUT === 'function') {
-        if (W.PA_CLICKOUT(dest) === true) { _lastCta = t; return }
-      } else if (mraidUsable(W.mraid)) {
-        return done(() => W.mraid.open(dest))
-      }
-    }
-  } catch { /* */ }
-  // 11. Fallback — standalone HTML (no network SDK present). Try a new tab first; if the
-  // browser blocks the popup (common when the exported file is opened directly / served
-  // from plain hosting) window.open returns null, so navigate the CURRENT tab instead.
-  // Without this the popup-block swallows the first tap(s) and the redirect only fires after
-  // several presses. The cooldown is armed only when something actually opens/navigates.
-  // Skipped only when truly no URL (mode:'none').
-  if (url) {
-    let opened: Window | null = null
+  // export). It returns true only when the container accepted the open.
+  if (W.mraid && typeof W.mraid.open === 'function') {
     try {
-      opened = window.open(url, '_blank')
-    } catch { /* */ }
-    if (opened) { _lastCta = t; return }
-    // about:blank has no meaningful same-tab destination — only redirect in place for a real URL.
-    if (url !== 'about:blank') {
-      try {
-        window.location.href = url
-        _lastCta = t
-      } catch { /* */ }
+      if (typeof W.PA_CLICKOUT === 'function') {
+        if (W.PA_CLICKOUT(clickDest) === true) _lastCta = t
+      } else if (clickDest && mraidUsable(W.mraid)) {
+        done(() => W.mraid.open(clickDest))
+      }
+    } catch (e) {
+      console.error('mraid.open failed', e)
     }
+    return
+  }
+  // 11. No container at all — editor preview or the file opened straight in a browser.
+  // Navigate the current tab (never a popup: that would put a non-MRAID click-through in
+  // the creative). Skipped when there is no real destination (mode:'none' / about:blank).
+  if (clickDest && clickDest !== 'about:blank') {
+    try {
+      window.location.href = clickDest
+      _lastCta = t
+    } catch { /* */ }
   }
 }
 

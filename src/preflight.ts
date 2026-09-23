@@ -131,8 +131,16 @@ export function preflightNetwork(net: Network, html: string, bytes: number, proj
   const macros = ['clickTag', 'clickTag1', 'clickthrough', 'clickThrough'].filter((k) => !html.includes(k))
   if (macros.length)
     findings.push({ level: 'error', message: `Click macro chain incomplete — missing ${macros.join(', ')}; clickouts must fall back through all four.` })
-  if (!/window\.open\(/.test(html))
-    findings.push({ level: 'error', message: 'No window.open() fallback in the output: a clickout must still reach the browser when mraid.open() is unavailable or throws.' })
+  // Click-throughs must use mraid.open() ONLY. Validators static-scan the file and reject
+  // "window.open() used — must use mraid.open() instead" on ANY occurrence — a call, a dead
+  // fallback, even a comment — so the bare text is the check
+  // (docs/mraid_clickthrough_validation_fix.md).
+  if (/window\s*\.\s*open|window\s*\[\s*["']open/.test(html))
+    findings.push({ level: 'error', message: 'window.open found in the output: click-throughs must use mraid.open() only, and validators reject any window.open reference (including comments).' })
+  // ...and it always carries the destination: an empty open — mraid.open() / mraid.open("")
+  // — is flagged by the same scanners, even inside a comment.
+  if (/mraid\s*\.\s*open\(\s*(?:(["'])\1)?\s*\)/.test(html))
+    findings.push({ level: 'error', message: 'mraid.open called with no URL: every click-through must pass its destination (mraid.open(clickTarget)).' })
 
   return {
     net: net.name,

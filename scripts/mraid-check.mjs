@@ -6,7 +6,8 @@
 //   2. The creative still loads and stays interactive when 'ready' never arrives.
 //   3. The MRAID 2.0 lifecycle listeners register once ready fires — even on a container
 //      that rejects the 3.0-only event names (exposureChange / audioVolumeChange).
-//   4. Click-through goes through mraid.open().
+//   4. Click-through goes through mraid.open(url) — and ONLY that: no window.open
+//      anywhere in the shell or bundle (validators reject even a dead fallback or comment).
 //   5. No audio starts before the first user interaction, and it mutes when hidden.
 //
 // The stub container below is deliberately hostile: it reports MRAID 2.0, throws on the
@@ -167,6 +168,13 @@ async function run() {
   // 0. the bridge declaration every export must carry
   if (!/src="mraid\.js"/.test(HEAD)) problems.push('export shell is missing the <script src="mraid.js"> bridge declaration')
   else console.log('✓ export shell declares the mraid.js bridge')
+  // 0b. mraid.open() is the only click-through: validators static-scan for window.open
+  const opens = [HEAD, runtimeSrc].join('\n').match(/window\s*\.\s*open\w*|window\s*\[\s*["']open/g)
+  if (opens) problems.push(`window.open in the export (${[...new Set(opens)].join(', ')}) — click-throughs must use mraid.open() only`)
+  else console.log('✓ no window.open anywhere in the export — mraid.open() is the only click-through')
+  const emptyOpens = [HEAD, runtimeSrc].join('\n').match(/mraid\s*\.\s*open\(\s*(?:(["'])\1)?\s*\)/g)
+  if (emptyOpens) problems.push(`mraid.open with no URL in the export (${[...new Set(emptyOpens)].join(', ')})`)
+  else console.log('✓ every mraid.open call carries its destination')
 
   try {
     await page.setContent(buildHtml(target.project, target.assets, runtimeSrc), { waitUntil: 'load' })
