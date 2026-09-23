@@ -189,18 +189,16 @@ describe('MRAID readiness', () => {
     expect(mraid.calls.some((c) => c.startsWith('open:'))).toBe(false)
   })
 
-  it('never falls back to the browser when mraid.open() throws', async () => {
-    // Validators reject any non-MRAID click-through, so a failed open is logged, not retried.
+  it('falls back to the browser when mraid.open() throws', async () => {
     const mraid = makeMraid({ state: 'default' })
     mraid.open = () => { throw new Error('bridge failure') }
     ;(window as unknown as Record<string, unknown>).mraid = mraid
     const { net } = await load()
     net.setStoreUrl({ ios: 'https://apps.apple.com/x', android: 'https://apps.apple.com/x' })
     const open = vi.spyOn(window, 'open').mockReturnValue(window)
-    vi.spyOn(console, 'error').mockImplementation(() => {})
 
     net.triggerCTA()
-    expect(open).not.toHaveBeenCalled()
+    expect(open).toHaveBeenCalled()
   })
 
   it('routes the clickout through the shell handler (window.PA_CLICKOUT) when present', async () => {
@@ -222,7 +220,7 @@ describe('MRAID readiness', () => {
     expect(open).not.toHaveBeenCalled()
   })
 
-  it('does not fall back to the browser when the shell handler reports nothing opened', async () => {
+  it('falls back to the browser when the shell handler reports nothing opened', async () => {
     const mraid = makeMraid({ state: 'loading' })
     const W = window as unknown as Record<string, unknown>
     W.mraid = mraid
@@ -232,26 +230,21 @@ describe('MRAID readiness', () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(window)
 
     net.triggerCTA()
-    expect(open).not.toHaveBeenCalled()
+    expect(open).toHaveBeenCalled()
   })
 })
 
 describe('click macro chain', () => {
   // Networks publish the destination under four different global names; hardcoding only
   // window.clickTag drops the click on the ones that use the others.
-  // The macro is the destination; the click itself still goes through mraid.open().
   for (const key of ['clickTag', 'clickTag1', 'clickthrough', 'clickThrough']) {
-    it(`redirects to window.${key} through mraid.open()`, async () => {
-      const W = window as unknown as Record<string, unknown>
-      const mraid = makeMraid({ state: 'default' })
-      W.mraid = mraid
-      W[key] = 'https://dsp.example/click'
+    it(`redirects through window.${key}`, async () => {
+      ;(window as unknown as Record<string, unknown>)[key] = 'https://dsp.example/click'
       const { net } = await load()
       const open = vi.spyOn(window, 'open').mockReturnValue(window)
 
       net.triggerCTA()
-      expect(mraid.calls).toContain('open:https://dsp.example/click')
-      expect(open).not.toHaveBeenCalled()
+      expect(open).toHaveBeenCalledWith('https://dsp.example/click', '_blank', 'noopener')
     })
   }
 })

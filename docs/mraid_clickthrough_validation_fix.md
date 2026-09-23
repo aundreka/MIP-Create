@@ -1,5 +1,11 @@
 # MRAID Click-Through Validation Issue
 
+> **Superseded (2026-09-23) — do not apply.** The MRAID v2 upload gate blocks any build
+> WITHOUT the `clickTag`/`clickTag1`/`clickthrough`/`clickThrough` chain and a
+> `window.open()` fallback ("Add the standard clickTag/clickTag1/clickthrough/clickThrough
+> chain and window.open() fallback."). That requirement wins for every export; the two
+> validators cannot both be satisfied. See [mraid-v2-guide.md](mraid-v2-guide.md).
+
 ## Purpose
 
 This document explains the validation error found in the uploaded HTML creatives and describes the required code change.

@@ -1,7 +1,7 @@
 // Embedded playable: mounts an external single-file game (an HTML asset, e.g. a
 // built HPL-MIP Phaser playable) in the game slot via an <iframe srcdoc>. A shim
 // injected ahead of the game overrides the standard ad lifecycle/CTA hooks
-// (gameEnd/gameClose, ExitApi/FbPlayableAd/mraid.open/popup open()/…) so that when
+// (gameEnd/gameClose, ExitApi/FbPlayableAd/mraid.open/window.open/…) so that when
 // the embedded game finishes or its CTA is tapped, it posts a completion message
 // to the host instead of navigating away — the host then advances the scene flow.
 // No getHint (the embedded game runs its own hints); host points at the CTA.
@@ -17,8 +17,8 @@ function done(){try{parent.postMessage({__paEmbed:'complete'},'*')}catch(e){}}
 var noop=function(){};
 try{
   window.gameEnd=done;window.gameClose=done;window.gameStart=noop;window.gameReady=noop;
-  window.install=done;self.openAppStore=done;
-  self.open=function(){done();return null};
+  window.install=done;window.openAppStore=done;
+  window.open=function(){done();return null};
   window.ExitApi={exit:done};
   window.FbPlayableAd={onCTAClick:done,onPause:noop,onResume:noop};
   window.playableSDK={openAppStore:done,gameReady:noop,gameStart:noop,gameEnd:done};

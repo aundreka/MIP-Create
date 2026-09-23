@@ -124,12 +124,11 @@ describe('source map stripping', () => {
     expect(guard).toBeGreaterThan(-1)
     expect(guard).toBeLessThan(open)
     expect(html.slice(guard, open)).toContain('try {')
-    // No network's click macro is universal, so all four ship — but mraid.open() is the
-    // only click-through: validators reject any window.open in the file.
+    // No network's click macro is universal, so all four ship, with a browser fallback.
     for (const macro of ['clickTag', 'clickTag1', 'clickthrough', 'clickThrough']) {
       expect(html).toContain('window.' + macro)
     }
-    expect(html).not.toMatch(/window\s*\.\s*open/)
+    expect(html).toContain('window.open(clickTarget, "_blank", "noopener")')
     // The guard is defined in <head>, ahead of the runtime that calls it.
     expect(html.indexOf('window.PA_CLICKOUT')).toBeLessThan(html.indexOf('</head>'))
   })
