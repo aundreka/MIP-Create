@@ -47,7 +47,7 @@ function armCtaTap(el: HTMLElement, run: () => void): void {
 // standard ad CTA signals inside the iframe bubble up to the host.
 //
 // Every CTA hook below is gated on a real tap INSIDE the card: end-card HTML routinely calls
-// gameEnd()/mraid.open()/window.open() on load to announce "the ad finished", and those
+// gameEnd()/mraid.open()/a popup open() on load to announce "the ad finished", and those
 // must not read as "the player asked to install". Taps landing inside the arm window are
 // ignored for the same reason the host ignores them (see ARM_MS).
 //
@@ -67,8 +67,8 @@ try{['loadeddata','canplay','loadedmetadata'].forEach(function(t){addEventListen
 try{addEventListener('message',function(e){if(e&&e.data&&e.data.__paEnd==='roll')roll()})}catch(e){}
 var noop=function(){};
 try{
-  window.gameEnd=end;window.gameClose=cta;window.install=cta;window.openAppStore=cta;
-  window.open=function(){cta();return null};
+  window.gameEnd=end;window.gameClose=cta;window.install=cta;self.openAppStore=cta;
+  self.open=function(){cta();return null};
   window.ExitApi={exit:cta};
   window.FbPlayableAd={onCTAClick:cta,onPause:noop,onResume:noop};
   window.playableSDK={openAppStore:cta,gameReady:noop,gameStart:noop,gameEnd:end};

@@ -10,7 +10,7 @@ const NET: Network = { name: 'AppLovin', tag: 'al' }
 // open() behind the full click-macro chain.
 const CLICKOUT =
   `var t=window.clickTag||window.clickTag1||window.clickthrough||window.clickThrough||"";` +
-  `if(window.isMraidUsable(mraid)){try{mraid.open(t);return}catch(e){}}window.open(t,"_blank","noopener");`
+  `if(window.isMraidUsable(mraid)){try{mraid.open(t);return}catch(e){}}`
 const MRAID_OK =
   `<script src="mraid.js"></script><script>window.isMraidUsable=function(m){return m.getState()!=="loading"};` +
   `if(mraid.getState()==="loading"){mraid.addEventListener("ready",start)}${CLICKOUT}</script>`
@@ -91,10 +91,15 @@ describe('preflightNetwork', () => {
     expect(hit?.message).toContain('clickthrough')
     expect(hit?.message).toContain('clickThrough')
   })
-  it('flags a clickout with no window.open() fallback', () => {
-    const html = MRAID_OK.replace('window.open(t,"_blank","noopener");', '')
-    const r = preflightNetwork(NET, html, 1000, baseProject())
-    expect(r.findings.some((f) => /window\.open\(\) fallback/.test(f.message))).toBe(true)
+  it('passes a clickout that uses mraid.open() only', () => {
+    const r = preflightNetwork(NET, MRAID_OK, 1000, baseProject())
+    expect(r.findings.some((f) => /window\.open/.test(f.message))).toBe(false)
+  })
+  it('flags any window.open reference — call, fallback or comment', () => {
+    for (const extra of ['window.open(t,"_blank","noopener");', '// window.open fallback', 'window["open"](t)']) {
+      const r = preflightNetwork(NET, MRAID_OK.replace('</script>', extra + '</script>'), 1000, baseProject())
+      expect(r.findings.some((f) => f.level === 'error' && /window\.open found/.test(f.message)), extra).toBe(true)
+    }
   })
   it('checks MRAID on a non-MRAID-tagged network too — every export ships the bridge', () => {
     const fb: Network = { name: 'Facebook', tag: 'fb' }

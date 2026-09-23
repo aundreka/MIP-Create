@@ -649,6 +649,8 @@ export const MRAID_HEAD = `<script src="mraid.js"></script>
     // it is present). Longhand here, with mraid as the literal identifier, for the same
     // static-scan reason as the gate below: inside the minified bundle the same code reads
     // Pa(tt.mraid), and a validator sees an unguarded open.
+    // mraid.open() is the ONLY click-through method: validators reject any other
+    // navigation API in the creative, so there is deliberately no browser fallback.
     window.PA_CLICKOUT = function (url) {
       var mraid = window.mraid || {};
 
@@ -666,16 +668,10 @@ export const MRAID_HEAD = `<script src="mraid.js"></script>
           else mraid.open("");
           return true;
         } catch (e) {
-          // Container refused the open — fall through to the browser.
+          console.error("mraid.open failed", e);
         }
       }
-
-      if (!clickTarget) return false;
-      try {
-        return !!window.open(clickTarget, "_blank", "noopener");
-      } catch (e) {
-        return false;
-      }
+      return false;
     };
 
     // The creative bundle below defers its own start to PA_START() because of this flag;
