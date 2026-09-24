@@ -18,6 +18,8 @@ interface CellState {
   // Dynamic date rendered inside the reveal (under the cover). Sized in sizeAll
   // as a fraction of the cell's short side, so it scales exactly like the cell art.
   dateEl: HTMLDivElement | null
+  // Border ring drawn ON TOP of the cover (so scratching never erases it); width set in sizeAll.
+  borderEl: HTMLDivElement
   won: boolean
   isWin: boolean
   row: number
@@ -202,6 +204,9 @@ export function createScratchGrid(): GameModule {
   // Outer-corner rounding as a fraction of the cell's short side. Authored via the
   // cellRadius param (percent); 9% is the historical hardcoded look, 0 = square.
   let cellRadiusFrac = 0.09
+  // Cell border: width in DESIGN px (scaled like padding/gaps in sizeAll), 0 = none.
+  let cellBorderWidth = 0
+  let cellBorderColor = '#ffffff'
   // Dynamic-date font size as a fraction of the cell's short side (see CellState.dateEl).
   let dateSizeFrac = 0.08
   let basePad = 0
@@ -716,6 +721,10 @@ export function createScratchGrid(): GameModule {
       const br = row === gridRows - 1 && col === gridCols - 1 ? r : 0
       const bl = row === gridRows - 1 && col === 0 ? r : 0
       el.style.borderRadius = `${tl}px ${tr}px ${br}px ${bl}px`
+      const bw = cellBorderWidth > 0 ? Math.max(1, Math.round(cellBorderWidth * scale())) : 0
+      cell.borderEl.style.display = bw ? 'block' : 'none'
+      cell.borderEl.style.borderWidth = bw + 'px'
+      cell.borderEl.style.borderColor = cellBorderColor
       // Keep the canvas's CSS size pinned to the cell every pass (cheap) so it fills the
       // cell exactly even when only the CSS size shifts (e.g. a live browser-zoom resize).
       // width/height:100% (not a rounded px value) so the cover canvas and the reveal canvas
@@ -1063,6 +1072,8 @@ export function createScratchGrid(): GameModule {
       zoneH = Math.max(0.02, Math.min(1 - zoneY, num(params.zoneH, 100) / 100))
       imageFit = str(params.imageFit as unknown, 'cover') === 'contain' ? 'contain' : 'cover'
       cellRadiusFrac = Math.max(0, Math.min(50, num(params.cellRadius, 9))) / 100
+      cellBorderWidth = Math.max(0, Math.min(40, num(params.cellBorderWidth as unknown, 0)))
+      cellBorderColor = str(params.cellBorderColor as unknown, '#ffffff') || '#ffffff'
       // Brush: tip position + erode radius + display size + spawn + intro (all authored).
       brushTipX = Math.max(0, Math.min(1, num(params.brushTipX as unknown, 50) / 100))
       brushTipY = Math.max(0, Math.min(1, num(params.brushTipY as unknown, 50) / 100))
@@ -1327,10 +1338,16 @@ export function createScratchGrid(): GameModule {
         canvas.addEventListener('dragstart', (e) => e.preventDefault())
         const c2d = canvas.getContext('2d')!
         cellEl.appendChild(canvas)
+        // Border overlay above the cover canvas; inherits the cell's (outer-corner) radius.
+        const borderEl = document.createElement('div')
+        borderEl.style.cssText =
+          'position:absolute;inset:0;box-sizing:border-box;border-style:solid;border-width:0;' +
+          'border-radius:inherit;pointer-events:none;display:none;'
+        cellEl.appendChild(borderEl)
         grid.appendChild(cellEl)
 
         const cellState: CellState = {
-          el: cellEl, canvas, c2d, labelEl, dateEl, won: false, isWin,
+          el: cellEl, canvas, c2d, labelEl, dateEl, borderEl, won: false, isWin,
           row: Math.floor(i / cols), col: i % cols,
           coverGrid: new Uint8Array(COVERAGE_S * COVERAGE_S),
           cellCoverImg: null, cellCoverReady: false,
@@ -1561,6 +1578,8 @@ export const SCRATCH_GRID_TEMPLATE: GameTemplate = {
     { key: 'colGap', label: 'Column gap', type: 'number', min: 0, max: 60, step: 2 },
     { key: 'rowGap', label: 'Row gap', type: 'number', min: 0, max: 60, step: 2 },
     { key: 'cellRadius', label: 'Cell corner radius (% of cell, 0 = square)', type: 'number', min: 0, max: 50, step: 1 },
+    { key: 'cellBorderWidth', label: 'Cell border width (0 = none)', type: 'number', min: 0, max: 40, step: 1 },
+    { key: 'cellBorderColor', label: 'Cell border color', type: 'color' },
     { key: 'bgScale', label: 'BG image scale (%)', type: 'number', min: 10, max: 300, step: 5 },
     { key: 'bgX', label: 'BG image X (%)', type: 'number', min: 0, max: 100, step: 5 },
     { key: 'bgY', label: 'BG image Y (%)', type: 'number', min: 0, max: 100, step: 5 },
@@ -1620,6 +1639,8 @@ export const SCRATCH_GRID_TEMPLATE: GameTemplate = {
     colGap: 10,
     rowGap: 10,
     cellRadius: 9,
+    cellBorderWidth: 0,
+    cellBorderColor: '#ffffff',
     loseSceneId: '',
     winSceneId: '',
     loseOverlayImage: '',

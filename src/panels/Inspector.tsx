@@ -2977,6 +2977,8 @@ function ScratchGridCells({ params, setParam, setParams, elementId, cardAspect }
       <NumField label="Row gap" value={Number(params.rowGap ?? params.gap ?? 10)} step={2} min={0} max={60} onChange={(n) => setParam('rowGap', n)} />
       <NumField label="Cell corner radius (%)" value={Number(params.cellRadius ?? 9)} step={1} min={0} max={50} onChange={(n) => setParam('cellRadius', n)} />
       <div className="hint pad">Rounds the grid&apos;s 4 outer cell corners (% of the cell&apos;s short side). Set 0 for square corners so cell images aren&apos;t clipped.</div>
+      <NumField label="Cell border width" value={Number(params.cellBorderWidth ?? 0)} step={1} min={0} max={40} onChange={(n) => setParam('cellBorderWidth', n)} />
+      <ColorField label="Cell border color" value={(params.cellBorderColor as string) || '#ffffff'} onChange={(c) => setParam('cellBorderColor', c ?? '#ffffff')} />
       <NumField label="Reveal threshold" value={Number(params.threshold ?? 0.5)} step={0.05} min={0.2} max={0.9} onChange={(n) => setParam('threshold', n)} />
       <NumField label="Reveal zone left (%, per cell)" value={Number(params.zoneX ?? 0)} step={1} min={0} max={100} onChange={(n) => setParam('zoneX', n)} />
       <NumField label="Reveal zone top (%, per cell)" value={Number(params.zoneY ?? 0)} step={1} min={0} max={100} onChange={(n) => setParam('zoneY', n)} />
