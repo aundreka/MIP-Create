@@ -14,6 +14,18 @@ describe('pruneAssets', () => {
     expect(Object.keys(pruneAssets(p, assets))).toEqual(['used'])
   })
 
+  it('keeps random-reveal art nested inside game params', () => {
+    const assets: AssetMap = { p1: { src: 'a', w: 1, h: 1 }, p2: { src: 'b', w: 1, h: 1 }, t1: { src: 'c', w: 1, h: 1 }, none: { src: 'd', w: 1, h: 1 } }
+    const p: Project = {
+      meta: { schemaVersion: 1, name: 'p', clickUrl: { ios: '', android: '' }, baseW: 1080, baseH: 1920 },
+      scenes: [{ id: 's1', name: 's1', kind: 'overlay', advance: { on: 'manual' }, elements: [
+        { id: 'g', type: 'game', name: 'g', x: 0, y: 0, anchor: 'center', zIndex: 0, mode: 'fit', game: { templateId: 'scratch', params: { reveals: [{ image: 'p1', text: '', weight: 1, sceneId: '' }, { image: 'p2', text: 't1', weight: 1, sceneId: '' }] } } },
+      ] }],
+      startSceneId: 's1',
+    }
+    expect(Object.keys(pruneAssets(p, assets)).sort()).toEqual(['p1', 'p2', 't1'])
+  })
+
   it('keeps element-level SFX and project-level SFX assets', () => {
     const assets: AssetMap = { s1: { src: 'a', w: 0, h: 0, kind: 'audio' }, s2: { src: 'b', w: 0, h: 0, kind: 'audio' }, none: { src: 'c', w: 1, h: 1 } }
     const p: Project = {

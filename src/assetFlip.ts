@@ -37,8 +37,10 @@ function gameAssetKeys(el: Partial<SceneElement>): Set<string> {
   // per-cell win overlay. These keys are dynamic, so they cannot all be listed
   // in the static template definition.
   if (el.game?.templateId === 'scratch_grid') {
-    for (const key of Object.keys(params)) if (/^cell\d+(?:cover|text|winOverlayImage)?$/.test(key)) keys.add(key)
+    for (const key of Object.keys(params)) if (/^cell\d+(?:cover|text|winOverlayImage|reveals)?$/.test(key)) keys.add(key)
   }
+  // Scratch card random reveals: an array of { image, ... } options.
+  if (el.game?.templateId === 'scratch') keys.add('reveals')
   // The configurator's picture table is one param per combination (img_2_3) plus one
   // per option's selected art (on_1_4), so its keys are dynamic for the same reason.
   if (el.game?.templateId === 'configurator') {
@@ -62,8 +64,16 @@ function elementAssetRefs(el: Partial<SceneElement>, path: string): Array<{ id: 
   const out: Array<{ id: string; path: string }> = []
   const add = (id: unknown, at: string): void => { if (typeof id === 'string' && id) out.push({ id, path: at }) }
   const addValue = (value: unknown, at: string): void => {
-    if (Array.isArray(value)) value.forEach((id, index) => add(id, `${at}[${index}]`))
-    else add(value, at)
+    if (Array.isArray(value)) {
+      value.forEach((id, index) => {
+        // Random reveal options carry their art as { image, text }.
+        if (id && typeof id === 'object') {
+          const o = id as Record<string, unknown>
+          add(o.image, `${at}[${index}].image`)
+          add(o.text, `${at}[${index}].text`)
+        } else add(id, `${at}[${index}]`)
+      })
+    } else add(value, at)
   }
 
   add(el.assetId, `${path}.assetId`)
@@ -171,7 +181,18 @@ export function analyzeAssetFlipUploads(expectedNames: string[], uploads: AssetF
 
 function remapElementAssets(el: Partial<SceneElement>, renameById: Record<string, string>): void {
   const remap = (id: string | undefined): string | undefined => id ? (renameById[id] ?? id) : id
-  const remapValue = (value: unknown): unknown => Array.isArray(value) ? value.map((id) => typeof id === 'string' ? remap(id) : id) : typeof value === 'string' ? remap(value) : value
+  const remapItem = (id: unknown): unknown => {
+    if (typeof id === 'string') return remap(id)
+    if (id && typeof id === 'object') {
+      // Random reveal option: remap its art, keep the rest.
+      const o = { ...(id as Record<string, unknown>) }
+      if (typeof o.image === 'string') o.image = remap(o.image) ?? o.image
+      if (typeof o.text === 'string') o.text = remap(o.text) ?? o.text
+      return o
+    }
+    return id
+  }
+  const remapValue = (value: unknown): unknown => Array.isArray(value) ? value.map(remapItem) : typeof value === 'string' ? remap(value) : value
 
   el.assetId = remap(el.assetId)
   for (const override of Object.values(el.localeOverrides ?? {})) override.assetId = remap(override.assetId)

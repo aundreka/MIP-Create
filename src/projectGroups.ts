@@ -113,7 +113,7 @@ function referencedAssetIds(el: Partial<SceneElement>): string[] {
     nestedStrings(override.source)
   }
   if (el.sfx) for (const b of el.sfx) ids.push(b.assetId)
-  if (el.game?.params) for (const v of Object.values(el.game.params)) (Array.isArray(v) ? ids.push(...(v as string[])) : ids.push(v as string))
+  if (el.game?.params) nestedStrings(el.game.params) // random reveals nest ids in objects
   if (el.endscene) ids.push(el.endscene.portraitVideoId, el.endscene.landscapeVideoId, el.endscene.portraitImageId, el.endscene.landscapeImageId)
   return [...new Set(ids.filter((x): x is string => typeof x === 'string'))]
 }

@@ -85,7 +85,8 @@ function addSceneAssets(scene: SceneDef, assets: AssetMap, used: Set<string>, au
     if (el.container?.imageId) add(el.container.imageId)
     if (el.button?.tapFadeAssetId) add(el.button.tapFadeAssetId)
     if (el.generate?.resultId) add(el.generate.resultId)
-    if (el.game?.params) for (const v of Object.values(el.game.params)) (Array.isArray(v) ? v.forEach(add) : add(v))
+    // Nested: random reveals are arrays of { image, text, ... } objects, not bare ids.
+    if (el.game?.params) addNested(el.game.params)
     if (el.unboxing) {
       const u = el.unboxing
       add(u.bgAssetId)
