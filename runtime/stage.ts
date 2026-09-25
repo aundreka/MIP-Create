@@ -1193,6 +1193,9 @@ html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;overscroll-b
 .pa-el--scratch-off,.pa-el--page-off{opacity:0 !important;pointer-events:none !important;}
 .pa-root:not(.has-interacted) .pa-show-after-interaction{opacity:0 !important;pointer-events:none !important;}
 .pa-root.has-interacted .pa-hide-after-basket-interaction{opacity:0 !important;pointer-events:none !important;}
+/* Set by the scene-overlay handler while a floating overlay is up. A class, not inline
+   display, because layoutRec rewrites style.display on every relayout (rotation). */
+.pa-el--overlay-hidden{display:none !important;}
 /* Combo builder. Off-question options/titles and unrevealed layers hide by CLASS for
    the same reason as .pa-el--t-off: layoutRec rewrites inline display and opacity on
    every layout pass, so an inline hide would be dropped by the next resize.

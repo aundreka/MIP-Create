@@ -132,12 +132,12 @@ describe('hide on overlay', () => {
     // Parked (so the old scene-root-only query could never have found it)...
     expect(cta().parentElement?.className).toContain('pa-stage')
     // ...and hidden all the same.
-    expect(cta().style.display).toBe('none')
+    expect(cta().classList.contains('pa-el--overlay-hidden')).toBe(true)
   })
 
   it('leaves the CTA alone when the flag is off', () => {
     const { cta } = openOverlay(makeProject())
-    expect(cta().style.display).not.toBe('none')
+    expect(cta().classList.contains('pa-el--overlay-hidden')).toBe(false)
   })
 
   it('hides an ordinary (unparked) element too', () => {
@@ -148,6 +148,17 @@ describe('hide on overlay', () => {
       text: { value: 'TAP THE BOOK', fontSizePx: 40 },
     })
     const { mount } = openOverlay(project)
-    expect(mount.querySelector<HTMLElement>('.pa-el[data-id="note"]')!.style.display).toBe('none')
+    expect(mount.querySelector<HTMLElement>('.pa-el[data-id="note"]')!.classList.contains('pa-el--overlay-hidden')).toBe(true)
+  })
+
+  // Rotation relayouts every element, and layoutRec rewrites style.display — an inline
+  // display:none hide used to be wiped there, bringing the element back mid-overlay.
+  it('stays hidden across a rotation relayout', () => {
+    const { cta } = openOverlay(makeProject({ hideOnOverlay: true }))
+    setDesign(1920, 1080)
+    computeMetrics(1920, 1080)
+    window.dispatchEvent(new Event('resize'))
+    vi.runOnlyPendingTimers()
+    expect(cta().classList.contains('pa-el--overlay-hidden')).toBe(true)
   })
 })

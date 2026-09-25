@@ -160,6 +160,6 @@ describe('CTA stacking against a floating overlay', () => {
     play(ctaEl({ hideOnOverlay: true }))
     win()
 
-    expect(cta()!.style.display).toBe('none')
+    expect(cta()!.classList.contains('pa-el--overlay-hidden')).toBe(true)
   })
 })
