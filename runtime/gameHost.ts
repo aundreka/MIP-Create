@@ -55,6 +55,7 @@ export function createGameHost(opts: GameHostOptions): GameHost | null {
       },
       sfx: { play: opts.sfx, loopStart: opts.sfxLoopStart, loopStop: opts.sfxLoopStop },
       rng: mulberry32(123456),
+      random: opts.interactive ? Math.random : () => 0,
       scale,
       navigate: opts.navigate,
       elementId: opts.elementId,

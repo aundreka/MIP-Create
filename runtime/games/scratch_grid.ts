@@ -5,6 +5,7 @@
 
 import type { GameContext, GameModule, GameTemplate, HintMove } from './types'
 import { num, str } from './types'
+import { parseRevealOptions, pickFromScenePool, pickWeighted } from './scenepool'
 import { emit } from '../emitter'
 import { cssFontFamily } from '../font'
 import { scale } from '../responsive'
@@ -40,6 +41,9 @@ interface CellState {
   // Per-cell win overlay (resolved at mount: cell override || global default).
   // Only meaningful for win cells; lose cells use the shared lose overlay.
   winSceneId: string
+  // Random win scene: a weighted pool (see scenepool.ts), drawn at win time. Takes
+  // precedence over winSceneId when non-empty.
+  winScenePool: string
   winOverlayImage: string
   winOverlayDurationMs: number
   // Per-cell hint path: the hand rubs between these two points, each normalized 0..1
@@ -870,11 +874,12 @@ export function createScratchGrid(): GameModule {
     if (cell.isWin) {
       fadeBrush() // prize revealed — fade the brush out
       winCb?.()
-      if (cell.winSceneId) {
+      const winTarget = pickFromScenePool(cell.winScenePool) || cell.winSceneId
+      if (winTarget) {
         // Record the chosen win scene, then finish through the ordinary scene-level
         // game-win flow so the current scene's authored Advance delay still applies.
         window.setTimeout(() => {
-          emit('scene-goto-after-win', cell.winSceneId)
+          emit('scene-goto-after-win', winTarget)
           completeCb?.()
         }, 350)
       } else if (cell.winOverlayImage) {
@@ -1118,8 +1123,12 @@ export function createScratchGrid(): GameModule {
       const sharedBgSrc = ctx.assets.src(str(params.sharedBg as unknown, ''))
       const sharedTextSrc = ctx.assets.src(str(params.sharedText as unknown, ''))
 
+      // Random reveals: each cell draws one of its options for this play. The option's
+      // image / text overlay / win scene replace the cell's own; blank fields fall through.
+      const drawnReveal = Array.from({ length: total }, (_, i) => pickWeighted(parseRevealOptions(params['cell' + i + 'reveals']), ctx.random ?? Math.random))
       // Per-cell overrides: cell0..cell3 images and cell0Label..cell3Label text
       const cellImageSrc = (i: number): string =>
+        ctx.assets.src(drawnReveal[i]?.image || '') ||
         ctx.assets.src(str(params['cell' + i] as unknown, '')) ||
         sharedBgSrc ||
         (isWinCell[i] ? winImageSrc : loseImageSrc)
@@ -1129,6 +1138,7 @@ export function createScratchGrid(): GameModule {
       // Text-image overlay: a transparent PNG with just the text/offer graphic.
       // Swap only this to A/B test different offers without touching the layout.
       const cellTextImgSrc = (i: number): string =>
+        ctx.assets.src(drawnReveal[i]?.text || '') ||
         ctx.assets.src(str(params['cell' + i + 'text'] as unknown, '')) ||
         sharedTextSrc ||
         (isWinCell[i] ? winTextImageSrc : loseTextImageSrc)
@@ -1171,7 +1181,12 @@ export function createScratchGrid(): GameModule {
 
       // Per-cell win overlay overrides (each falls back to the global default).
       const cellWinSceneId = (i: number): string =>
-        str(params['cell' + i + 'winSceneId'] as unknown, '') || winSceneId
+        drawnReveal[i]?.sceneId || str(params['cell' + i + 'winSceneId'] as unknown, '') || winSceneId
+      // A cell's own pool wins; a cell with its own fixed scene opts out of the default pool.
+      const cellWinScenePool = (i: number): string =>
+        drawnReveal[i]?.sceneId ? '' : // the drawn reveal's own scene is final
+        str(params['cell' + i + 'winScenePool'] as unknown, '') ||
+        (str(params['cell' + i + 'winSceneId'] as unknown, '') ? '' : str(params.winScenePool as unknown, ''))
       const cellWinOverlayImage = (i: number): string =>
         ctx.assets.src(str(params['cell' + i + 'winOverlayImage'] as unknown, '')) || winOverlayImage
       const cellWinOverlayDurationMs = (i: number): number => {
@@ -1353,6 +1368,7 @@ export function createScratchGrid(): GameModule {
           cellCoverImg: null, cellCoverReady: false,
           revealCanvas, revealC2d, revealImg, revealReady: false,
           winSceneId: cellWinSceneId(i),
+          winScenePool: cellWinScenePool(i),
           winOverlayImage: cellWinOverlayImage(i),
           winOverlayDurationMs: cellWinOverlayDurationMs(i),
           ...hintPath,

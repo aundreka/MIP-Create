@@ -33,6 +33,9 @@ export interface GameContext {
   sfx: { play(event: string): void; loopStart?(event: string): void; loopStop?(event: string): void }
   /** Deterministic RNG so boards + hints stay consistent. */
   rng: () => number
+  /** Real randomness for per-play draws (random reveals). Always 0 on the editor canvas,
+   * so the static preview shows the first option instead of re-rolling on every edit. */
+  random?: () => number
   /** Current stage scale (screen px per design px). Multiply design-px params
    * (gaps, radii, offsets) by this so the game scales as ONE unit with the rest
    * of the layout at any viewport size/zoom, instead of keeping fixed px. */

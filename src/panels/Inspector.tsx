@@ -48,6 +48,7 @@ import { headerAllowedFor } from '../../runtime/scene'
 import { autoMorphMatch, morphTargets, MORPH_DEFAULT_EASING, MORPH_DEFAULT_MS } from '../../runtime/morph'
 import { ownsSlot, patchSlot, projectLayoutPatch, resolvedLayout, seedSlot, withOwnSlot, withoutSlot, type Orient } from '../headerLayout'
 import { TAP_FADE_DEFAULT_MS } from '../../runtime/elements/button'
+import { parseRevealOptions, parseScenePool, serializeScenePool, type RevealOption, type ScenePoolEntry } from '../../runtime/games/scenepool'
 import { currentDeviceLabel } from '../../runtime/elements/device'
 import { RIPPLE_DEFAULT_COLOR, RIPPLE_DEFAULT_OPACITY, RIPPLE_HAND_REF_W, RIPPLE_MAX_R } from '../../runtime/hint'
 import { GAME_TEMPLATES } from '../../runtime/games/registry'
@@ -2928,6 +2929,84 @@ function ConfigSetup({ params, setParam, elementId, siblings }: ConfigSetupProps
   )
 }
 
+// Random win scene: tick the scenes a win may route to; each is drawn with a chance
+// proportional to its weight (shown as a %). Stored as one string param (see scenepool.ts).
+function ScenePoolField({ value, onChange }: { value: unknown; onChange: (v: string) => void }): JSX.Element {
+  const { project, activeSceneId } = useEditorState()
+  const pool = parseScenePool(value)
+  const total = pool.reduce((sum, e) => sum + e.weight, 0)
+  const set = (next: ScenePoolEntry[]): void => onChange(serializeScenePool(next))
+  return (
+    <>
+      {project.scenes
+        .filter((sc) => sc.id !== activeSceneId)
+        .map((sc) => {
+          const entry = pool.find((e) => e.id === sc.id)
+          const pct = entry && total ? Math.round((entry.weight / total) * 100) : 0
+          return (
+            <div key={sc.id}>
+              <Toggle
+                label={(sc.name || sc.id) + (entry ? ` — ${pct}%` : '')}
+                checked={!!entry}
+                onChange={(on) => set(on ? [...pool, { id: sc.id, weight: 1 }] : pool.filter((e) => e.id !== sc.id))}
+              />
+              {entry && (
+                <NumField
+                  label="Chance weight"
+                  value={entry.weight}
+                  step={1}
+                  min={0}
+                  onChange={(n) => set(pool.map((e) => (e.id === sc.id ? { ...e, weight: n } : e)))}
+                />
+              )}
+            </div>
+          )
+        })}
+    </>
+  )
+}
+
+// Random reveals: a list of possible prizes, one drawn per play by chance weight. Each can
+// send the win to its own scene. Stored as an array param (see scenepool.ts). The editor
+// canvas always shows the first option.
+function RevealOptionsField(props: { value: unknown; onChange: (v: RevealOption[]) => void; imageLabel: string; withText?: boolean; withScene?: boolean }): JSX.Element {
+  const { project, activeSceneId } = useEditorState()
+  const list = parseRevealOptions(props.value)
+  const total = list.reduce((sum, o) => sum + o.weight, 0)
+  const patch = (i: number, p: Partial<RevealOption>): void => props.onChange(list.map((o, j) => (j === i ? { ...o, ...p } : o)))
+  const scenes = project.scenes.filter((sc) => sc.id !== activeSceneId)
+  return (
+    <>
+      {list.map((o, i) => (
+        <div key={i}>
+          <div className="group-title2">
+            Reveal {i + 1}
+            {total ? ` — ${Math.round((o.weight / total) * 100)}%` : ''}
+          </div>
+          <AssetPicker label={props.imageLabel} value={o.image || undefined} allowNone onChange={(aid) => patch(i, { image: aid ?? '' })} />
+          {props.withText && <AssetPicker label="Text / product overlay" value={o.text || undefined} allowNone onChange={(aid) => patch(i, { text: aid ?? '' })} />}
+          <NumField label="Chance weight" value={o.weight} step={1} min={0} onChange={(n) => patch(i, { weight: n })} />
+          {props.withScene !== false && (
+            <Row label="Win goes to">
+              <Select
+                value={o.sceneId}
+                onChange={(v) => patch(i, { sceneId: v })}
+                options={[{ value: '', label: '(usual win scene)' }, ...scenes.map((sc) => ({ value: sc.id, label: sc.name || sc.id }))]}
+              />
+            </Row>
+          )}
+          <button className="wide danger" onClick={() => props.onChange(list.filter((_, j) => j !== i))}>
+            Remove reveal {i + 1}
+          </button>
+        </div>
+      ))}
+      <button className="wide" onClick={() => props.onChange([...list, { image: '', text: '', weight: 1, sceneId: '' }])}>
+        + Add reveal
+      </button>
+    </>
+  )
+}
+
 interface ScratchGridCellsProps {
   params: Record<string, unknown>
   setParam: (k: string, v: unknown) => void
@@ -3107,6 +3186,19 @@ function ScratchGridCells({ params, setParam, setParams, elementId, cardAspect }
         />
       </Row>
 
+      <div className="group-title2">Random reveals (this cell)</div>
+      <div className="hint pad">
+        Add two or more and the cell shows one of them at random each play, weighted by chance{cellIsWin ? ', and a win goes to that reveal’s scene' : ''}. Blank fields use the cell&apos;s settings
+        above.
+      </div>
+      <RevealOptionsField
+        value={params[`cell${safeCell}reveals`]}
+        onChange={(v) => setParam(`cell${safeCell}reveals`, v)}
+        imageLabel="Cell background image"
+        withText
+        withScene={cellIsWin}
+      />
+
       <div className="group-title2">Hint path (this cell)</div>
       <div className="hint pad">The hint hand rubs from the start point to the end point. Values are % of the cell (0,0 = top-left). Default is a centered horizontal rub.</div>
       <NumField label="Start X (%)" value={Number(params[`cell${safeCell}hintFromX`] ?? 20)} step={5} min={0} max={100} onChange={(n) => setParam(`cell${safeCell}hintFromX`, n)} />
@@ -3127,6 +3219,9 @@ function ScratchGridCells({ params, setParam, setParams, elementId, cardAspect }
               options={[{ value: '', label: '(use default below)' }, ...project.scenes.map((s) => ({ value: s.id, label: s.name || s.id }))]}
             />
           </Row>
+          <div className="group-title2">Random win scene (this cell)</div>
+          <div className="hint pad">Tick two or more scenes and this cell&apos;s win goes to one of them at random, weighted by chance. Overrides the cell win scene above.</div>
+          <ScenePoolField value={params[`cell${safeCell}winScenePool`]} onChange={(v) => setParam(`cell${safeCell}winScenePool`, v)} />
           <AssetPicker
             label="Cell win overlay image"
             value={(params[`cell${safeCell}winOverlayImage`] as string) || undefined}
@@ -3270,6 +3365,11 @@ function ScratchGridCells({ params, setParam, setParams, elementId, cardAspect }
           options={[{ value: '', label: '(none, use image below)' }, ...project.scenes.map((s) => ({ value: s.id, label: s.name || s.id }))]}
         />
       </Row>
+      <div className="group-title2">Random win scene (default)</div>
+      <div className="hint pad">
+        Tick scenes and a win goes to one of them at random, weighted by chance. Applies to win cells with no scene of their own; overrides the default win scene above.
+      </div>
+      <ScenePoolField value={params.winScenePool} onChange={(v) => setParam('winScenePool', v)} />
       <AssetPicker label="Default win overlay image" value={(params.winOverlayImage as string) || undefined} allowNone onChange={(aid) => setParam('winOverlayImage', aid ?? '')} />
       <NumField
         label="Default win image duration (ms)"
@@ -5115,6 +5215,21 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                       cardAspect={cardAspect}
                       radiusOnly={!!params.scratcherId && (activeSceneDef(state)?.elements ?? []).some((e) => e.id === params.scratcherId)}
                     />
+                  )}
+                  {tpl.id === 'scratch' && (
+                    <>
+                      <div className="group-title2">Random reveals</div>
+                      <div className="hint pad">
+                        Add two or more and the card reveals one of them at random each play, weighted by chance; the win goes to that reveal&apos;s scene. A blank image
+                        uses the prize image; a blank scene uses the random win scene below, then Advance.
+                      </div>
+                      <RevealOptionsField value={params.reveals} onChange={(v) => setParam('reveals', v)} imageLabel="Prize image" />
+                      <div className="group-title2">Random win scene</div>
+                      <div className="hint pad">
+                        Tick scenes and the win goes to one of them at random, weighted by chance, instead of this scene&apos;s Advance target. Timing still follows Advance.
+                      </div>
+                      <ScenePoolField value={params.winScenePool} onChange={(v) => setParam('winScenePool', v)} />
+                    </>
                   )}
                   {tpl.id === 'scratch' && params.fit === 'fit' && (
                     <div className="hint pad">Double-click the card on the canvas to position &amp; scale the reveal image: drag to move, corner handles to resize.</div>

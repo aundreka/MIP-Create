@@ -20,6 +20,7 @@
 import type { GameContext, GameModule, GameTemplate, HintMove } from './types'
 import { num, str } from './types'
 import { emit } from '../emitter'
+import { parseRevealOptions, pickFromScenePool, pickWeighted } from './scenepool'
 import { emitProgress, onProgressRequest } from './progresschannel'
 
 // Parse an authored brush-intro path: a JSON list of {x,y} points, each a fraction 0..1 of the card.
@@ -101,6 +102,8 @@ export function createScratch(): GameModule {
   let dprCleanup: (() => void) | null = null // tears down the browser-zoom (DPR) re-render listener
   let winCb: (() => void) | null = null
   let completeCb: (() => void) | null = null
+  let winScenePool = ''
+  let revealSceneId = '' // the drawn random reveal's own win redirect
   let lastPt: { x: number; y: number } | null = null
   let moves = 0
   let coverImg: HTMLImageElement | null = null
@@ -591,6 +594,10 @@ export function createScratch(): GameModule {
       finished = true
       c2d.globalCompositeOperation = 'source-over'
       c2d.clearRect(0, 0, canvas.width, canvas.height)
+      // Random win scene: route this win to one scene drawn from the pool (by weight);
+      // the scene's own Advance still decides when.
+      const winTarget = revealSceneId || pickFromScenePool(winScenePool)
+      if (winTarget) emit('scene-goto-after-win', winTarget)
       completeCb?.() // win SFX fires centrally on completion (stage revealOnWin)
     }
     canvas.addEventListener('transitionend', finish, { once: true })
@@ -843,6 +850,7 @@ export function createScratch(): GameModule {
       areaH = Math.max(0.02, Math.min(1 - areaY, num(params.areaH, 100) / 100))
       progressGameId = str(params.progressGameId, '').trim()
       scratcherId = str(params.scratcherId, '').trim()
+      winScenePool = str(params.winScenePool, '')
       scratcherTipX = Math.max(0, Math.min(1, num(params.scratcherTipX, 50) / 100))
       scratcherTipY = Math.max(0, Math.min(1, num(params.scratcherTipY, 50) / 100))
       brushTipX = Math.max(0, Math.min(1, num(params.brushTipX, 50) / 100))
@@ -857,7 +865,11 @@ export function createScratch(): GameModule {
       brushIntroLoops = Math.max(1, Math.min(20, Math.round(num(params.brushIntroLoops, 2))))
       brushIntroPath = parseBrushPath(str(params.brushIntroPath, ''))
       const label = str(params.label, 'YOU WIN!')
-      const prizeSrc = ctx.assets.src(str(params.prize, ''))
+      // Random reveals: draw one option for this play; its image replaces the prize and its
+      // scene (if any) is where the win goes. Blank fields keep the usual prize / routing.
+      const drawn = pickWeighted(parseRevealOptions(params.reveals), ctx.random ?? Math.random)
+      revealSceneId = drawn?.sceneId ?? ''
+      const prizeSrc = ctx.assets.src(drawn?.image || str(params.prize, ''))
       const coverSrc = ctx.assets.src(str(params.cover, ''))
       const cursorMode = str(params.cursor, 'inherit')
       const cursorAssetSrc = ctx.assets.src(str(params.cursorAsset, ''))
