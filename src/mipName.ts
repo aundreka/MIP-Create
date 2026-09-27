@@ -128,3 +128,30 @@ export function fileBaseName(project: Pick<Project, 'meta' | 'scenes'>): string 
   const kind = sip ? `product_${meta.sipFormat === 'card' ? 'card' : 'carousel'}` : `game_${exportMechanicToken(project)}`
   return `${client}_acslanot_${type}_${date}_${version}_emily_${kind}_human_${subconcept}_${unique}`
 }
+
+// Characters no file system accepts in a folder name (Windows is the strictest),
+// plus control characters.
+const FOLDER_UNSAFE = /[<>:"/\\|?*]+/g
+const stripControl = (s: string): string => Array.from(s, (c) => (c.charCodeAt(0) < 32 ? ' ' : c)).join('')
+
+/**
+ * The delivery folder name for one MIP: "MIP<n> - <GAME>", e.g. "MIP1 - SCRATCH".
+ * `<n>` is the digits of meta.mip (or `index + 1` when meta.mip has none).
+ * `<GAME>` is meta.gameName when set, else the mechanic ("scratch_grid" reads
+ * "SCRATCH", "tap_reveal" reads "TAP REVEAL"); a SIP reads "SIP" and a MIP with
+ * no game mount carries no suffix at all ("MIP1").
+ */
+export function mipFolderName(project: Pick<Project, 'meta' | 'scenes'>, index = 0): string {
+  const digits = (project.meta.mip ?? '').match(/\d+/g)?.join('')
+  const head = `MIP${digits ? Number(digits) : index + 1}`
+  const custom = (project.meta.gameName ?? '').trim()
+  const game = custom
+    ? custom
+    : isSip(project)
+      ? 'SIP'
+      : firstGameTemplateId(project)
+        ? exportMechanicToken(project).replace(/_+/g, ' ')
+        : ''
+  const tail = stripControl(game).replace(FOLDER_UNSAFE, ' ').replace(/\s+/g, ' ').trim().toUpperCase()
+  return tail ? `${head} - ${tail}` : head
+}

@@ -83,6 +83,15 @@ interface NativeAPI {
   applovinOpen?(url: string): Promise<{ ok: boolean; error?: string }>
   applovinProbe?(opts: { url?: string; addButtonText?: string; uploadButtonText?: string }): Promise<ApplovinProbe>
   applovinUpload?(opts: ApplovinUploadOpts): Promise<{ ok: boolean; files?: number; submitted?: boolean; pageUrl?: string; link?: string; error?: string }>
+  applovinWaitForLinks?(opts: { mark: string; expected: number; timeoutMs?: number }): Promise<ApplovinLinksResult>
+}
+
+export interface ApplovinLinksResult {
+  ok: boolean
+  links?: string[]
+  closed?: boolean
+  timedOut?: boolean
+  error?: string
 }
 
 const native: NativeAPI | undefined = (window as unknown as { editorAPI?: NativeAPI }).editorAPI
@@ -125,6 +134,13 @@ export async function applovinProbe(opts: { url?: string; addButtonText?: string
 export async function applovinUpload(opts: ApplovinUploadOpts): Promise<{ ok: boolean; files?: number; submitted?: boolean; pageUrl?: string; link?: string; error?: string }> {
   if (!native?.applovinUpload) return { ok: false, error: 'desktop app only' }
   return native.applovinUpload(opts)
+}
+
+/** After a fill, wait for the upload page to print this upload's result links
+ * (the user clicks Upload in the meantime). Desktop only. */
+export async function applovinWaitForLinks(opts: { mark: string; expected: number; timeoutMs?: number }): Promise<ApplovinLinksResult> {
+  if (!native?.applovinWaitForLinks) return { ok: false, error: 'desktop app only' }
+  return native.applovinWaitForLinks(opts)
 }
 
 /** Post-compress a fully assembled playable HTML string using the

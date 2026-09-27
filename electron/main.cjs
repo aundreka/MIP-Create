@@ -3,7 +3,7 @@
 // editor's bridge can persist projects to real files (browser-mode falls back
 // to download/localStorage). Plain CommonJS — no build step.
 
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, safeStorage, shell } = require('electron')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
@@ -138,6 +138,42 @@ ipcMain.handle('export:write', async (_e, payload = {}) => {
     try { fs.rmSync(target, { force: true }) } catch { /* ignore */ }
     fs.writeFileSync(target, Buffer.from(bytes))
     return { ok: true, path: target }
+  } catch (e) {
+    return { ok: false, error: String(e) }
+  }
+})
+
+// Small secrets (the GitHub token) encrypted with the OS keychain via safeStorage,
+// kept in userData/secrets.json as base64 ciphertext. Never plaintext on disk: when
+// encryption is unavailable, saving fails instead of silently writing the token out.
+const secretsPath = () => path.join(app.getPath('userData'), 'secrets.json')
+function readSecrets() {
+  try {
+    return JSON.parse(fs.readFileSync(secretsPath(), 'utf8')) || {}
+  } catch {
+    return {}
+  }
+}
+ipcMain.handle('secret:get', (_e, name) => {
+  try {
+    const enc = readSecrets()[String(name)]
+    if (!enc || !safeStorage.isEncryptionAvailable()) return { ok: true, value: '' }
+    return { ok: true, value: safeStorage.decryptString(Buffer.from(enc, 'base64')) }
+  } catch (e) {
+    return { ok: false, error: String(e) }
+  }
+})
+ipcMain.handle('secret:set', (_e, name, value) => {
+  try {
+    const all = readSecrets()
+    const key = String(name)
+    if (!value) delete all[key]
+    else {
+      if (!safeStorage.isEncryptionAvailable()) return { ok: false, error: 'OS keychain encryption is unavailable' }
+      all[key] = safeStorage.encryptString(String(value)).toString('base64')
+    }
+    fs.writeFileSync(secretsPath(), JSON.stringify(all), { mode: 0o600 })
+    return { ok: true }
   } catch (e) {
     return { ok: false, error: String(e) }
   }
@@ -341,6 +377,46 @@ ipcMain.handle('applovin:probe', async (_e, payload = {}) => {
   }
 })
 
+// Every http(s) URL on the page: anchors, text fields and plain text, in page order.
+function collectPageLinks(wc, mark) {
+  return wc.executeJavaScript(`(function(){
+    var mark=${JSON.stringify(String(mark || '').toLowerCase())}, out=[];
+    function push(v){ v=(v||'').trim(); if(/^https?:/i.test(v) && (!mark || v.toLowerCase().indexOf(mark)>=0) && out.indexOf(v)<0) out.push(v); }
+    document.querySelectorAll('a[href]').forEach(function(el){ push(el.href); push(el.textContent); });
+    document.querySelectorAll('input, textarea').forEach(function(el){ push(el.value); });
+    ((document.body && document.body.innerText) || '').split(/\\s+/).forEach(push);
+    return out;
+  })()`)
+}
+let alBaseline = new Set()
+
+// After the form is filled, wait for the page to print this upload's result links:
+// poll the window until `expected` new links containing `mark` show up and hold
+// steady for a moment, the window closes, or the timeout passes. The user clicks
+// Upload themselves in the meantime (or the fill already submitted).
+ipcMain.handle('applovin:waitForLinks', async (_e, payload = {}) => {
+  const mark = String(payload.mark || '')
+  const expected = Math.max(1, Number(payload.expected) || 1)
+  const timeoutMs = Math.max(1000, Math.min(15 * 60000, Number(payload.timeoutMs) || 5 * 60000))
+  const started = Date.now()
+  let last = []
+  let stableSince = 0
+  while (Date.now() - started < timeoutMs) {
+    if (!alWin || alWin.isDestroyed()) return { ok: true, links: last, closed: true }
+    try {
+      const found = (await collectPageLinks(alWin.webContents, mark)).filter((l) => !alBaseline.has(l))
+      if (found.length !== last.length) stableSince = Date.now()
+      last = found
+      // Rows can finish one by one; take the set once it has settled.
+      if (found.length >= expected && Date.now() - stableSince >= 1500) return { ok: true, links: found }
+    } catch {
+      /* page mid-navigation; try again */
+    }
+    await new Promise((r) => setTimeout(r, 1000))
+  }
+  return { ok: true, links: last, timedOut: true }
+})
+
 ipcMain.handle('applovin:upload', async (_e, payload = {}) => {
   try {
     const files = Array.isArray(payload.files) ? payload.files : []
@@ -348,6 +424,12 @@ ipcMain.handle('applovin:upload', async (_e, payload = {}) => {
     const w = ensureAlWindow(payload.url)
     const wc = w.webContents
     w.focus()
+    // The window is shared by every upload target. When it is still on another
+    // target's site, go to this one first instead of filling the wrong form.
+    const target = originOf(payload.url)
+    if (target && originOf(wc.getURL()) !== target) await w.loadURL(payload.url)
+    // Links already on the page (an earlier upload's results) are not this upload's.
+    alBaseline = new Set(await collectPageLinks(wc, '').catch(() => []))
 
     // write the playables to a temp folder for the file inputs
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-al-'))

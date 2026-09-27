@@ -1552,6 +1552,12 @@ export interface ProjectMeta {
   // slot of the export filename ('product_carousel' vs 'product_card').
   // Undefined reads as 'carousel'. Ignored by multi-scene / game MIPs.
   sipFormat?: 'carousel' | 'card'
+  // Delivery folder naming: the game label in "MIP1 - SCRATCH" (see mipFolderName
+  // in src/mipName.ts). Undefined falls back to the mechanic. Editor-only.
+  gameName?: string
+  // The end card a SIP export is cut from (see src/sip.ts). Undefined or a
+  // dangling id falls back to the first end card in the flow. Editor-only.
+  sipSceneId?: string
   // Project grouping: several MIPs (each a `Project` in the code) belong to one
   // real-world "project" (brand + date + theme, e.g. "Bioma 2026-07 Scratch").
   // `projectId` is the stable group id (see src/projectGroups.ts); `projectName`

@@ -4734,6 +4734,9 @@ svg {
 .figma-status {
   margin: 8px 0;
   padding: 8px 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
   background: var(--input-bg);
   border: 1px solid var(--line);
   border-radius: var(--r-sm);

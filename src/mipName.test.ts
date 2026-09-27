@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { fileBaseName } from './mipName'
+import { fileBaseName, mipFolderName } from './mipName'
 import type { Project } from '../runtime/scene'
 
 function project(overrides: Partial<Project['meta']> = {}, templateId: string | null = 'scratch'): Project {
@@ -87,5 +87,27 @@ describe('fileBaseName', () => {
     expect(fileBaseName(project({ client: '', mip: '', exportDate: '', mipDate: '2026-07-05' }, 'merge'))).toBe('client_acslanot_mip_20260705_00_emily_game_merge_human_none_unique')
     expect(fileBaseName(project({ client: '', mip: '', exportDate: '', mipDate: '' }, 'merge'))).toBe('client_acslanot_mip_20260803_00_emily_game_merge_human_none_unique')
     vi.useRealTimers()
+  })
+})
+
+describe('mipFolderName', () => {
+  it('names the folder MIP<n> - <MECHANIC> in capitals', () => {
+    expect(mipFolderName(project({ mip: 'MIP1' }, 'scratch'))).toBe('MIP1 - SCRATCH')
+    expect(mipFolderName(project({ mip: 'mip 03' }, 'scratch_grid'))).toBe('MIP3 - SCRATCH')
+    expect(mipFolderName(project({ mip: 'MIP2' }, 'tap_reveal'))).toBe('MIP2 - TAP REVEAL')
+  })
+
+  it('prefers the Game name override and strips folder-illegal characters', () => {
+    expect(mipFolderName(project({ mip: 'MIP1', gameName: 'Lucky: Scratch/Win' }))).toBe('MIP1 - LUCKY SCRATCH WIN')
+  })
+
+  it('falls back to the list position without MIP digits, and drops the suffix without a game', () => {
+    expect(mipFolderName(project({ mip: '' }, null), 4)).toBe('MIP5')
+  })
+
+  it('names a SIP folder SIP', () => {
+    const sip = project({ mip: 'MIP2' }, null)
+    sip.scenes[0].kind = 'endscene'
+    expect(mipFolderName(sip)).toBe('MIP2 - SIP')
   })
 })

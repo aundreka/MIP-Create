@@ -1,33 +1,20 @@
 import { useMemo, useState } from 'react'
-import type { Project } from '../../runtime/scene'
-import type { CompressProfile } from '../../runtime/types'
 import {
   applovinOpen,
   applovinProbe,
   applovinUpload,
+  applovinWaitForLinks,
   canApplovin,
   type ApplovinFile,
   type ProjectData,
 } from '../bridge'
-import {
-  buildOutputs,
-  DEFAULT_MEDIA,
-  fetchRuntimeSrc,
-  fmtBytes,
-  NETWORKS,
-  processAssetsAutoFit,
-  pruneAssets,
-} from '../export'
+import { matchPreviewLinks, PREVIEW_LINK_MARK, readLastLinks, saveLastLinks, type FileLink } from '../applovinLinks'
+import { buildDeliveryFiles } from '../deliver'
+import { fetchRuntimeSrc } from '../export'
 import { Copy, Icon, Upload } from '../icons'
-import { fileBaseName } from '../mipName'
-import { loadProjectPreview } from '../projects'
+import { currentProjectId, loadProjectPreview } from '../projects'
 import { getState } from '../store'
 import { Modal, Row, Toggle } from '../ui'
-import { applyVariant, stripVariants } from '../variants'
-
-function slug(value: string): string {
-  return value.replace(/[^a-z0-9_-]+/gi, '_').replace(/^_+|_+$/g, '') || 'variant'
-}
 
 interface UploadSource {
   id: string
@@ -40,46 +27,10 @@ interface UploadBuildResult {
   skipped: string[]
 }
 
-async function buildProjectUploadFiles(source: UploadSource): Promise<UploadBuildResult> {
-  const runtimeSrc = await fetchRuntimeSrc()
-  const media = {
-    video: { ...(DEFAULT_MEDIA.video as CompressProfile) },
-    audio: { ...(DEFAULT_MEDIA.audio as CompressProfile) },
-  }
-  const al = NETWORKS.find((n) => n.name === 'AppLovin') ?? NETWORKS[0]
-  const out: ApplovinFile[] = []
-  const skipped: string[] = []
+async function buildProjectUploadFiles(source: UploadSource, sip: boolean, runtimeSrc: string): Promise<UploadBuildResult> {
   const { project, assets } = source.data
-  const baseName = fileBaseName(project)
-  const variants = project.meta.variants ?? []
-
-  const emitOne = async (proj: Project, name: string, iteration: string): Promise<void> => {
-    const stripped = stripVariants(proj)
-    const named: Project = { ...stripped, meta: { ...stripped.meta, name } }
-    const { assets: processed } = await processAssetsAutoFit(
-      pruneAssets(stripped, assets),
-      true,
-      0.82,
-      media,
-      named,
-      runtimeSrc,
-    )
-    const { outputs } = buildOutputs(named, processed, [al], runtimeSrc)
-    const file = outputs[0]
-    if (!file || file.over) {
-      if (file?.over) skipped.push(`${name} (${fmtBytes(file.bytes)})`)
-      return
-    }
-    out.push({ name: file.filename, text: await (await file.make()).text(), iteration })
-  }
-
-  await emitOne(project, baseName, project.meta.mip || source.label || baseName)
-  for (const variant of variants) {
-    const variantProject = applyVariant(project, variant)
-    await emitOne(variantProject, `${baseName}_${slug(variant.name)}`, `${source.label} / ${variant.name}`)
-  }
-
-  return { files: out, skipped }
+  const built = await buildDeliveryFiles(project, assets, { label: source.label, variants: true, sip, runtimeSrc })
+  return { files: built.files.map((f) => ({ name: f.name, text: f.text, iteration: f.iteration })), skipped: built.skipped }
 }
 
 function copyText(text: string): void {
@@ -97,6 +48,10 @@ export function UploadModal(props: { onClose: () => void; projectIds?: string[];
   const [alSubmit, setAlSubmit] = useState(false)
   const [alStatus, setAlStatus] = useState<string | null>(null)
   const [alLink, setAlLink] = useState<string | null>(null)
+  const [includeSip, setIncludeSip] = useState(() => localStorage.getItem('pa:uploadSip') !== 'off')
+  const linksKey = props.projectIds?.length ? props.projectIds.join(',') : currentProjectId() ?? 'current'
+  const [alLinks, setAlLinks] = useState<FileLink[] | null>(() => readLastLinks(linksKey)?.links ?? null)
+  const [alLinksFresh, setAlLinksFresh] = useState(false)
   const [alPage, setAlPage] = useState<string | null>(null)
   const [fuUrl, setFuUrl] = useState(() => localStorage.getItem('pa:fileUploadUrl') || 'http://20.255.60.183/file-upload/')
   const [fuAddText] = useState(() => localStorage.getItem('pa:fileUploadAdd') || 'Add Another Upload')
@@ -164,6 +119,7 @@ export function UploadModal(props: { onClose: () => void; projectIds?: string[];
     setAlStatus(null)
     setFuStatus(null)
     setAlLink(null)
+    setAlLinksFresh(false)
     setFuLink(null)
     setAlPage(null)
     setFuPage(null)
@@ -172,9 +128,10 @@ export function UploadModal(props: { onClose: () => void; projectIds?: string[];
       if (!sources.length) throw new Error('No playable data could be loaded.')
       const allFiles: ApplovinFile[] = []
       const skipped: string[] = []
+      const runtimeSrc = await fetchRuntimeSrc()
       for (let i = 0; i < sources.length; i++) {
         setStatus(`Building playables ${i + 1}/${sources.length}...`)
-        const built = await buildProjectUploadFiles(sources[i])
+        const built = await buildProjectUploadFiles(sources[i], includeSip, runtimeSrc)
         allFiles.push(...built.files)
         skipped.push(...built.skipped)
       }
@@ -192,11 +149,37 @@ export function UploadModal(props: { onClose: () => void; projectIds?: string[];
           submit: alSubmit,
           addButtonText: alAddText,
           uploadButtonText: alUploadText,
-          waitForResultMs: alSubmit ? 2500 : 0,
         })
-        setAlStatus(result.ok ? `Uploaded ${result.files || 0} file(s)${result.submitted ? ' and submitted.' : '. Review the window and click Upload.'}` : 'Error: ' + result.error)
-        setAlLink(result.link ?? null)
         setAlPage(result.pageUrl ?? null)
+        if (!result.ok) {
+          setAlStatus('Error: ' + result.error)
+        } else {
+          setAlStatus(
+            `Filled ${result.files || 0} file(s)` +
+              (result.submitted ? ' and submitted. Waiting for the preview links...' : '. Click Upload in the AppLovin window; waiting for the preview links...'),
+          )
+          const wait = await applovinWaitForLinks({ mark: PREVIEW_LINK_MARK, expected: allFiles.length })
+          const matched = matchPreviewLinks(allFiles, wait.links ?? [])
+          const found = matched.filter((f) => f.link).length
+          if (found) {
+            setAlLinks(matched)
+            setAlLinksFresh(true)
+            saveLastLinks(linksKey, matched)
+            if (found === 1) copyText(matched.find((f) => f.link)!.link!)
+          }
+          setAlLink(null)
+          setAlStatus(
+            found === allFiles.length
+              ? `Uploaded. ${found} preview link${found === 1 ? '' : 's'} below${found === 1 ? ' (copied)' : ''}.`
+              : found
+                ? `Uploaded, but only ${found} of ${allFiles.length} preview links were found.`
+                : wait.closed
+                  ? 'No link found: the AppLovin window was closed.'
+                  : wait.timedOut
+                    ? 'No link found within 5 minutes. Check the AppLovin window.'
+                    : 'No link found. ' + (wait.error ?? ''),
+          )
+        }
       }
 
       if (fileServerOn) {
@@ -240,6 +223,14 @@ export function UploadModal(props: { onClose: () => void; projectIds?: string[];
       <div className="group-title">Targets</div>
       <Toggle label="Upload to AppLovin" checked={appLovinOn} onChange={setAppLovinOn} />
       <Toggle label="Upload to file server" checked={fileServerOn} onChange={setFileServerOn} />
+      <Toggle
+        label="Include the SIP (end card alone)"
+        checked={includeSip}
+        onChange={(v) => {
+          setIncludeSip(v)
+          localStorage.setItem('pa:uploadSip', v ? 'on' : 'off')
+        }}
+      />
 
       <div className="group-title">AppLovin</div>
       <Row label="Upload URL">
@@ -265,6 +256,31 @@ export function UploadModal(props: { onClose: () => void; projectIds?: string[];
         </div>
       )}
       {!alLink && alPage && <div className="hint pad">Result page: {alPage}</div>}
+      {alLinks && alLinks.some((f) => f.link) && (
+        <>
+          <div className="hint pad">{alLinksFresh ? 'Preview links' : 'Last upload\u2019s preview links'}</div>
+          {alLinks.map((f) => (
+            <Row key={f.name} label={f.iteration || f.name}>
+              {f.link ? (
+                <div className="grid2">
+                  <input className="text-input" readOnly value={f.link} title={f.name} />
+                  <span>
+                    <button onClick={() => copyText(f.link!)}><Icon icon={Copy} size={13} /> Copy</button>{' '}
+                    <button onClick={() => window.open(f.link, '_blank')}>Open</button>
+                  </span>
+                </div>
+              ) : (
+                <span className="hint">No link found</span>
+              )}
+            </Row>
+          ))}
+          {alLinks.filter((f) => f.link).length > 1 && (
+            <button onClick={() => copyText(alLinks.filter((f) => f.link).map((f) => `${f.iteration}: ${f.link}`).join('\n'))}>
+              <Icon icon={Copy} size={13} /> Copy all links
+            </button>
+          )}
+        </>
+      )}
 
       <div className="group-title">File Server</div>
       <Row label="Upload URL">

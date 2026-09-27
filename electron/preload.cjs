@@ -16,4 +16,7 @@ contextBridge.exposeInMainWorld('editorAPI', {
   applovinOpen: (url) => ipcRenderer.invoke('applovin:open', url),
   applovinProbe: (payload) => ipcRenderer.invoke('applovin:probe', payload),
   applovinUpload: (payload) => ipcRenderer.invoke('applovin:upload', payload),
+  applovinWaitForLinks: (payload) => ipcRenderer.invoke('applovin:waitForLinks', payload),
+  secretGet: (name) => ipcRenderer.invoke('secret:get', name),
+  secretSet: (name, value) => ipcRenderer.invoke('secret:set', name, value),
 })

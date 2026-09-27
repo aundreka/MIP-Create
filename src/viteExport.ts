@@ -5,14 +5,15 @@
 
 import JSZip from 'jszip'
 import type { Project } from '../runtime/scene'
-import type { AssetMap } from '../runtime/types'
-import { downloadBlob, MRAID_HEAD, pruneAssets } from './export'
+import type { AssetEntry, AssetMap } from '../runtime/types'
+import { downloadBlob, MRAID_HEAD, parentAssetRefs, pruneAssets } from './export'
+import { mipFolderName } from './mipName'
 import { currentProjectId, loadProjectPreview, projectsInGroup } from './projects'
 import { getState } from './store'
 
 // Every runtime source file, pulled in as raw text at the editor's build time.
 // Keys look like '../runtime/index.ts'; we re-root them under src/runtime/.
-const runtimeFiles = import.meta.glob('../runtime/**/*.ts', { query: '?raw', import: 'default', eager: true }) as Record<string, string>
+const runtimeFiles = import.meta.glob(['../runtime/**/*.{ts,css}', '!../runtime/**/*.test.ts'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>
 
 const PACKAGE_JSON = `{
   "name": "NAME",
@@ -68,6 +69,31 @@ import type { AssetMap } from './runtime/types'
 const W = window as unknown as Record<string, any>
 const mraid = W.mraid
 
+// Media lives in public/media/ as plain files so it can be swapped. The runtime
+// registers custom fonts from inline bytes only, so read each font file into a
+// data URL before booting. Images, video and audio load from their paths as-is.
+async function withInlineFonts(list: AssetMap): Promise<AssetMap> {
+  const out: AssetMap = { ...list }
+  await Promise.all(
+    Object.entries(list).map(async ([id, a]) => {
+      if (a.kind !== 'font' || a.src.startsWith('data:')) return
+      try {
+        const blob = await (await fetch(a.src)).blob()
+        const url = await new Promise<string>((resolve, reject) => {
+          const r = new FileReader()
+          r.onload = () => resolve(String(r.result))
+          r.onerror = () => reject(r.error)
+          r.readAsDataURL(blob)
+        })
+        out[id] = { ...a, src: url }
+      } catch {
+        // Missing font file: the text falls back to the default face.
+      }
+    }),
+  )
+  return out
+}
+
 let started = false
 function startCreative(): void {
   if (started) return
@@ -75,9 +101,11 @@ function startCreative(): void {
   // Tells the runtime the ready wait already happened here, so it registers the MRAID
   // lifecycle listeners instead of waiting a second time.
   W.PA_MRAID_WAITED = true
-  void boot(project as unknown as Project, assets as unknown as AssetMap, {
-    mount: document.getElementById('app') ?? document.body,
-  })
+  void withInlineFonts(assets as unknown as AssetMap).then((list) =>
+    boot(project as unknown as Project, list, {
+      mount: document.getElementById('app') ?? document.body,
+    }),
+  )
 }
 
 // MRAID v2.0: nothing may initialize while the container is still loading — the ready
@@ -123,7 +151,11 @@ npm run build    # production build into dist/
 ## Where things live
 
 - \`src/project.json\`: the scenes, elements and layout you authored in the editor.
-- \`src/assets.json\`: every image / video / audio / sound, inlined as data URLs.
+- \`public/media/\`: every image / video / audio / font as a plain file. To swap one,
+  replace the file and keep its name. If the new art has a different shape, also
+  update that asset's \`w\` / \`h\` (its design size in px) in \`src/assets.json\`.
+- \`src/assets.json\`: the asset list: id, file path (\`media/<id>.<ext>\`) and size.
+  HTML end cards stay inlined here, since they are self-contained playables.
 - \`src/main.ts\`: the entry point; boots the runtime with the project + assets.
 - \`src/runtime/\`: the full DOM/CSS runtime (no external dependencies).
   - \`src/runtime/games/\`: edit these to change gameplay mechanics, win
@@ -183,25 +215,99 @@ function openFolder(zip: JSZip, folder: string): JSZip {
   return target
 }
 
-function writePlayableViteProject(target: JSZip, project: Project, assets: AssetMap): void {
-  const safe = safeToken(project.meta.name || 'playable', 'playable')
-  const used = pruneAssets(project, assets)
+/** One file of an exported source project: a path relative to the playable's
+ * folder, and its text or bytes. Shared by the zip exports and Push to GitHub. */
+export interface SourceFile {
+  path: string
+  data: string | Uint8Array
+}
 
-  target.file('package.json', PACKAGE_JSON.replace('NAME', safe.toLowerCase()))
-  target.file('tsconfig.json', TSCONFIG)
-  target.file('vite.config.ts', VITE_CONFIG)
-  target.file('index.html', INDEX_HTML(project.meta.client || project.meta.name || 'playable'))
-  target.file('README.md', readme(project.meta.name || 'Playable'))
-  target.file('.gitignore', 'node_modules\ndist\n')
+// Where extracted media lands. Vite copies public/ verbatim into the build, and
+// "media/" (not "assets/") keeps it clear of Vite's own hashed dist/assets/.
+const MEDIA_DIR = 'media'
 
-  target.file('src/main.ts', MAIN_TS)
-  target.file('src/project.json', JSON.stringify(project, null, 2))
-  target.file('src/assets.json', JSON.stringify(used, null, 2))
+const MIME_EXT: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/svg+xml': 'svg',
+  'audio/mpeg': 'mp3',
+  'audio/x-wav': 'wav',
+  'audio/wave': 'wav',
+  'video/quicktime': 'mov',
+  'font/sfnt': 'ttf',
+  'application/x-font-ttf': 'ttf',
+  'application/x-font-otf': 'otf',
+  'application/font-woff': 'woff',
+}
 
-  for (const [path, src] of Object.entries(runtimeFiles)) {
-    const rel = path.replace(/^.*\/runtime\//, 'runtime/')
-    target.file('src/' + rel, src)
+function mediaExt(mime: string, kind: AssetEntry['kind']): string {
+  const known = MIME_EXT[mime]
+  if (known) return known
+  const sub = (mime.split('/')[1] ?? '').replace(/^x-/, '').replace(/[^a-z0-9]/gi, '')
+  if (sub && sub !== 'octetstream') return sub.toLowerCase()
+  return kind === 'font' ? 'ttf' : kind === 'audio' ? 'mp3' : kind === 'video' ? 'mp4' : 'png'
+}
+
+function base64Bytes(b64: string): Uint8Array {
+  const bin = atob(b64)
+  const out = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
+  return out
+}
+
+/**
+ * Pull every base64 image / video / audio / font out of `used` into its own file
+ * under public/media/, pointing the asset's src at it ("media/logo.webp"), so the
+ * art can be swapped by replacing a file instead of editing a data URI. HTML end
+ * cards stay inline (they are self-contained playables), and so does any asset a
+ * card reads back out of the host: the card resolves it inside its own frame,
+ * where a relative path would not reach public/.
+ */
+export function extractMediaFiles(used: AssetMap): { assets: AssetMap; files: SourceFile[] } {
+  const keepInline = new Set<string>()
+  for (const a of Object.values(used)) for (const ref of parentAssetRefs(a.src)) keepInline.add(ref)
+  const assets: AssetMap = {}
+  const files: SourceFile[] = []
+  const taken = new Set<string>()
+  for (const [id, a] of Object.entries(used)) {
+    const m = /^data:([^;,]+)((?:;[^;,]*)*);base64,/i.exec(a.src)
+    if (!m || a.kind === 'html' || keepInline.has(id)) {
+      assets[id] = a
+      continue
+    }
+    const ext = mediaExt(m[1].toLowerCase(), a.kind)
+    const stem = id.replace(/[^a-z0-9_.-]+/gi, '_').replace(/^[._]+/, '') || 'asset'
+    let name = `${stem}.${ext}`
+    for (let n = 2; taken.has(name.toLowerCase()); n++) name = `${stem}_${n}.${ext}`
+    taken.add(name.toLowerCase())
+    files.push({ path: `public/${MEDIA_DIR}/${name}`, data: base64Bytes(a.src.slice(m[0].length)) })
+    assets[id] = { ...a, src: `${MEDIA_DIR}/${name}` }
   }
+  return { assets, files }
+}
+
+/** Every file of one playable's Vite source project (no folder prefix). */
+export function playableSourceFiles(project: Project, assets: AssetMap): SourceFile[] {
+  const safe = safeToken(project.meta.name || 'playable', 'playable')
+  const media = extractMediaFiles(pruneAssets(project, assets))
+  const files: SourceFile[] = [
+    { path: 'package.json', data: PACKAGE_JSON.replace('NAME', safe.toLowerCase()) },
+    { path: 'tsconfig.json', data: TSCONFIG },
+    { path: 'vite.config.ts', data: VITE_CONFIG },
+    { path: 'index.html', data: INDEX_HTML(project.meta.client || project.meta.name || 'playable') },
+    { path: 'README.md', data: readme(project.meta.name || 'Playable') },
+    { path: '.gitignore', data: 'node_modules\ndist\n' },
+    { path: 'src/main.ts', data: MAIN_TS },
+    { path: 'src/project.json', data: JSON.stringify(project, null, 2) },
+    { path: 'src/assets.json', data: JSON.stringify(media.assets, null, 2) },
+  ]
+  for (const [path, src] of Object.entries(runtimeFiles)) {
+    files.push({ path: 'src/' + path.replace(/^.*\/runtime\//, 'runtime/'), data: src })
+  }
+  return [...files, ...media.files]
+}
+
+function writePlayableViteProject(target: JSZip, project: Project, assets: AssetMap): void {
+  for (const f of playableSourceFiles(project, assets)) target.file(f.path, f.data)
 }
 
 export async function buildViteProjectZip(project: Project, assets: AssetMap): Promise<Blob> {
@@ -222,14 +328,6 @@ function mipSortValue(project: Project): number {
   return digits ? Number(digits) : Number.POSITIVE_INFINITY
 }
 
-function mipFolderName(project: Project, index: number): string {
-  const raw = (project.meta.mip ?? '').trim()
-  const digits = raw.match(/\d+/g)?.join('')
-  if (digits) return `mip${String(Number(digits))}`
-  const safe = safeToken(raw.toLowerCase(), '')
-  return safe || `mip${index + 1}`
-}
-
 function dedupeFolderNames(playables: Array<{ project: Project; assets: AssetMap }>): ViteProjectSource[] {
   const seen = new Map<string, number>()
   return playables.map((playable, index) => {
@@ -238,7 +336,7 @@ function dedupeFolderNames(playables: Array<{ project: Project; assets: AssetMap
     seen.set(base, count + 1)
     return {
       ...playable,
-      folderName: count === 0 ? base : `${base}_${count + 1}`,
+      folderName: count === 0 ? base : `${base} (${count + 1})`,
     }
   })
 }

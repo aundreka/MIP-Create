@@ -71,6 +71,8 @@ export function App(): JSX.Element {
   const [cmdK, setCmdK] = useState(false)
   const [quickExportBusy, setQuickExportBusy] = useState(false)
   const [quickViteExportBusy, setQuickViteExportBusy] = useState(false)
+  const [quickSipBusy, setQuickSipBusy] = useState(false)
+  const [githubBusy, setGithubBusy] = useState<string | null>(null)
   const [quickProjectViteExportBusy, setQuickProjectViteExportBusy] = useState(false)
   const [uploadRequest, setUploadRequest] = useState<{ projectIds?: string[]; label?: string } | null>(null)
 
@@ -128,6 +130,38 @@ export function App(): JSX.Element {
       alert('Quick export failed: ' + String(e))
     } finally {
       setQuickExportBusy(false)
+    }
+  }
+
+  const doQuickSip = async (): Promise<void> => {
+    setQuickSipBusy(true)
+    try {
+      const mod = await import('./quickExport')
+      await mod.quickExportSip()
+    } catch (e) {
+      alert('Quick SIP export failed: ' + String((e as Error)?.message ?? e))
+    } finally {
+      setQuickSipBusy(false)
+    }
+  }
+
+  const doGithubPush = async (): Promise<void> => {
+    const mod = await import('./github')
+    if (!mod.readGithubLink() || !(await mod.readGithubToken())) {
+      alert('Link a GitHub repository first: Project settings > GitHub.')
+      setSettings(true)
+      return
+    }
+    setGithubBusy('Pushing...')
+    try {
+      const r = await mod.pushProjectGroup((msg) => setGithubBusy(msg))
+      const over = r.skipped.length ? `\n\nNot included (over 5 MB): ${r.skipped.join(', ')}` : ''
+      if (!r.changed) alert(`${r.repo} is already up to date.${over}`)
+      else if (confirm(`Pushed ${r.folders.join(', ')} to ${r.repo} (${r.changed} file(s) changed).${over}\n\nOpen the commit on GitHub?`)) window.open(r.commitUrl, '_blank')
+    } catch (e) {
+      alert('Push to GitHub failed: ' + String((e as Error)?.message ?? e))
+    } finally {
+      setGithubBusy(null)
     }
   }
 
@@ -234,6 +268,10 @@ export function App(): JSX.Element {
             quickViteExportBusy={quickViteExportBusy}
             onQuickProjectViteExport={() => void doQuickProjectViteExport()}
             quickProjectViteExportBusy={quickProjectViteExportBusy}
+            onQuickSip={() => void doQuickSip()}
+            quickSipBusy={quickSipBusy}
+            onGithubPush={() => void doGithubPush()}
+            githubBusy={githubBusy}
             onExport={() => setExportOpen(true)}
             onUpload={() => setUploadRequest({})}
             onQa={() => setQa(true)}

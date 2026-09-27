@@ -8,11 +8,13 @@ import { addVariant, assignProjectGroup, patchMeta, removeVariant, renameVariant
 import { setActiveVariant } from '../variantMode'
 import { listGroups } from '../projectGroups'
 import { projectsInGroup } from '../projects'
-import { fileBaseName, isSip, mipName, subconceptToken, todayLabel } from '../mipName'
+import { fileBaseName, isSip, mipFolderName, mipName, subconceptToken, todayLabel } from '../mipName'
 import type { Subconcept } from '../mipName'
 import { Checkbox, Chips, ColorField, Drawer, NumField, Row, Select, Slider } from '../ui'
 import { Check, Icon, Play, X } from '../icons'
 import { AssetPicker } from './AssetPicker'
+import { GithubSettings } from './GithubSettings'
+import { endcardScenes, sipScene } from '../sip'
 import { getEditLocale, setEditLocale } from '../locale'
 import { importCsv } from '../bridge'
 import { DEFAULT_PROMO_CALENDAR, calendarRange, labelForDate, parsePromoCsv, validatePromoCalendar } from '../promoCalendar'
@@ -41,6 +43,7 @@ const EVENTS: { key: string; label: string; wired?: boolean }[] = [
 export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
   const { project, assets } = useEditorState()
   const m = project.meta
+  const endcards = endcardScenes(project)
   const previewDate = usePreviewDate()
   // Last CSV import result — how many rows landed and which lines were unreadable.
   const [csvNote, setCsvNote] = useState<string | null>(null)
@@ -162,6 +165,27 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
       <Row label="Export file">
         <input value={fileBaseName(project)} readOnly title="Export filename stem" />
       </Row>
+      <Row label="Game name">
+        <input
+          value={m.gameName ?? ''}
+          placeholder={mipFolderName({ ...project, meta: { ...m, gameName: undefined } }).replace(/^MIP\d+( - )?/, '') || 'e.g. Scratch'}
+          title="Names the delivery folder, e.g. MIP1 - SCRATCH. Blank uses the mechanic."
+          onChange={(e) => patchMeta({ gameName: e.target.value || undefined })}
+        />
+      </Row>
+      <Row label="Folder">
+        <input value={mipFolderName(project)} readOnly title="Folder name used by source exports and Push to GitHub" />
+      </Row>
+      {endcards.length > 1 && (
+        <Row label="SIP end card">
+          <Select
+            value={sipScene(project)?.id ?? endcards[0].id}
+            title="The end card Quick SIP, Upload and Push to GitHub cut the SIP from"
+            options={endcards.map((s) => ({ value: s.id, label: s.name }))}
+            onChange={(v) => patchMeta({ sipSceneId: v })}
+          />
+        </Row>
+      )}
       <div className="hint pad">Auto-named <b>Client + MIP + Date</b>. Export files use <b>client_acslanot_mip_date_mip_emily_game_mechanic_human_subconcept_unique</b>. A MIP with no minigame names the mechanic slot <b>unknown</b>; <b>Subconcept</b> sets the second-to-last slot (<b>dd</b> dynamic date / <b>dt</b> dynamic time / <b>dh</b> dynamic holiday / <b>dtd</b> dynamic date and time / <b>none</b>) and clearing <b>Unique creative</b> ends the name in <b>none</b> — so no dynamic date and no promo ends <b>…_none_none</b>, and a dynamic date with a promo ends <b>…_dd_unique</b>. A <b>SIP</b> — one scene, and that scene is an end card — names itself <b>client_acslanot_sip_date_mip_emily_product_carousel_human_none_unique</b>, with <b>SIP format</b> switching <b>carousel</b> ↔ <b>card</b>.</div>
       <div className="grid2">
         <NumField label="Base W" value={m.baseW} suffix="px" onChange={(n) => patchMeta({ baseW: n })} />
@@ -179,6 +203,7 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
         />
       </Row>
       <div className="hint pad">On screens taller than the design, <b>Center</b> keeps the content vertically centered (retaining relative size/position) instead of gluing it to the top. Top-pinned headers/bars stay pinned either way.</div>
+      <GithubSettings />
       <div className="group-title">Session timer</div>
       <Checkbox
         label="Session timer"

@@ -8,7 +8,8 @@ import { getState, joinProjectGroup, loadProject as storeLoad, markSaved, redo, 
 import { createProject, currentProjectId, openProject, projectsInGroup, saveCurrent } from '../projects'
 import { ContextMenu, type MenuItem } from './ContextMenu'
 import { HeaderPopover } from './HeaderPopover'
-import { CalendarDays, ChevronDown, FolderOpen, Frame, Icon, Menu, Minus, Play, Plus, Redo2, Undo2, Upload, X } from '../icons'
+import { CalendarDays, ChevronDown, FolderOpen, Frame, GitBranch, Icon, Menu, Minus, Play, Plus, RectangleVertical, Redo2, Undo2, Upload, X } from '../icons'
+import { endcardScenes } from '../sip'
 import { toggleTheme, useTheme } from '../theme'
 import { setEditLocale, useEditLocale } from '../locale'
 import { setActiveVariant, useActiveVariant } from '../variantMode'
@@ -43,13 +44,18 @@ export function Topbar(props: {
   quickViteExportBusy: boolean
   onQuickProjectViteExport: () => void
   quickProjectViteExportBusy: boolean
+  onQuickSip: () => void
+  quickSipBusy: boolean
+  onGithubPush: () => void
+  githubBusy: string | null
   onExport: () => void
   onUpload: () => void
   onQa: () => void
   onQaCheck: () => void
   onShare: () => void
 }): JSX.Element {
-  const { orientation, dirty, projectPath, canUndo, canRedo, scene } = useEditorState()
+  const { orientation, dirty, projectPath, canUndo, canRedo, scene, project } = useEditorState()
+  const hasEndcard = endcardScenes(project).length > 0
   const previewDate = usePreviewDate()
   const theme = useTheme()
   const editLocale = useEditLocale()
@@ -219,6 +225,13 @@ export function Topbar(props: {
       <button onClick={props.onQuickExport} disabled={props.quickExportBusy} title="Quick export using your saved Export modal settings">
         <Icon icon={Upload} size={14} /> {props.quickExportBusy ? 'Quick exporting...' : 'Quick export'}
       </button>
+      <button
+        onClick={props.onQuickSip}
+        disabled={props.quickSipBusy || !hasEndcard}
+        title={hasEndcard ? 'Quick export the end card alone, under the SIP file name' : 'This MIP has no end card to export as a SIP'}
+      >
+        <Icon icon={RectangleVertical} size={14} /> {props.quickSipBusy ? 'Quick SIP...' : 'Quick SIP'}
+      </button>
       <button onClick={props.onQuickViteExport} disabled={props.quickViteExportBusy} title="Quick Vite source export for the current playable">
         <Icon icon={FolderOpen} size={14} /> {props.quickViteExportBusy ? 'Quick Vite...' : 'Quick Vite'}
       </button>
@@ -230,6 +243,9 @@ export function Topbar(props: {
       </button>
       <button onClick={props.onUpload} title="Build and upload the current playable">
         Upload
+      </button>
+      <button onClick={props.onGithubPush} disabled={!!props.githubBusy} title="Push every MIP in this project to its GitHub repository (source, media files, MIP + SIP HTML)">
+        <Icon icon={GitBranch} size={14} /> {props.githubBusy ?? 'Push to GitHub'}
       </button>
       <span className="hint">{platformLabel}{projectPath ? ' - ' + projectPath.split(/[\\/]/).pop() : ''}</span>
 

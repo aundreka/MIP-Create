@@ -23,7 +23,8 @@ import { setAssetCompress, useEditorState } from '../store'
 import { applyVariant, stripVariants } from '../variants'
 import { fileBaseName } from '../mipName'
 import { readExportPrefs, readStoredMediaDefaults, writeExportPrefs } from '../exportPrefs'
-import { applovinOpen, applovinProbe, applovinUpload, canApplovin, compressHtmlScript, type ApplovinFile } from '../bridge'
+import { applovinOpen, applovinProbe, applovinUpload, applovinWaitForLinks, canApplovin, compressHtmlScript, type ApplovinFile } from '../bridge'
+import { matchPreviewLinks, PREVIEW_LINK_MARK } from '../applovinLinks'
 import { Modal, NumField, Slider, Toggle } from '../ui'
 import { AlertTriangle, Check, Icon, ScanSearch } from '../icons'
 import { FlowPreview } from '../preview/FlowPreview'
@@ -245,6 +246,7 @@ export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void
     selectors: { addButtonText: string; uploadButtonText: string }
     setBusy: (busy: boolean) => void
     setStatus: (status: string | null) => void
+    waitForLinks?: boolean
   }): Promise<void> => {
     if (!confirmIfBlocked()) return
     props.setBusy(true)
@@ -258,6 +260,17 @@ export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void
       props.setStatus('Filling the upload form...')
       const r = await applovinUpload({ url: props.url, files, submit: props.submit, ...props.selectors })
       props.setStatus(r.ok ? `Filled ${r.files} file(s)${r.submitted ? ' and submitted.' : '. Review the window and click Upload.'}` : 'Error: ' + r.error)
+      if (r.ok && props.waitForLinks) {
+        const wait = await applovinWaitForLinks({ mark: PREVIEW_LINK_MARK, expected: files.length })
+        const found = matchPreviewLinks(files, wait.links ?? []).filter((f) => f.link)
+        if (found.length) {
+          const text = found.map((f) => (found.length > 1 ? `${f.iteration}: ${f.link}` : f.link!)).join('\n')
+          void navigator.clipboard?.writeText(text)
+          props.setStatus(`Preview link${found.length > 1 ? 's' : ''} (copied):\n${text}`)
+        } else {
+          props.setStatus(wait.closed ? 'No link found: the upload window was closed.' : 'No preview link found. Check the upload window.')
+        }
+      }
     } catch (e) {
       props.setStatus('Error: ' + (e as Error).message)
     } finally {
@@ -285,7 +298,7 @@ export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void
   }
 
   const doApplovin = async (): Promise<void> => {
-    await fillUploadForm({ url: alUrl, submit: alSubmit, selectors: alSelectors, setBusy: setAlBusy, setStatus: setAlStatus })
+    await fillUploadForm({ url: alUrl, submit: alSubmit, selectors: alSelectors, setBusy: setAlBusy, setStatus: setAlStatus, waitForLinks: true })
     return
     if (!confirmIfBlocked()) return
     setAlBusy(true)
@@ -594,7 +607,7 @@ export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void
         <b>npm run dev</b> and edit <b>src/runtime/games/</b> to customize gameplay mechanics. Optional; not needed for ad delivery.
       </div>
       <div className="hint pad">
-        The project zip gathers every playable in the current project into folders like <b>project/mip1</b>, <b>project/mip2</b>, and so on.
+        The project zip gathers every playable in the current project into folders like <b>project/MIP1 - SCRATCH</b>, <b>project/MIP2 - SPIN</b>, and so on, with every image, video, sound and font as its own file under <b>public/media/</b>.
       </div>
 
       {canApplovin && (
