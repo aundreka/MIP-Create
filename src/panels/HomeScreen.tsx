@@ -4,7 +4,7 @@
 // editor to that project (persisting the current one first).
 
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { createProject, currentProjectId, deleteProject, listProjects, loadProjectPreview, projectGameTypes, openProject, renameProject, saveCurrent, type ProjectRecord } from '../projects'
+import { createProject, currentProjectId, deleteProject, listProjects, loadProjectPreview, projectElementNames, projectGameTypes, openProject, renameProject, saveCurrent, type ProjectRecord } from '../projects'
 import type { ProjectData } from '../bridge'
 import type { Project } from '../../runtime/scene'
 import type { AssetMap } from '../../runtime/types'
@@ -195,6 +195,7 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
   }
   const [query, setQuery] = useState('')
   const [projQuery, setProjQuery] = useState('')
+  const [elQuery, setElQuery] = useState('')
   const [gameType, setGameType] = useState<string | null>(null)
   const [hover, setHover] = useState<string | null>(null)
   const hoverTimer = useRef<number | undefined>(undefined)
@@ -282,11 +283,14 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
     .map(([id, count]) => ({ id, count, label: getTemplate(id)?.label ?? id }))
     .sort((a, b) => a.label.localeCompare(b.label))
   const activeGameType = gameType && gameTypeCounts.has(gameType) ? gameType : null
+  // Element search keeps MIPs that contain an element whose name includes the text.
+  const eq = elQuery.trim().toLowerCase()
   const shownProjects = projects.filter((p) => {
     if (activeGameType && !projectGameTypes(p).includes(activeGameType)) return false
+    if (eq && !projectElementNames(p).some((n) => n.includes(eq))) return false
     return !pq || p.name.toLowerCase().includes(pq) || (p.projectName ?? '').toLowerCase().includes(pq)
   })
-  const filteringProjects = !!pq || !!activeGameType
+  const filteringProjects = !!pq || !!eq || !!activeGameType
   const blocks: Block[] = []
   const groupBlock = new Map<string, Block & { kind: 'group' }>()
   for (const p of shownProjects) {
@@ -496,6 +500,15 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
                 </button>
               )}
             </label>
+            <label className="home-search proj-search el-search">
+              <Icon icon={LayoutGrid} size={15} />
+              <input value={elQuery} placeholder="Search by element name…" onChange={(e) => setElQuery(e.target.value)} />
+              {elQuery && (
+                <button className="home-search-x" onClick={() => setElQuery('')} title="Clear">
+                  <Icon icon={X} size={13} />
+                </button>
+              )}
+            </label>
             {gameTypeChips.length > 0 && (
               <div className="brand-filter proj-game-filter" role="group" aria-label="Filter playables by minigame type">
                 <button className={'brand-chip' + (activeGameType === null ? ' on' : '')} onClick={() => setGameType(null)}>
@@ -516,6 +529,7 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
             {filteringProjects && !shownProjects.length && (
               <div className="hint pad">
                 No playables match{pq ? ` “${projQuery}”` : ''}
+                {eq ? ` with an element named “${elQuery.trim()}”` : ''}
                 {activeGameType ? ` with a ${getTemplate(activeGameType)?.label ?? activeGameType} minigame` : ''}.
               </div>
             )}

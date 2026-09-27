@@ -75,6 +75,21 @@ export function projectGameTypes(rec: ProjectRecord): string[] {
   gameTypeCache.set(rec.id, { at: rec.updatedAt, ids: out })
   return out
 }
+// Element names per project (lower-cased, deduped), cached by updatedAt like the
+// game types above — powers Home's "search by element name" filter.
+const elementNameCache = new Map<string, { at: number; names: string[] }>()
+/** Distinct element names used anywhere in a project, lower-cased. */
+export function projectElementNames(rec: ProjectRecord): string[] {
+  const hit = elementNameCache.get(rec.id)
+  if (hit && hit.at === rec.updatedAt) return hit.names
+  const names = new Set<string>()
+  for (const sd of loadProjectData(rec.id)?.project.scenes ?? []) {
+    for (const el of sd.elements) if (el.name) names.add(el.name.toLowerCase())
+  }
+  const out = [...names]
+  elementNameCache.set(rec.id, { at: rec.updatedAt, names: out })
+  return out
+}
 export function currentProjectId(): string | null {
   return currentId
 }
