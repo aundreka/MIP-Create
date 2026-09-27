@@ -19,7 +19,7 @@ describe('pruneAssets', () => {
     const p: Project = {
       meta: { schemaVersion: 1, name: 'p', clickUrl: { ios: '', android: '' }, baseW: 1080, baseH: 1920 },
       scenes: [{ id: 's1', name: 's1', kind: 'overlay', advance: { on: 'manual' }, elements: [
-        { id: 'g', type: 'game', name: 'g', x: 0, y: 0, anchor: 'center', zIndex: 0, mode: 'fit', game: { templateId: 'scratch', params: { reveals: [{ image: 'p1', text: '', weight: 1, sceneId: '' }, { image: 'p2', text: 't1', weight: 1, sceneId: '' }] } } },
+        { id: 'g', type: 'game-mount', name: 'g', x: 0, y: 0, anchor: 'center', zIndex: 0, mode: 'fit', game: { templateId: 'scratch', params: { reveals: [{ image: 'p1', text: '', weight: 1, sceneId: '' }, { image: 'p2', text: 't1', weight: 1, sceneId: '' }] } } },
       ] }],
       startSceneId: 's1',
     }
