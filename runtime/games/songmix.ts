@@ -8,6 +8,7 @@
 
 import type { GameContext, GameModule, GameTemplate, HintMove, Pt } from './types'
 import { num, str } from './types'
+import { videoSrc } from '../mediaSrc'
 
 const center = (el: HTMLElement): Pt => {
   const r = el.getBoundingClientRect()
@@ -134,7 +135,7 @@ export function createSongmix(): GameModule {
     ctx.sfx.play('gameWin')
     if (resultSrc) {
       const node = document.createElement(resultIsVideo ? 'video' : 'img') as HTMLImageElement & HTMLVideoElement
-      node.src = resultSrc
+      node.src = resultIsVideo ? videoSrc(resultSrc) : resultSrc
       node.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:18px;'
       if (resultIsVideo) {
         node.autoplay = true

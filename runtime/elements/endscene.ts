@@ -16,6 +16,7 @@ import type { SceneElement } from '../scene'
 import type { RuntimeCtx } from '../types'
 import { triggerCTA, notifyGameClose, notifyGameEnd } from '../networks'
 import { on } from '../emitter'
+import { videoSrc } from '../mediaSrc'
 
 // How long an end card ignores input after it appears.
 //
@@ -680,6 +681,55 @@ function autoplayHtmlEndscene(wrap: HTMLElement, iframe: HTMLIFrameElement): voi
   poll()
 }
 
+// Which source each <video> currently has a watchdog for. Kept out of the DOM: the
+// dataset already carries whole data: URLs, and a third copy of one is megabytes.
+const rollWatch = new WeakMap<HTMLVideoElement, string>()
+
+// The plain <video> card gets the same watchdog the HTML card gets, for the same reason.
+// The first play() is the one most likely to be refused — a container that only grants
+// playback inside a gesture, iOS Low Power Mode, a clip not yet decodable — and the end
+// card is the last thing in the ad, so nothing ever asks again. Left alone, that refusal
+// is what the player sees: a paused clip wearing the webview's own play button.
+function autoplayEndsceneVideo(wrap: HTMLElement, video: HTMLVideoElement, key: string): void {
+  rollClip(video)
+  if (rollWatch.get(video) === key) return
+  rollWatch.set(video, key)
+
+  const view = wrap.ownerDocument.defaultView ?? window
+  const stale = (): boolean => !wrap.isConnected || rollWatch.get(video) !== key
+  let offScreen = false
+  const offAdPause = on('ad-pause', () => {
+    offScreen = true
+  })
+  const offAdResume = on('ad-resume', () => {
+    offScreen = false
+  })
+  const kick = (): void => {
+    // A clip the timeline playhead is holding (editor preview) is paused on purpose —
+    // that's the author's pause, not a refusal, so leave it where they parked it.
+    if (offScreen || video.dataset.tlHold === '1') return
+    if (video.style.display === 'none') return
+    if (video.paused && !video.ended) rollClip(video)
+  }
+  const onGesture = (): void => {
+    if (!done()) kick()
+  }
+  const done = (): boolean => {
+    if (!stale()) return false
+    offAdPause()
+    offAdResume()
+    view.removeEventListener('pointerdown', onGesture, true)
+    return true
+  }
+  const poll = (): void => {
+    if (done()) return
+    kick()
+    setTimeout(poll, ROLL_POLL_MS)
+  }
+  view.addEventListener('pointerdown', onGesture, true)
+  poll()
+}
+
 // Pick the source for the current orientation, toggle which node shows, repaint
 // the letterbox fill, and start playback when a clip becomes visible. Called from
 // the stage layout pass so a device rotation re-chooses clip + fill without a
@@ -740,14 +790,14 @@ export function updateEndsceneMedia(wrap: HTMLElement, landscape: boolean, box?:
   if (vSrc) {
     if (video.dataset.cur !== vSrc) {
       video.dataset.cur = vSrc
-      video.src = vSrc
+      video.src = videoSrc(vSrc)
       video.load()
       wrap.dispatchEvent(new CustomEvent('pa-endscene-media-reset', { bubbles: true }))
     }
-    void video.play().catch(() => {})
     video.style.display = 'block'
     img.style.display = 'none'
     if (ph) ph.style.display = 'none'
+    autoplayEndsceneVideo(wrap, video, vSrc)
   } else if (iSrc) {
     if (img.dataset.cur !== iSrc) {
       img.dataset.cur = iSrc

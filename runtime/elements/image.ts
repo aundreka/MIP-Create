@@ -4,6 +4,7 @@
 
 import type { SceneElement } from '../scene'
 import type { RuntimeCtx } from '../types'
+import { videoSrc } from '../mediaSrc'
 
 export function createImageContent(el: SceneElement, ctx: RuntimeCtx): HTMLImageElement {
   const img = document.createElement('img')
@@ -81,7 +82,7 @@ export function styleContainer(d: HTMLElement, el: SceneElement, ctx: RuntimeCtx
     d.innerHTML = ''
     if (id && a) {
       const node = document.createElement(isVideo ? 'video' : 'img') as HTMLImageElement & HTMLVideoElement
-      node.src = a.src
+      node.src = isVideo ? videoSrc(a.src) : a.src
       node.style.cssText = `width:100%;height:100%;display:block;object-position:center;`
       if (isVideo) {
         node.autoplay = true

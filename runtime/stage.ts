@@ -57,6 +57,7 @@ import { onSwipeResult, readSwipeResult, type SwipeResult } from './games/swipec
 import { onProgressShown } from './games/progresschannel'
 import { attachScratchCover } from './reveal'
 import { emit, on } from './emitter'
+import { videoSrc } from './mediaSrc'
 
 interface Rec {
   el: SceneElement
@@ -2291,8 +2292,15 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       } catch {
         /* not seekable yet — the loadedmetadata pass below retries */
       }
-      if (play && sec >= 0 && (!dur || sec < dur)) void v.play().catch(() => {})
-      else v.pause()
+      if (play && sec >= 0 && (!dur || sec < dur)) {
+        delete v.dataset.tlHold
+        void v.play().catch(() => {})
+      } else {
+        // Tell the endscene's autoplay watchdog this pause is the playhead's, not a
+        // refusal to play — otherwise it would keep rolling the clip out from under it.
+        v.dataset.tlHold = '1'
+        v.pause()
+      }
       if (timelinePreview?.playing && dur > 0 && (videoLoopWas.get(v) ?? v.loop) && !loadedMetadataRearm.has(v)) {
         loadedMetadataRearm.add(v)
         armTimeline(timelinePreview.ms + (Date.now() - timelinePreview.startedAt))
@@ -2322,6 +2330,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       for (const v of videosOf(rec)) {
         const was = videoLoopWas.get(v)
         if (was != null) v.loop = was
+        delete v.dataset.tlHold
         void v.play().catch(() => {})
       }
   }
@@ -2874,7 +2883,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
             if (!src) return
             const n = document.createElement(isVideo ? 'video' : 'img') as HTMLImageElement & HTMLVideoElement
             n.className = 'pa-fill'
-            n.src = src
+            n.src = isVideo ? videoSrc(src) : src
             const radius = rec.el.box?.pill ? '9999px' : rec.el.box?.radiusPx ? rec.el.box.radiusPx * scale() + 'px' : ''
             // How the picture sits in the slot is the author's call: the box is the
             // element they placed and sized, and these decide what happens inside it.
