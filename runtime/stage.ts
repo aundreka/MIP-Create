@@ -215,6 +215,7 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     | 'brush'
     | 'scratchdrag'
     | 'swipecards'
+    | 'slider'
     | 'still'
     | 'hold' = 'tap'
   if (cfg.mode === 'still') {
@@ -265,6 +266,8 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     kind = 'scratchdrag'
   } else if (cfg.mode === 'swipecards') {
     kind = 'swipecards'
+  } else if (cfg.mode === 'slider') {
+    kind = 'slider'
   }
   // A hold has to read as a HOLD, so its default cycle is longer than a tap's.
   const travel =
@@ -276,7 +279,7 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
           ? 1500
           : kind === 'combo'
             ? 1900
-            : kind === 'swipecards'
+            : kind === 'swipecards' || kind === 'slider'
               ? 1600
               : kind === 'pinch'
                 ? 1400
@@ -699,6 +702,41 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
       swell = g.carry
       // Fade out after the lift so the loop's jump back to the card's middle is unseen.
       content.style.opacity = g.alpha.toFixed(3)
+    } else if (kind === 'slider') {
+      // Grab the Slider game's divider handle and drag it to the edge that wins.
+      //
+      // Both the handle and the track are read every frame, so the hand starts from
+      // wherever the divider was left rather than from where it began. When either end
+      // wins, alternate sides per loop: the storyboard gesture is "slide left AND
+      // right", which is also the only way a compare shows both images.
+      const handleEl = root.querySelector<HTMLElement>('[data-slider-handle]')
+      const trackEl = root.querySelector<HTMLElement>('[data-slider-track]')
+      if (!handleEl || !trackEl) {
+        content.style.opacity = '0'
+        raf = requestAnimationFrame(frame)
+        return
+      }
+      const hRect = handleEl.getBoundingClientRect()
+      const tRect = trackEl.getBoundingClientRect()
+      const guideRect = rec.outer.getBoundingClientRect()
+      const loop = Math.floor((now - t0) / travel)
+      const edge = trackEl.dataset.sliderEdge
+      const toRight = edge === 'right' || (edge !== 'left' && loop % 2 === 1)
+      const g = dragGesture(((now - t0) % travel) / travel)
+      const fromX = hRect.left + hRect.width / 2
+      const fromY = hRect.top + hRect.height / 2
+      // Stop a little short of the wall, so the hand stays inside the card it is on.
+      const f = toRight ? 0.9 : 0.1
+      const toX = trackEl.dataset.sliderVertical ? fromX : tRect.left + tRect.width * f
+      const toY = trackEl.dataset.sliderVertical ? tRect.top + tRect.height * f : fromY
+      const fingerX = fromX + (toX - fromX) * g.travel
+      const fingerY = fromY + (toY - fromY) * g.travel
+      ox = fingerX - (guideRect.left + guideRect.width * 0.22)
+      oy = fingerY - (guideRect.top + guideRect.height * 0.12)
+      press = g.press
+      swell = g.carry
+      // Fade out after the release so the loop's jump back to the handle is unseen.
+      content.style.opacity = g.alpha.toFixed(3)
     } else if (kind === 'dragclean') {
       // Carry the Drag to clean tool onto the obstacle it is nearest to and wipe.
       //
@@ -889,7 +927,7 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     }
     // A drag softens the contact dip to leave room for the carry swell; every other
     // mode keeps the original press-only scale.
-    const dip = kind === 'combo' || kind === 'dragclean' || kind === 'scratchdrag' || kind === 'swipecards' ? 0.1 : 0.18
+    const dip = kind === 'combo' || kind === 'dragclean' || kind === 'scratchdrag' || kind === 'swipecards' || kind === 'slider' ? 0.1 : 0.18
     const squash = (1 - press * dip + swell * 0.14).toFixed(3)
     content.style.transform = `translate(${Math.round(ox)}px,${Math.round(oy)}px) scale(${squash})`
     // scaleX(-1) LAST, so it composes about the shared 22%/12% origin and pins the
@@ -2103,7 +2141,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
   }
   /** Templates whose win IS the player's own action, so their win sound plays at once
    * instead of waiting for the win animation's lead-in. */
-  const WIN_SFX_ON_THE_BEAT = new Set(['basket', 'carousel', 'catch', 'dragclean', 'tapremove', 'tapreveal', 'swipecards'])
+  const WIN_SFX_ON_THE_BEAT = new Set(['basket', 'carousel', 'catch', 'dragclean', 'tapremove', 'tapreveal', 'swipecards', 'slider'])
   const GAME_WIN_SFX_BIAS_MS = 500
   const gameWinSoundDelayMs = (rec?: Rec): number => {
     const phaseDelay = rec ? phaseLeadDelayMs(rec.el, 'gameWin') : 0

@@ -639,6 +639,8 @@ export interface HandguideConfig {
   // the two halves of the gesture are timed independently.
   // 'swipecards' presses on the card on top of a Swipe cards pile and mimes dragging it
   // off to one side (`swipeDir`), walking down the pile as cards are swiped away.
+  // 'slider' grabs the Slider game's divider handle and mimes the drag to the edge that
+  // wins, alternating sides when either end does — the before/after compare shown both ways.
   // 'combo' follows the Combo builder's live option and mimes dragging it into the
   // drop area, advancing to the next question's option on its own.
   // 'carousel' mimes the whole gesture a carousel asks for, in one loop: a swipe that
@@ -678,6 +680,7 @@ export interface HandguideConfig {
     | 'brush'
     | 'scratchdrag'
     | 'swipecards'
+    | 'slider'
     | 'still'
     | 'hold'
   toX?: number
