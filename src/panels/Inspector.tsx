@@ -721,6 +721,7 @@ function ElementSound(props: { el: SceneElement }): JSX.Element {
   const isTapReveal = el.game?.templateId === 'tapreveal'
   const hasTapReveal = scene.elements.some((candidate) => candidate.game?.templateId === 'tapreveal')
   const isSwipeCards = el.game?.templateId === 'swipecards'
+  const isSlider = el.game?.templateId === 'slider'
   const hasSwipeCards = scene.elements.some((candidate) => candidate.game?.templateId === 'swipecards')
   const isProgressBar = el.game?.templateId === 'progressbar'
   const hasProgressBar = scene.elements.some((candidate) => candidate.game?.templateId === 'progressbar')
@@ -827,6 +828,12 @@ function ElementSound(props: { el: SceneElement }): JSX.Element {
       : []),
     ...gaugeStages,
     ...(isScratching ? [{ value: 'whileScratching', label: 'While scratching (loop)' }] : []),
+    ...(isSlider
+      ? [
+          { value: 'whileSliding', label: 'While sliding (loop)' },
+          { value: 'onReveal', label: 'When the game is won' },
+        ]
+      : []),
     ...(isScratching || el.reveal ? [{ value: 'onReveal', label: 'When revealed / win' }] : []),
     // Same wire ('onReveal' = the game's own win moment, timed to the "On game won"
     // animation phase), named for a game that is won rather than revealed.

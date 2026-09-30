@@ -17,18 +17,23 @@ interface Card {
   line: HTMLDivElement
   handle: HTMLDivElement
   played: string[]
+  loops: string[]
   completed: () => boolean
+  won: () => boolean
   drag: (fx: number, fy?: number) => void
+  press: (fx: number, fy?: number) => void
+  release: (type?: string) => void
 }
 
 function makeCard(params: Record<string, unknown> = {}): Card {
   const root = document.createElement('div')
   document.body.appendChild(root)
   const played: string[] = []
+  const loops: string[] = []
   const ctx: GameContext = {
     root,
     assets: { src: (id) => (id ? String(id) : ''), size: () => ({ w: 100, h: 50 }) },
-    sfx: { play: (e) => played.push(e) },
+    sfx: { play: (e) => played.push(e), loopStart: (e) => loops.push('start:' + e), loopStop: (e) => loops.push('stop:' + e) },
     rng: mulberry32(1),
     scale: () => 1,
   }
@@ -41,14 +46,22 @@ function makeCard(params: Record<string, unknown> = {}): Card {
   mod.start()
   let done = false
   mod.onComplete(() => (done = true))
+  let win = false
+  mod.onWin?.(() => (win = true))
   const kids = Array.from(wrap.children) as HTMLDivElement[]
   // [after, before, line, handle]
-  const drag = (fx: number, fy = 0.5): void => {
+  const press = (fx: number, fy = 0.5): void => {
     wrap.dispatchEvent(new PointerEvent('pointerdown', { clientX: fx * WRAP_W, clientY: fy * WRAP_H, pointerId: 1, bubbles: true }))
     wrap.dispatchEvent(new PointerEvent('pointermove', { clientX: fx * WRAP_W, clientY: fy * WRAP_H, pointerId: 1, bubbles: true }))
-    wrap.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1, bubbles: true }))
   }
-  return { mod, wrap, before: kids[1], line: kids[2], handle: kids[3], played, completed: () => done, drag }
+  const release = (type = 'pointerup'): void => {
+    wrap.dispatchEvent(new PointerEvent(type, { pointerId: 1, bubbles: true }))
+  }
+  const drag = (fx: number, fy = 0.5): void => {
+    press(fx, fy)
+    release()
+  }
+  return { mod, wrap, before: kids[1], line: kids[2], handle: kids[3], played, loops, completed: () => done, won: () => win, drag, press, release }
 }
 
 /** How much of the "before" layer is still showing (0-100), off its clip-path. A
@@ -134,6 +147,40 @@ describe('slider (before / after)', () => {
     expect(cover.before.style.background).toContain('center / cover')
     const contain = makeCard({ imageFit: 'contain' })
     expect(contain.before.style.background).toContain('center / contain')
+  })
+
+  it('loops a sliding sound for as long as the divider is held', () => {
+    const c = makeCard({ snapMs: 0 })
+    expect(c.loops).toEqual([])
+    c.press(0.6)
+    // Stop first: a fresh gesture has to be allowed to restart a loop left running.
+    expect(c.loops).toEqual(['stop:drag', 'start:drag'])
+    c.release()
+    expect(c.loops.at(-1)).toBe('stop:drag')
+  })
+
+  it('stops the sliding loop on a cancelled gesture, and on destroy', () => {
+    const c = makeCard({ snapMs: 0 })
+    c.press(0.6)
+    c.release('pointercancel')
+    expect(c.loops.at(-1)).toBe('stop:drag')
+    c.loops.length = 0
+    c.release('pointerup') // already up: nothing left to stop
+    expect(c.loops).toEqual([])
+    c.press(0.6)
+    c.mod.destroy()
+    expect(c.loops.at(-1)).toBe('stop:drag')
+  })
+
+  it('drops the sliding loop the moment the game is won, before the wipe', () => {
+    vi.useFakeTimers()
+    const c = makeCard({ snapMs: 400 })
+    c.press(0.05)
+    expect(c.loops.at(-1)).toBe('stop:drag')
+    expect(c.won()).toBe(true) // the win fires on the beat, not after the wipe
+    expect(c.completed()).toBe(false)
+    vi.advanceTimersByTime(400)
+    expect(c.completed()).toBe(true)
   })
 
   it('styles the divider line and handle from the params', () => {

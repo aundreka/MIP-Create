@@ -96,6 +96,7 @@ export function createSlider(): GameModule {
   const finish = (edge: number): void => {
     if (done) return
     done = true
+    ctx.sfx.loopStop?.('drag') // the gesture is over: drop the sliding loop at once
     winCb?.()
     ctx.sfx.play('gameWin')
     // The handguide stops pointing at a handle that is on its way out.
@@ -191,12 +192,19 @@ export function createSlider(): GameModule {
       started = true
       let dragging = false
       const stop = (): void => {
+        if (!dragging) return
         dragging = false
+        ctx.sfx.loopStop?.('drag')
       }
       wrap.addEventListener('pointerdown', (e) => {
         if (done) return
         dragging = true
         wrap.setPointerCapture(e.pointerId)
+        // Started inside the gesture that opened it, so a mobile browser's autoplay
+        // rules let the loop through. Stop first: a fresh gesture has to be allowed to
+        // restart a loop the previous one left running.
+        ctx.sfx.loopStop?.('drag')
+        ctx.sfx.loopStart?.('drag')
         setFromPointer(e.clientX, e.clientY)
       })
       wrap.addEventListener('pointermove', (e) => {
@@ -228,6 +236,7 @@ export function createSlider(): GameModule {
       winCb = cb
     },
     destroy() {
+      ctx.sfx.loopStop?.('drag')
       timers.forEach((t) => window.clearTimeout(t))
       timers.length = 0
       ctx.root.innerHTML = ''

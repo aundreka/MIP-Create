@@ -2139,6 +2139,9 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     if ((binding.delayMs ?? 0) > 0) emit('sfx-asset-loop-start', binding.assetId, binding.volume ?? 1, binding.delayMs)
     else emit('sfx-asset-loop-start', binding.assetId, binding.volume ?? 1)
   }
+  /** The authored sound for a game's held-gesture loop, whatever its template calls it. */
+  const gestureLoopBind = (rec: Rec): SfxBinding | undefined =>
+    (rec.el.sfx ?? []).find((b) => (b.event === 'whileScratching' || b.event === 'whileSliding') && b.assetId)
   /** Templates whose win IS the player's own action, so their win sound plays at once
    * instead of waiting for the win animation's lead-in. */
   const WIN_SFX_ON_THE_BEAT = new Set(['basket', 'carousel', 'catch', 'dragclean', 'tapremove', 'tapreveal', 'swipecards', 'slider'])
@@ -2610,13 +2613,17 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
               if (bind) emitBoundSfx(bind)
               else emit('sfx', event)
             },
+            // One gesture loop per game, under whichever name its template offers in
+            // the Sounds list ('whileScratching' for a scratch card, 'whileSliding'
+            // for the before/after slider). A game only ever runs one, so the first
+            // bound one wins rather than each template needing its own wire.
             sfxLoopStart: (event) => {
-              const bind = (rec.el.sfx ?? []).find((b) => b.event === 'whileScratching' && b.assetId)
+              const bind = gestureLoopBind(rec)
               if (bind) emitBoundSfxLoopStart(bind)
               else emit('sfx-loop-start', event)
             },
             sfxLoopStop: (event) => {
-              const bind = (rec.el.sfx ?? []).find((b) => b.event === 'whileScratching' && b.assetId)
+              const bind = gestureLoopBind(rec)
               if (bind) emit('sfx-asset-loop-stop', bind.assetId)
               else emit('sfx-loop-stop', event)
             },
