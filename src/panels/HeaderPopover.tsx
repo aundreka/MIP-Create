@@ -317,7 +317,7 @@ export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): 
                 <input value={h.suffix ?? ''} placeholder="e.g. “ !”" onChange={(e) => set({ suffix: e.target.value || undefined })} />
               </Row>
             </div>
-            <div className="grid2">
+            <div className="color-pair">
               <ColorField label="Background" value={h.bgColor || ''} onChange={(c) => set({ bgColor: c ?? undefined })} allowNone />
               <ColorField label="Text color" value={h.color || '#ffffff'} onChange={(c) => set({ color: c ?? '#ffffff' })} />
             </div>

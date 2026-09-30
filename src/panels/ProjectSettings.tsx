@@ -10,8 +10,8 @@ import { listGroups } from '../projectGroups'
 import { projectsInGroup } from '../projects'
 import { fileBaseName, isSip, mipFolderName, mipName, subconceptToken, todayLabel } from '../mipName'
 import type { Subconcept } from '../mipName'
-import { Checkbox, Chips, ColorField, Drawer, NumField, Row, Select, Slider } from '../ui'
-import { Check, Icon, Play, X } from '../icons'
+import { Accordion, Checkbox, Chips, ColorField, Drawer, Help, NumField, Row, Select, Slider } from '../ui'
+import { Icon, Play, X } from '../icons'
 import { AssetPicker } from './AssetPicker'
 import { GithubSettings } from './GithubSettings'
 import { endcardScenes, sipScene } from '../sip'
@@ -20,7 +20,8 @@ import { importCsv } from '../bridge'
 import { DEFAULT_PROMO_CALENDAR, calendarRange, labelForDate, parsePromoCsv, validatePromoCalendar } from '../promoCalendar'
 import { setPreviewDate, todayKey, usePreviewDate } from '../uiState'
 
-// Events the runtime fires are marked ✓; the rest await game templates that emit them.
+// Only events the runtime actually fires are shown (wired); the rest are kept here
+// for the bindings they may already hold, and reappear once a template emits them.
 const EVENTS: { key: string; label: string; wired?: boolean }[] = [
   { key: 'gameStart', label: 'Game start', wired: true },
   { key: 'correct', label: 'Correct move', wired: true },
@@ -92,7 +93,7 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
 
   return (
     <Drawer title="Project settings" onClose={props.onClose} width={380}>
-      <div className="group-title">Project</div>
+      <Accordion id="settings.project" title="Project">
       <Row label="Project">
         <input
           list="pa-project-names"
@@ -135,11 +136,11 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
         <Select
           value={subconceptToken(m)}
           options={[
-            { value: 'none', label: 'none — no dynamic element (…_human_none_…)' },
-            { value: 'dd', label: 'dd — dynamic date (…_human_dd_…)' },
-            { value: 'dt', label: 'dt — dynamic time (…_human_dt_…)' },
-            { value: 'dh', label: 'dh — dynamic holiday (…_human_dh_…)' },
-            { value: 'dtd', label: 'dtd — dynamic date and time (…_human_dtd_…)' },
+            { value: 'none', label: 'None (…_none_…)' },
+            { value: 'dd', label: 'Dynamic date (…_dd_…)' },
+            { value: 'dt', label: 'Dynamic time (…_dt_…)' },
+            { value: 'dh', label: 'Dynamic holiday (…_dh_…)' },
+            { value: 'dtd', label: 'Dynamic date and time (…_dtd_…)' },
           ]}
           onChange={(v) => patchMeta({ subconcept: v as Subconcept })}
         />
@@ -186,7 +187,7 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
           />
         </Row>
       )}
-      <div className="hint pad">Auto-named <b>Client + MIP + Date</b>. Export files use <b>client_acslanot_mip_date_mip_emily_game_mechanic_human_subconcept_unique</b>. A MIP with no minigame names the mechanic slot <b>unknown</b>; <b>Subconcept</b> sets the second-to-last slot (<b>dd</b> dynamic date / <b>dt</b> dynamic time / <b>dh</b> dynamic holiday / <b>dtd</b> dynamic date and time / <b>none</b>) and clearing <b>Unique creative</b> ends the name in <b>none</b> — so no dynamic date and no promo ends <b>…_none_none</b>, and a dynamic date with a promo ends <b>…_dd_unique</b>. A <b>SIP</b> — one scene, and that scene is an end card — names itself <b>client_acslanot_sip_date_mip_emily_product_carousel_human_none_unique</b>, with <b>SIP format</b> switching <b>carousel</b> ↔ <b>card</b>.</div>
+      <Help>Client + MIP also group this playable with its siblings for the QA consistency check. Names: auto-named <b>Client + MIP + Date</b>. Export files use <b>client_acslanot_mip_date_mip_emily_game_mechanic_human_subconcept_unique</b>. A MIP with no minigame names the mechanic slot <b>unknown</b>; <b>Subconcept</b> sets the second-to-last slot (<b>dd</b> dynamic date / <b>dt</b> dynamic time / <b>dh</b> dynamic holiday / <b>dtd</b> dynamic date and time / <b>none</b>) and clearing <b>Unique creative</b> ends the name in <b>none</b> — so no dynamic date and no promo ends <b>…_none_none</b>, and a dynamic date with a promo ends <b>…_dd_unique</b>. A <b>SIP</b> — one scene, and that scene is an end card — names itself <b>client_acslanot_sip_date_mip_emily_product_carousel_human_none_unique</b>, with <b>SIP format</b> switching <b>carousel</b> ↔ <b>card</b>.</Help>
       <div className="grid2">
         <NumField label="Base W" value={m.baseW} suffix="px" onChange={(n) => patchMeta({ baseW: n })} />
         <NumField label="Base H" value={m.baseH} suffix="px" onChange={(n) => patchMeta({ baseH: n })} />
@@ -202,9 +203,9 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
           onChange={(v) => patchMeta({ vAlign: v === 'center' ? 'center' : undefined })}
         />
       </Row>
-      <div className="hint pad">On screens taller than the design, <b>Center</b> keeps the content vertically centered (retaining relative size/position) instead of gluing it to the top. Top-pinned headers/bars stay pinned either way.</div>
-      <GithubSettings />
-      <div className="group-title">Session timer</div>
+      <Help>On screens taller than the design, <b>Center</b> keeps the content vertically centered (retaining relative size/position) instead of gluing it to the top. Top-pinned headers/bars stay pinned either way.</Help>
+      </Accordion>
+      <Accordion id="settings.flow" title="Redirect &amp; flow" defaultOpen={false}>
       <Checkbox
         label="Session timer"
         checked={!!m.sessionTimer}
@@ -233,7 +234,7 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
           </Row>
         </>
       )}
-      <div className="hint pad">Starts on the player&rsquo;s <b>first interaction</b> and keeps running across every screen — moving between scenes never restarts it. When it runs out the flow jumps to the scene above. Nothing is drawn; it&rsquo;s flow logic only, and it does nothing once an end card is reached.</div>
+      <Help>Starts on the player&rsquo;s <b>first interaction</b> and keeps running across every screen — moving between scenes never restarts it. When it runs out the flow jumps to the scene above. Nothing is drawn; it&rsquo;s flow logic only, and it does nothing once an end card is reached.</Help>
 
       <Row label="CTA redirect">
         <Select
@@ -276,10 +277,11 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
           onChange={(v) => patchMeta({ cursor: v as 'default' | 'none' | 'pointer' | 'crosshair' })}
         />
       </Row>
-      <div className="hint pad">Client + MIP group this playable for the QA consistency check.</div>
-      <div className="hint pad">The pinned header (date or countdown) is customized from the <b>header</b> button in the top toolbar.</div>
-
-      <div className="group-title">Audio</div>
+      </Accordion>
+      <Accordion id="settings.github" title="GitHub" defaultOpen={false}>
+        <GithubSettings />
+      </Accordion>
+      <Accordion id="settings.audio" title="Audio" defaultOpen={false}>
       <div className="sfx-row">
         <AssetPicker accept="audio" allowNone value={bgm?.assetId} onChange={(id) => setBgm(id, bgm?.volume)} />
         <span className="sfx-name">{bgm?.assetId ? (assets[bgm.assetId]?.src ? bgm.assetId : '(missing)') : 'Background music: none'}</span>
@@ -291,13 +293,13 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
         <Slider label="Music volume" value={Math.round((bgm.volume ?? 0.5) * 100)} min={0} max={100} suffix="%" onChange={(n) => setBgm(bgm.assetId, n / 100)} />
       )}
       <div className="sfx-list">
-        {EVENTS.map((ev) => {
+        {EVENTS.filter((ev) => ev.wired).map((ev) => {
           const id = bindingFor(ev.key)
           return (
             <div className="sfx-row" key={ev.key}>
               <AssetPicker accept="audio" allowNone value={id} onChange={(aid) => setSfxBinding(ev.key, aid)} />
               <span className="sfx-name">
-                {ev.label} {ev.wired ? <em className="sfx-on"><Icon icon={Check} size={12} strokeWidth={3} /></em> : <em className="sfx-off">soon</em>}
+                {ev.label}
               </span>
               <button className="sfx-test" title="Test" disabled={!id} onClick={() => test(id)}>
                 <Icon icon={Play} size={13} />
@@ -306,9 +308,9 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
           )
         })}
       </div>
-      <div className="hint pad">Sound is muted until the player’s first tap (ad networks block autoplay); volume/mute follow the ad container (MRAID). “soon” events await game templates that emit them.</div>
-
-      <div className="group-title">Languages</div>
+      <Help>Sound is muted until the player’s first tap (ad networks block autoplay); volume/mute follow the ad container (MRAID).</Help>
+      </Accordion>
+      <Accordion id="settings.languages" title="Languages" defaultOpen={false}>
       <Row label="Default">
         <input value={m.defaultLocale || 'en'} placeholder="en" onChange={(e) => patchMeta({ defaultLocale: e.target.value.trim() || 'en' })} />
       </Row>
@@ -338,12 +340,12 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
           onClick: () => setLocales((m.locales ?? []).includes(locale) ? (m.locales ?? []).filter((item) => item !== locale) : [...(m.locales ?? []), locale]),
         }))}
       />
-      <div className="hint pad">
+      <Help>
         Pick common languages above or type any BCP-47 codes. Each selected element exposes language-specific text, assets, and
         portrait/landscape layouts. The exported playable detects the browser language and falls back to the default for anything unset.
-      </div>
-
-      <div className="group-title">Promo calendar</div>
+      </Help>
+      </Accordion>
+      <Accordion id="settings.promo" title="Promo calendar" defaultOpen={false}>
       {(() => {
         const calendar = m.promoCalendar ?? []
         const range = calendarRange(calendar)
@@ -388,18 +390,19 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
             {usesHoliday && !calendar.length && (
               <div className="hint pad bad">This MIP renders <b>{'{holiday}'}</b> but has no calendar — the label will be empty everywhere. Load the default or import the client's CSV.</div>
             )}
-            <div className="hint pad">
+            <Help>
               Which sale is running on any given day. A <b>Dynamic holiday</b> element (or a <b>{'{holiday}'}</b> token in any date format, the pinned header included) renders the
               row covering the <b>viewer's own</b> date and re-reads it at local midnight; outside the calendar the label is empty, which is what a “only when there is NO promo”
               element covers. <b>Load default</b> is the 2026–2027 US retail calendar. <b>Import CSV…</b> takes the delivered sheet —{' '}
               <b>Year, Start Date, End Date, Promo, Key Holiday Dates</b> — reading Start/End/Promo. Dates are inclusive <b>YYYY-MM-DD</b>. The calendar is stripped from exports
               that never use the token.
-            </div>
+            </Help>
           </>
         )
       })()}
 
-      <div className="group-title">Variants</div>
+      </Accordion>
+      <Accordion id="settings.variants" title="Variants" defaultOpen={false}>
       {(m.variants ?? []).map((v) => (
         <div className="var-row" key={v.id}>
           <input value={v.name} onChange={(e) => renameVariant(v.id, e.target.value)} />
@@ -413,10 +416,11 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
       <button className="wide" onClick={() => editVariant(addVariant(''))}>
         Add variant
       </button>
-      <div className="hint pad">
+      <Help>
         A variant is the same MIP with a few overrides (mechanic, win condition, swapped asset, text). Export emits one playable per
         variant. Languages are separate (auto-detected at runtime, not a variant).
-      </div>
+      </Help>
+      </Accordion>
     </Drawer>
   )
 }

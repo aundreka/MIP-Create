@@ -4,7 +4,7 @@
 
 import { useEffect, useState } from 'react'
 import { parseRepo, readGithubLink, readGithubToken, testGithubLink, tokenInKeychain, writeGithubLink, writeGithubToken } from '../github'
-import { Row } from '../ui'
+import { Help, Row } from '../ui'
 
 export function GithubSettings(): JSX.Element {
   const saved = readGithubLink()
@@ -58,7 +58,6 @@ export function GithubSettings(): JSX.Element {
 
   return (
     <>
-      <div className="group-title">GitHub</div>
       <Row label="Repository">
         <input value={repo} placeholder="owner/repo" onChange={(e) => setRepo(e.target.value)} />
       </Row>
@@ -89,11 +88,11 @@ export function GithubSettings(): JSX.Element {
         </button>
       )}
       {status && <div className="figma-status">{status}</div>}
-      <div className="hint pad">
+      <Help>
         Push to GitHub commits every MIP in this project as folders like <b>MIP1 - SCRATCH</b>: the source project with its images as
         files, plus the MIP, variant and SIP HTML. Use a fine-grained token limited to this repository with <b>Contents: Read and
         write</b>. It is saved {tokenInKeychain() ? 'in your system keychain' : 'in this browser only'} and never in the project file.
-      </div>
+      </Help>
     </>
   )
 }

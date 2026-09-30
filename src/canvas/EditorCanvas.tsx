@@ -2622,10 +2622,10 @@ export function EditorCanvas(props: Props): JSX.Element {
     const locked = single?.locked
     const otherScenes = project.scenes.filter((s) => s.id !== activeSceneId)
     return [
-      { label: 'Copy', onClick: copySelected, disabled: !selectedIds.length },
-      { label: 'Paste', onClick: pasteElements, disabled: !hasElementClip() },
-      { label: 'Duplicate', onClick: duplicateSelected, disabled: !selectedIds.length },
-      { label: 'Delete', onClick: removeSelected, disabled: !selectedIds.length },
+      { label: 'Copy', hint: 'Ctrl+C', onClick: copySelected, disabled: !selectedIds.length },
+      { label: 'Paste', hint: 'Ctrl+V', onClick: pasteElements, disabled: !hasElementClip() },
+      { label: 'Duplicate', hint: 'Ctrl+D', onClick: duplicateSelected, disabled: !selectedIds.length },
+      { label: 'Delete', hint: 'Del', onClick: removeSelected, disabled: !selectedIds.length },
       { sep: true, label: '' },
       ...(selectedIds.length && otherScenes.length
         ? [
@@ -2640,8 +2640,8 @@ export function EditorCanvas(props: Props): JSX.Element {
       { label: 'Bring to front', onClick: () => selectedIds.forEach(bringToFront), disabled: !selectedIds.length },
       { label: 'Send to back', onClick: () => selectedIds.forEach(sendToBack), disabled: !selectedIds.length },
       { sep: true, label: '' },
-      ...(multi ? [{ label: 'Group', onClick: groupSelected } as MenuItem] : []),
-      { label: 'Ungroup', onClick: ungroupSelected, disabled: !scene.elements.some((e) => selectedIds.includes(e.id) && e.groupId) },
+      ...(multi ? [{ label: 'Group', hint: 'Ctrl+G', onClick: groupSelected } as MenuItem] : []),
+      { label: 'Ungroup', hint: 'Ctrl+Shift+G', onClick: ungroupSelected, disabled: !scene.elements.some((e) => selectedIds.includes(e.id) && e.groupId) },
       { label: locked ? 'Unlock' : 'Lock', onClick: () => single && toggleLock(single.id), disabled: !single },
     ]
   }

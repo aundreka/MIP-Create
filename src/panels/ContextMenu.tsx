@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom'
 
 export interface MenuItem {
   label: string
+  /** Keyboard shortcut, shown right-aligned (e.g. 'Ctrl+D'). */
+  hint?: string
   onClick?: () => void
   disabled?: boolean
   sep?: boolean
@@ -60,7 +62,8 @@ export function ContextMenu(props: { x: number; y: number; alignRight?: boolean;
               props.onClose()
             }}
           >
-            {it.label}
+            <span>{it.label}</span>
+            {it.hint && <kbd className="ctx-hint">{it.hint}</kbd>}
           </button>
         ),
       )}

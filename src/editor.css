@@ -991,7 +991,7 @@ button.icon {
 }
 .dock-resize {
   position: relative;
-  flex: 0 0 6px;
+  flex: 0 0 8px;
   cursor: col-resize;
   background: transparent;
   transition: background var(--t-fast) var(--ease);
@@ -1676,6 +1676,11 @@ button.icon {
 }
 .grid2 button {
   width: 100%;
+}
+/* Swatches keep their own size inside a two-up grid. */
+.grid2 .swatch,
+.grid2 .swatches button {
+  width: 22px;
 }
 /* Three equal actions on one line (Import / Load default / Clear). */
 .grid3 {
@@ -2678,7 +2683,9 @@ svg {
     inset 0 1px 0 var(--glass-hi);
 }
 .ctx-item {
-  display: block;
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
   width: 100%;
   text-align: left;
   background: transparent;
@@ -2688,6 +2695,17 @@ svg {
 }
 .ctx-item:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.ctx-hint {
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+.layer-rename {
+  flex: 1;
+  min-width: 0;
+  padding: 1px 4px;
+  font-size: inherit;
 }
 .ctx-sep {
   height: 1px;

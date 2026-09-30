@@ -36,17 +36,20 @@ export function LayersPanel(): JSX.Element {
   const [over, setOver] = useState<{ id: string; pos: 'before' | 'after' } | null>(null)
   const [, force] = useState(0)
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null)
+  // Inline rename: double-click a name (or Rename in the menu); Enter / blur commits.
+  const [editId, setEditId] = useState<string | null>(null)
   const menuEl = menu ? scene.elements.find((e) => e.id === menu.id) : undefined
   const menuItems: MenuItem[] = menuEl
     ? [
-        { label: 'Duplicate', onClick: duplicateSelected },
+        { label: 'Rename', onClick: () => setEditId(menuEl.id) },
+        { label: 'Duplicate', hint: 'Ctrl+D', onClick: duplicateSelected },
         { label: 'Bring to front', onClick: () => bringToFront(menuEl.id) },
         { label: 'Send to back', onClick: () => sendToBack(menuEl.id) },
         { sep: true, label: '' },
         { label: menuEl.locked ? 'Unlock' : 'Lock', onClick: () => toggleLock(menuEl.id) },
         { label: menuEl.hidden ? 'Show' : 'Hide', onClick: () => patchElement(menuEl.id, { hidden: !menuEl.hidden }) },
         { sep: true, label: '' },
-        { label: 'Delete', onClick: () => removeElement(menuEl.id) },
+        { label: 'Delete', hint: 'Del', onClick: () => removeElement(menuEl.id) },
       ]
     : []
 
@@ -82,7 +85,7 @@ export function LayersPanel(): JSX.Element {
         (el.locked ? ' locked' : '') +
         (child ? ' child' : '')
       }
-      draggable={!el.locked}
+      draggable={!el.locked && editId !== el.id}
       onDragStart={() => setDragId(el.id)}
       onDragOver={(e) => {
         e.preventDefault()
@@ -110,7 +113,29 @@ export function LayersPanel(): JSX.Element {
       <span className="layer-icon">
         <Icon icon={LAYER_TYPE_ICON[el.type] ?? LayoutGrid} size={14} />
       </span>
-      <span className="layer-name">{el.name || el.id}</span>
+      {editId === el.id ? (
+        <input
+          className="layer-rename"
+          autoFocus
+          defaultValue={el.name ?? ''}
+          onClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+          onBlur={(e) => {
+            const name = e.target.value.trim()
+            if (name && name !== el.name) patchElement(el.id, { name })
+            setEditId(null)
+          }}
+          onKeyDown={(e) => {
+            e.stopPropagation()
+            if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+            if (e.key === 'Escape') setEditId(null)
+          }}
+        />
+      ) : (
+        <span className="layer-name" title="Double-click to rename" onDoubleClick={(e) => { e.stopPropagation(); setEditId(el.id) }}>
+          {el.name || el.id}
+        </span>
+      )}
       {/* Orientation-limited elements (Inspector "Show in"): P = portrait only, L = landscape only. */}
       {!el.hidden && el.landscape?.hidden === true && (
         <span className="layer-orient" title="Shows in portrait only (hidden in landscape)">
