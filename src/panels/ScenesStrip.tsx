@@ -1,11 +1,13 @@
-// Scenes strip — the project's ordered scenes as tabs. Click to edit; ★ sets the
-// start scene; double-click the name to rename; ▶ previews just that scene; drag
-// to reorder; duplicate/delete; add Game/Win/Endscene/Blank.
+// Scenes strip — the project's ordered scenes. Click to edit; ★ sets the start
+// scene; double-click the name to rename; drag to reorder. Everything else (preview,
+// duplicate, language versions, hide/solo, delete) is in the row's ⋯ / right-click
+// menu. One "Add scene" menu adds an overlay, an end card, or a game.
 
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { addScene, addGameScene, duplicateScene, patchSceneDef, removeScene, reorderScenes, setActiveScene, setStartScene, useEditorState } from '../store'
-import { Copy, Eye, EyeOff, Icon, Languages, LayoutGrid, Pencil, Play, SCENE_KIND_ICON, Star, X } from '../icons'
+import { Eye, EyeOff, Icon, LayoutGrid, MoreHorizontal, Plus, SCENE_KIND_ICON, Star } from '../icons'
+import { ContextMenu, type MenuItem } from './ContextMenu'
 import { SceneThumb } from '../preview/SceneThumb'
 import { confirmDestructive } from '../ui'
 import { hiddenCount, isSceneHidden, showAllScenes, soloScene, toggleSceneHidden, useCanvasView } from '../canvasView'
@@ -18,7 +20,7 @@ const MAX_THUMBS = 8
 const KIND_LABELS: Record<string, string> = { game: 'Game', overlay: 'Overlay', endscene: 'End', win: 'Overlay', custom: 'Overlay' }
 const SCENE_KINDS: SceneKind[] = ['game', 'overlay', 'endscene']
 
-interface PickerPos { x: number; y: number }
+interface PickerPos { x: number; y: number; up: boolean; maxH: number }
 interface KindPickerPos { x: number; y: number; id: string }
 
 export function ScenesStrip(props: { onPreviewScene: (id: string) => void; vertical?: boolean }): JSX.Element {
@@ -28,6 +30,8 @@ export function ScenesStrip(props: { onPreviewScene: (id: string) => void; verti
   const [over, setOver] = useState<{ id: string; pos: 'before' | 'after' } | null>(null)
   const [editId, setEditId] = useState<string | null>(null)
   const [gamePicker, setGamePicker] = useState<PickerPos | null>(null)
+  const [rowMenu, setRowMenu] = useState<{ id: string; x: number; y: number; alignRight: boolean } | null>(null)
+  const [gameQuery, setGameQuery] = useState('')
   const [kindPicker, setKindPicker] = useState<KindPickerPos | null>(null)
   const [translationSceneId, setTranslationSceneId] = useState<string | null>(null)
   const showThumbs = project.scenes.length <= MAX_THUMBS
@@ -45,8 +49,17 @@ export function ScenesStrip(props: { onPreviewScene: (id: string) => void; verti
       setGamePicker(null)
       setKindPicker(null)
     }
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return
+      setGamePicker(null)
+      setKindPicker(null)
+    }
     window.addEventListener('pointerdown', close, true)
-    return () => window.removeEventListener('pointerdown', close, true)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('pointerdown', close, true)
+      window.removeEventListener('keydown', onKey)
+    }
   }, [anyPickerOpen])
 
   const drop = (): void => {
@@ -62,7 +75,11 @@ export function ScenesStrip(props: { onPreviewScene: (id: string) => void; verti
   const openGamePicker = (e: React.MouseEvent<HTMLButtonElement>): void => {
     e.stopPropagation()
     const r = e.currentTarget.getBoundingClientRect()
-    setGamePicker({ x: r.left, y: r.top })
+    // Drop down when there is room, otherwise open upward — never past the window edge.
+    const below = window.innerHeight - r.bottom - 12
+    const up = below < 280 && r.top > below
+    setGamePicker(up ? { x: r.left, y: r.top - 6, up, maxH: r.top - 18 } : { x: r.left, y: r.bottom + 6, up, maxH: below })
+    setGameQuery('')
     setKindPicker(null)
   }
 
@@ -76,7 +93,7 @@ export function ScenesStrip(props: { onPreviewScene: (id: string) => void; verti
   return (
     <div className={'scenes-strip' + (props.vertical ? ' vertical' : '')}>
       <span className="scenes-label">Scenes</span>
-      {project.scenes.map((s, i) => (
+      {project.scenes.map((s) => (
         <div
           key={s.id}
           className={'scene-chip' + (s.id === activeSceneId ? ' active' : '') + (isSceneHidden(s.id) ? ' canvas-hidden' : '') + (over?.id === s.id ? (over.pos === 'before' ? ' drop-before' : ' drop-after') : '')}
@@ -100,6 +117,10 @@ export function ScenesStrip(props: { onPreviewScene: (id: string) => void; verti
             setOver(null)
           }}
           onClick={() => setActiveScene(s.id)}
+          onContextMenu={(e) => {
+            e.preventDefault()
+            setRowMenu({ id: s.id, x: e.clientX, y: e.clientY, alignRight: false })
+          }}
         >
           <button
             className={'scene-star' + (project.startSceneId === s.id ? ' on' : '')}
@@ -145,7 +166,18 @@ export function ScenesStrip(props: { onPreviewScene: (id: string) => void; verti
               {s.name}
             </span>
           )}
-          <span className="scene-num">{i + 1}</span>
+          {isSceneHidden(s.id) && (
+            <button
+              className="scene-hidden-flag"
+              title="Hidden from the canvas. Click to show"
+              onClick={(e) => {
+                e.stopPropagation()
+                toggleSceneHidden(s.id)
+              }}
+            >
+              <Icon icon={EyeOff} size={13} />
+            </button>
+          )}
           <button
             className={`scene-kind-badge kind-${s.kind ?? 'overlay'}`}
             title="Change scene type"
@@ -156,74 +188,17 @@ export function ScenesStrip(props: { onPreviewScene: (id: string) => void; verti
             {s.kind === 'overlay' && s.asEndscene ? ' · End' : ''}
           </button>
           <button
-            className={'scene-mini scene-language-action' + (Object.keys(s.localeOverrides ?? {}).length ? ' has-language' : '')}
-            title={Object.keys(s.localeOverrides ?? {}).length ? `Language scenes: ${Object.keys(s.localeOverrides ?? {}).join(', ')}` : 'Use a scene from another playable for a language'}
+            className="scene-more"
+            title="Scene actions"
+            aria-label="Scene actions"
             onClick={(e) => {
               e.stopPropagation()
-              setActiveScene(s.id)
-              setTranslationSceneId(s.id)
+              const r = e.currentTarget.getBoundingClientRect()
+              setRowMenu({ id: s.id, x: r.right, y: r.bottom + 4, alignRight: true })
             }}
           >
-            <Icon icon={Languages} size={13} /><span className="scene-language-label">+ Language</span>
+            <Icon icon={MoreHorizontal} size={14} />
           </button>
-          <button
-            className="scene-mini"
-            title={isSceneHidden(s.id) ? 'Show on canvas (Alt-click: solo)' : 'Hide from canvas (Alt-click: solo)'}
-            onClick={(e) => {
-              e.stopPropagation()
-              if (e.altKey) {
-                soloScene(s.id, allIds)
-                setActiveScene(s.id)
-              } else {
-                toggleSceneHidden(s.id)
-              }
-            }}
-          >
-            <Icon icon={isSceneHidden(s.id) ? EyeOff : Eye} size={13} />
-          </button>
-          <button
-            className="scene-mini"
-            title="Preview this scene"
-            onClick={(e) => {
-              e.stopPropagation()
-              props.onPreviewScene(s.id)
-            }}
-          >
-            <Icon icon={Play} size={13} />
-          </button>
-          <button
-            className="scene-mini"
-            title="Rename scene"
-            onClick={(e) => {
-              e.stopPropagation()
-              setEditId(s.id)
-            }}
-          >
-            <Icon icon={Pencil} size={13} />
-          </button>
-          <button
-            className="scene-mini"
-            title="Duplicate scene"
-            onClick={(e) => {
-              e.stopPropagation()
-              duplicateScene(s.id)
-            }}
-          >
-            <Icon icon={Copy} size={13} />
-          </button>
-          {project.scenes.length > 1 && (
-            <button
-              className="scene-mini"
-              title="Delete scene"
-              onClick={(e) => {
-                e.stopPropagation()
-                if (s.elements.length && !confirmDestructive(`Delete scene "${s.name}" and its ${s.elements.length} element${s.elements.length === 1 ? '' : 's'}? (Ctrl+Z to undo)`)) return
-                removeScene(s.id)
-              }}
-            >
-              <Icon icon={X} size={13} />
-            </button>
-          )}
         </div>
       ))}
       {hiddenCount() > 0 && (
@@ -231,17 +206,34 @@ export function ScenesStrip(props: { onPreviewScene: (id: string) => void; verti
           <Icon icon={Eye} size={13} /> Show all ({hiddenCount()})
         </button>
       )}
-      <span className="scenes-add">
-        <button onClick={openGamePicker} title="Add a game scene: pick a mechanic">
-          + Game ▾
-        </button>
-        <button onClick={() => addScene('overlay')} title="Add an overlay scene (win/lose result)">
-          + Overlay
-        </button>
-        <button onClick={() => addScene('endscene')} title="Add an endscene (manual / loops)">
-          + End
-        </button>
-      </span>
+      <button className="scenes-add-btn" onClick={openGamePicker} title="Add a scene">
+        <Icon icon={Plus} size={13} /> Add scene
+      </button>
+      {rowMenu && (() => {
+        const sc = project.scenes.find((x) => x.id === rowMenu.id)
+        if (!sc) return null
+        const langs = Object.keys(sc.localeOverrides ?? {})
+        const hidden = isSceneHidden(sc.id)
+        const items: MenuItem[] = [
+          { label: 'Preview this scene', onClick: () => props.onPreviewScene(sc.id) },
+          { label: 'Rename', onClick: () => setEditId(sc.id) },
+          { label: 'Duplicate', onClick: () => duplicateScene(sc.id) },
+          { label: langs.length ? `Language versions (${langs.join(', ')})...` : 'Language versions...', onClick: () => { setActiveScene(sc.id); setTranslationSceneId(sc.id) } },
+          { sep: true, label: '' },
+          { label: hidden ? 'Show on canvas' : 'Hide from canvas', onClick: () => toggleSceneHidden(sc.id) },
+          { label: 'Show only this scene', onClick: () => { soloScene(sc.id, allIds); setActiveScene(sc.id) } },
+          { sep: true, label: '' },
+          {
+            label: 'Delete scene',
+            disabled: project.scenes.length <= 1,
+            onClick: () => {
+              if (sc.elements.length && !confirmDestructive(`Delete scene "${sc.name}" and its ${sc.elements.length} element${sc.elements.length === 1 ? '' : 's'}? (Ctrl+Z to undo)`)) return
+              removeScene(sc.id)
+            },
+          },
+        ]
+        return <ContextMenu x={rowMenu.x} y={rowMenu.y} alignRight={rowMenu.alignRight} items={items} onClose={() => setRowMenu(null)} />
+      })()}
 
       {translationSceneId && <SceneTranslationModal sceneId={translationSceneId} onClose={() => setTranslationSceneId(null)} />}
 
@@ -249,10 +241,26 @@ export function ScenesStrip(props: { onPreviewScene: (id: string) => void; verti
       {gamePicker && createPortal(
         <div
           className="scene-picker"
-          style={{ left: gamePicker.x, top: gamePicker.y, transform: 'translateY(calc(-100% - 6px))' }}
+          style={{ left: gamePicker.x, top: gamePicker.y, maxHeight: Math.min(gamePicker.maxH, 420), transform: gamePicker.up ? 'translateY(-100%)' : undefined }}
         >
-          <div className="scene-picker-header">Choose game type</div>
-          {GAME_TEMPLATES.map((t) => (
+          <button className="scene-picker-item" onClick={() => { addScene('overlay'); setGamePicker(null) }}>
+            Overlay (win / lose card)
+          </button>
+          <button className="scene-picker-item" onClick={() => { addScene('endscene'); setGamePicker(null) }}>
+            End card
+          </button>
+          <div className="scene-picker-header">Game</div>
+          <input
+            className="scene-picker-search"
+            autoFocus
+            placeholder="Search games"
+            value={gameQuery}
+            onChange={(e) => setGameQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') setGamePicker(null)
+            }}
+          />
+          {GAME_TEMPLATES.filter((t) => t.label.toLowerCase().includes(gameQuery.trim().toLowerCase())).map((t) => (
             <button
               key={t.id}
               className="scene-picker-item"

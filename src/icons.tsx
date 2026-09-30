@@ -28,6 +28,11 @@ import {
   Diamond,
   Eye,
   EyeOff,
+  Info,
+  MoreHorizontal,
+  CopyPlus,
+  ClipboardPaste,
+  Paintbrush,
   Folder,
   FolderOpen,
   Frame,
@@ -93,6 +98,11 @@ export type { LucideIcon }
 
 export {
   AlignCenterHorizontal,
+  Info,
+  MoreHorizontal,
+  CopyPlus,
+  ClipboardPaste,
+  Paintbrush,
   Columns2,
   Layers,
   ScanSearch,

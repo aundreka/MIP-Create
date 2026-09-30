@@ -3,12 +3,12 @@
 // button. Create methods live on Home's Create gallery; insert is on the tool rail.
 
 import { useRef, useState } from 'react'
-import { loadProject as bridgeLoad, platformLabel, saveProject } from '../bridge'
+import { loadProject as bridgeLoad, saveProject } from '../bridge'
 import { getState, joinProjectGroup, loadProject as storeLoad, markSaved, redo, refreshScene, setOrientation, undo, useEditorState } from '../store'
 import { createProject, currentProjectId, openProject, projectsInGroup, saveCurrent } from '../projects'
 import { ContextMenu, type MenuItem } from './ContextMenu'
 import { HeaderPopover } from './HeaderPopover'
-import { CalendarDays, ChevronDown, FolderOpen, Frame, GitBranch, Icon, Menu, Minus, Play, Plus, RectangleVertical, Redo2, Undo2, Upload, X } from '../icons'
+import { CalendarDays, ChevronDown, FolderOpen, Frame, Icon, Menu, PanelTop, Minus, Play, Plus, Redo2, Undo2, X } from '../icons'
 import { endcardScenes } from '../sip'
 import { toggleTheme, useTheme } from '../theme'
 import { setEditLocale, useEditLocale } from '../locale'
@@ -53,8 +53,9 @@ export function Topbar(props: {
   onQa: () => void
   onQaCheck: () => void
   onShare: () => void
+  onFigma: () => void
 }): JSX.Element {
-  const { orientation, dirty, projectPath, canUndo, canRedo, scene, project } = useEditorState()
+  const { orientation, dirty, canUndo, canRedo, scene, project } = useEditorState()
   const hasEndcard = endcardScenes(project).length > 0
   const previewDate = usePreviewDate()
   const theme = useTheme()
@@ -86,6 +87,28 @@ export function Topbar(props: {
     if (r) setProjMenu({ x: r.left, y: r.bottom + 4 })
   }
 
+  // Every delivery path hangs off the one Export button: the main half opens the
+  // Export dialog, the caret lists the one-click variants.
+  const exportBtn = useRef<HTMLButtonElement>(null)
+  const [exportMenu, setExportMenu] = useState<{ x: number; y: number } | null>(null)
+  const openExportMenu = (): void => {
+    const r = exportBtn.current?.getBoundingClientRect()
+    if (r) setExportMenu({ x: r.right, y: r.bottom + 4 })
+  }
+  const busy =
+    props.githubBusy ??
+    (props.quickExportBusy ? 'Exporting...' : props.quickSipBusy ? 'Exporting SIP...' : props.quickViteExportBusy || props.quickProjectViteExportBusy ? 'Exporting source...' : null)
+  const exportItems: MenuItem[] = [
+    { label: 'Quick export (saved settings)', onClick: props.onQuickExport },
+    { label: hasEndcard ? 'End card only (SIP)' : 'End card only (SIP) - no end card', onClick: props.onQuickSip, disabled: !hasEndcard },
+    { sep: true, label: '' },
+    { label: 'Source code - this MIP', onClick: props.onQuickViteExport },
+    { label: 'Source code - whole project', onClick: props.onQuickProjectViteExport },
+    { sep: true, label: '' },
+    { label: 'Upload...', onClick: props.onUpload },
+    { label: 'Push to GitHub', onClick: props.onGithubPush },
+  ]
+
   const newMipInProject = async (): Promise<void> => {
     if (!projectId || !projectName) return
     const id = await createProject()
@@ -97,7 +120,8 @@ export function Topbar(props: {
   const projItems: MenuItem[] = projectId
     ? [
         ...projectsInGroup(projectId).map((r) => ({
-          label: (r.id === curId ? '* ' : 'o ') + r.name,
+          label: r.name + (r.id === curId ? '  (open)' : ''),
+          disabled: r.id === curId,
           onClick: () => { if (r.id !== curId) void openProject(r.id) },
         })),
         { sep: true, label: '' },
@@ -111,6 +135,7 @@ export function Topbar(props: {
     { label: 'Save...', onClick: () => void doSave() },
     { label: 'Open...', onClick: () => void doOpen() },
     { label: 'Save as template...', onClick: props.onSaveTemplate },
+    { label: 'Import from Figma...', onClick: props.onFigma },
     { sep: true, label: '' },
     { label: 'Project settings...', onClick: props.onProjectSettings },
     { label: 'Share / import by code...', onClick: props.onShare },
@@ -122,7 +147,7 @@ export function Topbar(props: {
 
   return (
     <div className="topbar">
-      <button className="brand" ref={appBtn} onClick={openApp} title="Menu: Home, file, profile, theme">
+      <button className="brand" ref={appBtn} onClick={openApp} title="Menu">
         <Icon icon={Menu} size={16} /> {scene.meta.name || 'untitled'} <Icon icon={ChevronDown} size={12} />
       </button>
       {projectId && (
@@ -217,40 +242,23 @@ export function Topbar(props: {
         aria-pressed={!!scene.meta.header}
         onClick={toggleHeaderPop}
       >
-        <Icon icon={CalendarDays} size={15} />
+        <Icon icon={PanelTop} size={15} />
       </button>
       <button onClick={props.onPreview} title="Preview the ad">
         <Icon icon={Play} size={14} /> Preview
       </button>
-      <button onClick={props.onQuickExport} disabled={props.quickExportBusy} title="Quick export using your saved Export modal settings">
-        <Icon icon={Upload} size={14} /> {props.quickExportBusy ? 'Quick exporting...' : 'Quick export'}
-      </button>
-      <button
-        onClick={props.onQuickSip}
-        disabled={props.quickSipBusy || !hasEndcard}
-        title={hasEndcard ? 'Quick export the end card alone, under the SIP file name' : 'This MIP has no end card to export as a SIP'}
-      >
-        <Icon icon={RectangleVertical} size={14} /> {props.quickSipBusy ? 'Quick SIP...' : 'Quick SIP'}
-      </button>
-      <button onClick={props.onQuickViteExport} disabled={props.quickViteExportBusy} title="Quick Vite source export for the current playable">
-        <Icon icon={FolderOpen} size={14} /> {props.quickViteExportBusy ? 'Quick Vite...' : 'Quick Vite'}
-      </button>
-      <button onClick={props.onQuickProjectViteExport} disabled={props.quickProjectViteExportBusy} title="Quick Vite source export for every MIP in this project">
-        <Icon icon={FolderOpen} size={14} /> {props.quickProjectViteExportBusy ? 'Quick Project...' : 'Quick Project'}
-      </button>
-      <button className="primary" onClick={props.onExport}>
-        Export
-      </button>
-      <button onClick={props.onUpload} title="Build and upload the current playable">
-        Upload
-      </button>
-      <button onClick={props.onGithubPush} disabled={!!props.githubBusy} title="Push every MIP in this project to its GitHub repository (source, media files, MIP + SIP HTML)">
-        <Icon icon={GitBranch} size={14} /> {props.githubBusy ?? 'Push to GitHub'}
-      </button>
-      <span className="hint">{platformLabel}{projectPath ? ' - ' + projectPath.split(/[\\/]/).pop() : ''}</span>
+      <span className="split-btn">
+        <button className="primary" onClick={props.onExport} disabled={!!busy}>
+          {busy ?? 'Export'}
+        </button>
+        <button className="primary split-caret" ref={exportBtn} onClick={openExportMenu} disabled={!!busy} aria-label="More export options">
+          <Icon icon={ChevronDown} size={13} />
+        </button>
+      </span>
 
       {appMenu && <ContextMenu x={appMenu.x} y={appMenu.y} items={appItems} onClose={() => setAppMenu(null)} />}
       {projMenu && <ContextMenu x={projMenu.x} y={projMenu.y} items={projItems} onClose={() => setProjMenu(null)} />}
+      {exportMenu && <ContextMenu x={exportMenu.x} y={exportMenu.y} alignRight items={exportItems} onClose={() => setExportMenu(null)} />}
       {headerPop && <HeaderPopover anchor={headerPop} onClose={() => setHeaderPop(null)} />}
     </div>
   )

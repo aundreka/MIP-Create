@@ -27,9 +27,9 @@ interface UploadBuildResult {
   skipped: string[]
 }
 
-async function buildProjectUploadFiles(source: UploadSource, sip: boolean, runtimeSrc: string): Promise<UploadBuildResult> {
+async function buildProjectUploadFiles(source: UploadSource, sip: boolean, runtimeSrc: string, variantIds?: string[]): Promise<UploadBuildResult> {
   const { project, assets } = source.data
-  const built = await buildDeliveryFiles(project, assets, { label: source.label, variants: true, sip, runtimeSrc })
+  const built = await buildDeliveryFiles(project, assets, { label: source.label, variants: true, variantIds, sip, runtimeSrc })
   return { files: built.files.map((f) => ({ name: f.name, text: f.text, iteration: f.iteration })), skipped: built.skipped }
 }
 
@@ -43,24 +43,28 @@ export function UploadModal(props: { onClose: () => void; projectIds?: string[];
   const [appLovinOn, setAppLovinOn] = useState(true)
   const [fileServerOn, setFileServerOn] = useState(true)
   const [alUrl, setAlUrl] = useState(() => localStorage.getItem('pa:applovinUrl') || 'http://167.99.227.249/wp-login.php?redirect_to=%2F')
-  const [alAddText] = useState(() => localStorage.getItem('pa:applovinAdd') || 'Add Another Upload')
-  const [alUploadText] = useState(() => localStorage.getItem('pa:applovinUpload') || 'Upload')
+  const [alAddText, setAlAddText] = useState(() => localStorage.getItem('pa:applovinAdd') || 'Add Another Upload')
+  const [alUploadText, setAlUploadText] = useState(() => localStorage.getItem('pa:applovinUpload') || 'Upload')
   const [alSubmit, setAlSubmit] = useState(false)
   const [alStatus, setAlStatus] = useState<string | null>(null)
   const [alLink, setAlLink] = useState<string | null>(null)
+  // Which of the open playable's variants go up with it (all by default).
+  const openVariants = props.projectIds?.length ? [] : (getState().project.meta.variants ?? [])
+  const [selVars, setSelVars] = useState<Set<string>>(() => new Set(openVariants.map((v) => v.id)))
   const [includeSip, setIncludeSip] = useState(() => localStorage.getItem('pa:uploadSip') !== 'off')
   const linksKey = props.projectIds?.length ? props.projectIds.join(',') : currentProjectId() ?? 'current'
   const [alLinks, setAlLinks] = useState<FileLink[] | null>(() => readLastLinks(linksKey)?.links ?? null)
   const [alLinksFresh, setAlLinksFresh] = useState(false)
   const [alPage, setAlPage] = useState<string | null>(null)
   const [fuUrl, setFuUrl] = useState(() => localStorage.getItem('pa:fileUploadUrl') || 'http://20.255.60.183/file-upload/')
-  const [fuAddText] = useState(() => localStorage.getItem('pa:fileUploadAdd') || 'Add Another Upload')
-  const [fuUploadText] = useState(() => localStorage.getItem('pa:fileUploadSubmit') || 'Upload')
+  const [fuAddText, setFuAddText] = useState(() => localStorage.getItem('pa:fileUploadAdd') || 'Add Another Upload')
+  const [fuUploadText, setFuUploadText] = useState(() => localStorage.getItem('pa:fileUploadSubmit') || 'Upload')
   const [fuSubmit, setFuSubmit] = useState(true)
   const [fuStatus, setFuStatus] = useState<string | null>(null)
   const [fuLink, setFuLink] = useState<string | null>(null)
   const [fuPage, setFuPage] = useState<string | null>(null)
   const [fuAdvanced, setFuAdvanced] = useState(false)
+  const [alAdvanced, setAlAdvanced] = useState(false)
   const [fuLinkSelector, setFuLinkSelector] = useState(() => localStorage.getItem('pa:fileUploadLinkSelector') || '')
   const [fuLinkFilter, setFuLinkFilter] = useState(() => localStorage.getItem('pa:fileUploadLinkFilter') || '20.255.60.183')
 
@@ -131,7 +135,8 @@ export function UploadModal(props: { onClose: () => void; projectIds?: string[];
       const runtimeSrc = await fetchRuntimeSrc()
       for (let i = 0; i < sources.length; i++) {
         setStatus(`Building playables ${i + 1}/${sources.length}...`)
-        const built = await buildProjectUploadFiles(sources[i], includeSip, runtimeSrc)
+        // Variant ticks apply to the open playable only; bulk uploads send every variant.
+        const built = await buildProjectUploadFiles(sources[i], includeSip, runtimeSrc, props.projectIds?.length ? undefined : [...selVars])
         allFiles.push(...built.files)
         skipped.push(...built.skipped)
       }
@@ -232,6 +237,30 @@ export function UploadModal(props: { onClose: () => void; projectIds?: string[];
         }}
       />
 
+      {openVariants.length > 0 && (
+        <>
+          <div className="group-title">Variants</div>
+          <div className="net-grid">
+            {openVariants.map((v) => (
+              <button
+                key={v.id}
+                type="button"
+                className={'net-chip' + (selVars.has(v.id) ? ' on' : '')}
+                aria-pressed={selVars.has(v.id)}
+                onClick={() => {
+                  const next = new Set(selVars)
+                  if (next.has(v.id)) next.delete(v.id)
+                  else next.add(v.id)
+                  setSelVars(next)
+                }}
+              >
+                {v.name}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
       <div className="group-title">AppLovin</div>
       <Row label="Upload URL">
         <input
@@ -256,6 +285,19 @@ export function UploadModal(props: { onClose: () => void; projectIds?: string[];
         </div>
       )}
       {!alLink && alPage && <div className="hint pad">Result page: {alPage}</div>}
+      <button className="link-btn" onClick={() => setAlAdvanced((v) => !v)}>{alAdvanced ? 'Hide' : 'Form button text'}</button>
+      {alAdvanced && (
+        <div className="grid2">
+          <label className="field">
+            <span>Add row button</span>
+            <input className="text-input" value={alAddText} onChange={(e) => { setAlAddText(e.target.value); localStorage.setItem('pa:applovinAdd', e.target.value) }} />
+          </label>
+          <label className="field">
+            <span>Upload button</span>
+            <input className="text-input" value={alUploadText} onChange={(e) => { setAlUploadText(e.target.value); localStorage.setItem('pa:applovinUpload', e.target.value) }} />
+          </label>
+        </div>
+      )}
       {alLinks && alLinks.some((f) => f.link) && (
         <>
           <div className="hint pad">{alLinksFresh ? 'Preview links' : 'Last upload\u2019s preview links'}</div>
@@ -306,9 +348,17 @@ export function UploadModal(props: { onClose: () => void; projectIds?: string[];
         </div>
       )}
       {!fuLink && fuPage && <div className="hint pad">Result page: {fuPage}</div>}
-      <button className="link-btn" onClick={() => setFuAdvanced((v) => !v)}>{fuAdvanced ? 'Hide' : 'Advanced link detection'}</button>
+      <button className="link-btn" onClick={() => setFuAdvanced((v) => !v)}>{fuAdvanced ? 'Hide' : 'Advanced'}</button>
       {fuAdvanced && (
         <div className="grid2">
+          <label className="field">
+            <span>Add row button</span>
+            <input className="text-input" value={fuAddText} onChange={(e) => { setFuAddText(e.target.value); localStorage.setItem('pa:fileUploadAdd', e.target.value) }} />
+          </label>
+          <label className="field">
+            <span>Upload button</span>
+            <input className="text-input" value={fuUploadText} onChange={(e) => { setFuUploadText(e.target.value); localStorage.setItem('pa:fileUploadSubmit', e.target.value) }} />
+          </label>
           <label className="field">
             <span>Link selector</span>
             <input

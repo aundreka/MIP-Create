@@ -34,6 +34,7 @@ import {
 } from './icons'
 import {
   addElement,
+  addGameHint,
   addScene,
   alignSelected,
   bringToFront,
@@ -73,6 +74,12 @@ export interface AppCommandActions {
   openTeam: () => void
   openShare: () => void
   openGenerateMip: () => void
+  openUpload: () => void
+  quickExport: () => void
+  quickSip: () => void
+  sourceMip: () => void
+  sourceProject: () => void
+  githubPush: () => void
 }
 
 export function buildCommands(a: AppCommandActions): Command[] {
@@ -97,25 +104,31 @@ export function buildCommands(a: AppCommandActions): Command[] {
     { id: 'add-text', title: 'Add text', icon: Type, run: () => addElement(makeText()) },
     { id: 'add-rect', title: 'Add rectangle', icon: RectangleHorizontal, run: () => addElement(makeRect()) },
     { id: 'add-cta', title: 'Add CTA button', icon: MousePointerClick, run: () => addElement(makeCta()) },
-    { id: 'add-bar', title: 'Add header / footer bar', icon: RectangleHorizontal, run: () => addElement(makeBar()) },
-    { id: 'add-game', title: 'Add mini-game', icon: Gamepad2, run: () => addElement(makeGame()) },
+    { id: 'add-bar', title: 'Add bar / banner', icon: RectangleHorizontal, run: () => addElement(makeBar()) },
+    { id: 'add-game', title: 'Add mini-game', icon: Gamepad2, run: () => { const g = makeGame(); addElement(g); addGameHint(g.id) } },
     { id: 'scene-game', title: 'Add game scene', icon: Gamepad2, run: () => addScene('game') },
     { id: 'scene-overlay', title: 'Add overlay scene', icon: Trophy, run: () => addScene('overlay') },
-    { id: 'scene-end', title: 'Add endscene', icon: Clapperboard, run: () => addScene('endscene') },
+    { id: 'scene-end', title: 'Add end card scene', icon: Clapperboard, run: () => addScene('endscene') },
     { id: 'orient-portrait', title: 'Orientation: Portrait', run: () => setOrientation('portrait') },
     { id: 'orient-landscape', title: 'Orientation: Landscape', run: () => setOrientation('landscape') },
     { id: 'theme', title: 'Toggle light / dark theme', icon: Sun, run: () => toggleTheme() },
     { id: 'preview', title: 'Preview the ad', icon: Play, run: a.openPreview },
-    { id: 'export', title: 'Export playable…', icon: Upload, run: a.openExport },
+    { id: 'export', title: 'Export…', icon: Upload, run: a.openExport },
+    { id: 'quick-export', title: 'Quick export (saved settings)', run: a.quickExport },
+    { id: 'quick-sip', title: 'Export end card only (SIP)', run: a.quickSip },
+    { id: 'source-mip', title: 'Export source code - this MIP', run: a.sourceMip },
+    { id: 'source-project', title: 'Export source code - whole project', run: a.sourceProject },
+    { id: 'upload', title: 'Upload…', run: a.openUpload },
+    { id: 'github', title: 'Push to GitHub', run: a.githubPush },
     { id: 'settings', title: 'Project settings…', icon: Settings, run: a.openProjectSettings },
     { id: 'templates', title: 'Templates…', run: a.openTemplates },
     { id: 'quizfunnel', title: 'Quiz / survey funnel…', run: a.openQuizFunnel },
     { id: 'genmip', title: 'Generate MIP…', hint: 'logo + product → scaffold', icon: Star, run: a.openGenerateMip },
-    { id: 'qa', title: 'QA consistency check…', hint: 'compare MIPs', run: a.openQa },
-    { id: 'qacheck', title: 'QA checker…', hint: 'compare vs Figma mockup', icon: ScanSearch, run: a.openQaCheck },
-    { id: 'team', title: 'Team library (cloud)…', hint: 'publish / browse MIPs', icon: Upload, run: a.openTeam },
-    { id: 'share', title: 'Share / import a MIP by code…', hint: 'send or receive a project', icon: Upload, run: a.openShare },
+    { id: 'qa', title: 'QA & reports…', hint: 'compare MIPs', run: a.openQa },
+    { id: 'qacheck', title: 'QA checker (vs Figma mockup)…', icon: ScanSearch, run: a.openQaCheck },
+    { id: 'team', title: 'Team library…', hint: 'publish / browse MIPs', run: a.openTeam },
+    { id: 'share', title: 'Share / import by code…', hint: 'send or receive a project', run: a.openShare },
     { id: 'figma', title: 'Import from Figma…', run: a.openFigma },
-    { id: 'home', title: 'Projects / Home…', icon: Smartphone, run: a.openHome },
+    { id: 'home', title: 'Home / Projects…', icon: Smartphone, run: a.openHome },
   ]
 }

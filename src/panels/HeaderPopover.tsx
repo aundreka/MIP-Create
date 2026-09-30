@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { addAsset, patchHeader, patchMeta, useEditorState } from '../store'
-import { ColorField, NumField, Row, Select, Toggle } from '../ui'
+import { ColorField, Help, NumField, Row, Select, Toggle } from '../ui'
 import { Icon, Upload, X } from '../icons'
 import { importFont } from '../bridge'
 import { DATE_LOCALE_OPTIONS } from '../dateLocales'
@@ -166,11 +166,11 @@ export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): 
                     onChange={(e) => set({ dateFormat: e.target.value || undefined })}
                   />
                 </Row>
-                <div className="hint pad">
+                <Help>
                   Date parts: <b>MMMM</b> July, <b>MMM</b> Jul, <b>D</b>/<b>DD</b> day, <b>Do</b> 21st, <b>dddd</b> Monday, <b>ddd</b> Mon, <b>YYYY</b> year, or <b>{'{date}'}</b> for the whole localized date (braces
                   optional). <b>{'{holiday}'}</b> bands the promo calendar's copy for the viewer's own day — “Labor Day Sale” — and re-reads it at local midnight; set the calendar
                   up in Project settings.
-                </div>
+                </Help>
                 <NumField label="Day offset" value={h.dateDays ?? 0} step={1} min={0} onChange={(n) => set({ dateDays: n || undefined })} />
                 <RecurrenceField
                   value={h.dateRecur}
@@ -279,30 +279,30 @@ export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): 
             >
               Drag into place on the canvas
             </button>
-            <div className="hint pad">
+            <Help>
               <b>Move X/Y here moves the band in every scene.</b> Dragging it on the canvas instead places it for <b>that scene only</b> — the scene picks up its own placement, and
               the rest stay where they are (Scene panel → <i>Own header placement in this scene</i>). Double-click the band to snap it back, Esc finishes. It still spans the full
               width, so <b>Move X</b> only shows once it is aligned left/right or narrower than the screen.
-            </div>
+            </Help>
             <Toggle
               label="Separate landscape layout"
               checked={!!h.landscape}
               onChange={(v) => set({ landscape: v ? seedSlot(h, undefined, 'portrait') : undefined })}
             />
             {!h.landscape && (
-              <div className="hint pad">
+              <Help>
                 Landscape currently mirrors portrait, so the size and position above apply to both. Turn this on to snapshot them into landscape and size the band differently on a
                 wide screen — where the whole design scales down hardest.
-              </div>
+              </Help>
             )}
             {h.landscape && (
               <>
                 <Toggle label="Hide the header in landscape" checked={!!h.landscape.hidden} onChange={(v) => set({ landscape: { ...h.landscape, hidden: v || undefined } })} />
-                <div className="hint pad">
+                <Help>
                   Font size, weight, height, padding, alignment and position are now authored <b>per orientation</b> — you are editing the{' '}
-                  <b>{lsLayout ? 'landscape' : 'portrait'}</b> one, and the other keeps its own values. Switch the canvas with the <b>▭ landscape</b> chip on the active frame to
+                  <b>{lsLayout ? 'landscape' : 'portrait'}</b> one, and the other keeps its own values. Switch the canvas with <b>Portrait / Landscape</b> in the top bar to
                   compose it. Content, colours and animation stay shared.
-                </div>
+                </Help>
               </>
             )}
             <div className="grid2">
@@ -319,7 +319,7 @@ export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): 
             </div>
             <div className="grid2">
               <ColorField label="Background" value={h.bgColor || ''} onChange={(c) => set({ bgColor: c ?? undefined })} allowNone />
-              <ColorField label="Text colour" value={h.color || '#ffffff'} onChange={(c) => set({ color: c ?? '#ffffff' })} />
+              <ColorField label="Text color" value={h.color || '#ffffff'} onChange={(c) => set({ color: c ?? '#ffffff' })} />
             </div>
             <Toggle label="Entrance animation" checked={!!h.entrance} onChange={(v) => set({ entrance: v ? DEFAULT_HEADER_ENTRANCE : undefined })} />
             {h.entrance && (
@@ -339,10 +339,10 @@ export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): 
               onChange={(v) => set({ loopFollowsCta: v || undefined })}
             />
             {h.loopFollowsCta && (
-              <div className="hint pad">
+              <Help>
                 The date copies the CTA’s pulse — same shape, same speed — and restarts with it on every scene, so the two beat together. Scenes without a CTA use the loop below
                 (or stay still if there isn’t one).
-              </div>
+              </Help>
             )}
             <Toggle label={h.loopFollowsCta ? 'Loop animation (no-CTA scenes)' : 'Loop animation'} checked={!!h.loop} onChange={(v) => set({ loop: v ? DEFAULT_HEADER_LOOP : undefined })} />
             {h.loop && (
@@ -356,14 +356,14 @@ export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): 
                 </div>
               </>
             )}
-            <div className="hint pad">
+            <Help>
               {h.mode === 'countdown'
                 ? h.countdownTarget === 'midnight'
                   ? 'Counts down to the viewer’s next midnight — at 5pm it shows about 7 hours left. It freezes when the first scene carrying this header is won. Format tokens: {hh} {mm} {ss} (padded), {ms} (hundredths, 00–99), or {h} {m} {s}.'
                   : 'Starts on the viewer’s first interaction and freezes when the first scene carrying this header is won. Use {ss}:{ms} for 06:99 (6.99 seconds). Other tokens: {hh} {mm} {ss} (padded) or {h} {m} {s}.'
                 : 'Shows the current date. Format tokens: {date}, dddd (Monday), ddd (Mon), MMMM (July), MMM (Jul), MM (07), M (7), DD (05), D (5), Do (5th), YYYY (2026), YY (26), {device} (iOS / Android / Windows / Mac / Linux). Empty = localized full date, uppercased.'}{' '}
               Leave background as “none” for no band.
-            </div>
+            </Help>
           </>
         )}
       </div>

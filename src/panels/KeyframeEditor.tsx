@@ -5,7 +5,7 @@
 // of the UI rebuild.
 
 import type { KeyframeStep } from '../../runtime/scene'
-import { NumField } from '../ui'
+import { Help, NumField } from '../ui'
 import { Icon, Plus, X } from '../icons'
 
 const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, n))
@@ -56,10 +56,10 @@ export function KeyframeEditor(props: { steps: KeyframeStep[]; onChange: (steps:
       <button className="wide" onClick={add}>
         <Icon icon={Plus} size={14} /> Add keyframe
       </button>
-      <div className="hint pad">
+      <Help>
         Steps play 0–100% across the duration (auto-sorted by %). Set transform / opacity / filter at each. e.g. <b>0%</b>: opacity
         0, scale(.6); <b>60%</b>: scale(1.1); <b>100%</b>: opacity 1, scale(1). Plays in Preview.
-      </div>
+      </Help>
     </div>
   )
 }

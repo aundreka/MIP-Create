@@ -1,39 +1,19 @@
-// Left tool rail — Figma-style vertical insert icons. Click a tool to drop that
-// element at the canvas center (and select it). One distinct lucide icon per tool
-// so they're easy to tell apart at a glance.
+// Left tool rail — insert tools. The three everyday ones (text, image, background)
+// are one click; the rest sit in labelled group menus. Click a tool to drop that
+// element at the canvas center (and select it).
 
 import { importImage, importImages } from '../bridge'
 import { insertDynamicHoliday, makeBackground, makeBar, makeButton, makeChoice, makeConfetti, makeCountdownTimer, makeCta, makeDynamicDate, makeEndcardBlock, makeEndsceneVideo, makeGame, makeHeaderBlock, makeImage, makeRect, makeText, makeUnboxing } from '../factories'
-import { addAsset, addElement, addElements, addGameHint, clearSelection, getState, nextId } from '../store'
+import { useRef, useState } from 'react'
+import { addAsset, addElement, addElements, addGameHint, getState, nextId } from '../store'
 import { Tooltip } from '../ui'
-import {
-  CalendarDays,
-  CalendarHeart,
-  Film,
-  Frame,
-  Gamepad2,
-  Gift,
-  Heading,
-  Icon,
-  ImageIcon,
-  LayoutTemplate,
-  ListChecks,
-  type LucideIcon,
-  MousePointer2,
-  MousePointerClick,
-  PanelTop,
-  PartyPopper,
-  Square,
-  SquareMousePointer,
-  Timer,
-  Type,
-  Wallpaper,
-} from '../icons'
+import { CalendarDays, Gamepad2, Icon, ImageIcon, LayoutTemplate, type LucideIcon, MousePointerClick, Square, Type, Wallpaper } from '../icons'
+import { ContextMenu } from './ContextMenu'
 
-function Tool(props: { title: string; onClick: () => void; active?: boolean; icon: LucideIcon }): JSX.Element {
+function Tool(props: { title: string; onClick: () => void; icon: LucideIcon }): JSX.Element {
   return (
     <Tooltip label={props.title} side="right">
-      <button className={'tool' + (props.active ? ' active' : '')} aria-label={props.title} onClick={props.onClick}>
+      <button className="tool" aria-label={props.title} onClick={props.onClick}>
         <Icon icon={props.icon} size={21} />
       </button>
     </Tooltip>
@@ -61,46 +41,88 @@ async function insertImage(kind: 'image' | 'background'): Promise<void> {
   }
 }
 
-export function ToolRail(props: { onFigma: () => void }): JSX.Element {
+type ToolItem = { label: string; run: () => void }
+
+// A rail button that opens a labelled list of related tools to its right. The
+// corner tick marks it as a group, so the rail stays short enough for a laptop
+// screen and every tool is found by name, not by guessing an icon.
+function ToolGroup(props: { title: string; icon: LucideIcon; items: ToolItem[] }): JSX.Element {
+  const ref = useRef<HTMLButtonElement>(null)
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
+  return (
+    <>
+      <Tooltip label={props.title} side="right">
+        <button
+          ref={ref}
+          className={'tool tool-group' + (pos ? ' active' : '')}
+          aria-label={props.title}
+          aria-haspopup="menu"
+          aria-expanded={!!pos}
+          onClick={() => {
+            const r = ref.current?.getBoundingClientRect()
+            if (r) setPos(pos ? null : { x: r.right + 6, y: r.top })
+          }}
+        >
+          <Icon icon={props.icon} size={21} />
+        </button>
+      </Tooltip>
+      {pos && <ContextMenu x={pos.x} y={pos.y} items={props.items.map((it) => ({ label: it.label, onClick: it.run }))} onClose={() => setPos(null)} />}
+    </>
+  )
+}
+
+export function ToolRail(): JSX.Element {
   return (
     <div className="tool-rail">
-      <Tool title="Select" active icon={MousePointer2} onClick={() => clearSelection()} />
-
-      <div className="rail-sep" />
-
-      {/* static elements */}
       <Tool title="Text" icon={Type} onClick={() => addElement(makeText())} />
       <Tool title="Image" icon={ImageIcon} onClick={() => void insertImage('image')} />
-      <Tool title="Background" icon={Wallpaper} onClick={() => void insertImage('background')} />
-      <Tool title="Bar / banner" icon={PanelTop} onClick={() => addElement(makeBar())} />
-      <Tool title="Rectangle" icon={Square} onClick={() => addElement(makeRect())} />
-      <Tool title="Button / CTA" icon={MousePointerClick} onClick={() => addElement(makeCta())} />
-      <Tool title="Button (go to screen)" icon={SquareMousePointer} onClick={() => addElement(makeButton())} />
-      <Tool title="Answer choice (quiz/survey)" icon={ListChecks} onClick={() => addElement(makeChoice())} />
-
-      <div className="rail-sep" />
-
-      {/* interactive / dynamic */}
-      <Tool title="Mini-game" icon={Gamepad2} onClick={() => { const g = makeGame(); addElement(g); addGameHint(g.id) }} />
-      <Tool title="Mystery Box grid" icon={Gift} onClick={() => addElement(makeUnboxing())} />
-      <Tool title="Confetti" icon={PartyPopper} onClick={() => addElement(makeConfetti())} />
-      <Tool title="Video endscene" icon={Film} onClick={() => addElement(makeEndsceneVideo())} />
-      <Tool title="Countdown" icon={Timer} onClick={() => addElement(makeCountdownTimer())} />
-      <Tool title="Dynamic date" icon={CalendarDays} onClick={() => addElement(makeDynamicDate())} />
-      {/* Drops BOTH states — the promo label and its no-promo fallback — and seeds the
-          project's promo calendar, so the element has something to read on day one. */}
-      <Tool title="Dynamic holiday" icon={CalendarHeart} onClick={() => insertDynamicHoliday(addElements)} />
-
-      <div className="rail-sep" />
-
-      {/* composite blocks */}
-      <Tool title="Header block" icon={Heading} onClick={() => addElements(makeHeaderBlock())} />
-      <Tool title="Endcard block" icon={LayoutTemplate} onClick={() => addElements(makeEndcardBlock())} />
-
-      <div className="rail-sep" />
-
-      {/* import from Figma — add a frame as a new scene (or replace the project) */}
-      <Tool title="Import from Figma" icon={Frame} onClick={props.onFigma} />
+      <Tool title="Background image" icon={Wallpaper} onClick={() => void insertImage('background')} />
+      <ToolGroup
+        title="Shapes"
+        icon={Square}
+        items={[
+          { label: 'Rectangle', run: () => addElement(makeRect()) },
+          { label: 'Bar / banner', run: () => addElement(makeBar()) },
+        ]}
+      />
+      <ToolGroup
+        title="Buttons"
+        icon={MousePointerClick}
+        items={[
+          { label: 'CTA button (opens the store)', run: () => addElement(makeCta()) },
+          { label: 'Button (goes to a screen)', run: () => addElement(makeButton()) },
+          { label: 'Answer choice (quiz / survey)', run: () => addElement(makeChoice()) },
+        ]}
+      />
+      <ToolGroup
+        title="Game & effects"
+        icon={Gamepad2}
+        items={[
+          { label: 'Mini-game', run: () => { const g = makeGame(); addElement(g); addGameHint(g.id) } },
+          { label: 'Mystery box grid', run: () => addElement(makeUnboxing()) },
+          { label: 'Confetti', run: () => addElement(makeConfetti()) },
+          { label: 'Video end card', run: () => addElement(makeEndsceneVideo()) },
+        ]}
+      />
+      <ToolGroup
+        title="Dynamic text"
+        icon={CalendarDays}
+        items={[
+          { label: 'Countdown', run: () => addElement(makeCountdownTimer()) },
+          { label: 'Dynamic date', run: () => addElement(makeDynamicDate()) },
+          // Drops BOTH states — the promo label and its no-promo fallback — and seeds
+          // the promo calendar when the MIP has none.
+          { label: 'Dynamic holiday', run: () => insertDynamicHoliday(addElements) },
+        ]}
+      />
+      <ToolGroup
+        title="Blocks"
+        icon={LayoutTemplate}
+        items={[
+          { label: 'Header block', run: () => addElements(makeHeaderBlock()) },
+          { label: 'End card block', run: () => addElements(makeEndcardBlock()) },
+        ]}
+      />
     </div>
   )
 }

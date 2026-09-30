@@ -23,10 +23,9 @@ import { setAssetCompress, useEditorState } from '../store'
 import { applyVariant, stripVariants } from '../variants'
 import { fileBaseName } from '../mipName'
 import { readExportPrefs, readStoredMediaDefaults, writeExportPrefs } from '../exportPrefs'
-import { applovinOpen, applovinProbe, applovinUpload, applovinWaitForLinks, canApplovin, compressHtmlScript, type ApplovinFile } from '../bridge'
-import { matchPreviewLinks, PREVIEW_LINK_MARK } from '../applovinLinks'
-import { Modal, NumField, Slider, Toggle } from '../ui'
-import { AlertTriangle, Check, Icon, ScanSearch } from '../icons'
+import { compressHtmlScript } from '../bridge'
+import { Help, Modal, NumField, Slider, Toggle } from '../ui'
+import { AlertTriangle, Check, Icon, ScanSearch, Settings } from '../icons'
 import { FlowPreview } from '../preview/FlowPreview'
 import type { Project } from '../../runtime/scene'
 import type { AssetMap, CompressProfile } from '../../runtime/types'
@@ -46,7 +45,7 @@ function CompressFields(props: { kind: 'video' | 'audio'; value: CompressProfile
     <div className="compress-fields">
       {props.kind === 'video' && (
         <div className="grid2">
-          <NumField label="Max width (px)" value={v.scale ?? 720} min={16} step={2} onChange={(n) => up({ scale: n })} />
+          <NumField label="Max width" suffix="px" value={v.scale ?? 720} min={16} step={2} onChange={(n) => up({ scale: n })} />
           <NumField label="CRF (0–51)" value={v.crf ?? 28} min={0} max={51} step={1} onChange={(n) => up({ crf: n })} />
           <label className="field">
             <span>Max bitrate</span>
@@ -95,26 +94,8 @@ export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void
   const [baseBytes, setBaseBytes] = useState(0)
   const [warns, setWarns] = useState<string[]>([])
   const [autoQ, setAutoQ] = useState<number | null>(null)
-  const [srcBusy, setSrcBusy] = useState(false)
-  const [srcProjectBusy, setSrcProjectBusy] = useState(false)
   const variants = project.meta.variants ?? []
   const [selVars, setSelVars] = useState<Set<string>>(() => new Set(variants.map((v) => v.id)))
-  const [alUrl, setAlUrl] = useState(() => localStorage.getItem('pa:applovinUrl') || 'http://167.99.227.249/wp-login.php?redirect_to=%2F')
-  const [alAddText, setAlAddText] = useState(() => localStorage.getItem('pa:applovinAdd') || 'Add Another Upload')
-  const [alUploadText, setAlUploadText] = useState(() => localStorage.getItem('pa:applovinUpload') || 'Upload')
-  const [alSubmit, setAlSubmit] = useState(false)
-  const [alAdvanced, setAlAdvanced] = useState(false)
-  const [alBusy, setAlBusy] = useState(false)
-  const [alStatus, setAlStatus] = useState<string | null>(null)
-  const alSelectors = { addButtonText: alAddText, uploadButtonText: alUploadText }
-  const [fuUrl, setFuUrl] = useState(() => localStorage.getItem('pa:fileUploadUrl') || 'http://20.255.60.183/file-upload/')
-  const [fuAddText, setFuAddText] = useState(() => localStorage.getItem('pa:fileUploadAdd') || 'Add Another Upload')
-  const [fuUploadText, setFuUploadText] = useState(() => localStorage.getItem('pa:fileUploadSubmit') || 'Upload')
-  const [fuSubmit, setFuSubmit] = useState(false)
-  const [fuAdvanced, setFuAdvanced] = useState(false)
-  const [fuBusy, setFuBusy] = useState(false)
-  const [fuStatus, setFuStatus] = useState<string | null>(null)
-  const fuSelectors = { addButtonText: fuAddText, uploadButtonText: fuUploadText }
   // Shared runtime snapshot: set by the preview effect, reused by doExportAll so
   // both compute sizes with the same runtime binary (avoids a 0.5 MB gap when the
   // runtime is rebuilt between the preview run and the export click).
@@ -207,142 +188,6 @@ export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void
     }
   }
 
-  // Build the AppLovin HTML for base + selected variants, for the auto-uploader.
-  const buildUploadBatch = async (): Promise<ApplovinFile[]> => {
-    const al = NETWORKS.find((n) => n.name === 'AppLovin') ?? NETWORKS[0]
-    const runtimeSrc = previewRuntimeSrc ?? await fetchRuntimeSrc()
-    const out: ApplovinFile[] = []
-    // Base: reuse proc (already compressed + measured).
-    const stripped = stripVariants(project)
-    const namedBase: Project = { ...stripped, meta: { ...stripped.meta, name: baseName } }
-    const { outputs: baseOuts } = buildOutputs(namedBase, proc, [al], runtimeSrc)
-    const baseO = baseOuts[0]
-    if (!baseO || baseO.over) {
-      if (baseO?.over) alert(`${baseName} is ${fmtBytes(baseO.bytes)}, over the 5MB limit; skipped.`)
-    } else {
-      out.push({ name: baseO.filename, text: await (await baseO.make()).text(), iteration: project.meta.mip || baseName })
-    }
-    // Variants: re-process (may have different asset sets via patches).
-    const oneVariant = async (proj: Project, name: string, iteration: string): Promise<void> => {
-      const named: Project = { ...proj, meta: { ...proj.meta, name } }
-      const { assets: a } = await processAssetsAutoFit(pruneAssets(proj, assets), optimize, quality / 100, media, named, runtimeSrc)
-      const { outputs } = buildOutputs(named, a, [al], runtimeSrc)
-      const o = outputs[0]
-      if (!o || o.over) {
-        if (o?.over) alert(`${name} is ${fmtBytes(o.bytes)}, over the 5MB limit; skipped.`)
-        return
-      }
-      out.push({ name: o.filename, text: await (await o.make()).text(), iteration })
-    }
-    for (const v of variants.filter((x) => selVars.has(x.id))) await oneVariant(applyVariant(project, v), `${baseName}_${slug(v.name)}`, v.name)
-    return out
-  }
-
-  const uploadBatchCount = 1 + (variants.length ? selVars.size : 0)
-
-  const fillUploadForm = async (props: {
-    url: string
-    submit: boolean
-    selectors: { addButtonText: string; uploadButtonText: string }
-    setBusy: (busy: boolean) => void
-    setStatus: (status: string | null) => void
-    waitForLinks?: boolean
-  }): Promise<void> => {
-    if (!confirmIfBlocked()) return
-    props.setBusy(true)
-    props.setStatus('Building playables...')
-    try {
-      const files = await buildUploadBatch()
-      if (!files.length) {
-        props.setStatus('Nothing to upload (all over budget?).')
-        return
-      }
-      props.setStatus('Filling the upload form...')
-      const r = await applovinUpload({ url: props.url, files, submit: props.submit, ...props.selectors })
-      props.setStatus(r.ok ? `Filled ${r.files} file(s)${r.submitted ? ' and submitted.' : '. Review the window and click Upload.'}` : 'Error: ' + r.error)
-      if (r.ok && props.waitForLinks) {
-        const wait = await applovinWaitForLinks({ mark: PREVIEW_LINK_MARK, expected: files.length })
-        const found = matchPreviewLinks(files, wait.links ?? []).filter((f) => f.link)
-        if (found.length) {
-          const text = found.map((f) => (found.length > 1 ? `${f.iteration}: ${f.link}` : f.link!)).join('\n')
-          void navigator.clipboard?.writeText(text)
-          props.setStatus(`Preview link${found.length > 1 ? 's' : ''} (copied):\n${text}`)
-        } else {
-          props.setStatus(wait.closed ? 'No link found: the upload window was closed.' : 'No preview link found. Check the upload window.')
-        }
-      }
-    } catch (e) {
-      props.setStatus('Error: ' + (e as Error).message)
-    } finally {
-      props.setBusy(false)
-    }
-  }
-
-  const detectUploadForm = async (props: {
-    url: string
-    selectors: { addButtonText: string; uploadButtonText: string }
-    setStatus: (status: string | null) => void
-  }): Promise<void> => {
-    props.setStatus('Detecting form...')
-    const p = await applovinProbe({ url: props.url, ...props.selectors })
-    if (!p.ok) {
-      props.setStatus('Detect failed: ' + (p.error ?? 'open the page first'))
-      return
-    }
-    const ok = p.fileInputs && p.addButton
-    props.setStatus(
-      `${ok ? 'OK' : 'Warn'} ${p.title || p.url}: ${p.fileInputs} file input(s), ${p.textInputs} name field(s); ` +
-        `Add button ${p.addButton ? 'yes' : 'no'}, Upload button ${p.uploadButton ? 'yes' : 'no'}.` +
-        (ok ? '' : ' Open the Upload File page, or adjust the selectors below.'),
-    )
-  }
-
-  const doApplovin = async (): Promise<void> => {
-    await fillUploadForm({ url: alUrl, submit: alSubmit, selectors: alSelectors, setBusy: setAlBusy, setStatus: setAlStatus, waitForLinks: true })
-    return
-    if (!confirmIfBlocked()) return
-    setAlBusy(true)
-    setAlStatus('Building playables…')
-    try {
-      const files = await buildUploadBatch()
-      if (!files.length) {
-        setAlStatus('Nothing to upload (all over budget?).')
-        return
-      }
-      setAlStatus('Filling the upload form…')
-      const r = await applovinUpload({ url: alUrl, files, submit: alSubmit, ...alSelectors })
-      setAlStatus(r.ok ? `Filled ${r.files} file(s)${r.submitted ? ' and submitted.' : '. Review the window and click Upload.'}` : 'Error: ' + r.error)
-    } catch (e) {
-      setAlStatus('Error: ' + (e as Error).message)
-    } finally {
-      setAlBusy(false)
-    }
-  }
-
-  // Non-destructive selector check against the open page.
-  const doProbe = async (): Promise<void> => {
-    setAlStatus('Detecting form…')
-    const p = await applovinProbe({ url: alUrl, ...alSelectors })
-    if (!p.ok) {
-      setAlStatus('Detect failed: ' + (p.error ?? 'open the page first'))
-      return
-    }
-    const ok = p.fileInputs && p.addButton
-    setAlStatus(
-      `${ok ? '✓' : '⚠'} ${p.title || p.url}: ${p.fileInputs} file input(s), ${p.textInputs} name field(s); ` +
-        `Add button ${p.addButton ? '✓' : '✗'}, Upload button ${p.uploadButton ? '✓' : '✗'}.` +
-        (ok ? '' : ' Open the Upload File page, or adjust the selectors below.'),
-    )
-  }
-
-  const doFileUpload = async (): Promise<void> => {
-    await fillUploadForm({ url: fuUrl, submit: fuSubmit, selectors: fuSelectors, setBusy: setFuBusy, setStatus: setFuStatus })
-  }
-
-  const doFileUploadProbe = async (): Promise<void> => {
-    await detectUploadForm({ url: fuUrl, selectors: fuSelectors, setStatus: setFuStatus })
-  }
-
   const doExport = async (): Promise<void> => {
     if (!confirmIfBlocked()) return
     setBusy(true)
@@ -424,10 +269,10 @@ export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void
         </>
       )}
       {optimize && (hasVideo || hasAudio) && (
-        <div className="hint pad">
+        <Help>
           Re-encoded on export with ffmpeg (desktop). Lower CRF = sharper but bigger; Max bitrate caps peaks (e.g. <b>536k</b>);
           Trim cuts length. These are the defaults; give any clip its own recipe below.
-        </div>
+        </Help>
       )}
 
       {/* assets */}
@@ -447,7 +292,7 @@ export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void
                 {r.remote && <span className="a-tag warn">remote</span>}
                 {isMedia && (
                   <button type="button" className={'a-tag btn' + (has ? ' on' : '')} onClick={() => setOpenRow(openRow === r.id ? null : r.id)} title="Per-asset compression">
-                    {has ? 'custom ⚙' : '⚙'}
+                    <Icon icon={Settings} size={12} />{has ? ' custom' : ''}
                   </button>
                 )}
               </div>
@@ -545,10 +390,10 @@ export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void
       <button className="primary wide" disabled={busy || !nets.size} onClick={() => void doExport()}>
         Export {nets.size} {nets.size === 1 ? 'file' : 'files'}
       </button>
-      <div className="hint pad">
+      <Help>
         Single self-contained HTML per network (zipped where the network requires it). Exports download to your browser; the
         desktop app saves to disk. Preflight above flags rejection-class issues per network before you ship.
-      </div>
+      </Help>
 
       {variants.length > 0 && (
         <>
@@ -573,125 +418,10 @@ export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void
           <button className="primary wide" disabled={busy || !nets.size} onClick={() => void doExportAll()}>
             Export base + {selVars.size} {selVars.size === 1 ? 'variant' : 'variants'} × {nets.size} {nets.size === 1 ? 'network' : 'networks'}
           </button>
-          <div className="hint pad">Emits one playable per variant per selected network, named “{baseName}_variant_network”. Languages stay inside each file (auto-detected at runtime).</div>
+          <Help>Emits one playable per variant per selected network, named “{baseName}_variant_network”. Languages stay inside each file (auto-detected at runtime).</Help>
         </>
       )}
 
-      <div className="group-title">Developer export</div>
-      <button
-        className="wide"
-        disabled={srcBusy}
-        onClick={() => {
-          setSrcBusy(true)
-          void import('../viteExport')
-            .then((m) => m.exportViteProject(project, assets))
-            .finally(() => setSrcBusy(false))
-        }}
-      >
-        {srcBusy ? 'Building…' : 'Download Vite project (source).zip'}
-      </button>
-      <button
-        className="wide"
-        disabled={srcProjectBusy}
-        onClick={() => {
-          setSrcProjectBusy(true)
-          void import('../viteExport')
-            .then((m) => m.exportViteProjectGroup())
-            .finally(() => setSrcProjectBusy(false))
-        }}
-      >
-        {srcProjectBusy ? 'Building…' : 'Download project Vite source.zip'}
-      </button>
-      <div className="hint pad">
-        A runnable Vite + TypeScript repo with the full runtime source, your project and assets. Devs run <b>npm install</b> then{' '}
-        <b>npm run dev</b> and edit <b>src/runtime/games/</b> to customize gameplay mechanics. Optional; not needed for ad delivery.
-      </div>
-      <div className="hint pad">
-        The project zip gathers every playable in the current project into folders like <b>project/MIP1 - SCRATCH</b>, <b>project/MIP2 - SPIN</b>, and so on, with every image, video, sound and font as its own file under <b>public/media/</b>.
-      </div>
-
-      {canApplovin && (
-        <>
-          <div className="group-title">Upload to AppLovin</div>
-          <label className="field">
-            <span>Upload site URL</span>
-            <input
-              className="text-input"
-              value={alUrl}
-              onChange={(e) => {
-                setAlUrl(e.target.value)
-                localStorage.setItem('pa:applovinUrl', e.target.value)
-              }}
-            />
-          </label>
-          <Toggle label="Submit automatically (otherwise it fills the form and you click Upload)" checked={alSubmit} onChange={setAlSubmit} />
-          <div className="grid2">
-            <button onClick={() => void applovinOpen(alUrl)}>Open / log in</button>
-            <button onClick={() => void doProbe()}>Detect form</button>
-          </div>
-          <button className="primary wide" disabled={alBusy} onClick={() => void doApplovin()}>
-            {alBusy ? 'Filling…' : `Auto-fill upload form (${1 + (variants.length ? selVars.size : 0)})`}
-          </button>
-          {alStatus && <div className="figma-status">{alStatus}</div>}
-          <button className="link-btn" onClick={() => setAlAdvanced((v) => !v)}>{alAdvanced ? 'Hide' : 'Form selectors'}</button>
-          {alAdvanced && (
-            <div className="grid2">
-              <label className="field">
-                <span>“Add row” button text</span>
-                <input className="text-input" value={alAddText} onChange={(e) => { setAlAddText(e.target.value); localStorage.setItem('pa:applovinAdd', e.target.value) }} />
-              </label>
-              <label className="field">
-                <span>“Upload” button text</span>
-                <input className="text-input" value={alUploadText} onChange={(e) => { setAlUploadText(e.target.value); localStorage.setItem('pa:applovinUpload', e.target.value) }} />
-              </label>
-            </div>
-          )}
-          <div className="hint pad">
-            First click <b>Open / log in</b>, sign in and open the <b>Upload File</b> page. Use <b>Detect form</b> to confirm the
-            page matches (file inputs + buttons); adjust the selectors if not. Then <b>Auto-fill</b> drops your base + selected
-            variants into the batch form (one row each; Iteration Name = variant). Review and click Upload, or enable auto-submit.
-            Uploads the AppLovin (MRAID) build of each.
-          </div>
-          <div className="group-title">Upload to File Server</div>
-          <label className="field">
-            <span>Upload site URL</span>
-            <input
-              className="text-input"
-              value={fuUrl}
-              onChange={(e) => {
-                setFuUrl(e.target.value)
-                localStorage.setItem('pa:fileUploadUrl', e.target.value)
-              }}
-            />
-          </label>
-          <Toggle label="Submit automatically (otherwise it fills the form and you click Upload)" checked={fuSubmit} onChange={setFuSubmit} />
-          <div className="grid2">
-            <button onClick={() => void applovinOpen(fuUrl)}>Open / log in</button>
-            <button onClick={() => void doFileUploadProbe()}>Detect form</button>
-          </div>
-          <button className="primary wide" disabled={fuBusy} onClick={() => void doFileUpload()}>
-            {fuBusy ? 'Filling...' : `Auto-fill upload form (${uploadBatchCount})`}
-          </button>
-          {fuStatus && <div className="figma-status">{fuStatus}</div>}
-          <button className="link-btn" onClick={() => setFuAdvanced((v) => !v)}>{fuAdvanced ? 'Hide' : 'Form selectors'}</button>
-          {fuAdvanced && (
-            <div className="grid2">
-              <label className="field">
-                <span>Add row button text</span>
-                <input className="text-input" value={fuAddText} onChange={(e) => { setFuAddText(e.target.value); localStorage.setItem('pa:fileUploadAdd', e.target.value) }} />
-              </label>
-              <label className="field">
-                <span>Upload button text</span>
-                <input className="text-input" value={fuUploadText} onChange={(e) => { setFuUploadText(e.target.value); localStorage.setItem('pa:fileUploadSubmit', e.target.value) }} />
-              </label>
-            </div>
-          )}
-          <div className="hint pad">
-            Uses the same desktop automation flow as AppLovin, pointed at <b>http://20.255.60.183/file-upload/</b> by default.
-            Log in, open the upload form, confirm the detected controls, then auto-fill the AppLovin-ready HTML batch.
-          </div>
-        </>
-      )}
     </Modal>
   )
 }

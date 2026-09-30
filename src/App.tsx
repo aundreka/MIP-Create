@@ -2,10 +2,8 @@ import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { EditorCanvas } from './canvas/EditorCanvas'
 import { clampZoom } from './canvas/geometry'
 import { buildCommands } from './commands'
-import { ContextToolbar } from './panels/ContextToolbar'
 import { Inspector } from './panels/Inspector'
 import { Navigator } from './panels/Navigator'
-import { StatusBar } from './panels/StatusBar'
 import { Timeline } from './panels/Timeline'
 import { ToolRail } from './panels/ToolRail'
 import { Topbar } from './panels/Topbar'
@@ -98,7 +96,15 @@ export function App(): JSX.Element {
         openTeam: () => { setHomeTab('team'); setHome(true) },
         openShare: () => setShare(true),
         openGenerateMip: () => setGenMip(true),
+        openUpload: () => setUploadRequest({}),
+        quickExport: () => void doQuickExport(),
+        quickSip: () => void doQuickSip(),
+        sourceMip: () => void doQuickViteExport(),
+        sourceProject: () => void doQuickProjectViteExport(),
+        githubPush: () => void doGithubPush(),
       }),
+    // The do* handlers only touch state setters and the store, so the first
+    // render's closures stay valid for the palette's lifetime.
     [],
   )
 
@@ -277,14 +283,14 @@ export function App(): JSX.Element {
             onQa={() => setQa(true)}
             onQaCheck={() => setQaCheck(true)}
             onShare={() => setShare(true)}
+            onFigma={() => setFigma(true)}
           />
           <div className="body">
-            <ToolRail onFigma={() => setFigma(true)} />
+            <ToolRail />
             <DockPanel id="nav" side="left" defaultWidth={224} min={170} max={420}>
               <Navigator onPreviewScene={(id) => { setPreviewScene(id); setPreview(true) }} />
             </DockPanel>
             <div className="canvas-col">
-              <ContextToolbar />
               <EditorCanvas zoom={zoom} pan={pan} setZoom={(z) => setZoom(clampZoom(z))} setPan={setPan} fitSignal={fitSignal} showHandles={showHandles} />
               <Timeline />
             </div>
@@ -292,7 +298,6 @@ export function App(): JSX.Element {
               <Inspector onProjectSettings={() => setSettings(true)} />
             </DockPanel>
           </div>
-          <StatusBar zoom={zoom} />
         </>
       )}
       <Suspense fallback={null}>

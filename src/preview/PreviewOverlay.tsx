@@ -274,11 +274,6 @@ export function PreviewOverlay(props: { onClose: () => void; initialScene?: stri
             <Icon icon={RotateCcw} size={13} /> Replay
           </button>
         </div>
-        <div className="scope-hint">
-          {picked.length === 0
-            ? 'Playing the whole ad from the start scene. Click a scene to preview just it (pick several for a sequence).'
-            : `Previewing ${picked.length === 1 ? 'one scene' : picked.length + ' scenes'} in order. Click “Whole flow” to play the full ad.`}
-        </div>
 
         <div className="preview-stage" ref={stageRef}>
           <DeviceView project={effProject} assets={assets} playKey={playKey} w={device.w} h={device.h} label="Portrait" scale={scale} framed={framed} iframeRef={pRef} />

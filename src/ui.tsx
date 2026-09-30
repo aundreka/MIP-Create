@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { addToPalette, loadPalette } from './brandkit'
-import { ArrowDown, ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight, Icon, X } from './icons'
+import { ArrowDown, ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight, Icon, Info, X } from './icons'
 import type { SortState } from './sort'
 import { getAccordion, getDock, setAccordion, setDock } from './uiState'
 
@@ -39,6 +39,12 @@ export function SortButton<K extends string>(props: {
 }
 
 // ---- NumField: label is draggable to scrub the value (Figma-style) ----------
+// A short label sits left of its control on one row (see .field.short in
+// editor.css); a long one stays stacked above it rather than wrapping in a column.
+function fieldClass(label: string | undefined): string {
+  return label && label.length <= 16 ? 'field short' : 'field'
+}
+
 export function NumField(props: {
   label: string
   value: number | undefined
@@ -59,7 +65,7 @@ export function NumField(props: {
     return v
   }
   return (
-    <label className="field">
+    <label className={fieldClass(props.label)}>
       <span
         className="scrub"
         onPointerDown={(e) => {
@@ -295,7 +301,7 @@ export function Swatches(props: { label: string; value?: string; onChange: (c: s
               placeholder="rrggbb"
               spellCheck={false}
               autoComplete="off"
-              aria-label="Hex colour code"
+              aria-label="Hex color code"
               title="Type a hex code — 3, 4, 6 or 8 digits"
               onChange={(e) => {
                 const raw = e.target.value.replace(/[^0-9a-fA-F]/g, '').slice(0, 8)
@@ -356,7 +362,7 @@ export function Select<T extends string>(props: {
   )
   if (!props.label) return control
   return (
-    <label className="field">
+    <label className={fieldClass(props.label)}>
       <span>{props.label}</span>
       {control}
     </label>
@@ -557,7 +563,7 @@ export function SearchSelect<T extends string>(props: {
       </>
     )
   return (
-    <label className="field">
+    <label className={fieldClass(props.label)}>
       <span>{props.label}</span>
       {control}
       {pop}
@@ -592,13 +598,32 @@ export function Tooltip(props: { label: string; side?: 'top' | 'bottom' | 'left'
   )
 }
 
+// ---- Help (explanation kept out of the way) ----------------------------------
+// A small (i) that expands its text in place on click. Use it for how-it-works
+// detail; status and warnings stay inline as plain .hint lines.
+export function Help(props: { children: React.ReactNode }): JSX.Element {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className={'help' + (open ? ' open' : '')}>
+      <button type="button" className="help-btn" aria-expanded={open} aria-label={open ? 'Hide help' : 'Show help'} title={open ? 'Hide help' : 'Help'} onClick={() => setOpen((v) => !v)}>
+        <Icon icon={Info} size={13} />
+      </button>
+      {open && <div className="help-body">{props.children}</div>}
+    </div>
+  )
+}
+
 // ---- Accordion (collapsible inspector section, persisted open state) --------
 export function Accordion(props: { id: string; title: React.ReactNode; defaultOpen?: boolean; children: React.ReactNode }): JSX.Element {
-  const [open, setOpen] = useState(() => getAccordion(props.id, props.defaultOpen ?? true))
+  // Read the open state by id on every render instead of holding it in useState:
+  // React reuses an Accordion instance by position, so swapping panels (scene ->
+  // element, or one element type for another) would otherwise hand a section the
+  // open/closed state of whatever section used to sit in that slot.
+  const [, rerender] = useState(0)
+  const open = getAccordion(props.id, props.defaultOpen ?? true)
   const toggle = (): void => {
-    const v = !open
-    setOpen(v)
-    setAccordion(props.id, v)
+    setAccordion(props.id, !open)
+    rerender((n) => n + 1)
   }
   return (
     <div className={'acc' + (open ? ' open' : '')}>
@@ -661,7 +686,7 @@ export function Modal(props: {
 // ---- Row: labelled field row (shared by Inspector + drawers) ----------------
 export function Row(props: { label: string; children: React.ReactNode }): JSX.Element {
   return (
-    <label className="field">
+    <label className={fieldClass(props.label)}>
       <span>{props.label}</span>
       {props.children}
     </label>

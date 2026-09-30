@@ -99,7 +99,7 @@ export function QuizFunnel(props: { onClose: () => void }): JSX.Element {
           <ColorField label="Accent (buttons)" value={st.accent} onChange={(c) => set({ accent: c ?? '#7c3aed' })} />
           <ColorField label="Background" value={st.bg} onChange={(c) => set({ bg: c ?? '#f3effa' })} />
           <ColorField label="Answer card" value={st.cardBg} onChange={(c) => set({ cardBg: c ?? '#ffffff' })} />
-          <ColorField label="Text colour" value={st.ink} onChange={(c) => set({ ink: c ?? '#1b2a4a' })} />
+          <ColorField label="Text color" value={st.ink} onChange={(c) => set({ ink: c ?? '#1b2a4a' })} />
           <label className="field">
             <span>End-card CTA text</span>
             <input className="text-input" value={st.ctaText} onChange={(e) => set({ ctaText: e.target.value })} />

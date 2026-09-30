@@ -100,7 +100,7 @@ import {
   type AlignOp,
   type ConvertTo,
 } from '../store'
-import { Accordion, Chips, ColorField, NumField, Row, SearchSelect, Select, Slider, Swatches, Toggle } from '../ui'
+import { Accordion, Chips, ColorField, Help, NumField, Row, SearchSelect, Select, Slider, Swatches, Toggle } from '../ui'
 import { calendarRange, labelForDate, validatePromoCalendar } from '../promoCalendar'
 import { ensurePromoCalendar, makeText } from '../factories'
 import { idealInk } from '../svgAssets'
@@ -119,8 +119,13 @@ import {
   AlignEndVertical,
   AlignStartHorizontal,
   AlignStartVertical,
+  ClipboardPaste,
+  CopyPlus,
   Icon,
   Languages,
+  Lock,
+  LockOpen,
+  Paintbrush,
   Plus,
   type LucideIcon,
   Trash2,
@@ -242,6 +247,23 @@ const TAP_EFFECTS = [
 // Element types that may be carried across scene changes (SceneElement.persist).
 // Everything omitted is bound to the scene it lives on — games, the end-card video,
 // the unboxing/confetti one-shots, the hint hand, and the full-screen background/dim.
+// Panel title per element type — the words a user would use, not the type ids.
+const TYPE_LABEL: Record<SceneElement['type'], string> = {
+  background: 'Background',
+  bar: 'Bar',
+  image: 'Image',
+  text: 'Text',
+  cta: 'CTA button',
+  button: 'Button',
+  choice: 'Answer choice',
+  handguide: 'Hand pointer',
+  countdown: 'Countdown / date',
+  dim: 'Dim',
+  'game-mount': 'Game',
+  endscene: 'Video end card',
+  unboxing: 'Mystery box',
+  confetti: 'Confetti',
+}
 const CARRY_OVER_TYPES = new Set<SceneElement['type']>(['cta', 'image', 'text', 'bar', 'button', 'countdown'])
 
 // Where a tappable image/button goes on click. '__stay' is not a scene id — it maps
@@ -283,11 +305,11 @@ function LinkedButtons(props: { cfg: ButtonConfig; selfId: string; siblings: Sce
       {stale.map((lid) => (
         <Toggle key={lid} label={`${lid} (missing)`} checked onChange={() => set(linked.filter((x) => x !== lid))} />
       ))}
-      <div className="hint pad">
+      <Help>
         Tapping any ticked button also presses this element — same tap effect and on-tap animation as a direct tap on it. A linked press never changes screen: the button that was
         tapped keeps its own <b>Go to screen</b>, so it wins whenever the two point at different places. If this element should only react to those buttons and do nothing when
         tapped itself, set its <b>Go to screen</b> to “stay on this screen”.
-      </div>
+      </Help>
     </>
   )
 }
@@ -334,10 +356,10 @@ function AdjustFields(props: { el: SceneElement; onPatch?: (adjust: AdjustConfig
       {ADJUST_FIELDS.map((f) => (
         <Slider key={f.key} label={f.label} value={pct(f.key)} min={0} max={200} step={1} suffix="%" onChange={(n) => set(f.key, n)} />
       ))}
-      <div className="hint pad">
+      <Help>
         {ADJUST_FIELDS.map((f) => f.hint).join(' · ')}. Corrects the element’s own pixels, so one picture can be bright on one screen and dimmed on another without a second copy in
         the bundle.
-      </div>
+      </Help>
       {!!adj && (
         <button className="wide" onClick={() => write(undefined)}>
           Reset adjustments
@@ -422,17 +444,17 @@ function MorphSection(props: { el: SceneElement; scenes: SceneDef[]; sceneId: st
         <>
           <Toggle label="Morph into another screen" checked={!!cfg} onChange={enable} />
           {!cfg ? (
-            <div className="hint pad">
+            <Help>
               Off: this element simply leaves with the screen. On: a copy of it flies onto an element you pick on another screen — matching its position and size — so the two read
               as one object moving instead of two elements swapping.
-            </div>
+            </Help>
           ) : (
             <>
               <Toggle label="Find the target automatically" checked={auto} onChange={(v) => set({ auto: v ? undefined : false })} />
-              <div className="hint pad">
+              <Help>
                 On: whenever the flow moves to <b>any</b> other screen — the next one, or one it comes back to — this element flies onto the element there with the same artwork or
                 the same name. Screens with no such element are left alone. Off: it only flies where a row below says so.
-              </div>
+              </Help>
               {auto && (
                 <div className="hint pad">
                   {landing.length ? (
@@ -476,7 +498,7 @@ function MorphSection(props: { el: SceneElement; scenes: SceneDef[]; sceneId: st
                           ]}
                         />
                         <button className="mini" title="Remove this screen" onClick={() => setRows(rows.filter((_, n) => n !== i))}>
-                          ✕
+                          <Icon icon={X} size={12} />
                         </button>
                       </div>
                     </Row>
@@ -526,11 +548,11 @@ function MorphSection(props: { el: SceneElement; scenes: SceneDef[]; sceneId: st
                   carry-over to use it.
                 </div>
               )}
-              <div className="hint pad">
+              <Help>
                 Where it lands is wherever the target sits on its own screen — drag either element on its own canvas to re-aim the move. <b>Lands at</b> lets the flight settle over
                 or under the target's size before it hands over; the target itself always ends at its authored size. Preview the flow to watch it — the editor canvas shows one
                 screen at a time.
-              </div>
+              </Help>
             </>
           )}
         </>
@@ -564,19 +586,19 @@ function ButtonTapFields(props: { cfg: ButtonConfig; others: SceneDef[]; selfId:
         <>
           <AssetPicker label="Fade to image" value={cfg.tapFadeAssetId} allowNone onChange={(aid) => patch({ tapFadeAssetId: aid ?? undefined })} />
           <Slider label="Fade duration" value={cfg.tapFadeMs ?? TAP_FADE_DEFAULT_MS} min={0} max={3000} step={50} suffix="ms" onChange={(n) => patch({ tapFadeMs: n })} />
-          <div className="hint pad">
+          <Help>
             On tap the picture cross-fades into this one and <b>stays</b> on it (it resets when the screen is re-entered).
-          </div>
+          </Help>
         </>
       )}
       {!cfg.stay && (
         <>
           <Slider label="Wait before switching" value={cfg.navDelayMs ?? 0} min={0} max={3000} step={50} suffix="ms" onChange={(n) => patch({ navDelayMs: n || undefined })} />
-          <div className="hint pad">
+          <Help>
             {cfg.tapEffect === 'fade'
               ? 'Holds the screen this long after the tap so the cross-fade can play out. Match it to the fade duration above (or set Go to screen to “stay on this screen” to never leave).'
               : 'Holds the screen this long after the tap before changing screen — useful to let the tap effect or a sound finish. 0 = switch immediately.'}
-          </div>
+          </Help>
         </>
       )}
       <LinkedButtons cfg={cfg} selfId={props.selfId} siblings={props.siblings} patch={patch} />
@@ -622,10 +644,10 @@ function ReuseFromScene(props: { sceneId: string; scenes: SceneDef[] }): JSX.Ele
   const els = src ? [...src.elements].sort((a, b) => (a.type === 'background' ? -1 : 0) - (b.type === 'background' ? -1 : 0) || a.zIndex - b.zIndex) : []
   return (
     <Accordion id="inspector.reuse" title="Reuse from another scene" defaultOpen={false}>
-      <div className="hint pad">
+      <Help>
         Copy elements from another scene into this one. Copies share the same underlying assets (each asset is packed once on export, so this barely grows the file) but are edited
         independently — give this scene's copy its own animations. A copied element keeps its landscape layout too.
-      </div>
+      </Help>
       <Row label="Scene">
         <Select value={fromId} onChange={setFromId} options={[{ value: '', label: '(choose scene)' }, ...others.map((s) => ({ value: s.id, label: s.name }))]} />
       </Row>
@@ -913,7 +935,7 @@ function PiecePlacement({ label, pieceKey, el }: { label: string; pieceKey: Unbo
             <NumField label="End °" value={piece.endRotation ?? -35} step={5} onChange={(n) => set({ endRotation: n })} />
             <NumField label="End α" value={piece.endOpacity ?? 0} step={0.1} min={0} max={1} onChange={(n) => set({ endOpacity: n })} />
           </div>
-          <NumField label="Duration ms" value={piece.durationMs ?? 700} step={50} min={0} onChange={(n) => set({ durationMs: n })} />
+          <NumField label="Duration" suffix="ms" value={piece.durationMs ?? 700} step={50} min={0} onChange={(n) => set({ durationMs: n })} />
         </>
       )}
     </>
@@ -926,7 +948,7 @@ function UnboxingInspector({ el }: { el: SceneElement }): JSX.Element {
   const hasLose = !!cfg.loseAssetId
 
   return (
-    <Accordion id="inspector.unboxing" title="Mystery Box">
+    <Accordion id="inspector.unboxing" title="Mystery box">
       <div className="group-title2">Grid</div>
       <div className="grid2">
         <NumField
@@ -955,17 +977,17 @@ function UnboxingInspector({ el }: { el: SceneElement }): JSX.Element {
         />
       </div>
       <div className="grid2">
-        <NumField label="Col gap px" value={cfg.colGap ?? 24} step={4} min={0} onChange={(n) => set({ colGap: n })} />
-        <NumField label="Row gap px" value={cfg.rowGap ?? 24} step={4} min={0} onChange={(n) => set({ rowGap: n })} />
+        <NumField label="Col gap" suffix="px" value={cfg.colGap ?? 24} step={4} min={0} onChange={(n) => set({ colGap: n })} />
+        <NumField label="Row gap" suffix="px" value={cfg.rowGap ?? 24} step={4} min={0} onChange={(n) => set({ rowGap: n })} />
       </div>
 
       <div className="group-title2">Background (static)</div>
       <AssetPicker label="Image" allowNone value={cfg.bgAssetId} onChange={(aid) => set({ bgAssetId: aid ?? undefined })} />
       <div className="grid2">
         <NumField label="Scale ×" value={cfg.bgScale ?? 1} step={0.05} onChange={(n) => set({ bgScale: n })} />
-        <NumField label="X px" value={cfg.bgX ?? 0} step={10} onChange={(n) => set({ bgX: n })} />
+        <NumField label="X" suffix="px" value={cfg.bgX ?? 0} step={10} onChange={(n) => set({ bgX: n })} />
       </div>
-      <NumField label="Y px" value={cfg.bgY ?? 0} step={10} onChange={(n) => set({ bgY: n })} />
+      <NumField label="Y" suffix="px" value={cfg.bgY ?? 0} step={10} onChange={(n) => set({ bgY: n })} />
 
       <PiecePlacement label="Back face (z1, static)" pieceKey="back" el={el} />
       <PiecePlacement label="Front face (z3, occludes product)" pieceKey="front" el={el} />
@@ -988,7 +1010,7 @@ function UnboxingInspector({ el }: { el: SceneElement }): JSX.Element {
         <NumField label="End Y %" value={cfg.productY ?? 28} step={2} onChange={(n) => set({ productY: n })} />
       </div>
       <NumField label="Width %" value={cfg.productW ?? 65} step={2} min={1} onChange={(n) => set({ productW: n })} />
-      <NumField label="Rise ms" value={cfg.productDurationMs ?? 900} step={50} min={0} onChange={(n) => set({ productDurationMs: n })} />
+      <NumField label="Rise" suffix="ms" value={cfg.productDurationMs ?? 900} step={50} min={0} onChange={(n) => set({ productDurationMs: n })} />
 
       <AssetPicker label="Lose image (optional)" allowNone value={cfg.loseAssetId} onChange={(aid) => set({ loseAssetId: aid ?? undefined })} />
       {hasLose && (
@@ -1108,19 +1130,32 @@ function UnboxingInspector({ el }: { el: SceneElement }): JSX.Element {
       <div className="group-title2">Timing</div>
       <NumField label="Centered box size %" value={cfg.centerSize ?? 65} step={5} min={10} max={150} onChange={(n) => set({ centerSize: n })} />
       <div className="grid2">
-        <NumField label="Offset X px" value={cfg.centerX ?? 0} step={10} onChange={(n) => set({ centerX: n })} />
-        <NumField label="Offset Y px" value={cfg.centerY ?? 0} step={10} onChange={(n) => set({ centerY: n })} />
+        <NumField label="Offset X" suffix="px" value={cfg.centerX ?? 0} step={10} onChange={(n) => set({ centerX: n })} />
+        <NumField label="Offset Y" suffix="px" value={cfg.centerY ?? 0} step={10} onChange={(n) => set({ centerY: n })} />
       </div>
-      <NumField label="Fly to center ms" value={cfg.selectMs ?? 450} step={50} min={0} onChange={(n) => set({ selectMs: n })} />
+      <NumField label="Fly to center" suffix="ms" value={cfg.selectMs ?? 450} step={50} min={0} onChange={(n) => set({ selectMs: n })} />
     </Accordion>
   )
 }
 
-function StyleButtons(): JSX.Element {
+// Copy / paste style, duplicate, delete: one compact icon row at the foot of the
+// element and multi-select panels (the same actions live on right-click + keys).
+function ElementActions(): JSX.Element {
   return (
-    <div className="grid2 wide">
-      <button onClick={copyStyle}>Copy style</button>
-      <button onClick={pasteStyle}>Paste style</button>
+    <div className="el-actions">
+      <button className="icon" title="Copy style" onClick={copyStyle}>
+        <Icon icon={Paintbrush} size={14} />
+      </button>
+      <button className="icon" title="Paste style" onClick={pasteStyle}>
+        <Icon icon={ClipboardPaste} size={14} />
+      </button>
+      <button className="icon" title="Duplicate (Ctrl+D)" onClick={duplicateSelected}>
+        <Icon icon={CopyPlus} size={14} />
+      </button>
+      <span className="spacer" />
+      <button className="icon danger" title="Delete (Del)" onClick={removeSelected}>
+        <Icon icon={Trash2} size={14} />
+      </button>
     </div>
   )
 }
@@ -1383,7 +1418,7 @@ function BrushTipPicker(props: { src: string; tipXPct: number; tipYPct: number; 
   }
   return (
     <div>
-      <div className="hint pad">Click or drag on the brush to set its tip — the point that does the revealing (offset from the finger).</div>
+      <Help>Click or drag on the brush to set its tip — the point that does the revealing (offset from the finger).</Help>
       <div
         onPointerDown={(e) => {
           dragging.current = true
@@ -1534,49 +1569,54 @@ function BrushControls(props: {
   const followOn = !!params.brushFollow && params.brushFollow !== 'off'
   return (
     <>
-      <div className="group-title2">Brush (drag to scratch)</div>
-      <AssetPicker label="Brush image (optional)" value={(params.brushImage as string) || undefined} allowNone onChange={(aid) => setParam('brushImage', aid ?? '')} />
-      <NumField label="Brush image size (% of card)" value={Number(params.brushScale ?? 40)} step={5} min={5} max={200} onChange={(n) => setParam('brushScale', n)} />
+      <div className="group-title2">Brush</div>
+      <AssetPicker label="Brush image" value={(params.brushImage as string) || undefined} allowNone onChange={(aid) => setParam('brushImage', aid ?? '')} />
+      <NumField label="Brush size (% of card)" value={Number(params.brushScale ?? 40)} step={5} min={5} max={200} onChange={(n) => setParam('brushScale', n)} />
       <NumField label={props.radiusLabel} value={Number(params.brushRadius ?? 10)} step={1} min={1} max={50} onChange={(n) => setParam('brushRadius', n)} />
       {brushSrc ? (
         <BrushTipPicker src={brushSrc} tipXPct={tipX} tipYPct={tipY} onChange={(x, y) => setParams({ brushTipX: x, brushTipY: y })} />
       ) : (
         <>
-          <NumField label="Brush tip X — reveal point (%)" value={tipX} step={1} min={0} max={100} onChange={(n) => setParam('brushTipX', n)} />
-          <NumField label="Brush tip Y — reveal point (%)" value={tipY} step={1} min={0} max={100} onChange={(n) => setParam('brushTipY', n)} />
+          <div className="grid2">
+            <NumField label="Tip X" suffix="%" value={tipX} step={1} min={0} max={100} onChange={(n) => setParam('brushTipX', n)} />
+            <NumField label="Tip Y" suffix="%" value={tipY} step={1} min={0} max={100} onChange={(n) => setParam('brushTipY', n)} />
+          </div>
         </>
       )}
-      <Toggle label="Follow finger (appear only while scratching)" checked={followOn} onChange={(v) => setParam('brushFollow', v)} />
+      <Toggle label="Only show while scratching" checked={followOn} onChange={(v) => setParam('brushFollow', v)} />
       {(!followOn || introOn) && (
         <>
-          <NumField label="Spawn X — resting spot (% of card)" value={Number(params.brushSpawnX ?? 50)} step={1} min={0} max={100} onChange={(n) => setParam('brushSpawnX', n)} />
-          <NumField label="Spawn Y — resting spot (% of card)" value={Number(params.brushSpawnY ?? 50)} step={1} min={0} max={100} onChange={(n) => setParam('brushSpawnY', n)} />
+          <div className="grid2">
+            <NumField label="Rest X" suffix="%" value={Number(params.brushSpawnX ?? 50)} step={1} min={0} max={100} onChange={(n) => setParam('brushSpawnX', n)} />
+            <NumField label="Rest Y" suffix="%" value={Number(params.brushSpawnY ?? 50)} step={1} min={0} max={100} onChange={(n) => setParam('brushSpawnY', n)} />
+          </div>
         </>
       )}
-      <Toggle label="Intro animation (demo at start)" checked={introOn} onChange={(v) => setParam('brushIntro', v)} />
+      <Toggle label="Demo motion at start" checked={introOn} onChange={(v) => setParam('brushIntro', v)} />
       {followOn ? (
-        <div className="hint pad">
+        <Help>
           The brush is hidden until the player scratches — it appears <b>centered under the finger</b>, follows it, and disappears on release. Scratching starts anywhere on the
           card (no need to grab the brush).{introOn ? ' The intro demo still plays from the spawn point, then the brush hides.' : ''}
-        </div>
+        </Help>
       ) : (
-        <div className="hint pad">
+        <Help>
           The brush stays on screen and can overflow past the card edges. Spawn sets where it rests; the intro plays a demo motion (like the hint hand) until the player touches.
-        </div>
+        </Help>
       )}
       {introOn && (
         <>
           <NumField
-            label="Intro speed — ms per pass (lower = faster)"
+            label="Demo pass time"
+            suffix="ms"
             value={Number(params.brushIntroDurationMs ?? 1600)}
             step={100}
             min={200}
             max={8000}
             onChange={(n) => setParam('brushIntroDurationMs', n)}
           />
-          <NumField label="Intro loops" value={Number(params.brushIntroLoops ?? 2)} step={1} min={1} max={20} onChange={(n) => setParam('brushIntroLoops', n)} />
+          <NumField label="Demo loops" value={Number(params.brushIntroLoops ?? 2)} step={1} min={1} max={20} onChange={(n) => setParam('brushIntroLoops', n)} />
           <BrushPathEditor pathJson={String(params.brushIntroPath ?? '')} aspect={props.cardAspect} onChange={(j) => setParam('brushIntroPath', j)} />
-          <div className="hint pad">No path drawn = a default left-right rub at the spawn point.</div>
+          <Help>No path drawn = a default left-right rub at the spawn point.</Help>
         </>
       )}
     </>
@@ -1643,7 +1683,7 @@ function ScratchSetup({ params, setParams, elementId, siblings }: ScratchSetupPr
           )}
         </span>
       </div>
-      <div style={{ display: 'flex', gap: 6, margin: '4px 0' }}>
+      <div style={{ display: 'flex', gap: 6, margin: '4px 0', padding: '0 10px' }}>
         {rect('area', 'Scratch area', 'Only this part of the cover can be scratched. Drawn on the canvas; Esc when done.')}
         {rect('zone', 'Reveal zone', 'Only scratching inside this counts toward “Reveal at”. Drawn on the canvas; Esc when done.')}
       </div>
@@ -1808,7 +1848,7 @@ function DragCleanSetup({ params, setParam, elementId, siblings }: DragCleanSetu
               options={[{ value: '', label: 'Every bar in this screen' }, ...bars.map((b) => ({ value: b.id, label: b.name || b.id }))]}
             />
           </Row>
-          <div className="hint pad">One step per obstacle cleaned. Leave it on “every bar” unless this screen has more than one.</div>
+          <Help>One step per obstacle cleaned. Leave it on “every bar” unless this screen has more than one.</Help>
         </>
       )}
       <div className="group-title2">Feel &amp; timing</div>
@@ -1926,7 +1966,7 @@ function TapRemoveSetup({ params, setParam, elementId, siblings }: TapRemoveSetu
               options={[{ value: '', label: 'Every bar in this screen' }, ...bars.map((b) => ({ value: b.id, label: b.name || b.id }))]}
             />
           </Row>
-          <div className="hint pad">One step per obstacle removed. Leave it on “every bar” unless this screen has more than one.</div>
+          <Help>One step per obstacle removed. Leave it on “every bar” unless this screen has more than one.</Help>
         </>
       )}
       <div className="group-title2">Feel &amp; timing</div>
@@ -2078,7 +2118,7 @@ function TapRevealSetup({ params, setParam, elementId, siblings }: TapRevealSetu
               options={[{ value: '', label: 'Every bar in this screen' }, ...bars.map((b) => ({ value: b.id, label: b.name || b.id }))]}
             />
           </Row>
-          <div className="hint pad">One step per tap. Leave it on “every bar” unless this screen has more than one.</div>
+          <Help>One step per tap. Leave it on “every bar” unless this screen has more than one.</Help>
         </>
       )}
       <div className="group-title2">Feel &amp; timing</div>
@@ -2190,13 +2230,13 @@ function SwipeCardsSetup({ params, setParam, elementId, siblings }: SwipeCardsSe
       </div>
       <div className="group-title2">Swipe marks</div>
       {(['like', 'nope'] as const).map((kind) => [...swipeMarks(siblings, elementId, kind), undefined].map((m, i) => markRow(kind, m, i)))}
-      <div className="hint pad">
+      <Help>
         Optional. Put the heart (and the X) over any card on the canvas, where it should appear on that card; each card shows it in the same corner, fading in as the card is
         dragged that way. Use the eye to hide it once it sits right.
-      </div>
+      </Help>
       <div className="group-title2">Buttons</div>
       {(['yes', 'no'] as const).map((kind) => [...swipeMarks(siblings, elementId, kind), undefined].map((m, i) => markRow(kind, m, i)))}
-      <div className="hint pad">Optional. Any placed element — the heart and X under the pile, say. A tap leans the top card that way and swipes it.</div>
+      <Help>Optional. Any placed element — the heart and X under the pile, say. A tap leans the top card that way and swipes it.</Help>
       <div className="group-title2">Result</div>
       <div className="combo-slot">
         <span title={resultHint}>Liked card</span>
@@ -2217,11 +2257,11 @@ function SwipeCardsSetup({ params, setParam, elementId, siblings }: SwipeCardsSe
           )}
         </span>
       </div>
-      <div className="hint pad">
+      <Help>
         {result
           ? `On “${result.scene.name || result.scene.id}”. It keeps its own picture until a card is swiped right on. Leave it uncropped so the card fits it cleanly.`
           : 'Optional. An image — usually on the end card — that shows the first look the player liked.'}
-      </div>
+      </Help>
       {bars.length > 0 && (
         <>
           <div className="group-title2">Progress bar</div>
@@ -2232,7 +2272,7 @@ function SwipeCardsSetup({ params, setParam, elementId, siblings }: SwipeCardsSe
               options={[{ value: '', label: 'Every bar in this screen' }, ...bars.map((b) => ({ value: b.id, label: b.name || b.id }))]}
             />
           </Row>
-          <div className="hint pad">One step per swipe, either direction. Set the bar&rsquo;s Fill style to “bars” for a separate bar per card.</div>
+          <Help>One step per swipe, either direction. Set the bar&rsquo;s Fill style to “bars” for a separate bar per card.</Help>
         </>
       )}
       <div className="group-title2">Feel &amp; timing</div>
@@ -2316,11 +2356,11 @@ function ProgressBarSetup({ params, setParam, elementId, siblings, fullWidth, se
               : `Counts to however many steps ${feeder ? `“${feeder.name || feeder.id}”` : 'the game feeding it'} has, so the two finish together. Set “Steps to win” to end earlier.`}
       </div>
       <Toggle label="Full screen width (like the header)" checked={fullWidth} onChange={setFullWidth} />
-      <div className="hint pad">
+      <Help>
         {fullWidth
           ? 'Edge to edge on every screen, letterboxing included. The box’s height still sets how tall it is; drag it up or down to place it.'
           : 'The bar fills the box you drew. Turn this on to span the whole screen instead.'}
-      </div>
+      </Help>
     </>
   )
 }
@@ -2492,10 +2532,10 @@ function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps):
         />
         <span className="combo-slot-actions" />
       </div>
-      <div className="hint pad">
+      <Help>
         Picks to win: 0 wins when the questions run out — so with one question, one pick wins. Jigsaw keeps a question up until all of its options are placed, which is what makes a
         picks-to-win number above 1 mean anything within a single question.
-      </div>
+      </Help>
       <Chips
         items={Array.from({ length: questions }, (_, i) => ({
           key: String(i),
@@ -2524,7 +2564,7 @@ function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps):
       <button className="btn wide" onClick={() => window.dispatchEvent(new CustomEvent('pa:zone-edit', { detail: { elementId } }))}>
         Set drop area
       </button>
-      <div className="hint pad">Drop area: drag to move, corners to resize, Esc to finish.</div>
+      <Help>Drop area: drag to move, corners to resize, Esc to finish.</Help>
 
       <div className="group-title2">While dragging</div>
       {[...comboSharedCaptions(siblings, elementId), undefined].map((cap) =>
@@ -2541,7 +2581,7 @@ function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps):
 
       {[...fxTargets, undefined].map((el, i) => (
         <div className="combo-slot" key={el?.id ?? 'fx-add'}>
-          <span title="This element dims / fades / drains colour for as long as an option is being carried, then comes back. It can already be a layer, the anchor or the backdrop — the effect is not a role.">
+          <span title="This element dims / fades / drains color for as long as an option is being carried, then comes back. It can already be a layer, the anchor or the backdrop — the effect is not a role.">
             {el ? 'Affect' : 'Add affected'}
           </span>
           <Select value={el?.id ?? ''} onChange={(v) => setFxTarget(i, v)} options={fxChoices(el)} />
@@ -2576,7 +2616,7 @@ function ComboSetup({ params, setParam, elementId, siblings }: ComboSetupProps):
           {fxNum('Saturation', 'holdSaturation', 1, 0, 3, 0.05)}
           {fxNum('Opacity', 'holdOpacity', 1, 0, 1, 0.05)}
           {fxNum('Effect fade (ms)', 'holdEffectMs', 180, 0, 2000, 20)}
-          <div className="hint pad">1 = untouched. The effect rides on top of whatever the element already looks like.</div>
+          <Help>1 = untouched. The effect rides on top of whatever the element already looks like.</Help>
         </>
       )}
 
@@ -2848,13 +2888,13 @@ function ConfigSetup({ params, setParam, elementId, siblings }: ConfigSetupProps
         />
         <span className="combo-slot-actions" />
       </div>
-      <div className="hint pad">
+      <Help>
         Taps to win: 0 wins once the player has chosen in every group. A pre-selection is a starting state, not a move, so it never counts toward that.
-      </div>
-      <div className="hint pad">
+      </Help>
+      <Help>
         Selection doesn’t need a second image: <b>Selected look</b> below draws a border, grows the option and nudges it, and the gap opens by exactly what the growth needs — so
         the space around the selected option ends up wider than the gaps between the rest.
-      </div>
+      </Help>
       <Chips
         items={Array.from({ length: groups }, (_, i) => ({
           key: String(i),
@@ -2910,7 +2950,6 @@ function ConfigSetup({ params, setParam, elementId, siblings }: ConfigSetupProps
           Nothing marks the chosen option — no selected image, no selected art, and Selected look is left neutral. Only the product image will change when a tap lands.
         </div>
       )}
-      <div className="hint pad">Taps only do anything in Preview — the canvas holds every option still so you can place it.</div>
 
       {stateArt.length > 0 && (
         <>
@@ -3054,8 +3093,8 @@ function ScratchGridCells({ params, setParam, setParams, elementId, cardAspect }
       <NumField label="Outer padding" value={Number(params.gap ?? 10)} step={2} min={0} max={60} onChange={(n) => setParam('gap', n)} />
       <NumField label="Column gap" value={Number(params.colGap ?? params.gap ?? 10)} step={2} min={0} max={60} onChange={(n) => setParam('colGap', n)} />
       <NumField label="Row gap" value={Number(params.rowGap ?? params.gap ?? 10)} step={2} min={0} max={60} onChange={(n) => setParam('rowGap', n)} />
-      <NumField label="Cell corner radius (%)" value={Number(params.cellRadius ?? 9)} step={1} min={0} max={50} onChange={(n) => setParam('cellRadius', n)} />
-      <div className="hint pad">Rounds the grid&apos;s 4 outer cell corners (% of the cell&apos;s short side). Set 0 for square corners so cell images aren&apos;t clipped.</div>
+      <NumField label="Cell corner radius" suffix="%" value={Number(params.cellRadius ?? 9)} step={1} min={0} max={50} onChange={(n) => setParam('cellRadius', n)} />
+      <Help>Rounds the grid&apos;s 4 outer cell corners (% of the cell&apos;s short side). Set 0 for square corners so cell images aren&apos;t clipped.</Help>
       <NumField label="Cell border width" value={Number(params.cellBorderWidth ?? 0)} step={1} min={0} max={40} onChange={(n) => setParam('cellBorderWidth', n)} />
       <ColorField label="Cell border color" value={(params.cellBorderColor as string) || '#ffffff'} onChange={(c) => setParam('cellBorderColor', c ?? '#ffffff')} />
       <NumField label="Reveal threshold" value={Number(params.threshold ?? 0.5)} step={0.05} min={0.2} max={0.9} onChange={(n) => setParam('threshold', n)} />
@@ -3066,10 +3105,10 @@ function ScratchGridCells({ params, setParam, setParams, elementId, cardAspect }
       <button className="btn" style={{ width: '100%', marginTop: 6 }} onClick={() => window.dispatchEvent(new CustomEvent('pa:zone-edit', { detail: { elementId } }))}>
         Edit reveal zone on canvas
       </button>
-      <div className="hint pad">
+      <Help>
         Only scratching inside the reveal zone counts toward a cell&apos;s threshold — anywhere outside never contributes. The same zone applies to every cell. Drag the box in the
         first cell to move, corner handles to resize. Esc to finish.
-      </div>
+      </Help>
       <ColorField label="Cover color" value={(params.coverColor as string) || undefined} allowNone onChange={(c) => setParam('coverColor', c ?? '')} />
       <ColorField label="Win cell bg" value={(params.winBgColor as string) || undefined} allowNone onChange={(c) => setParam('winBgColor', c ?? '')} />
       <ColorField label="Lose cell bg" value={(params.loseBgColor as string) || undefined} allowNone onChange={(c) => setParam('loseBgColor', c ?? '')} />
@@ -3163,7 +3202,7 @@ function ScratchGridCells({ params, setParam, setParams, elementId, cardAspect }
         onChange={(aid) => setParam(`cell${safeCell}text`, aid ?? '')}
       />
       <NumField
-        label="Text overlay scale (%)"
+        label="Text overlay scale" suffix="%"
         value={Number(params[`cell${safeCell}textScale`] !== '' && params[`cell${safeCell}textScale`] != null ? params[`cell${safeCell}textScale`] : (params.textScale ?? 80))}
         step={5}
         min={10}
@@ -3187,10 +3226,10 @@ function ScratchGridCells({ params, setParam, setParams, elementId, cardAspect }
       </Row>
 
       <div className="group-title2">Random reveals (this cell)</div>
-      <div className="hint pad">
+      <Help>
         Add two or more and the cell shows one of them at random each play, weighted by chance{cellIsWin ? ', and a win goes to that reveal’s scene' : ''}. Blank fields use the cell&apos;s settings
         above.
-      </div>
+      </Help>
       <RevealOptionsField
         value={params[`cell${safeCell}reveals`]}
         onChange={(v) => setParam(`cell${safeCell}reveals`, v)}
@@ -3200,18 +3239,18 @@ function ScratchGridCells({ params, setParam, setParams, elementId, cardAspect }
       />
 
       <div className="group-title2">Hint path (this cell)</div>
-      <div className="hint pad">The hint hand rubs from the start point to the end point. Values are % of the cell (0,0 = top-left). Default is a centered horizontal rub.</div>
-      <NumField label="Start X (%)" value={Number(params[`cell${safeCell}hintFromX`] ?? 20)} step={5} min={0} max={100} onChange={(n) => setParam(`cell${safeCell}hintFromX`, n)} />
-      <NumField label="Start Y (%)" value={Number(params[`cell${safeCell}hintFromY`] ?? 50)} step={5} min={0} max={100} onChange={(n) => setParam(`cell${safeCell}hintFromY`, n)} />
-      <NumField label="End X (%)" value={Number(params[`cell${safeCell}hintToX`] ?? 80)} step={5} min={0} max={100} onChange={(n) => setParam(`cell${safeCell}hintToX`, n)} />
-      <NumField label="End Y (%)" value={Number(params[`cell${safeCell}hintToY`] ?? 50)} step={5} min={0} max={100} onChange={(n) => setParam(`cell${safeCell}hintToY`, n)} />
+      <Help>The hint hand rubs from the start point to the end point. Values are % of the cell (0,0 = top-left). Default is a centered horizontal rub.</Help>
+      <NumField label="Start X" suffix="%" value={Number(params[`cell${safeCell}hintFromX`] ?? 20)} step={5} min={0} max={100} onChange={(n) => setParam(`cell${safeCell}hintFromX`, n)} />
+      <NumField label="Start Y" suffix="%" value={Number(params[`cell${safeCell}hintFromY`] ?? 50)} step={5} min={0} max={100} onChange={(n) => setParam(`cell${safeCell}hintFromY`, n)} />
+      <NumField label="End X" suffix="%" value={Number(params[`cell${safeCell}hintToX`] ?? 80)} step={5} min={0} max={100} onChange={(n) => setParam(`cell${safeCell}hintToX`, n)} />
+      <NumField label="End Y" suffix="%" value={Number(params[`cell${safeCell}hintToY`] ?? 50)} step={5} min={0} max={100} onChange={(n) => setParam(`cell${safeCell}hintToY`, n)} />
 
       {cellIsWin && (
         <>
-          <div className="hint pad">
+          <Help>
             When this cell wins, it redirects to this scene without flashing back to the game (a normal scene replaces it; an overlay-type scene dims it). That scene’s own Advance
             then continues to the end scene. Leave blank to use the default below; if no scene is set, falls back to the overlay image.
-          </div>
+          </Help>
           <Row label="Cell win scene (redirect)">
             <Select
               value={String(params[`cell${safeCell}winSceneId`] ?? '')}
@@ -3220,7 +3259,7 @@ function ScratchGridCells({ params, setParam, setParams, elementId, cardAspect }
             />
           </Row>
           <div className="group-title2">Random win scene (this cell)</div>
-          <div className="hint pad">Tick two or more scenes and this cell&apos;s win goes to one of them at random, weighted by chance. Overrides the cell win scene above.</div>
+          <Help>Tick two or more scenes and this cell&apos;s win goes to one of them at random, weighted by chance. Overrides the cell win scene above.</Help>
           <ScenePoolField value={params[`cell${safeCell}winScenePool`]} onChange={(v) => setParam(`cell${safeCell}winScenePool`, v)} />
           <AssetPicker
             label="Cell win overlay image"
@@ -3229,7 +3268,7 @@ function ScratchGridCells({ params, setParam, setParams, elementId, cardAspect }
             onChange={(aid) => setParam(`cell${safeCell}winOverlayImage`, aid ?? '')}
           />
           <NumField
-            label="Cell win image duration (ms)"
+            label="Cell win image duration" suffix="ms"
             value={Number(
               params[`cell${safeCell}winOverlayDurationMs`] !== '' && params[`cell${safeCell}winOverlayDurationMs`] != null
                 ? params[`cell${safeCell}winOverlayDurationMs`]
@@ -3257,11 +3296,11 @@ function ScratchGridCells({ params, setParam, setParams, elementId, cardAspect }
       <NumField label="Text overlay scale (%, default)" value={Number(params.textScale ?? 80)} step={5} min={10} max={100} onChange={(n) => setParam('textScale', n)} />
 
       <Accordion id="inspector.scratchGridDate" title="Dynamic date (inside cells)" defaultOpen={false}>
-        <div className="hint pad">
+        <Help>
           Shows a live date inside the cell reveal (under the cover), scaling with the cell like the cell art. Tokens: <b>MMMM</b> July, <b>MMM</b> Jul, <b>MM/M</b> 07/7,{' '}
           <b>DD/D</b> day, <b>Do</b> 21st, <b>dddd/ddd</b> Monday/Mon, <b>YYYY/YY</b> year — e.g. “(MMMM Do)” → “(July 21st)”. Empty everywhere = no date; each cell can opt out with its “Show dynamic date”
           toggle.
-        </div>
+        </Help>
         <Row label="Win cells date">
           <input value={String(params.winDate ?? '')} placeholder="e.g. (MMMM D)" onChange={(e) => setParam('winDate', e.target.value)} />
         </Row>
@@ -3320,23 +3359,23 @@ function ScratchGridCells({ params, setParam, setParams, elementId, cardAspect }
             </Row>
           )
         })()}
-        <div className="hint pad">
+        <Help>
           Dragging the round marker in any cell moves the shared position (Esc to finish). One position, size and style applies to every cell that shows a date.
-        </div>
+        </Help>
       </Accordion>
 
       <div className="group-title2">Container background</div>
       <AssetPicker label="Background image" value={(params.bgImage as string) || undefined} allowNone onChange={(aid) => setParam('bgImage', aid ?? '')} />
-      <NumField label="BG scale (%)" value={Number(params.bgScale ?? 100)} step={5} min={10} max={300} onChange={(n) => setParam('bgScale', n)} />
-      <NumField label="BG X (%)" value={Number(params.bgX ?? 50)} step={5} min={0} max={100} onChange={(n) => setParam('bgX', n)} />
-      <NumField label="BG Y (%)" value={Number(params.bgY ?? 50)} step={5} min={0} max={100} onChange={(n) => setParam('bgY', n)} />
+      <NumField label="BG scale" suffix="%" value={Number(params.bgScale ?? 100)} step={5} min={10} max={300} onChange={(n) => setParam('bgScale', n)} />
+      <NumField label="BG X" suffix="%" value={Number(params.bgX ?? 50)} step={5} min={0} max={100} onChange={(n) => setParam('bgX', n)} />
+      <NumField label="BG Y" suffix="%" value={Number(params.bgY ?? 50)} step={5} min={0} max={100} onChange={(n) => setParam('bgY', n)} />
 
       <div className="group-title2">Lose &amp; win scenes</div>
-      <div className="hint pad">
+      <Help>
         Lose: the chosen scene pops up over the game, then dismisses on its own Advance and play resumes. Win: redirects to the chosen scene without flashing back to the game (a
         normal scene replaces it; an overlay-type scene dims it), and that scene’s own Advance continues to the end scene. If no scene is set, falls back to a plain image overlay.
         The win scene here is the default; each win cell can override it above.
-      </div>
+      </Help>
       <Row label="Lose overlay scene">
         <Select
           value={String(params.loseSceneId ?? '')}
@@ -3351,7 +3390,7 @@ function ScratchGridCells({ params, setParam, setParams, elementId, cardAspect }
         onChange={(aid) => setParam('loseOverlayImage', aid ?? '')}
       />
       <NumField
-        label="Lose image duration (ms)"
+        label="Lose image duration" suffix="ms"
         value={Number(params.loseOverlayDurationMs ?? 1500)}
         step={100}
         min={200}
@@ -3366,13 +3405,13 @@ function ScratchGridCells({ params, setParam, setParams, elementId, cardAspect }
         />
       </Row>
       <div className="group-title2">Random win scene (default)</div>
-      <div className="hint pad">
+      <Help>
         Tick scenes and a win goes to one of them at random, weighted by chance. Applies to win cells with no scene of their own; overrides the default win scene above.
-      </div>
+      </Help>
       <ScenePoolField value={params.winScenePool} onChange={(v) => setParam('winScenePool', v)} />
       <AssetPicker label="Default win overlay image" value={(params.winOverlayImage as string) || undefined} allowNone onChange={(aid) => setParam('winOverlayImage', aid ?? '')} />
       <NumField
-        label="Default win image duration (ms)"
+        label="Default win image duration" suffix="ms"
         value={Number(params.winOverlayDurationMs ?? 800)}
         step={100}
         min={200}
@@ -3559,11 +3598,11 @@ function CatchBoardSetup({ params, setParam, elementId, siblings }: CatchBoardSe
         box,
         'box',
       )}
-      <div className="hint pad">
+      <Help>
         {box
           ? 'The catch line is the top of this element, where you placed it. Move it on the canvas to move the line — the Basket section below no longer applies.'
           : 'Leave this empty to use the uploaded basket images and the Basket settings below instead.'}
-      </div>
+      </Help>
       {box && (
         <>
           {slot(
@@ -3572,11 +3611,11 @@ function CatchBoardSetup({ params, setParam, elementId, siblings }: CatchBoardSe
             boxFront,
             'boxfront',
           )}
-          <div className="hint pad">
+          <Help>
             {boxFront
               ? 'Falling items pass behind this and in front of the box, so a catch lands inside. It travels with the box, so place it over the box on the canvas.'
               : 'Leave this empty and the items simply land in front of the whole box.'}
-          </div>
+          </Help>
         </>
       )}
       <div className="group-title2">Placed items</div>
@@ -3625,11 +3664,11 @@ function CatchBoardSetup({ params, setParam, elementId, siblings }: CatchBoardSe
           )}
         </>
       )}
-      <div className="hint pad">
+      <Help>
         {items.length === 0
           ? 'Optional. Assign elements you have placed on the canvas and they become the falling items — each one dimmed until it is caught. Leave this empty to use the uploaded images below instead.'
           : `The board is these ${items.length} elements${params.requireUnique === false ? '' : ', won when one of each has been caught'}. Each falls at its own size on the canvas times the scale below.`}
-      </div>
+      </Help>
       <div className="group-title2">Soften behind</div>
       {Array.from({ length: soften.length + 1 }, (_, i) => {
         const index = i + 1
@@ -3655,12 +3694,12 @@ function CatchBoardSetup({ params, setParam, elementId, siblings }: CatchBoardSe
           </div>
         )
       })}
-      <div className="hint pad">
+      <Help>
         The placed items above are softened behind automatically — the row is read constantly while copies of those same items rain past it.{' '}
         {soften.length === 0
           ? 'Add anything else the falling items should read faintly through here: a logo, a title, whatever the board would otherwise clutter. Only the falling copies are touched; the element itself is never dimmed.'
           : `Plus these ${soften.length}. Strength is set by Soften blur / opacity in Falling Items below.`}
-      </div>
+      </Help>
     </>
   )
 }
@@ -3675,7 +3714,7 @@ function CatchTemplateInspector({ params, setParam, elementId, siblings }: Catch
       <Accordion id="inspector.catch.gameplay" title="Gameplay">
         <div className="grid2">
           <NumField label="Fall speed" value={Number(params.speed ?? 0.55)} step={0.05} min={0.2} max={3} onChange={(n) => setParam('speed', n)} />
-          <NumField label="Spawn every ms" value={Number(params.spawnMs ?? 900)} step={50} min={100} max={10000} onChange={(n) => setParam('spawnMs', n)} />
+          <NumField label="Spawn every" suffix="ms" value={Number(params.spawnMs ?? 900)} step={50} min={100} max={10000} onChange={(n) => setParam('spawnMs', n)} />
         </div>
         <Toggle label="Random fall angles" checked={!!params.randomizeAngle} onChange={(v) => setParam('randomizeAngle', v)} />
         {!!params.randomizeAngle && <NumberListEditor label="Angle choices" value={params.randomAngles} defaultValue={0} step={5} onChange={(v) => setParam('randomAngles', v)} />}
@@ -3711,7 +3750,7 @@ function CatchTemplateInspector({ params, setParam, elementId, siblings }: Catch
         </Row>
       </Accordion>
 
-      <Accordion id="inspector.catch.win" title="Winning Condition">
+      <Accordion id="inspector.catch.win" title="Winning condition">
         <Row label="Win when">
           <Chips
             items={[
@@ -3724,23 +3763,23 @@ function CatchTemplateInspector({ params, setParam, elementId, siblings }: Catch
         {uniqueMode ? (
           <>
             <NumField label="Favour uncollected" value={Number(params.uncaughtBias ?? 4)} step={1} min={1} max={20} onChange={(n) => setParam('uncaughtBias', n)} />
-            <div className="hint pad">
+            <Help>
               The player wins after collecting one of each unique item. Total catches is ignored in this mode. An item still missing is thrown this many times as often as one
               already collected, so the last of a set turns up quickly — 1 is a flat random draw.
-            </div>
+            </Help>
           </>
         ) : (
           <NumField label="Catches to win" value={Number(params.catches ?? 5)} step={1} min={1} max={50} onChange={(n) => setParam('catches', n)} />
         )}
       </Accordion>
 
-      <Accordion id="inspector.catch.items" title="Falling Items">
+      <Accordion id="inspector.catch.items" title="Falling items">
         <CatchBoardSetup params={params} setParam={setParam} elementId={elementId} siblings={siblings} />
         {catchItems(siblings, elementId).length > 0 ? (
           <>
             <div className="group-title2">Falling copies</div>
             <NumField label="Size vs placed" value={Number(params.itemFallScale ?? 2)} step={0.1} min={0.05} max={20} onChange={(n) => setParam('itemFallScale', n)} />
-            <NumField label="Fade to full (ms)" value={Number(params.caughtFadeMs ?? 260)} step={20} min={0} max={3000} onChange={(n) => setParam('caughtFadeMs', n)} />
+            <NumField label="Fade to full" suffix="ms" value={Number(params.caughtFadeMs ?? 260)} step={20} min={0} max={3000} onChange={(n) => setParam('caughtFadeMs', n)} />
             {catchCheck(siblings, elementId) && (
               <>
                 <div className="group-title2">Check mark</div>
@@ -3750,7 +3789,7 @@ function CatchTemplateInspector({ params, setParam, elementId, siblings }: Catch
                 </div>
                 <div className="grid2">
                   <NumField label="Scale" value={Number(params.checkScale ?? 1)} step={0.05} min={0.05} max={10} onChange={(n) => setParam('checkScale', n)} />
-                  <NumField label="Appears over (ms)" value={Number(params.checkFadeMs ?? 260)} step={20} min={0} max={3000} onChange={(n) => setParam('checkFadeMs', n)} />
+                  <NumField label="Appears over" suffix="ms" value={Number(params.checkFadeMs ?? 260)} step={20} min={0} max={3000} onChange={(n) => setParam('checkFadeMs', n)} />
                 </div>
                 <NumField label="Grows from" value={Number(params.checkFrom ?? 0.5)} step={0.05} min={0} max={3} onChange={(n) => setParam('checkFrom', n)} />
               </>
@@ -3764,9 +3803,9 @@ function CatchTemplateInspector({ params, setParam, elementId, siblings }: Catch
         )}
       </Accordion>
 
-      <Accordion id="inspector.catch.basketImages" title="Basket Images" defaultOpen={false}>
+      <Accordion id="inspector.catch.basketImages" title="Basket images" defaultOpen={false}>
         {placedBox ? (
-          <div className="hint pad">“{placedBox.name || placedBox.id}” is the box, so there is no front image to upload. A back layer still sits behind it.</div>
+          <Help>“{placedBox.name || placedBox.id}” is the box, so there is no front image to upload. A back layer still sits behind it.</Help>
         ) : (
           <AssetPicker label="Front image" value={(params.frontBasketImage as string) || undefined} allowNone onChange={(aid) => setParam('frontBasketImage', aid ?? '')} />
         )}
@@ -3775,9 +3814,9 @@ function CatchTemplateInspector({ params, setParam, elementId, siblings }: Catch
 
       <Accordion id="inspector.catch.basket" title="Basket" defaultOpen={false}>
         {placedBox ? (
-          <div className="hint pad">
+          <Help>
             The box is “{placedBox.name || placedBox.id}”. Its size and its catch height are its own, set by dragging it on the canvas — resize or move it there rather than here.
-          </div>
+          </Help>
         ) : (
           <>
             <div className="group-title2">Front layer</div>
@@ -3812,20 +3851,20 @@ function CatchTemplateInspector({ params, setParam, elementId, siblings }: Catch
         </Row>
       </Accordion>
 
-      <Accordion id="inspector.catch.caughtLayout" title="Caught Item Layout" defaultOpen={false}>
+      <Accordion id="inspector.catch.caughtLayout" title="Caught item layout" defaultOpen={false}>
         <NumberListEditor label="X positions" value={params.caughtItemXs} defaultValue={0} step={5} onChange={(v) => setParam('caughtItemXs', v)} />
         <NumberListEditor label="Y positions" value={params.caughtItemYs} defaultValue={0} step={5} onChange={(v) => setParam('caughtItemYs', v)} />
         <NumberListEditor label="Rotations" value={params.caughtItemAngles} defaultValue={0} step={5} onChange={(v) => setParam('caughtItemAngles', v)} />
         <NumberListEditor label="Scales" value={params.caughtItemScales} defaultValue={0.7} step={0.05} min={0.05} max={5} onChange={(v) => setParam('caughtItemScales', v)} />
         <NumField label="Layer" value={Number(params.caughtItemZIndex ?? 1)} step={1} min={-10} max={10} onChange={(n) => setParam('caughtItemZIndex', n)} />
         {placedBox && (
-          <div className="hint pad">Above 0 stacks caught items in front of the box’s picture; 0 or less tucks them behind it, which is what puts a shoe inside an open box.</div>
+          <Help>Above 0 stacks caught items in front of the box’s picture; 0 or less tucks them behind it, which is what puts a shoe inside an open box.</Help>
         )}
       </Accordion>
 
       <CatchPopupControls params={params} setParam={setParam} />
 
-      <Accordion id="inspector.catch.preview" title="Editor Preview" defaultOpen={false}>
+      <Accordion id="inspector.catch.preview" title="Editor preview" defaultOpen={false}>
         <Toggle label="Show caught items" checked={!!params.showCaughtItemsPreview} onChange={(v) => setParam('showCaughtItemsPreview', v)} />
         <Toggle label="Show catch effects" checked={!!params.showPopupPreview} onChange={(v) => setParam('showPopupPreview', v)} />
       </Accordion>
@@ -3861,7 +3900,7 @@ function CatchPopupControls({ params, setParam }: CatchPopupControlsProps): JSX.
 
   return (
     <>
-      <Accordion id="inspector.catch.effects" title="Catch Effects" defaultOpen={false}>
+      <Accordion id="inspector.catch.effects" title="Catch effects" defaultOpen={false}>
         {Array.from({ length: effectCount }).map((_, i) => {
           const conf = popupConfigs[i] || {}
           return (
@@ -3916,8 +3955,8 @@ function CatchPopupControls({ params, setParam }: CatchPopupControlsProps): JSX.
                 />
               </Row>
               <div className="grid2">
-                <NumField label="Duration ms" value={conf.durationMs ?? 600} step={50} min={0} onChange={(n) => updateConfig(i, { durationMs: n })} />
-                <NumField label="Delay ms" value={conf.delayMs ?? 0} step={50} min={0} onChange={(n) => updateConfig(i, { delayMs: n })} />
+                <NumField label="Duration" suffix="ms" value={conf.durationMs ?? 600} step={50} min={0} onChange={(n) => updateConfig(i, { durationMs: n })} />
+                <NumField label="Delay" suffix="ms" value={conf.delayMs ?? 0} step={50} min={0} onChange={(n) => updateConfig(i, { delayMs: n })} />
               </div>
               <Row label="Easing">
                 <Select
@@ -4041,13 +4080,13 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
         <div className="group-title">Align to canvas</div>
         <AlignRow />
         <Accordion id="inspector.multiAdjust" title="Adjust (all selected)" defaultOpen={false}>
-          <div className="hint pad">Sets the same brightness / contrast / saturation on every selected element — the usual way a batch of art is matched to one another.</div>
+          <Help>Sets the same brightness / contrast / saturation on every selected element — the usual way a batch of art is matched to one another.</Help>
           {first && <AdjustFields el={first} onPatch={(adjust) => patchAllAdjust(adjust)} />}
         </Accordion>
         <Accordion id="inspector.multiAnimation" title="Animation (all selected)" defaultOpen={false}>
-          <div className="hint pad">
+          <Help>
             Applies the same animation(s) to every selected element — stack multiple per phase with “+ Add another”, and they animate together as a group.
-          </div>
+          </Help>
           <AnimPhase
             title="Entrance"
             primary={firstEntrance}
@@ -4268,13 +4307,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
             Ungroup (Ctrl+Shift+G)
           </button>
         )}
-        <StyleButtons />
-        <button className="wide" onClick={duplicateSelected}>
-          Duplicate (Ctrl+D)
-        </button>
-        <button className="wide danger" onClick={removeSelected}>
-          Delete
-        </button>
+        <ElementActions />
       </div>
     )
   }
@@ -4317,28 +4350,32 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
             <Row label="Scene name">
               <input value={sd.name} onChange={(e) => patchSceneDef(sd.id, { name: e.target.value })} />
             </Row>
-            <button className="wide primary scene-language-inspector" onClick={() => setSceneTranslationId(sd.id)}>
-              <Icon icon={Languages} size={15} />
-              {Object.keys(sd.localeOverrides ?? {}).length ? `Language versions (${Object.keys(sd.localeOverrides ?? {}).join(', ')})` : '+ Add language version for this scene'}
+            <button className="wide scene-language-inspector" onClick={() => setSceneTranslationId(sd.id)}>
+              <Icon icon={Languages} size={14} />
+              {Object.keys(sd.localeOverrides ?? {}).length ? `Language versions (${Object.keys(sd.localeOverrides ?? {}).join(', ')})` : 'Language versions…'}
             </button>
             {sceneTranslationId === sd.id && <SceneTranslationModal sceneId={sd.id} onClose={() => setSceneTranslationId(null)} />}
-            <div className="scene-meta-row">
-              <Row label="Type">
-                <Select
-                  value={(sd.kind as string) === 'win' || (sd.kind as string) === 'custom' ? 'overlay' : (sd.kind ?? 'overlay')}
-                  // asEndscene / overlayBase only mean anything on an overlay — drop them on the way
-                  // out so a scene switched to game/endscene and back doesn't silently come back
-                  // terminal, or still pointing at a backdrop.
-                  onChange={(v) => patchSceneDef(sd.id, { kind: v as SceneKind, ...(v === 'overlay' ? {} : { asEndscene: undefined, overlayBase: undefined }) })}
-                  options={[
-                    { value: 'game', label: 'game scene' },
-                    { value: 'overlay', label: 'overlay scene' },
-                    { value: 'endscene', label: 'endscene' },
-                  ]}
-                />
-              </Row>
-              <ColorField label={landscape ? 'BG left' : 'BG top'} value={sd.bgColor || undefined} allowNone onChange={(c) => setSceneBg(c ?? '')} />
-              <ColorField label={landscape ? 'BG right' : 'BG bottom'} value={sd.bgColor2 || undefined} allowNone onChange={(c) => setSceneBg2(c)} />
+            <Row label="Type">
+              {(() => {
+                const kind = (sd.kind as string) === 'win' || (sd.kind as string) === 'custom' ? 'overlay' : (sd.kind ?? 'overlay')
+                // asEndscene / overlayBase only mean anything on an overlay — drop them on the way
+                // out so a scene switched to game/endscene and back doesn't silently come back
+                // terminal, or still pointing at a backdrop.
+                const setKind = (v: SceneKind): void => patchSceneDef(sd.id, { kind: v, ...(v === 'overlay' ? {} : { asEndscene: undefined, overlayBase: undefined }) })
+                return (
+                  <Chips
+                    items={[
+                      { key: 'game', label: 'Game', active: kind === 'game', onClick: () => setKind('game') },
+                      { key: 'overlay', label: 'Overlay', active: kind === 'overlay', onClick: () => setKind('overlay') },
+                      { key: 'endscene', label: 'End card', active: kind === 'endscene', onClick: () => setKind('endscene') },
+                    ]}
+                  />
+                )
+              })()}
+            </Row>
+            <div className="color-pair">
+              <ColorField label={landscape ? 'Background left' : 'Background top'} value={sd.bgColor || undefined} allowNone onChange={(c) => setSceneBg(c ?? '')} />
+              <ColorField label={landscape ? 'Background right' : 'Background bottom'} value={sd.bgColor2 || undefined} allowNone onChange={(c) => setSceneBg2(c)} />
             </div>
             {isOverlayKind && !!others.length && (
               <>
@@ -4350,20 +4387,20 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                   />
                 </Row>
                 {sd.overlayBase && (
-                  <div className="hint pad">
+                  <Help>
                     This overlay brings <b>{others.find((s) => s.id === sd.overlayBase)?.name ?? sd.overlayBase}</b> up underneath itself before it floats in — needed when the
                     overlay runs <b>first</b> in the flow and has no previous scene to dim. Leave it on <b>(previous scene)</b> and it dims whatever is already on screen.
-                  </div>
+                  </Help>
                 )}
               </>
             )}
             {isOverlayKind && <Toggle label="Also the MRAID end card" checked={!!sd.asEndscene} onChange={(v) => patchSceneDef(sd.id, { asEndscene: v || undefined })} />}
             {isOverlayKind && sd.asEndscene && (
-              <div className="hint pad">
+              <Help>
                 This overlay <b>is</b> the end card. It stays floated over the finished game — the dim/blur shows the board through — and gets the endscene wrap: tap anywhere to
                 install, <b>gameEnd</b> signalled to the network, no date header unless you turn it on below. It is
                 <b> terminal</b>, so its Advance rule below is ignored: nothing dismisses it and it never continues to another scene.
-              </div>
+              </Help>
             )}
             {state.scene.meta.header && !actsAsEndscene && (
               <Toggle label="Hide date header in this scene" checked={!!sd.hideHeader} onChange={(v) => patchSceneDef(sd.id, { hideHeader: v || undefined })} />
@@ -4371,10 +4408,10 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
             {state.scene.meta.header && actsAsEndscene && (
               <>
                 <Toggle label="Show date header on this end card" checked={!!sd.showHeader} onChange={(v) => patchSceneDef(sd.id, { showHeader: v || undefined })} />
-                <div className="hint pad">
+                <Help>
                   End cards hide the pinned date/countdown header by default. Turn this on to band it across the end card too — it stays tap-through, so the whole card still clicks
                   out.
-                </div>
+                </Help>
               </>
             )}
             {/* Per-scene header LAYOUT — two independent switches, one per orientation.
@@ -4401,10 +4438,10 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                       onChange={(v) => patchSceneDef(sd.id, { header: v ? withOwnSlot(projectHeader, sd.header, orient) : withoutSlot(sd.header, orient) })}
                     />
                     {!owns && (
-                      <div className="hint pad">
+                      <Help>
                         This scene follows the project header in {orient}. Turn this on — or just drag the band on the canvas — and it keeps a copy of what it shows now: from then
                         on nothing you change in the Header popover, or in another scene, can move it here.
-                      </div>
+                      </Help>
                     )}
                     {owns && (
                       <>
@@ -4441,18 +4478,18 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                         </button>
                       </>
                     )}
-                    <div className="hint pad">
-                      {other} is {ownsSlot(sd.header, other) ? <>this scene’s own too — switch the frame’s orientation chip to edit it</> : <>following the project header</>}. The
+                    <Help>
+                      {other} is {ownsSlot(sd.header, other) ? <>this scene’s own too — switch Portrait / Landscape in the top bar to edit it</> : <>following the project header</>}. The
                       two orientations are stored separately, so one never changes the other. Content, colours and animation always come from the project header.
-                    </div>
+                    </Help>
                   </>
                 )
               })()}
             {sd.kind === 'endscene' && (
-              <div className="hint pad">
+              <Help>
                 Endscene = MRAID <b>end card</b>: in Preview/export the whole scene is tap-to-install and signals the network the ad ended. Add a <b>video endscene</b> element for
                 a video card, or just build it like any scene (product + pulsing CTA) for a <b>coded</b> end card; both get the MRAID wrap.
-              </div>
+              </Help>
             )}
 
             {(sd.kind === 'overlay' || (sd.kind as string) === 'win' || (sd.kind as string) === 'custom') &&
@@ -4462,9 +4499,9 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 return (
                   <>
                     <div className="group-title">Dim / blur overlay</div>
-                    <div className="hint pad" style={{ marginBottom: 4 }}>
+                    <Help>
                       Full-screen overlay rendered behind all scene elements. Uses an oversized div so edges are always off-screen; no edge artifacts on AppLovin.
-                    </div>
+                    </Help>
                     <Row label="Fill">
                       <Select
                         value={ov.fillMode ?? 'solid'}
@@ -4499,7 +4536,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                         />
                       </>
                     )}
-                    <NumField label="Blur px" value={ov.blurPx ?? 0} step={1} min={0} max={30} onChange={(n) => setOv({ blurPx: n || undefined })} />
+                    <NumField label="Blur" suffix="px" value={ov.blurPx ?? 0} step={1} min={0} max={30} onChange={(n) => setOv({ blurPx: n || undefined })} />
                     {(ov.blurPx ?? 0) > 0 && (
                       <>
                         <Row label="Falloff">
@@ -4533,22 +4570,22 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 )
               })()}
 
-            <div className="group-title">Advance (when to leave this scene)</div>
+            <div className="group-title">Leave this scene</div>
             <Row label="On">
               <Select
                 value={adv.on}
                 onChange={(v) => patchSceneDef(sd.id, { advance: { ...adv, on: v as AdvanceOn } })}
                 options={[
-                  { value: 'gameWin', label: 'game won' },
-                  { value: 'timer', label: 'after delay' },
-                  { value: 'tap', label: 'on tap' },
-                  { value: 'manual', label: 'manual (stay)' },
+                  { value: 'gameWin', label: 'When the game is won' },
+                  { value: 'timer', label: 'After a delay' },
+                  { value: 'tap', label: 'On tap' },
+                  { value: 'manual', label: 'Never (stay)' },
                 ]}
               />
             </Row>
             {adv.on !== 'manual' && (
               <NumField
-                label="Delay (ms)"
+                label="Delay" suffix="ms"
                 value={adv.delayMs ?? (adv.on === 'timer' ? 2000 : 0)}
                 step={100}
                 onChange={(n) => patchSceneDef(sd.id, { advance: { ...adv, delayMs: n } })}
@@ -4559,49 +4596,45 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 <Select
                   value={adv.to ?? ''}
                   onChange={(v) => patchSceneDef(sd.id, { advance: { ...adv, to: v || undefined } })}
-                  options={[{ value: '', label: '(next scene)' }, ...others.map((s) => ({ value: s.id, label: s.name }))]}
+                  options={[{ value: '', label: 'Next scene' }, ...others.map((s) => ({ value: s.id, label: s.name }))]}
                 />
               </Row>
             )}
 
-            <div className="group-title">Transition (how this scene enters)</div>
+            <div className="group-title">Transition in</div>
             <div className="grid2">
               <Row label="Type">
                 <Select
                   value={tr.type}
                   onChange={(v) => patchSceneDef(sd.id, { transition: { ...tr, type: v as TransitionType } })}
                   options={[
-                    { value: 'none', label: 'none' },
-                    { value: 'fade', label: 'fade' },
-                    { value: 'slide-left', label: 'slide ←' },
-                    { value: 'slide-right', label: 'slide →' },
-                    { value: 'slide-up', label: 'slide ↑' },
-                    { value: 'slide-down', label: 'slide ↓' },
+                    { value: 'none', label: 'None' },
+                    { value: 'fade', label: 'Fade' },
+                    { value: 'slide-left', label: 'Slide left' },
+                    { value: 'slide-right', label: 'Slide right' },
+                    { value: 'slide-up', label: 'Slide up' },
+                    { value: 'slide-down', label: 'Slide down' },
                   ]}
                 />
               </Row>
-              <NumField label="Duration" value={tr.durationMs} step={50} onChange={(n) => patchSceneDef(sd.id, { transition: { ...tr, durationMs: n } })} />
+              <NumField label="Duration" value={tr.durationMs} step={50} suffix="ms" onChange={(n) => patchSceneDef(sd.id, { transition: { ...tr, durationMs: n } })} />
             </div>
 
             <div className="group-title">Landscape layout</div>
             {(() => {
               const withLs = sd.elements.filter((e) => e.landscape && Object.keys(e.landscape).length > 0).length
-              return (
+              return withLs > 0 ? (
                 <>
                   <div className="hint pad">
-                    Every element can hold its own <b>landscape</b> position &amp; size — same assets, same animations, only the layout differs. Toggle <b>Landscape</b> in the top
-                    bar and drag/resize; those edits never touch portrait.{' '}
-                    {withLs > 0 ? (
-                      <>
-                        <b>
-                          {withLs}/{sd.elements.length}
-                        </b>{' '}
-                        elements carry landscape overrides in this scene.
-                      </>
-                    ) : (
-                      <>No overrides yet — landscape currently mirrors the portrait layout.</>
-                    )}
+                    {withLs} of {sd.elements.length} elements have their own landscape layout.
                   </div>
+                  <button className="wide danger" onClick={clearLandscapeLayout}>
+                    Reset landscape to follow portrait
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="hint pad">Landscape follows the portrait layout.</div>
                   <button
                     className="wide"
                     onClick={() => {
@@ -4609,17 +4642,13 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                       setOrientation('landscape')
                     }}
                   >
-                    Create separate landscape layout (opens landscape)
+                    Make a separate landscape layout
                   </button>
-                  <div className="hint pad">
-                    Snapshots the current portrait layout into landscape for <b>every element</b>, so the two orientations become fully independent — after this, moving things in
-                    portrait won’t shift landscape. Reused elements keep their landscape layout when copied to another scene.
-                  </div>
-                  {withLs > 0 && (
-                    <button className="wide danger" onClick={clearLandscapeLayout}>
-                      Reset landscape — follow portrait again
-                    </button>
-                  )}
+                  <Help>
+                    Every element can hold its own <b>landscape</b> position &amp; size — same assets, same animations, only the layout differs. This snapshots the current
+                    portrait layout into landscape for every element, so moving things in portrait won’t shift landscape afterwards. You can also switch to <b>Landscape</b> in
+                    the top bar and drag any element; that edit never touches portrait.
+                  </Help>
                 </>
               )
             })()}
@@ -4629,17 +4658,12 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
           </>
         )}
 
-        <div className="group-title">Project</div>
-        <button className="wide" onClick={props.onProjectSettings}>
-          Project settings…
-        </button>
-        <div className="hint pad">Name, client/MIP, size &amp; store URLs, audio, languages and variants live in Project settings.</div>
-
-        <div className="group-title">Trace backdrop (editor only)</div>
-        <AssetPicker label="Mockup image" allowNone value={state.trace.assetId} onChange={(id) => setTrace({ assetId: id })} />
-        <Toggle label="Show backdrop" checked={state.trace.visible} onChange={(v) => setTrace({ visible: v })} />
-        <Slider label="Opacity" value={Math.round(state.trace.opacity * 100)} min={5} max={100} suffix="%" onChange={(n) => setTrace({ opacity: n / 100 })} />
-        <div className="hint pad">A mockup overlaid faintly on the canvas to trace/align against. Never rendered at runtime or exported.</div>
+        <Accordion id="inspector.trace" title="Trace backdrop" defaultOpen={false}>
+          <AssetPicker label="Mockup image" allowNone value={state.trace.assetId} onChange={(id) => setTrace({ assetId: id })} />
+          <Toggle label="Show backdrop" checked={state.trace.visible} onChange={(v) => setTrace({ visible: v })} />
+          <Slider label="Opacity" value={Math.round(state.trace.opacity * 100)} min={5} max={100} suffix="%" onChange={(n) => setTrace({ opacity: n / 100 })} />
+          <Help>A mockup overlaid faintly on the canvas to trace/align against. Editor only: never rendered at runtime or exported.</Help>
+        </Accordion>
       </div>
     )
   }
@@ -4661,17 +4685,6 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
   const entranceExtra = legacyWinAnim ? undefined : el.animations?.entranceExtra
   const gameWinAnim = el.animations?.gameWin ?? (legacyWinAnim ? el.animations?.entrance : undefined)
   const gameWinExtra = el.animations?.gameWinExtra ?? (legacyWinAnim ? el.animations?.entranceExtra : undefined)
-  const patchEntranceAnimations = (patch: Partial<AnimSpec> | null): void => {
-    const nextEntrance = patch === null ? undefined : { ...(entranceAnim ?? { preset: 'fade' as AnimSpec['preset'], durationMs: 520, delayMs: 0, easing: 'ease-out' }), ...patch }
-    patchElement(id, {
-      animations: {
-        ...(el.animations ?? {}),
-        entrance: nextEntrance,
-        entranceExtra: patch === null ? undefined : entranceExtra,
-        ...(legacyWinAnim && !el.animations?.gameWin ? { gameWin: el.animations?.entrance, gameWinExtra: el.animations?.entranceExtra } : {}),
-      },
-    })
-  }
   const patchGameWinAnimations = (primary: AnimSpec | undefined, extra: AnimSpec[]): void => {
     patchElement(id, {
       animations: {
@@ -4757,6 +4770,24 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
       box: { bgColor: 'rgba(255,255,255,0.16)', radiusPx: 24, borderPx: 1.5, borderColor: 'rgba(255,255,255,0.55)', paddingXPx: 36, paddingYPx: 20, shadow: 'soft' },
     },
   ]
+  const layerMode: 'below' | 'normal' | 'above' | 'top' = el.belowOverlay ? 'below' : el.overlayTop ? 'top' : el.overlayImmune || el.type === 'cta' ? 'above' : 'normal'
+  // A one-line digest under the collapsed Visibility header, so a non-default
+  // setting is never out of sight just because the section is closed.
+  const visSummary = (() => {
+    const parts: string[] = []
+    const lsHidden = el.landscape?.hidden ?? !!el.hidden
+    if (el.hidden && lsHidden) parts.push('hidden')
+    else if (el.hidden) parts.push('landscape only')
+    else if (lsHidden) parts.push('portrait only')
+    if (el.showOnWin) parts.push('on win')
+    if (el.showAfterInteraction) parts.push('after basket move')
+    if (layerMode !== (el.type === 'cta' ? 'above' : 'normal')) parts.push({ below: 'below overlays', normal: 'normal layer', above: 'above overlays', top: 'top layer' }[layerMode])
+    if (el.hideOnOverlay) parts.push('hides on overlay')
+    if (el.persist) parts.push('carried across scenes')
+    if (el.showOnPage) parts.push('page ' + el.showOnPage)
+    if (el.sync) parts.push('synced')
+    return parts.join(' · ')
+  })()
   const locales = state.project.meta.locales ?? []
   const defaultLanguage = state.project.meta.defaultLocale || 'en'
   const localeOverride = editLocale ? el.localeOverrides?.[editLocale] : undefined
@@ -4785,16 +4816,23 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
     <div className="panel inspector">
       {variantBanner}
       <div className="panel-title">
-        {el.type === 'bar' && el.mode === 'fit' ? 'rectangle' : el.type} {editLocale && <span className="badge">{editLocale}</span>}{' '}
+        {el.type === 'bar' && el.mode === 'fit' ? 'Rectangle' : TYPE_LABEL[el.type]} {editLocale && <span className="badge">{editLocale}</span>}{' '}
         {landscape && <span className="badge">landscape</span>}
       </div>
 
-      <Row label="Name (layers)">
-        <input value={el.name ?? ''} onChange={(e) => patchElement(id, { name: e.target.value })} />
-      </Row>
-
+      <div className="name-row">
+        <Row label="Name">
+          <input value={el.name ?? ''} onChange={(e) => patchElement(id, { name: e.target.value })} />
+        </Row>
+        {!activeVariant && (
+          <button className={'icon' + (el.locked ? ' on' : '')} title={el.locked ? 'Unlock' : 'Lock (stops canvas selection)'} aria-pressed={!!el.locked} onClick={() => toggleLock(id)}>
+            <Icon icon={el.locked ? Lock : LockOpen} size={14} />
+          </button>
+        )}
+      </div>
+      {locales.length > 0 && (
+        <>
       <div className="group-title">Languages</div>
-      {locales.length ? (
         <>
           <Chips
             items={[
@@ -4829,252 +4867,8 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
             <div className="hint pad">This is the default ({defaultLanguage}) element. Pick a language above to add only the differences.</div>
           )}
         </>
-      ) : (
-        <>
-          <div className="hint pad">No extra build languages yet. The default is {defaultLanguage}.</div>
-          <button className="wide" onClick={props.onProjectSettings}>
-            Choose build languages…
-          </button>
         </>
       )}
-      {!activeVariant && <Toggle label="Lock element" checked={!!el.locked} onChange={() => toggleLock(id)} />}
-      <Toggle label="Show on game win" checked={!!el.showOnWin} onChange={(v) => patchElement(id, { showOnWin: v })} />
-      {(el.type === 'text' || el.type === 'image' || (el.type === 'bar' && el.mode === 'fit')) && sceneHasCatch && (
-        <Toggle label="Show after basket moved" checked={!!el.showAfterInteraction} onChange={(v) => patchElement(id, { showAfterInteraction: v || undefined })} />
-      )}
-      {el.type === 'cta' ? (
-        // The CTA already floats above overlays, so an "Above overlays" toggle for it would
-        // render pre-ticked and read as a no-op. Phrase it as the opt-IN it is instead: off
-        // by default, and ticking it drops the button under the win/lose card.
-        <>
-          <Toggle label="Below overlays (dimmed, not hidden)" checked={!!el.belowOverlay} onChange={(v) => patchElement(id, { belowOverlay: v || undefined })} />
-          {el.belowOverlay && (
-            <div className="hint pad">The win/lose card now covers the CTA — it shows through the dim instead of on top of it, and taps land on the card while it is up.</div>
-          )}
-        </>
-      ) : (
-        <Toggle label="Above overlays" checked={!!el.overlayImmune} onChange={(v) => patchElement(id, { overlayImmune: v || undefined })} />
-      )}
-      <Toggle label="Above other overlays (top layer)" checked={!!el.overlayTop} onChange={(v) => patchElement(id, { overlayTop: v || undefined })} />
-      <Toggle label="Hide on overlay" checked={!!el.hideOnOverlay} onChange={(v) => patchElement(id, { hideOnOverlay: v || undefined })} />
-      {CARRY_OVER_TYPES.has(el.type) && (
-        <>
-          <Toggle label="Carry across scenes" checked={!!el.persist} onChange={(v) => patchElement(id, { persist: v || undefined, persistScenes: undefined })} />
-          {el.persist && (
-            <>
-              <div className="hint pad">
-                Built once, above every scene — a scene change never rebuilds it, so the pulse (and any loop animation) runs straight through the transition instead of cutting.
-                Untick a scene to fade it out there. The canvas still shows it only on this scene; Preview shows the rest.
-              </div>
-              {state.project.scenes.map((s) => {
-                const shown = !el.persistScenes?.length || el.persistScenes.includes(s.id)
-                return (
-                  <Toggle
-                    key={s.id}
-                    label={`Show on “${s.name || s.id}”`}
-                    checked={shown}
-                    onChange={(v) => {
-                      const all = state.project.scenes.map((x) => x.id)
-                      const cur = el.persistScenes?.length ? el.persistScenes : all
-                      const next = all.filter((x) => (x === s.id ? v : cur.includes(x)))
-                      // Every scene ticked === the default, so store nothing.
-                      patchElement(id, { persistScenes: next.length === all.length ? undefined : next })
-                    }}
-                  />
-                )
-              })}
-            </>
-          )}
-        </>
-      )}
-      {bookPages > 0 && el.type !== 'game-mount' && (
-        <Row label="Only on book page">
-          <Select
-            value={String(el.showOnPage ?? 0)}
-            onChange={(v) => patchElement(id, { showOnPage: Number(v) || undefined })}
-            options={[
-              { value: '0', label: 'Every page' },
-              ...Array.from({ length: bookPages }, (_, i) => ({
-                value: String(i + 1),
-                label: `Page ${i + 1}${i === 0 && flipbookEl?.game?.params?.hasCover !== false ? ' (cover)' : ''}`,
-              })),
-            ]}
-          />
-        </Row>
-      )}
-
-      {/* Per-orientation visibility: base `hidden` + landscape override `landscape.hidden`.
-          The canvas reflects it live — the element only renders in the orientation(s) it
-          shows in (reselect a hidden one via the Layers panel). */}
-      {(() => {
-        const baseHidden = !!el.hidden
-        const lsHidden = el.landscape?.hidden ?? baseHidden
-        const mode: 'both' | 'portrait' | 'landscape' | 'none' =
-          !baseHidden && !lsHidden ? 'both' : !baseHidden && lsHidden ? 'portrait' : baseHidden && !lsHidden ? 'landscape' : 'none'
-        const setMode = (m: 'both' | 'portrait' | 'landscape'): void => {
-          const { hidden: _drop, ...restLs } = el.landscape ?? {}
-          if (m === 'both') patchElement(id, { hidden: undefined, landscape: el.landscape ? restLs : undefined })
-          else if (m === 'portrait') patchElement(id, { hidden: undefined, landscape: { ...restLs, hidden: true } })
-          else patchElement(id, { hidden: true, landscape: { ...restLs, hidden: false } })
-        }
-        return (
-          <>
-            <Row label="Show in">
-              <Chips
-                items={[
-                  { key: 'both', label: 'Both', active: mode === 'both', onClick: () => setMode('both') },
-                  { key: 'portrait', label: 'Portrait only', active: mode === 'portrait', onClick: () => setMode('portrait') },
-                  { key: 'landscape', label: 'Landscape only', active: mode === 'landscape', onClick: () => setMode('landscape') },
-                ]}
-              />
-            </Row>
-            {mode !== 'both' && (
-              <div className="hint pad">
-                {mode === 'none'
-                  ? 'Currently hidden in BOTH orientations (Layers eye + landscape override) — pick a mode above to show it again.'
-                  : mode === 'portrait'
-                    ? 'Only rendered while the ad is in portrait. On the canvas it disappears in landscape view; reselect it from the Layers panel.'
-                    : 'Only rendered while the ad is in landscape. On the canvas it disappears in portrait view; reselect it from the Layers panel.'}
-              </div>
-            )}
-          </>
-        )
-      })()}
-
-      {!activeVariant && (
-        <>
-          <Toggle
-            label={state.project.meta.projectName ? `Sync to “${state.project.meta.projectName}”` : 'Sync to project'}
-            checked={!!el.sync}
-            onChange={() => toggleSyncToProject(id)}
-          />
-          {el.sync && (
-            <Row label="Appears on">
-              <Select
-                value={el.sync.scope}
-                onChange={(v) => setSyncScope(id, v as 'scene' | 'all')}
-                options={[
-                  { value: 'scene', label: 'One scene' },
-                  { value: 'all', label: 'Every scene (overlay)' },
-                ]}
-              />
-            </Row>
-          )}
-          {el.sync && <div className="hint pad">Shared across all MIPs in this project; edits here (position, size, text, style, everything) apply to every MIP.</div>}
-        </>
-      )}
-
-      {!activeVariant &&
-        el.type !== 'game-mount' &&
-        el.type !== 'endscene' &&
-        (() => {
-          const curKey: ConvertTo = el.type === 'bar' ? (el.mode === 'fit' ? 'rect' : 'bar') : (el.type as ConvertTo)
-          const opts: { to: ConvertTo; label: string }[] = el.assetId
-            ? [
-                { to: 'image', label: 'Image' },
-                { to: 'bar', label: 'Header' },
-                { to: 'rect', label: 'Rectangle' },
-                { to: 'cta', label: 'CTA' },
-                { to: 'background', label: 'Background' },
-                { to: 'handguide', label: 'Hand guide' },
-              ]
-            : el.type === 'text'
-              ? [
-                  { to: 'text', label: 'Text' },
-                  { to: 'cta', label: 'CTA' },
-                ]
-              : [
-                  { to: 'bar', label: 'Header' },
-                  { to: 'rect', label: 'Rectangle' },
-                  { to: 'cta', label: 'CTA' },
-                  { to: 'text', label: 'Text' },
-                ]
-          return (
-            <>
-              <div className="group-title">Convert to</div>
-              <Chips items={opts.map((o) => ({ key: o.to, label: o.label, active: curKey === o.to, onClick: () => convertElement(id, o.to) }))} />
-            </>
-          )
-        })()}
-
-      <div className="group-title">Align to canvas</div>
-      <AlignRow />
-
-      {landscape && (
-        <button className="wide" onClick={() => (editLocale ? resetLocaleLayout(id, editLocale, 'landscape') : patchElement(id, { landscape: undefined }))}>
-          Reset {editLocale ? `${editLocale} ` : ''}landscape overrides
-        </button>
-      )}
-
-      <div className="group-title">Position {editLocale ? `(${editLocale}, ${landscape ? 'landscape' : 'portrait'})` : landscape ? '(landscape)' : ''}</div>
-      {editLocale && !landscape && localeOverride?.portrait && (
-        <button className="wide" onClick={() => resetLocaleLayout(id, editLocale, 'portrait')}>
-          Reset {editLocale} portrait layout
-        </button>
-      )}
-      <div className="grid2">
-        <NumField label="X" value={g.x} suffix="px" onChange={(n) => patchGeometry(id, { x: n })} />
-        <NumField label="Y" value={g.y} suffix="px" onChange={(n) => patchGeometry(id, { y: n })} />
-      </div>
-      {el.type === 'text' || el.type === 'countdown' || el.type === 'background' || el.type === 'confetti' || (el.type === 'endscene' && g.mode === 'extend') ? null : el.type ===
-          'bar' && g.mode === 'extend' ? (
-        <NumField label="Height" value={g.h} suffix="px" onChange={(n) => patchGeometry(id, { h: n })} />
-      ) : g.w != null && g.h != null ? (
-        <div className="grid2">
-          <NumField label="W" value={g.w} suffix="px" onChange={(n) => patchGeometry(id, { w: n })} />
-          <NumField label="H" value={g.h} suffix="px" onChange={(n) => patchGeometry(id, { h: n })} />
-        </div>
-      ) : (
-        <NumField label="Scale" value={g.scale} step={0.01} onChange={(n) => patchGeometry(id, { scale: n })} />
-      )}
-      {
-        <div className="grid2" style={{ marginTop: 4 }}>
-          <NumField label="Angle" value={el.rotation ?? 0} suffix="°" onChange={(n) => patchElement(id, { rotation: n === 0 ? undefined : n })} />
-        </div>
-      }
-      <div className="grid2">
-        <Row label="Anchor">
-          <Select value={g.anchor} onChange={(v) => patchGeometry(id, { anchor: v as Anchor })} options={ANCHORS.map((a) => ({ value: a, label: a }))} />
-        </Row>
-        <Row label="Mode">
-          <Select
-            value={g.mode}
-            onChange={(v) => patchGeometry(id, { mode: v as LayoutMode })}
-            options={[
-              { value: 'fit', label: 'fit' },
-              { value: 'extend', label: 'extend (full width)' },
-            ]}
-          />
-        </Row>
-      </div>
-      {(el.type === 'cta' || el.type === 'image' || el.type === 'button' || el.type === 'handguide' || el.type === 'bar') && (
-        <Toggle label="Relative to footer" checked={!!el.relativeToBasketBar} onChange={(v) => patchElement(id, { relativeToBasketBar: v })} />
-      )}
-
-      {canIdleBehavior &&
-        (() => {
-          const idle = el.idle ?? (el.type === 'handguide' ? el.handguide : undefined) ?? {}
-          const setIdle = (patch: any): void => patchElement(id, { idle: { ...idle, ...patch } })
-          return (
-            <Accordion id="inspector.idle" title="Idle behavior">
-              <Toggle label="Hide on tap" checked={idle.hideOnInteract !== false} onChange={(v) => setIdle({ hideOnInteract: v })} />
-              <Toggle label="Reappear when idle" checked={idle.reappearOnIdle !== false} onChange={(v) => setIdle({ reappearOnIdle: v })} />
-              {idle.reappearOnIdle !== false && <NumField label="Reappear after (ms)" value={idle.idleMs ?? 4000} step={500} min={0} onChange={(n) => setIdle({ idleMs: n })} />}
-              <Toggle label="Show at start (before first tap)" checked={idle.showInitially !== false} onChange={(v) => setIdle({ showInitially: v })} />
-              {sceneHasCatch && (
-                <Toggle
-                  label="Hide after basket tap / drag"
-                  checked={!!el.hideAfterBasketInteraction}
-                  onChange={(v) => patchElement(id, { hideAfterBasketInteraction: v || undefined })}
-                />
-              )}
-              <div className="hint pad">
-                Animates in Preview and export. By default it hides on the player's first tap and reappears after {idle.idleMs ?? 4000}ms of no interaction.
-              </div>
-            </Accordion>
-          )
-        })()}
-
       {el.type === 'game-mount' &&
         (() => {
           const tpl = GAME_TEMPLATES.find((t) => t.id === (el.game?.templateId ?? 'match')) ?? GAME_TEMPLATES[0]
@@ -5089,7 +4883,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
             const v = params[f.key]
             if (f.key === 'randomAngles' && !params.randomizeAngle) return null
             if (f.type === 'number')
-              return <NumField key={f.key} label={f.label} value={typeof v === 'number' ? v : 0} step={f.step ?? 1} min={f.min} max={f.max} onChange={(n) => setParam(f.key, n)} />
+              return <NumField key={f.key} label={f.label} value={typeof v === 'number' ? v : 0} step={f.step ?? 1} min={f.min} max={f.max} suffix={f.suffix} onChange={(n) => setParam(f.key, n)} />
             if (f.type === 'color')
               return <ColorField key={f.key} label={f.label} value={typeof v === 'string' && v ? v : undefined} allowNone onChange={(c) => setParam(f.key, c ?? '')} />
             if (f.type === 'font')
@@ -5124,200 +4918,8 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 <ScratchGridCells params={params} setParam={setParam} setParams={setParams} elementId={id} cardAspect={cardAspect} />
               ) : (
                 <>
-                  {tpl.id === 'combo' && <ComboSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
-                  {tpl.id === 'combo' && <div className="group-title2">Feel &amp; timing</div>}
-                  {tpl.id === 'configurator' && <ConfigSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
-                  {tpl.id === 'scratch' && <ScratchSetup params={params} setParams={setParams} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
-                  {tpl.id === 'dragclean' && <DragCleanSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
-                  {tpl.id === 'tapremove' && <TapRemoveSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
-                  {tpl.id === 'tapreveal' && <TapRevealSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
-                  {tpl.id === 'swipecards' && <SwipeCardsSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
-                  {tpl.id === 'progressbar' && (
-                    <ProgressBarSetup
-                      params={params}
-                      setParam={setParam}
-                      elementId={id}
-                      siblings={activeSceneDef(state)?.elements ?? []}
-                      // Full width is not a game param: a game mount already goes
-                      // through the same 'extend' layout path the header bar does, so
-                      // this is the element's own Mode, surfaced here rather than left
-                      // for the author to find in Geometry.
-                      fullWidth={g.mode === 'extend'}
-                      setFullWidth={(v) => patchGeometry(id, { mode: v ? 'extend' : 'fit' })}
-                    />
-                  )}
-                  {tpl.id === 'catch' ? (
-                    <CatchTemplateInspector params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />
-                  ) : (
-                    tpl.paramFields
-                      .filter(
-                        (f) =>
-                          !BRUSH_PARAM_KEYS.has(f.key) &&
-                          !(tpl.id === 'scratch' && (f.key === 'coverColor' || f.key === 'shadowColor')) &&
-                          // Drawn on the canvas (ScratchSetup's buttons), not typed in.
-                          !(tpl.id === 'scratch' && /^zone[XYWH]$/.test(f.key)) &&
-                          // ComboSetup owns both counts, right above its per-question chips.
-                          !(tpl.id === 'combo' && (f.key === 'questions' || f.key === 'options')) &&
-                          // ConfigSetup owns both counts, right above its per-group chips.
-                          !(tpl.id === 'configurator' && (f.key === 'groups' || f.key === 'options')) &&
-                          // Progress wiring is a dropdown of real elements in the setup
-                          // panels above, never a typed-in element id.
-                          f.key !== 'sourceGameId' &&
-                          f.key !== 'progressGameId' &&
-                          (f.showIf?.(params) ?? true),
-                      )
-                      // A template can title its sections (ParamField.group): emit a
-                      // heading whenever the group changes, so thirty knobs read as a
-                      // few blocks. Ungrouped fields render exactly as they always did.
-                      .reduce<JSX.Element[]>((out, f, i, list) => {
-                        if (f.group && f.group !== list[i - 1]?.group)
-                          out.push(
-                            <div className="group-title2" key={'grp-' + f.group}>
-                              {f.group}
-                            </div>,
-                          )
-                        const node = renderField(f)
-                        if (node) out.push(node)
-                        return out
-                      }, [])
-                  )}
-                  {tpl.id === 'scratch' && (
-                    <ColorField
-                      label="Cover color (none = transparent)"
-                      value={(params.coverColor as string) || undefined}
-                      allowNone
-                      onChange={(c) => setParam('coverColor', c ?? '')}
-                    />
-                  )}
-                  {tpl.id === 'scratch' && (
-                    <ColorField
-                      label="Reveal background (none = transparent)"
-                      value={(params.revealBgColor as string) || undefined}
-                      allowNone
-                      onChange={(c) => setParam('revealBgColor', c ?? '')}
-                    />
-                  )}
-                  {tpl.id === 'scratch' && (
-                    <ColorField
-                      label="Shadow color (none = no shadow)"
-                      value={(params.shadowColor as string) || undefined}
-                      allowNone
-                      onChange={(c) => setParam('shadowColor', c ?? '')}
-                    />
-                  )}
-                  {tpl.id === 'scratch' && (
-                    <BrushControls
-                      params={params}
-                      setParam={setParam}
-                      setParams={setParams}
-                      brushSrc={state.assets[(params.brushImage as string) || '']?.src ?? ''}
-                      radiusLabel="Brush/scratch radius (% of card)"
-                      cardAspect={cardAspect}
-                      radiusOnly={!!params.scratcherId && (activeSceneDef(state)?.elements ?? []).some((e) => e.id === params.scratcherId)}
-                    />
-                  )}
-                  {tpl.id === 'scratch' && (
-                    <>
-                      <div className="group-title2">Random reveals</div>
-                      <div className="hint pad">
-                        Add two or more and the card reveals one of them at random each play, weighted by chance; the win goes to that reveal&apos;s scene. A blank image
-                        uses the prize image; a blank scene uses the random win scene below, then Advance.
-                      </div>
-                      <RevealOptionsField value={params.reveals} onChange={(v) => setParam('reveals', v)} imageLabel="Prize image" />
-                      <div className="group-title2">Random win scene</div>
-                      <div className="hint pad">
-                        Tick scenes and the win goes to one of them at random, weighted by chance, instead of this scene&apos;s Advance target. Timing still follows Advance.
-                      </div>
-                      <ScenePoolField value={params.winScenePool} onChange={(v) => setParam('winScenePool', v)} />
-                    </>
-                  )}
-                  {tpl.id === 'scratch' && params.fit === 'fit' && (
-                    <div className="hint pad">Double-click the card on the canvas to position &amp; scale the reveal image: drag to move, corner handles to resize.</div>
-                  )}
-                  {tpl.id === 'holdgauge' && params.stageSfx === true && (
-                    <div className="hint pad">
-                      Give each stage its own sound in this element&apos;s Sounds section — one trigger per stage the dial can climb into. They only play on the way up; sliding
-                      back is silent.
-                    </div>
-                  )}
-                  {tpl.id === 'memorymatch' && params.tracker !== 'off' && (
-                    <div className="hint pad">
-                      Double-click the game on the canvas to edit the tracker symbols: drag a symbol sideways to nudge it, drag its corner handle to resize (aspect locked — bottoms
-                      always stay aligned). Esc or click outside to finish.
-                    </div>
-                  )}
-                  {tpl.id === 'thoughtwhack' && (
-                    <>
-                      <button
-                        className="btn"
-                        style={{ width: '100%', marginTop: 6 }}
-                        onClick={() => window.dispatchEvent(new CustomEvent('pa:thought-zone-edit', { detail: { elementId: id } }))}
-                      >
-                        Draw spawn areas + place subject marker
-                      </button>
-                      <div className="hint pad">
-                        Drag empty game space to draw more areas. Drag an area to move it, use its corner handles to resize it, or × to remove it. Place the pink SUBJECT marker
-                        over the subject&apos;s head/body anchor; both trailing bubbles always point there. Press Enter or Esc when done.
-                      </div>
-                      <div className="hint pad">
-                        Any scene element can use <b>On thought spawn</b> / <b>On thought whack</b> in its Animation panel and the matching triggers in its Sounds panel.
-                      </div>
-                      <div className="hint pad">The animated hint hand follows a currently visible, unwhacked thought and retargets after every whack.</div>
-                    </>
-                  )}
-                  {tpl.id === 'carousel' && (
-                    <>
-                      <div className="hint pad">
-                        The centre choice is the selection — it eases up to the size you set above and back down as it leaves, so there is no outline or frame. Swipe, flick or tap
-                        a side choice to bring it in.
-                      </div>
-                      <div className="hint pad">
-                        Labels have their own position: <b>Where the label sits</b> puts it below, above or right on the choice, and the <b>Label nudge</b> pair moves it from there
-                        — with a separate pair for the selected one. A nudge moves the label only; the choices stay where they are.
-                      </div>
-                      <div className="hint pad">
-                        The two choices either side of the centre get their own spacing: <b>Extra gap either side of the CENTRE</b> adds to the regular gap for those two only, so
-                        an enlarged centre stops crowding its neighbours. Negative pulls them in. Remember the centre is scaled up, so it eats into its own gap — the visible space
-                        is always smaller than the number.
-                      </div>
-                      <div className="hint pad">
-                        Every size, gap and nudge is in <b>design px</b> — the number you type is the size you get, and resizing the game box no longer resizes the choices with it.
-                        Slot pitch is simply <b>choice width + gap</b>, so a gap of 0 butts them together. The canvas redraws as you type.
-                      </div>
-                      <div className="hint pad">
-                        To make a <b>separate element</b> follow the choice: select it, open <b>Select &amp; generate</b>, switch on <b>Fill slot</b> and type the same{' '}
-                        <b>Link name</b> (<code>{String(params.linkGroup ?? 'carousel')}</code>). It swaps to that choice&apos;s <b>Linked element image</b> — or, if you leave that
-                        empty, to the choice image itself.
-                      </div>
-                      <div className="hint pad">
-                        Each choice can carry its own <b>Label image</b> instead of typed text. Labels belong to their choice, not to a slot, so a label always travels with the
-                        picture it names. Label images are sized by <b>height</b>, so wordmarks of different lengths still read at one weight.
-                      </div>
-                      <div className="hint pad">
-                        Fields marked <b>CENTRE</b> apply only to the selected slot — size it and move it wherever you want, for the choice image and the label separately, and
-                        every other slot keeps the settings above. The carousel eases between the two as you swipe. Nudges are in design px; keep the game box tall enough for a big
-                        lift, since it clips at its own edges.
-                      </div>
-                    </>
-                  )}
-                  {tpl.id === 'basket' && (
-                    <>
-                      <button
-                        className="btn"
-                        style={{ width: '100%', marginTop: 6 }}
-                        onClick={() => window.dispatchEvent(new CustomEvent('pa:zone-edit', { detail: { elementId: id } }))}
-                      >
-                        Set basket area on canvas
-                      </button>
-                      <div className="hint pad">
-                        Draw the invisible drop area over the basket artwork. Items keep the position where they are released inside it; a release within the snap border is pulled
-                        just inside the area. Every item must be placed to win.
-                      </div>
-                      <div className="hint pad">
-                        Prefer freeform items? Select any normal image and enable <b>Drag &amp; drop → Basket game item</b>. Marked scene images automatically replace the item
-                        slots below.
-                      </div>
-                    </>
+                  {tpl.id !== 'catch' && (tpl.assetSlots ?? []).some((slot) => slot.key !== 'brushImage' && slot.key !== 'popupImages' && (slot.showIf?.(params) ?? true)) && (
+                    <div className="group-title2">Images</div>
                   )}
                   {tpl.id !== 'catch' &&
                     (tpl.assetSlots ?? [])
@@ -5386,42 +4988,208 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                           />
                         )
                       })}
+                  {tpl.id === 'combo' && <ComboSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
+                  {tpl.id === 'combo' && <div className="group-title2">Feel &amp; timing</div>}
+                  {tpl.id === 'configurator' && <ConfigSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
+                  {tpl.id === 'scratch' && <div className="group-title2">Scratching</div>}
+                  {tpl.id === 'scratch' && <ScratchSetup params={params} setParams={setParams} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
+                  {tpl.id === 'dragclean' && <DragCleanSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
+                  {tpl.id === 'tapremove' && <TapRemoveSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
+                  {tpl.id === 'tapreveal' && <TapRevealSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
+                  {tpl.id === 'swipecards' && <SwipeCardsSetup params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />}
+                  {tpl.id === 'progressbar' && (
+                    <ProgressBarSetup
+                      params={params}
+                      setParam={setParam}
+                      elementId={id}
+                      siblings={activeSceneDef(state)?.elements ?? []}
+                      // Full width is not a game param: a game mount already goes
+                      // through the same 'extend' layout path the header bar does, so
+                      // this is the element's own Mode, surfaced here rather than left
+                      // for the author to find in Geometry.
+                      fullWidth={g.mode === 'extend'}
+                      setFullWidth={(v) => patchGeometry(id, { mode: v ? 'extend' : 'fit' })}
+                    />
+                  )}
+                  {tpl.id === 'catch' ? (
+                    <CatchTemplateInspector params={params} setParam={setParam} elementId={id} siblings={activeSceneDef(state)?.elements ?? []} />
+                  ) : (
+                    tpl.paramFields
+                      .filter(
+                        (f) =>
+                          !BRUSH_PARAM_KEYS.has(f.key) &&
+                          // Drawn on the canvas (ScratchSetup's buttons), not typed in.
+                          !(tpl.id === 'scratch' && /^zone[XYWH]$/.test(f.key)) &&
+                          // ComboSetup owns both counts, right above its per-question chips.
+                          !(tpl.id === 'combo' && (f.key === 'questions' || f.key === 'options')) &&
+                          // ConfigSetup owns both counts, right above its per-group chips.
+                          !(tpl.id === 'configurator' && (f.key === 'groups' || f.key === 'options')) &&
+                          // Progress wiring is a dropdown of real elements in the setup
+                          // panels above, never a typed-in element id.
+                          f.key !== 'sourceGameId' &&
+                          f.key !== 'progressGameId' &&
+                          (f.showIf?.(params) ?? true),
+                      )
+                      // A template can title its sections (ParamField.group): emit a
+                      // heading whenever the group changes, so thirty knobs read as a
+                      // few blocks. Ungrouped fields render exactly as they always did.
+                      .reduce<JSX.Element[]>((out, f, i, list) => {
+                        if (f.group && f.group !== list[i - 1]?.group)
+                          out.push(
+                            <div className="group-title2" key={'grp-' + f.group}>
+                              {f.group}
+                            </div>,
+                          )
+                        const node = renderField(f)
+                        if (node) out.push(node)
+                        return out
+                      }, [])
+                  )}
+                  {tpl.id === 'scratch' && (
+                    <BrushControls
+                      params={params}
+                      setParam={setParam}
+                      setParams={setParams}
+                      brushSrc={state.assets[(params.brushImage as string) || '']?.src ?? ''}
+                      radiusLabel="Scratch radius (% of card)"
+                      cardAspect={cardAspect}
+                      radiusOnly={!!params.scratcherId && (activeSceneDef(state)?.elements ?? []).some((e) => e.id === params.scratcherId)}
+                    />
+                  )}
+                  {tpl.id === 'scratch' && (
+                    <>
+                      <div className="group-title2">Random reveals</div>
+                      <Help>
+                        Add two or more and the card reveals one of them at random each play, weighted by chance; the win goes to that reveal&apos;s scene. A blank image
+                        uses the prize image; a blank scene uses the random win scene below, then Advance.
+                      </Help>
+                      <RevealOptionsField value={params.reveals} onChange={(v) => setParam('reveals', v)} imageLabel="Prize image" />
+                      <div className="group-title2">Random win scene</div>
+                      <Help>
+                        Tick scenes and the win goes to one of them at random, weighted by chance, instead of this scene&apos;s Advance target. Timing still follows Advance.
+                      </Help>
+                      <ScenePoolField value={params.winScenePool} onChange={(v) => setParam('winScenePool', v)} />
+                    </>
+                  )}
+                  {tpl.id === 'scratch' && params.fit === 'fit' && (
+                    <Help>Double-click the card on the canvas to position &amp; scale the reveal image: drag to move, corner handles to resize.</Help>
+                  )}
+                  {tpl.id === 'holdgauge' && params.stageSfx === true && (
+                    <Help>
+                      Give each stage its own sound in this element&apos;s Sounds section — one trigger per stage the dial can climb into. They only play on the way up; sliding
+                      back is silent.
+                    </Help>
+                  )}
+                  {tpl.id === 'memorymatch' && params.tracker !== 'off' && (
+                    <Help>
+                      Double-click the game on the canvas to edit the tracker symbols: drag a symbol sideways to nudge it, drag its corner handle to resize (aspect locked — bottoms
+                      always stay aligned). Esc or click outside to finish.
+                    </Help>
+                  )}
+                  {tpl.id === 'thoughtwhack' && (
+                    <>
+                      <button
+                        className="btn"
+                        style={{ width: '100%', marginTop: 6 }}
+                        onClick={() => window.dispatchEvent(new CustomEvent('pa:thought-zone-edit', { detail: { elementId: id } }))}
+                      >
+                        Draw spawn areas + place subject marker
+                      </button>
+                      <Help>
+                        Drag empty game space to draw more areas. Drag an area to move it, use its corner handles to resize it, or × to remove it. Place the pink SUBJECT marker
+                        over the subject&apos;s head/body anchor; both trailing bubbles always point there. Press Enter or Esc when done.
+                      </Help>
+                      <Help>
+                        Any scene element can use <b>On thought spawn</b> / <b>On thought whack</b> in its Animation panel and the matching triggers in its Sounds panel.
+                      </Help>
+                      <Help>The animated hint hand follows a currently visible, unwhacked thought and retargets after every whack.</Help>
+                    </>
+                  )}
+                  {tpl.id === 'carousel' && (
+                    <>
+                      <Help>
+                        The centre choice is the selection — it eases up to the size you set above and back down as it leaves, so there is no outline or frame. Swipe, flick or tap
+                        a side choice to bring it in.
+                      </Help>
+                      <Help>
+                        Labels have their own position: <b>Where the label sits</b> puts it below, above or right on the choice, and the <b>Label nudge</b> pair moves it from there
+                        — with a separate pair for the selected one. A nudge moves the label only; the choices stay where they are.
+                      </Help>
+                      <Help>
+                        The two choices either side of the centre get their own spacing: <b>Extra gap either side of the CENTRE</b> adds to the regular gap for those two only, so
+                        an enlarged centre stops crowding its neighbours. Negative pulls them in. Remember the centre is scaled up, so it eats into its own gap — the visible space
+                        is always smaller than the number.
+                      </Help>
+                      <Help>
+                        Every size, gap and nudge is in <b>design px</b> — the number you type is the size you get, and resizing the game box no longer resizes the choices with it.
+                        Slot pitch is simply <b>choice width + gap</b>, so a gap of 0 butts them together. The canvas redraws as you type.
+                      </Help>
+                      <Help>
+                        To make a <b>separate element</b> follow the choice: select it, open <b>Select &amp; generate</b>, switch on <b>Fill slot</b> and type the same{' '}
+                        <b>Link name</b> (<code>{String(params.linkGroup ?? 'carousel')}</code>). It swaps to that choice&apos;s <b>Linked element image</b> — or, if you leave that
+                        empty, to the choice image itself.
+                      </Help>
+                      <Help>
+                        Each choice can carry its own <b>Label image</b> instead of typed text. Labels belong to their choice, not to a slot, so a label always travels with the
+                        picture it names. Label images are sized by <b>height</b>, so wordmarks of different lengths still read at one weight.
+                      </Help>
+                      <Help>
+                        Fields marked <b>CENTRE</b> apply only to the selected slot — size it and move it wherever you want, for the choice image and the label separately, and
+                        every other slot keeps the settings above. The carousel eases between the two as you swipe. Nudges are in design px; keep the game box tall enough for a big
+                        lift, since it clips at its own edges.
+                      </Help>
+                    </>
+                  )}
+                  {tpl.id === 'basket' && (
+                    <>
+                      <button
+                        className="btn"
+                        style={{ width: '100%', marginTop: 6 }}
+                        onClick={() => window.dispatchEvent(new CustomEvent('pa:zone-edit', { detail: { elementId: id } }))}
+                      >
+                        Set basket area on canvas
+                      </button>
+                      <Help>
+                        Draw the invisible drop area over the basket artwork. Items keep the position where they are released inside it; a release within the snap border is pulled
+                        just inside the area. Every item must be placed to win.
+                      </Help>
+                      <Help>
+                        Prefer freeform items? Select any normal image and enable <b>Drag &amp; drop → Basket game item</b>. Marked scene images automatically replace the item
+                        slots below.
+                      </Help>
+                    </>
+                  )}
                 </>
               )}
-              {activeSceneDef()?.elements.some((e) => e.type === 'handguide') ? (
-                <div className="hint pad">
-                  Editable hint hand added: drag it on the canvas, edit its route with its path tool, or swap its image via the handguide"s own Source. (The auto hint hand is off
-                  while a handguide exists.)
-                </div>
-              ) : (
-                <button className="wide" onClick={() => addGameHint(id)}>
-                  Add hint hand (editable)
-                </button>
-              )}
+              <div className="group-title2">Hint hand</div>
               <Toggle
-                label="Hint hand (points at the next move)"
+                label="Show hint hand"
                 checked={el.game?.hintEnabled !== false}
                 onChange={(v) => patchElement(id, { game: { ...(el.game ?? { templateId: tpl.id, params: {} }), hintEnabled: v } })}
               />
               {el.game?.hintEnabled !== false && (
                 <NumField
-                  label="Hint after (ms)"
+                  label="Appears after idle"
+                  suffix="ms"
                   value={el.game?.hintIdleMs ?? tpl.defaultHintIdleMs ?? 4000}
                   step={500}
                   onChange={(n) => patchElement(id, { game: { ...(el.game ?? { templateId: tpl.id, params: {} }), hintIdleMs: n } })}
                 />
               )}
-              <div className="hint pad">Games are interactive in Preview/export; the canvas shows a static layout. Mark a CTA/text "Show on game win" to reveal it on win.</div>
+              {activeSceneDef()?.elements.some((e) => e.type === 'handguide') ? (
+                <Help>
+                  Editable hint hand added: drag it on the canvas, edit its route with its path tool, or swap its image via the handguide"s own Source. (The auto hint hand is off
+                  while a handguide exists.)
+                </Help>
+              ) : (
+                <button className="wide" onClick={() => addGameHint(id)}>
+                  Add an editable hint hand
+                </button>
+              )}
+              <Help>Games are interactive in Preview/export; the canvas shows a static layout. Mark a CTA/text "Show on game win" to reveal it on win.</Help>
             </Accordion>
           )
         })()}
-      {el.type === 'bar' && (
-        <Accordion id="inspector.bar" title="Bar Background">
-          <AssetPicker label="Background Image" value={el.assetId} onChange={(aid) => patchElement(id, { assetId: aid })} allowNone />
-          <div className="hint pad">If set, this image stretches to fill the bar.</div>
-        </Accordion>
-      )}
-
       {el.type === 'image' && (
         <>
           <Accordion id="inspector.image" title="Image">
@@ -5452,14 +5220,14 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                   max={200}
                   onChange={(n) => patchElement(id, { container: { ...el.container!, padPx: n } })}
                 />
-                <div className="hint pad">The shape"s transparency masks the image; works on any shape (heart, star, etc.). The inside image is clipped to the shape.</div>
+                <Help>The shape"s transparency masks the image; works on any shape (heart, star, etc.). The inside image is clipped to the shape.</Help>
               </>
             )}
             <Slider label="Opacity" value={(el.opacity ?? 1) * 100} min={0} max={100} suffix="%" onChange={(n) => patchElement(id, { opacity: n === 100 ? undefined : n / 100 })} />
           </Accordion>
           {!el.container && el.assetId && (
             <>
-              <Accordion id="inspector.crop" title="Crop">
+              <Accordion id="inspector.crop" title="Crop" defaultOpen={false}>
                 {/* One panel, two shapes of crop. They were separate accordions and the
                     free-form one lost — the rectangle is what "Crop" means to everyone,
                     so the alternative has to be offered in the same breath, not below
@@ -5494,15 +5262,15 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                     <button className="wide" onClick={() => patchElement(id, { cropShape: undefined })}>
                       Remove crop area
                     </button>
-                    <div className="hint pad">
+                    <Help>
                       Cropping to {el.cropShape.points.length} corners. On the canvas: <b>drag a corner</b> to reshape, <b>drag a small dot</b> on an edge to add one,{' '}
                       <b>Alt-click</b> a corner to remove it. <b>Trim box</b> shrinks the element onto the outline, so it stops taking up the whole rectangle it was cut from.
-                    </div>
+                    </Help>
                     {el.crop && (
-                      <div className="hint pad">
+                      <Help>
                         The rectangular crop below is <b>also</b> on — it positions the picture, then the area cuts it. Set <b>Crop shape</b> to <b>Rectangle</b> if you only want
                         that one.
-                      </div>
+                      </Help>
                     )}
                   </>
                 ) : (
@@ -5522,10 +5290,10 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                         ]}
                       />
                     </Row>
-                    <div className="hint pad">
+                    <Help>
                       A free-form area crops to <b>any</b> shape: <b>click</b> to drop corners or <b>drag</b> to trace freehand, then click the first corner (or press <b>Enter</b>)
                       to close it. Everything outside the outline is cut away, in Preview and in the export.
-                    </div>
+                    </Help>
                   </>
                 )}
                 {el.crop && (
@@ -5536,10 +5304,10 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                     <button className="wide" onClick={() => setCrop({ scale: undefined, x: undefined, y: undefined })}>
                       Reset rectangular crop
                     </button>
-                    <div className="hint pad">
+                    <Help>
                       Drag the <b>edges/corners</b> to change what shows, drag the <b>middle</b> to move the picture, and <b>scroll</b> to zoom. Press <b>Enter</b> or click away
                       when done. <b>Double-clicking the image</b> on the canvas opens whichever crop it has — the area editor once one is drawn.
-                    </div>
+                    </Help>
                   </>
                 )}
               </Accordion>
@@ -5552,11 +5320,11 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                     Restore original image
                   </button>
                 )}
-                <div className="hint pad">
+                <Help>
                   {originAsset
                     ? 'This is a cut-out. The original image is still in the library, so you can put it back at any time.'
                     : 'Knocks a flat background out of the image, in the browser. The cut-out is saved as a NEW image — the original is never overwritten.'}
-                </div>
+                </Help>
               </Accordion>
               {removeBg && <RemoveBgModal elementId={removeBg.elementId} assetId={removeBg.assetId} onClose={() => setRemoveBg(null)} />}
             </>
@@ -5571,16 +5339,16 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 {cfg && (
                   <>
                     <ButtonTapFields cfg={cfg} others={others} selfId={id} siblings={state.scene.elements} patch={patch} />
-                    <div className="hint pad">Keeps the image’s own crop, mask &amp; animation — it just becomes tappable.</div>
+                    <Help>Keeps the image’s own crop, mask &amp; animation — it just becomes tappable.</Help>
                   </>
                 )}
                 <button className="wide" onClick={() => patchElement(id, { type: 'button', button: el.button ?? {} })}>
                   Convert to Button element
                 </button>
-                <div className="hint pad">
+                <Help>
                   Turns this into a full Button element in the same spot — position, size &amp; scale stay exactly the same. It gains the Button’s fill/corner styling; a crop or
                   mask is dropped. Reversible from the Button’s panel.
-                </div>
+                </Help>
               </Accordion>
             )
           })()}
@@ -5615,10 +5383,10 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                     </Row>
                   )}
                   {el.basketItem && (
-                    <div className="hint pad">
+                    <Help>
                       This image keeps its canvas position and size, but becomes draggable in Preview/export. Basket-item images replace the Basket game&apos;s internal item image
                       slots and all of them must be placed to win.
-                    </div>
+                    </Help>
                   )}
                   {el.basketItem && basketGames.length === 0 && <div className="hint pad">Add a Basket drop game to this scene so the item has a destination.</div>}
                 </>
@@ -5800,10 +5568,10 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               </div>
             )}
             {(el.drag || el.slot) && (
-              <div className="hint pad">
+              <Help>
                 Items + slots sharing a <b>Group</b> interact: drag an item onto a same-group slot to drop it in, or back out. A slot"s "accepts key" only takes an item whose
                 "match key" matches. Filling every slot in a group completes the scene (advances a "game won" scene). Runs in Preview/export.
-              </div>
+              </Help>
             )}
           </Accordion>
           <Accordion id="inspector.selgen" title="Select & generate" defaultOpen={false}>
@@ -5847,10 +5615,10 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                   </div>
                 )}
                 <NumField label="Zoom (1 = none)" value={el.fill.zoom ?? 1} step={0.05} min={0.1} max={5} onChange={(n) => patchElement(id, { fill: { ...el.fill!, zoom: n } })} />
-                <div className="hint pad">
+                <Help>
                   The <b>box</b> is this element — drag and resize it on the canvas like any other. These decide what the picture does inside it: <b>Cover</b> crops to fill,{' '}
                   <b>Contain</b> shows all of it. <b>Focus</b> picks which part survives a crop (50/50 = centre; drop Y toward 0 to keep a face).
-                </div>
+                </Help>
                 <NumField
                   label="Slot # (0=auto)"
                   value={(el.fill.index ?? -1) + 1}
@@ -5886,7 +5654,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                   />
                 </Row>
                 <NumField
-                  label="Progress (ms)"
+                  label="Progress" suffix="ms"
                   value={el.generate.durationMs ?? 2500}
                   step={250}
                   min={500}
@@ -5907,12 +5675,12 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               </>
             )}
             {(el.pick || el.fill || el.generate) && (
-              <div className="hint pad">
+              <Help>
                 Fully freeform: invent <b>any categories</b> (type any name) and place <b>as many thumbnails per category</b> as you like.{' '}
                 <b>How many picks a category holds = how many Fill slots</b> you give it (1 slot = single-choice, 3 slots = pick 3). Slots fill in scene order, or set Slot #.{' '}
                 <b>Generate</b> lists the categories it needs; tap it or <b>swipe up</b>→ circular % → result. Style/position every element yourself; nothing is grouped or laid out
                 for you.
-              </div>
+              </Help>
             )}
           </Accordion>
         </>
@@ -5921,7 +5689,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
       {el.type === 'bar' && (
         <>
           <Accordion id="inspector.fill" title="Fill">
-            <AssetPicker label="Image fill (optional)" value={el.assetId} allowNone onChange={(aid) => patchElement(id, { assetId: aid })} />
+            <AssetPicker label="Image (stretches to fill)" value={el.assetId} allowNone onChange={(aid) => patchElement(id, { assetId: aid })} />
             <Swatches label="Color (if no image)" value={el.bar?.color} onChange={(c) => patchElement(id, { bar: { color: c ?? '#1b2a4a' } })} />
             {el.mode === 'extend' && (
               <Row label="Pin to edge">
@@ -5945,7 +5713,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
           const hg: HandguideConfig = el.handguide ?? { mode: 'smart' }
           const setHg = (patch: Partial<HandguideConfig>): void => patchElement(id, { handguide: { ...hg, ...patch } })
           return (
-            <Accordion id="inspector.handguide" title="Hand guide">
+            <Accordion id="inspector.handguide" title="Hand pointer">
               <AssetPicker label="Hand image" value={el.assetId} onChange={(aid) => patchElement(id, { assetId: aid })} />
               <Row label="Animation">
                 <Select
@@ -5979,11 +5747,11 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               {hg.mode === 'pinch' && (
                 <>
                   <Toggle label="Hands come from the other side" checked={!!hg.pinchFlip} onChange={(v) => setHg({ pinchFlip: v || undefined })} />
-                  <div className="hint pad">
+                  <Help>
                     The second hand is a mirrored copy of this one, so both use the same image — swap it above and both change. They point INWARD when the hand art has its body to
                     the right of its fingertip, which most pointing-hand art does; turn this on if yours is drawn the other way round and the pair points outward. It follows
                     whatever the screen&rsquo;s Tap to reveal, Tap to remove or Drag to clean board still has waiting.
-                  </div>
+                  </Help>
                 </>
               )}
               {hg.mode === 'swipecards' && (
@@ -5999,9 +5767,9 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                       ]}
                     />
                   </Row>
-                  <div className="hint pad">
+                  <Help>
                     Presses on the card on top of the screen&rsquo;s Swipe cards pile and mimes dragging it off that side, moving down the pile as cards go. Only the hand moves.
-                  </div>
+                  </Help>
                 </>
               )}
               {hg.mode === 'radialtap' && (
@@ -6065,7 +5833,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                                 ({Math.round(nd.x)}, {Math.round(nd.y)})
                               </span>
                               <NumField
-                                label="Stop ms"
+                                label="Stop" suffix="ms"
                                 value={nd.pauseMs ?? 0}
                                 step={100}
                                 min={0}
@@ -6085,11 +5853,11 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                       )}
                       {hg.mode === 'slidetap' && (
                         <>
-                          <NumField label="Tap time (ms)" value={hg.tapMs ?? 900} step={100} min={0} onChange={(n) => setHg({ tapMs: n })} />
-                          <div className="hint pad">
+                          <NumField label="Tap time" suffix="ms" value={hg.tapMs ?? 900} step={100} min={0} onChange={(n) => setHg({ tapMs: n })} />
+                          <Help>
                             The hand taps where it lands, including back at the start. &ldquo;Travel time&rdquo; below is one leg of the path and &ldquo;Tap time&rdquo; is one tap;
                             a stop&rsquo;s own <b>Stop ms</b> is extra waiting after the tap.
-                          </div>
+                          </Help>
                         </>
                       )}
                     </>
@@ -6097,15 +5865,15 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 })()}
               {hg.mode === 'brush' && (
                 <>
-                  <div className="hint pad">
+                  <Help>
                     The hand renders in front of the brush, sits below it, and mimes dragging it across the card. It only appears after the brush's intro. Adjust its offset &amp;
                     rotation:
-                  </div>
+                  </Help>
                   <div className="grid2">
-                    <NumField label="Offset X (px)" value={hg.brushOffsetX ?? 0} step={4} onChange={(n) => setHg({ brushOffsetX: n })} />
-                    <NumField label="Offset Y (px)" value={hg.brushOffsetY ?? 0} step={4} onChange={(n) => setHg({ brushOffsetY: n })} />
+                    <NumField label="Offset X" suffix="px" value={hg.brushOffsetX ?? 0} step={4} onChange={(n) => setHg({ brushOffsetX: n })} />
+                    <NumField label="Offset Y" suffix="px" value={hg.brushOffsetY ?? 0} step={4} onChange={(n) => setHg({ brushOffsetY: n })} />
                   </div>
-                  <NumField label="Rotation (deg)" value={hg.brushRotateDeg ?? 0} step={5} min={-180} max={180} onChange={(n) => setHg({ brushRotateDeg: n })} />
+                  <NumField label="Rotation" suffix="°" value={hg.brushRotateDeg ?? 0} step={5} min={-180} max={180} onChange={(n) => setHg({ brushRotateDeg: n })} />
                 </>
               )}
               <Row label="Easing">
@@ -6140,13 +5908,13 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
             <Accordion id="inspector.choice" title="Choice">
               <Toggle label="Continue / next button" checked={!!ch.advance} onChange={(v) => setCh({ advance: v })} />
               {ch.advance ? (
-                <NumField label="Advance delay (ms)" value={ch.advanceDelayMs ?? 0} step={100} min={0} onChange={(n) => setCh({ advanceDelayMs: n })} />
+                <NumField label="Advance delay" suffix="ms" value={ch.advanceDelayMs ?? 0} step={100} min={0} onChange={(n) => setCh({ advanceDelayMs: n })} />
               ) : (
                 <>
                   <Row label="Group">
                     <input className="text-input" value={ch.group ?? ''} placeholder="e.g. q1" onChange={(e) => setCh({ group: e.target.value || undefined })} />
                   </Row>
-                  <div className="hint pad">Options sharing a Group are mutually exclusive (one selected at a time).</div>
+                  <Help>Options sharing a Group are mutually exclusive (one selected at a time).</Help>
                   <Toggle label="Quiz feedback (right/wrong)" checked={!!ch.feedback} onChange={(v) => setCh({ feedback: v })} />
                   {ch.feedback && <Toggle label="This is the correct answer" checked={!!ch.correct} onChange={(v) => setCh({ correct: v })} />}
                   <div className="grid2">
@@ -6159,7 +5927,6 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                   </div>
                 </>
               )}
-              <div className="hint pad">Selecting and advancing run in Preview and export.</div>
             </Accordion>
           )
         })()}
@@ -6209,10 +5976,10 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                       ]}
                     />
                   </Row>
-                  <div className="hint pad">
+                  <Help>
                     Shows the viewer's own clock, updating every second. <b>{'{hh}:{mm}'}</b> → “{cfg.hour12 ? '02:05' : '14:05'}” (zero-padded); <b>{'{h}:{mm}'}</b> drops the
                     leading zero and <b>{'{ss}'}</b> adds seconds. <b>{'{A}'}</b> → PM, <b>{'{a}'}</b> → pm. Date tokens (<b>MMM</b>, <b>D</b>…) show today.
-                  </div>
+                  </Help>
                 </>
               )}
               {cfg.mode === 'dynamic' && (
@@ -6239,12 +6006,12 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                     />
                   </Row>
                   {cfg.target === 'midnight' && (
-                    <div className="hint pad">
+                    <Help>
                       Counts down to <b>{new Date(computeDeadline(el, Date.now())).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</b>.
                       With the date on tomorrow, <b>{'{hh}'}</b> / <b>{'{mm}'}</b> / <b>{'{ss}'}</b> are the hours, minutes and seconds left in today — rounded down, live, and
                       rolling over at midnight. Give hours, minutes and seconds their own element (format <b>{'{hh}'}</b>, <b>{'{mm}'}</b>, <b>{'{ss}'}</b>) and they tick on
                       the same second.
-                    </div>
+                    </Help>
                   )}
                 </>
               )}
@@ -6292,9 +6059,9 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                   ]}
                 />
               </Row>
-              <div className="hint pad">
+              <Help>
                 Month names arrive already capitalized (<b>Jul</b>), so “Capitalize Each Word” won’t change them — pick <b>UPPERCASE</b> for <b>JUL</b>.
-              </div>
+              </Help>
               {(() => {
                 const targets = state.scene.elements.filter((t) => t.id !== id && (t.type === 'image' || t.type === 'bar'))
                 // A stale id (target deleted) stays listed so it can be seen + cleared.
@@ -6314,10 +6081,10 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 )
               })()}
               {cfg.attachToId && (
-                <div className="hint pad">
+                <Help>
                   Attached: position and size follow the target image's rendered box, so this text keeps the same height and Y as the image at every screen size and zoom. Drag it
                   where you want it relative to the image — the offset sticks.
-                </div>
+                </Help>
               )}
               {!cfg.attachToId && (
                 <Row label="Header scaling">
@@ -6325,11 +6092,11 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 </Row>
               )}
               {!cfg.attachToId && el.headerScale && (
-                <div className="hint pad">
+                <Help>
                   Sizes this label with a single transform, the way the pinned date band does, instead of multiplying font size, spacing and padding by the layout scale one at a
                   time. Nothing lands on a rounded pixel, so it holds its exact design position and size at every screen — the recommended setting for a holiday label sitting
                   inside artwork.
-                </div>
+                </Help>
               )}
 
               {/* ---- Dynamic holiday ------------------------------------------------ */}
@@ -6351,7 +6118,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                     <Row label="Holiday">
                       <button onClick={insertHoliday}>Insert {'{holiday}'}</button>
                     </Row>
-                    <div className="hint pad">
+                    <Help>
                       {'{holiday}'} renders the promo calendar's copy for the viewer's own date — “Labor Day Sale” from Aug 31, “Winter Sale” in between — and re-reads it at local
                       midnight. Outside the calendar it is empty.{' '}
                       {range ? (
@@ -6367,7 +6134,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                       <button className="link-btn" onClick={props.onProjectSettings}>
                         Promo calendar in Project settings
                       </button>
-                    </div>
+                    </Help>
                     {problems.map((pb, i) => (
                       <div key={i} className={'hint pad ' + (pb.level === 'error' ? 'bad' : 'warn')}>
                         {pb.message}
@@ -6385,10 +6152,10 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                       />
                     </Row>
                     {cfg.showWhen && cfg.showWhen !== 'always' && (
-                      <div className="hint pad">
+                      <Help>
                         Hidden on the days the calendar {cfg.showWhen === 'holiday' ? 'has nothing to say' : 'names a promo'}. Compose both states by pairing this with a second
                         element set to the opposite rule — flip the <b>Preview date</b> below to see each one.
-                      </div>
+                      </Help>
                     )}
                     <NumField
                       label="Shrink to fit"
@@ -6398,10 +6165,10 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                       suffix="px"
                       onChange={(n) => setCd({ fitWidthPx: n > 0 ? Math.round(n) : undefined })}
                     />
-                    <div className="hint pad">
+                    <Help>
                       Maximum width in design px; a longer label scales its font DOWN to fit (never up). The shrink is the same fraction at every screen, so the label keeps one
                       size relative to the artwork. 0 = off. The calendar's longest row is “Thanksgiving, Black Friday &amp; Cyber Monday Sale”.
-                    </div>
+                    </Help>
                     <Row label="Preview date">
                       <input type="date" value={previewDate ?? ''} onChange={(e) => setPreviewDate(e.target.value || null)} />
                     </Row>
@@ -6423,17 +6190,17 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               <Row label="Device">
                 <button onClick={() => setCd({ format: cfg.format ? `${cfg.format}{device}` : '{device}' })}>Insert {'{device}'}</button>
               </Row>
-              <div className="hint pad">
+              <Help>
                 {'{device}'} (alias {'{os}'}) renders the viewer's platform — <b>iOS</b>, <b>Android</b>, <b>Windows</b>, <b>Mac</b> or <b>Linux</b> — read from the browser
                 when the ad loads (client hints first, then the user agent; an iPad posing as a Mac is unmasked by its touch screen). Empty when nothing matches. This machine
                 reads as <b>{currentDeviceLabel() || 'unknown'}</b>, which is what the canvas shows — exports read the viewer's real device.
-              </div>
-              <div className="hint pad">
+              </Help>
+              <Help>
                 <b>Timer</b> tokens (live): <b>{'{hh}:{mm}:{ss}'}</b> / <b>{'{d} {h} {m} {s}'}</b>; <b>{'{ss}:{ms}'}</b> shows “06:99” for 6.99 seconds. <b>Date</b> label (no
                 ticking): <b>{'{date}'}</b>, e.g. "Order by {'{date}'}", or build your own from parts: <b>MMMM</b> July, <b>MMM</b> Jul, <b>MM/M</b> 07/7, <b>DD/D</b> day,{' '}
                 <b>Do</b> 21st, <b>dddd/ddd</b> Monday/Mon, <b>YYYY/YY</b> year (braces optional — "MM.D" → "07.16") — e.g. "Ends MMMM Do" → "Ends July 21st". <b>{'{holiday}'}</b> is the promo calendar's copy
                 for today; <b>{'{device}'}</b> the viewer's platform. "Dynamic" recomputes from today whenever the ad runs.
-              </div>
+              </Help>
             </Accordion>
           )
         })()}
@@ -6468,17 +6235,17 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                       </Row>
                     )}
                     {!el.attachToId && el.headerScale && (
-                      <div className="hint pad">
+                      <Help>
                         Sizes this text with a single transform, the way the pinned date band does, instead of multiplying font size, spacing and padding by the layout scale one at
                         a time. Nothing lands on a rounded pixel, so it holds its exact design position and size at every screen — use it when a label must stay put inside artwork.
-                      </div>
+                      </Help>
                     )}
                     {el.attachToId && (
-                      <div className="hint pad">
+                      <Help>
                         Locked to the target's rendered box: this text keeps the same offset and the same proportional size relative to that image at every screen size, orientation
                         and zoom. Drag it where you want it — the offset sticks. Note a landscape override on this text (and not on the target) still shifts it in landscape; clear
                         it under <b>Landscape layout</b> if you want them identical in both orientations.
-                      </div>
+                      </Help>
                     )}
                   </>
                 )
@@ -6557,8 +6324,8 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               />
             </Row>
             <div className="grid2">
-              <NumField label="Stroke px" value={el.text.strokePx ?? 0} onChange={(n) => setText({ strokePx: n })} />
-              <ColorField label="Stroke col" value={el.text.strokeColor ?? '#000000'} onChange={(c) => setText({ strokeColor: c ?? '#000000' })} />
+              <NumField label="Outline" value={el.text.strokePx ?? 0} suffix="px" onChange={(n) => setText({ strokePx: n })} />
+              <ColorField label="Outline color" value={el.text.strokeColor ?? '#000000'} onChange={(c) => setText({ strokeColor: c ?? '#000000' })} />
             </div>
           </Accordion>
         </>
@@ -6603,10 +6370,10 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
             <Accordion id="inspector.button" title="Button">
               <ButtonTapFields cfg={cfg} others={others} selfId={id} siblings={state.scene.elements} patch={patch} />
               <AssetPicker label="Image (optional)" allowNone value={el.assetId} onChange={(aid) => patchElement(id, { assetId: aid ?? undefined })} />
-              <div className="hint pad">
+              <Help>
                 Uses the image if set, otherwise the text label below. Style the fill &amp; corners in Background box. Animation is optional (Animation section). Toggle “Above
                 overlays” at the top to float it over game win/lose cards.
-              </div>
+              </Help>
               {el.assetId && (
                 <button className="wide" onClick={() => patchElement(id, { type: 'image' })}>
                   Convert back to Image
@@ -6625,9 +6392,9 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
             <Accordion id="inspector.background" title="Background">
               <AssetPicker label="Image" value={el.assetId} onChange={(aid) => patchElement(id, { assetId: aid })} />
               <AssetPicker label="Landscape image (optional)" value={bg.landscapeAssetId} allowNone onChange={(aid) => setBg({ landscapeAssetId: aid ?? undefined })} />
-              <div className="hint pad">
+              <Help>
                 Shown instead of the image above when the device is in <b>landscape</b>. Leave unset to reuse the same image in both orientations.
-              </div>
+              </Help>
               <Row label="Fit">
                 <Select
                   value={fit}
@@ -6644,10 +6411,10 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 <>
                   <Slider label="Crop X (portrait)" value={Math.round(bg.focusX ?? 50)} min={0} max={100} suffix="%" onChange={(n) => setBg({ focusX: n })} />
                   <Slider label="Crop Y (portrait)" value={Math.round(bg.focusY ?? 50)} min={0} max={100} suffix="%" onChange={(n) => setBg({ focusY: n })} />
-                  <div className="hint pad">
+                  <Help>
                     In <b>portrait</b>, these pick which part of the image stays visible when it's cropped to fill (0% = left/top, 100% = right/bottom). <b>Landscape</b> always
                     centers and crops to cover the whole screen.
-                  </div>
+                  </Help>
                 </>
               )}
             </Accordion>
@@ -6660,7 +6427,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
           const setEnd = (patch: Partial<EndsceneConfig>): void => patchElement(id, { endscene: { ...cfg, ...patch } })
           const mode = cfg.mode ?? 'video'
           return (
-            <Accordion id="inspector.endscene" title="Endscene">
+            <Accordion id="inspector.endscene" title="Video">
               <Row label="Type">
                 <Chips
                   items={[
@@ -6738,10 +6505,10 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                   <Slider label="Zoom (landscape)" value={cfg.zoomL ?? cfg.zoom ?? 1} min={0.5} max={2} step={0.05} suffix="×" onChange={(n) => setEnd({ zoomL: n })} />
                   <Toggle label="Transparent background (show element behind)" checked={!!cfg.transparentBg} onChange={(v) => setEnd({ transparentBg: v || undefined })} />
                   {cfg.transparentBg ? (
-                    <div className="hint pad">
+                    <Help>
                       The endcard fill is transparent — put a full-screen <b>background image</b> (or any element) on a lower layer and it shows through the gaps around the{' '}
                       {cfg.fullHeight ? 'full-height' : cfg.objectFit === 'contain' ? 'contained' : ''} clip.
-                    </div>
+                    </Help>
                   ) : (
                     <>
                       <div className="group-title2">Portrait background</div>
@@ -6782,11 +6549,11 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                     </>
                   )}
                   <Toggle label="Loop" checked={cfg.loop ?? true} onChange={(v) => setEnd({ loop: v })} />
-                  <div className="hint pad">
+                  <Help>
                     Full-bleed by default; the clip auto-plays muted and tapping anywhere fires the CTA. For extreme aspect ratios use "contain" + <b>split fill</b> so the
                     top/bottom (portrait) or left/right (landscape) bars match each edge. Turn on "match to edge(s)" to auto-sample them from the clip. Add a CTA/text element on
                     top for the button.
-                  </div>
+                  </Help>
                 </>
               )}
             </Accordion>
@@ -6852,7 +6619,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                     <>
                       <Slider label="Radius" value={cfg.radius ?? 45} min={10} max={100} suffix="%" onChange={(n) => set({ radius: n })} />
                       <div className="grid2">
-                        <NumField label="Hold (ms)" value={cfg.holdMs ?? 1400} step={100} min={0} onChange={(n) => set({ holdMs: n })} />
+                        <NumField label="Hold" suffix="ms" value={cfg.holdMs ?? 1400} step={100} min={0} onChange={(n) => set({ holdMs: n })} />
                         <NumField label="Fade (ms, 0 = stay)" value={cfg.fadeMs ?? 900} step={100} min={0} onChange={(n) => set({ fadeMs: n })} />
                       </div>
                       <Toggle label="Depth blur (big out-of-focus pieces)" checked={cfg.blurDepth !== false} onChange={(v) => set({ blurDepth: v })} />
@@ -6860,7 +6627,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                   )}
                 </>
               )}
-              <Row label="Colours">
+              <Row label="Colors">
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
                   {(cfg.colors ?? []).map((c, i) => (
                     <button
@@ -6871,7 +6638,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                       onClick={() => set({ colors: (cfg.colors ?? []).filter((_, j) => j !== i) })}
                     />
                   ))}
-                  <label className="swatch-dot" title="Add colour" style={{ display: 'grid', placeItems: 'center', cursor: 'pointer' }}>
+                  <label className="swatch-dot" title="Add color" style={{ display: 'grid', placeItems: 'center', cursor: 'pointer' }}>
                     +
                     <input type="color" style={{ display: 'none' }} onChange={(e) => set({ colors: [...(cfg.colors ?? []), e.target.value] })} />
                   </label>
@@ -6885,10 +6652,232 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               {(!cfg.colors || cfg.colors.length === 0) && (
                 <div className="hint pad">Using the default {mode === 'pop' ? 'six-colour party' : 'multi-colour'} palette. Add colours to override it.</div>
               )}
-              <div className="hint pad">
+              <Help>
                 Full-screen celebration overlay — always covers the whole screen (position &amp; size are ignored; <b>Pop</b> stays inside its radius around the origin). It only
                 animates in <b>Preview</b> / export; here you see a frozen sample. Use the layers panel to place it above your content.
+              </Help>
+            </Accordion>
+          )
+        })()}
+
+      <Accordion id="inspector.layout" title={<>Position &amp; size{editLocale || landscape ? <span className="acc-summary">{[editLocale, landscape ? 'landscape' : editLocale ? 'portrait' : ''].filter(Boolean).join(' · ')}</span> : null}</>}>
+      <AlignRow />
+
+      {landscape && (
+        <button className="wide" onClick={() => (editLocale ? resetLocaleLayout(id, editLocale, 'landscape') : patchElement(id, { landscape: undefined }))}>
+          Reset {editLocale ? `${editLocale} ` : ''}landscape overrides
+        </button>
+      )}
+
+      {editLocale && !landscape && localeOverride?.portrait && (
+        <button className="wide" onClick={() => resetLocaleLayout(id, editLocale, 'portrait')}>
+          Reset {editLocale} portrait layout
+        </button>
+      )}
+      <div className="grid2">
+        <NumField label="X" value={g.x} suffix="px" onChange={(n) => patchGeometry(id, { x: n })} />
+        <NumField label="Y" value={g.y} suffix="px" onChange={(n) => patchGeometry(id, { y: n })} />
+      </div>
+      {el.type === 'text' || el.type === 'countdown' || el.type === 'background' || el.type === 'confetti' || (el.type === 'endscene' && g.mode === 'extend') ? null : el.type ===
+          'bar' && g.mode === 'extend' ? (
+        <NumField label="Height" value={g.h} suffix="px" onChange={(n) => patchGeometry(id, { h: n })} />
+      ) : g.w != null && g.h != null ? (
+        <div className="grid2">
+          <NumField label="W" value={g.w} suffix="px" onChange={(n) => patchGeometry(id, { w: n })} />
+          <NumField label="H" value={g.h} suffix="px" onChange={(n) => patchGeometry(id, { h: n })} />
+        </div>
+      ) : (
+        <NumField label="Scale" value={g.scale} step={0.01} onChange={(n) => patchGeometry(id, { scale: n })} />
+      )}
+      {
+        <div className="grid2" style={{ marginTop: 4 }}>
+          <NumField label="Angle" value={el.rotation ?? 0} suffix="°" onChange={(n) => patchElement(id, { rotation: n === 0 ? undefined : n })} />
+        </div>
+      }
+      <div className="grid2">
+        <Row label="Anchor">
+          <Select value={g.anchor} onChange={(v) => patchGeometry(id, { anchor: v as Anchor })} options={ANCHORS.map((a) => ({ value: a, label: a }))} />
+        </Row>
+        <Row label="Mode">
+          <Select
+            value={g.mode}
+            onChange={(v) => patchGeometry(id, { mode: v as LayoutMode })}
+            options={[
+              { value: 'fit', label: 'fit' },
+              { value: 'extend', label: 'extend (full width)' },
+            ]}
+          />
+        </Row>
+      </div>
+      {(el.type === 'cta' || el.type === 'image' || el.type === 'button' || el.type === 'handguide' || el.type === 'bar') && (
+        <Toggle label="Relative to footer" checked={!!el.relativeToBasketBar} onChange={(v) => patchElement(id, { relativeToBasketBar: v })} />
+      )}
+
+      </Accordion>
+
+      <Accordion
+        id="inspector.visibility"
+        title={<>Visibility &amp; layering{visSummary ? <span className="acc-summary">{visSummary}</span> : null}</>}
+        defaultOpen={false}
+      >
+      <Toggle label="Show on game win" checked={!!el.showOnWin} onChange={(v) => patchElement(id, { showOnWin: v })} />
+      {(el.type === 'text' || el.type === 'image' || (el.type === 'bar' && el.mode === 'fit')) && sceneHasCatch && (
+        <Toggle label="Show after basket moved" checked={!!el.showAfterInteraction} onChange={(v) => patchElement(id, { showAfterInteraction: v || undefined })} />
+      )}
+      {/* One control for the four runtime tiers (stage.ts): belowOverlay opts out,
+          overlayImmune floats above in-game overlays, overlayTop above those. The CTA
+          is above overlays by default, so its "below" is the opt-out. */}
+      <Row label="Layer">
+        <Select
+          value={layerMode}
+          onChange={(v) =>
+            patchElement(id, {
+              belowOverlay: v === 'below' || undefined,
+              overlayImmune: (v === 'above' && el.type !== 'cta') || undefined,
+              overlayTop: v === 'top' || undefined,
+            })
+          }
+          options={[
+            ...(el.type === 'cta' ? [] : [{ value: 'normal' as const, label: 'Normal' }]),
+            { value: 'above' as const, label: el.type === 'cta' ? 'Above overlays (default)' : 'Above overlays' },
+            { value: 'top' as const, label: 'Top (above other overlays)' },
+            ...(el.type === 'cta' || layerMode === 'below' ? [{ value: 'below' as const, label: 'Below overlays (dimmed)' }] : []),
+          ]}
+        />
+      </Row>
+      {layerMode === 'below' && (
+        <Help>The win/lose card now covers this — it shows through the dim instead of on top of it, and taps land on the card while it is up.</Help>
+      )}
+      <Toggle label="Hide on overlay" checked={!!el.hideOnOverlay} onChange={(v) => patchElement(id, { hideOnOverlay: v || undefined })} />
+      {CARRY_OVER_TYPES.has(el.type) && (
+        <>
+          <Toggle label="Carry across scenes" checked={!!el.persist} onChange={(v) => patchElement(id, { persist: v || undefined, persistScenes: undefined })} />
+          {el.persist && (
+            <>
+              <Help>
+                Built once, above every scene — a scene change never rebuilds it, so the pulse (and any loop animation) runs straight through the transition instead of cutting.
+                Untick a scene to fade it out there. The canvas still shows it only on this scene; Preview shows the rest.
+              </Help>
+              {state.project.scenes.map((s) => {
+                const shown = !el.persistScenes?.length || el.persistScenes.includes(s.id)
+                return (
+                  <Toggle
+                    key={s.id}
+                    label={`Show on “${s.name || s.id}”`}
+                    checked={shown}
+                    onChange={(v) => {
+                      const all = state.project.scenes.map((x) => x.id)
+                      const cur = el.persistScenes?.length ? el.persistScenes : all
+                      const next = all.filter((x) => (x === s.id ? v : cur.includes(x)))
+                      // Every scene ticked === the default, so store nothing.
+                      patchElement(id, { persistScenes: next.length === all.length ? undefined : next })
+                    }}
+                  />
+                )
+              })}
+            </>
+          )}
+        </>
+      )}
+      {bookPages > 0 && el.type !== 'game-mount' && (
+        <Row label="Only on book page">
+          <Select
+            value={String(el.showOnPage ?? 0)}
+            onChange={(v) => patchElement(id, { showOnPage: Number(v) || undefined })}
+            options={[
+              { value: '0', label: 'Every page' },
+              ...Array.from({ length: bookPages }, (_, i) => ({
+                value: String(i + 1),
+                label: `Page ${i + 1}${i === 0 && flipbookEl?.game?.params?.hasCover !== false ? ' (cover)' : ''}`,
+              })),
+            ]}
+          />
+        </Row>
+      )}
+
+      {/* Per-orientation visibility: base `hidden` + landscape override `landscape.hidden`.
+          The canvas reflects it live — the element only renders in the orientation(s) it
+          shows in (reselect a hidden one via the Layers panel). */}
+      {(() => {
+        const baseHidden = !!el.hidden
+        const lsHidden = el.landscape?.hidden ?? baseHidden
+        const mode: 'both' | 'portrait' | 'landscape' | 'none' =
+          !baseHidden && !lsHidden ? 'both' : !baseHidden && lsHidden ? 'portrait' : baseHidden && !lsHidden ? 'landscape' : 'none'
+        const setMode = (m: 'both' | 'portrait' | 'landscape'): void => {
+          const { hidden: _drop, ...restLs } = el.landscape ?? {}
+          if (m === 'both') patchElement(id, { hidden: undefined, landscape: el.landscape ? restLs : undefined })
+          else if (m === 'portrait') patchElement(id, { hidden: undefined, landscape: { ...restLs, hidden: true } })
+          else patchElement(id, { hidden: true, landscape: { ...restLs, hidden: false } })
+        }
+        return (
+          <>
+            <Row label="Show in">
+              <Chips
+                items={[
+                  { key: 'both', label: 'Both', active: mode === 'both', onClick: () => setMode('both') },
+                  { key: 'portrait', label: 'Portrait only', active: mode === 'portrait', onClick: () => setMode('portrait') },
+                  { key: 'landscape', label: 'Landscape only', active: mode === 'landscape', onClick: () => setMode('landscape') },
+                ]}
+              />
+            </Row>
+            {mode !== 'both' && (
+              <div className="hint pad">
+                {mode === 'none'
+                  ? 'Currently hidden in BOTH orientations (Layers eye + landscape override) — pick a mode above to show it again.'
+                  : mode === 'portrait'
+                    ? 'Only rendered while the ad is in portrait. On the canvas it disappears in landscape view; reselect it from the Layers panel.'
+                    : 'Only rendered while the ad is in landscape. On the canvas it disappears in portrait view; reselect it from the Layers panel.'}
               </div>
+            )}
+          </>
+        )
+      })()}
+
+      {!activeVariant && (
+        <>
+          <Toggle
+            label={state.project.meta.projectName ? `Sync to “${state.project.meta.projectName}”` : 'Sync to project'}
+            checked={!!el.sync}
+            onChange={() => toggleSyncToProject(id)}
+          />
+          {el.sync && (
+            <Row label="Appears on">
+              <Select
+                value={el.sync.scope}
+                onChange={(v) => setSyncScope(id, v as 'scene' | 'all')}
+                options={[
+                  { value: 'scene', label: 'One scene' },
+                  { value: 'all', label: 'Every scene (overlay)' },
+                ]}
+              />
+            </Row>
+          )}
+          {el.sync && <Help>Shared across all MIPs in this project; edits here (position, size, text, style, everything) apply to every MIP.</Help>}
+        </>
+      )}
+
+      </Accordion>
+
+      {canIdleBehavior &&
+        (() => {
+          const idle = el.idle ?? (el.type === 'handguide' ? el.handguide : undefined) ?? {}
+          const setIdle = (patch: any): void => patchElement(id, { idle: { ...idle, ...patch } })
+          return (
+            <Accordion id="inspector.idle" title="Idle behavior" defaultOpen={false}>
+              <Toggle label="Hide on tap" checked={idle.hideOnInteract !== false} onChange={(v) => setIdle({ hideOnInteract: v })} />
+              <Toggle label="Reappear when idle" checked={idle.reappearOnIdle !== false} onChange={(v) => setIdle({ reappearOnIdle: v })} />
+              {idle.reappearOnIdle !== false && <NumField label="Reappear after" suffix="ms" value={idle.idleMs ?? 4000} step={500} min={0} onChange={(n) => setIdle({ idleMs: n })} />}
+              <Toggle label="Show at start (before first tap)" checked={idle.showInitially !== false} onChange={(v) => setIdle({ showInitially: v })} />
+              {sceneHasCatch && (
+                <Toggle
+                  label="Hide after basket tap / drag"
+                  checked={!!el.hideAfterBasketInteraction}
+                  onChange={(v) => patchElement(id, { hideAfterBasketInteraction: v || undefined })}
+                />
+              )}
+              <Help>
+                Animates in Preview and export. By default it hides on the player's first tap and reappears after {idle.idleMs ?? 4000}ms of no interaction.
+              </Help>
             </Accordion>
           )
         })()}
@@ -6918,7 +6907,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
             }))}
           />
           <div className="grid2">
-            <NumField label="Border px" value={el.box?.borderPx ?? 0} onChange={(n) => setBox({ borderPx: n })} />
+            <NumField label="Border" suffix="px" value={el.box?.borderPx ?? 0} onChange={(n) => setBox({ borderPx: n })} />
             <ColorField label="Border col" value={el.box?.borderColor ?? '#000000'} onChange={(c) => setBox({ borderColor: c ?? '#000000' })} />
           </div>
           <Slider label="Opacity" value={(el.opacity ?? 1) * 100} min={10} max={100} suffix="%" onChange={(n) => patchElement(id, { opacity: n / 100 })} />
@@ -6952,9 +6941,9 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
         <Slider label="Background blur" value={el.backdropBlur ?? 0} min={0} max={80} suffix="px" onChange={(n) => patchElement(id, { backdropBlur: n || undefined })} />
         {el.backdropBlur ? (
           <>
-            <div className="hint pad">
+            <Help>
               Blurs the scene <b>behind</b> this element (like Figma’s Background blur). Use a full-screen overlay (dim/bar) to blur the whole scene below it.
-            </div>
+            </Help>
             <Row label="Falloff">
               <Select
                 value={el.backdropBlurMode ?? 'uniform'}
@@ -6983,18 +6972,18 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
           </>
         ) : null}
         <div className="group-title2">Fade with scratch progress</div>
-        <div className="hint pad">Fade this element in/out based on how much of the scratch card/grid has been revealed (0–100%).</div>
+        <Help>Fade this element in/out based on how much of the scratch card/grid has been revealed (0–100%).</Help>
         <Toggle label="Fade in at progress" checked={el.scratchShowAt != null} onChange={(v) => patchElement(id, { scratchShowAt: v ? (el.scratchShowAt ?? 30) : undefined })} />
         {el.scratchShowAt != null && <Slider label="Fade in at" value={el.scratchShowAt} min={0} max={100} suffix="%" onChange={(n) => patchElement(id, { scratchShowAt: n })} />}
         <Toggle label="Fade out at progress" checked={el.scratchHideAt != null} onChange={(v) => patchElement(id, { scratchHideAt: v ? (el.scratchHideAt ?? 80) : undefined })} />
         {el.scratchHideAt != null && <Slider label="Fade out at" value={el.scratchHideAt} min={0} max={100} suffix="%" onChange={(n) => patchElement(id, { scratchHideAt: n })} />}
       </Accordion>
 
-      <Accordion id="inspector.timing" title="Timing (in / out)" defaultOpen={false}>
-        <div className="hint pad">
+      <Accordion id="inspector.timing" title="Timing" defaultOpen={false}>
+        <Help>
           Give this element a clip on the scene timeline: it appears at <b>In</b> playing its entrance, then plays its exit and disappears when the clip ends. Drag the clip in the{' '}
           <b>Timeline</b> panel under the canvas to adjust it there.
-        </div>
+        </Help>
         <Toggle
           label="Timed appearance"
           checked={!!el.timing}
@@ -7004,32 +6993,20 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
           <>
             <div className="grid2">
               <NumField
-                label="In (s)"
+                label="In" suffix="s"
                 value={Math.round((el.timing.inMs || 0) / 100) / 10}
                 step={0.1}
                 min={0}
                 onChange={(n) => setTiming({ inMs: Math.max(0, Math.round(n * 1000)) })}
               />
               <NumField
-                label="Duration (s)"
+                label="Duration" suffix="s"
                 value={el.timing.durationMs != null ? Math.round(el.timing.durationMs / 100) / 10 : 0}
                 step={0.1}
                 min={0}
                 onChange={(n) => setTiming({ durationMs: n > 0 ? Math.round(n * 1000) : undefined })}
               />
             </div>
-            <NumField
-              label="Out (s)"
-              value={el.timing.durationMs != null ? Math.round(((el.timing.inMs || 0) + el.timing.durationMs) / 100) / 10 : 0}
-              step={0.1}
-              min={0}
-              onChange={(n) => {
-                // Editing OUT holds the in point and moves the tail, the way a video
-                // editor's out-point field behaves.
-                const out = Math.round(n * 1000)
-                setTiming({ durationMs: Math.max(100, out - (el.timing?.inMs || 0)) })
-              }}
-            />
             <Toggle label="Stays until the scene ends" checked={el.timing.durationMs == null} onChange={(v) => setTiming({ durationMs: v ? undefined : 2000 })} />
             <div className="grid2">
               <button className="btn" onClick={() => setTiming({ inMs: Math.round(getTimeline().ms) })}>
@@ -7039,58 +7016,6 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 Out at playhead
               </button>
             </div>
-            <div className="group-title2">Animate in / out</div>
-            <div className="hint pad">
-              These are the same specs as the Entrance and Exit phases below — set them here for speed, or open Animation for stacking, easing and custom keyframes.
-            </div>
-            <Row label="Animate in">
-              <Select
-                value={(entranceAnim?.preset ?? 'none') as string}
-                onChange={(v) => patchEntranceAnimations(v === 'none' ? null : { preset: v as AnimSpec['preset'] })}
-                options={[{ value: 'none', label: 'none (just appears)' }, ...ENTRANCE_PRESETS.map((p) => ({ value: p as string, label: presetLabel(p) }))]}
-              />
-            </Row>
-            {entranceAnim && (
-              <>
-                <div className="grid2">
-                  <NumField label="In speed (ms)" value={entranceAnim.durationMs} step={50} min={0} onChange={(n) => patchEntranceAnimations({ durationMs: Math.max(0, n) })} />
-                  <NumField label="In delay (ms)" value={entranceAnim.delayMs} step={50} min={0} onChange={(n) => patchEntranceAnimations({ delayMs: Math.max(0, n) })} />
-                </div>
-              </>
-            )}
-            <Row label="Animate out">
-              <Select
-                value={(el.animations?.exit?.preset ?? 'none') as string}
-                onChange={(v) =>
-                  patchElement(id, {
-                    animations: {
-                      ...(el.animations ?? {}),
-                      exit: v === 'none' ? undefined : { ...(el.animations?.exit ?? { durationMs: 380, delayMs: 0, easing: 'ease-in' }), preset: v as AnimSpec['preset'] },
-                      exitExtra: v === 'none' ? undefined : el.animations?.exitExtra,
-                    },
-                  })
-                }
-                options={[{ value: 'none', label: 'none (just disappears)' }, ...EXIT_PRESETS.map((p) => ({ value: p as string, label: presetLabel(p) }))]}
-              />
-            </Row>
-            {el.animations?.exit && (
-              <div className="grid2">
-                <NumField
-                  label="Out speed (ms)"
-                  value={el.animations.exit.durationMs}
-                  step={50}
-                  min={0}
-                  onChange={(n) => patchElement(id, { animations: { ...(el.animations ?? {}), exit: { ...el.animations!.exit!, durationMs: Math.max(0, n) } } })}
-                />
-                <NumField
-                  label="Out delay (ms)"
-                  value={el.animations.exit.delayMs}
-                  step={50}
-                  min={0}
-                  onChange={(n) => patchElement(id, { animations: { ...(el.animations ?? {}), exit: { ...el.animations!.exit!, delayMs: Math.max(0, n) } } })}
-                />
-              </div>
-            )}
             <button className="wide" onClick={() => setTimeline({ open: true, ms: el.timing?.inMs ?? 0, playing: false })}>
               Show on the timeline
             </button>
@@ -7099,7 +7024,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
       </Accordion>
 
       <Accordion id="inspector.animation" title="Animation" defaultOpen={false}>
-        <div className="hint pad">Stack multiple animations per phase with “+ Add another” — e.g. an entrance that pops in AND shines.</div>
+        <Help>Stack multiple animations per phase with “+ Add another” — e.g. an entrance that pops in AND shines.</Help>
         <AnimPhase
           title="Entrance"
           primary={entranceAnim}
@@ -7195,9 +7120,9 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               defaultExtraSpec={{ preset: 'shine', durationMs: 800, delayMs: 0, easing: 'ease-in-out' }}
               onChange={(primary, ex) => patchElement(id, { animations: { ...(el.animations ?? {}), comboNext: primary, comboNextExtra: ex.length ? ex : undefined } })}
             />
-            <div className="hint pad">
+            <Help>
               The next-question phase fires once the incoming title and options are on screen, so a pop here animates them in. Tag them under Drag &amp; drop &rarr; Combo role.
-            </div>
+            </Help>
           </>
         )}
         {state.scene.elements.some((e) => e.game?.templateId === 'dragclean') && (
@@ -7232,10 +7157,10 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               defaultExtraSpec={{ preset: 'shine', durationMs: 600, delayMs: 0, easing: 'ease-in-out' }}
               onChange={(primary, ex) => patchElement(id, { animations: { ...(el.animations ?? {}), cleanDrop: primary, cleanDropExtra: ex.length ? ex : undefined } })}
             />
-            <div className="hint pad">
+            <Help>
               “On obstacle cleaned” fires while the obstacle is still visible, so an animation here plays before it fades. Put one on the obstacle itself for a per-item wipe, or on
               a counter, headline or background to react to every clean. Assign the roles in the Drag to clean game&rsquo;s own panel.
-            </div>
+            </Help>
           </>
         )}
         {state.scene.elements.some((e) => e.game?.templateId === 'tapremove') && (
@@ -7250,10 +7175,10 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               defaultExtraSpec={{ preset: 'shine', durationMs: 700, delayMs: 0, easing: 'ease-in-out' }}
               onChange={(primary, ex) => patchElement(id, { animations: { ...(el.animations ?? {}), tapRemove: primary, tapRemoveExtra: ex.length ? ex : undefined } })}
             />
-            <div className="hint pad">
+            <Help>
               Fires while the obstacle is still visible, so an animation here plays before it fades. For the obstacle&rsquo;s OWN reaction to the tap itself, use “On tap” above —
               that works on any tappable element and needs nothing from the game.
-            </div>
+            </Help>
           </>
         )}
         {state.scene.elements.some((e) => e.game?.templateId === 'tapreveal') && (
@@ -7268,10 +7193,10 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               defaultExtraSpec={{ preset: 'shine', durationMs: 700, delayMs: 0, easing: 'ease-in-out' }}
               onChange={(primary, ex) => patchElement(id, { animations: { ...(el.animations ?? {}), tapReveal: primary, tapRevealExtra: ex.length ? ex : undefined } })}
             />
-            <div className="hint pad">
+            <Help>
               Fires while the cover is still visible, so an animation here plays before it leaves. The revealed image has its own fade-in under the game&rsquo;s settings; give it
               an “Entrance” only if you want something on top of that.
-            </div>
+            </Help>
           </>
         )}
         {state.scene.elements.some((e) => e.game?.templateId === 'swipecards') && (
@@ -7295,10 +7220,10 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 onChange={(primary, ex) => patchElement(id, { animations: { ...(el.animations ?? {}), [phase]: primary, [`${phase}Extra`]: ex.length ? ex : undefined } })}
               />
             ))}
-            <div className="hint pad">
+            <Help>
               Fire on every element in the screen, not just the cards. A swiped card is already flying off when these play, so animate the headline, the next card or the
               backdrop rather than the card that left.
-            </div>
+            </Help>
           </>
         )}
         {state.scene.elements.some((e) => e.game?.templateId === 'thoughtwhack') && (
@@ -7342,10 +7267,10 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
           </>
         )}
         {(el.animations?.tap || el.animations?.tapExtra?.length) && (
-          <div className="hint pad">
+          <Help>
             Replays every time this element is tapped, in <b>Preview</b> and the exported ad — on the canvas a click selects instead. It doesn’t swallow the tap, so a screen change
             on this element still happens.
-          </div>
+          </Help>
         )}
         <AnimPhase
           title="Loop"
@@ -7386,10 +7311,10 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               />
               <Swatches label="Cover color" value={el.scratch.coverColor ?? '#d9b25b'} onChange={(c) => setScratch({ coverColor: c ?? '#d9b25b' })} />
               <Toggle label="Advance when all revealed" checked={el.scratch.advanceOnAllRevealed ?? true} onChange={(v) => setScratch({ advanceOnAllRevealed: v })} />
-              <div className="hint pad">
+              <Help>
                 A coating covers this element in Preview/export; scratching it reveals the elements layered <b>behind</b> it (lower layers inside its box). An image element uses
                 its own art as the foil; otherwise the cover color is used. Bind a <b>While scratching</b> sound in the Sound section.
-              </div>
+              </Help>
             </>
           )}
         </Accordion>
@@ -7419,10 +7344,10 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                   ]}
                 />
               </Row>
-              <div className="hint pad">
+              <Help>
                 When uncovered, this element pops its amount, plays its <b>When revealed</b> sound (Sound section), and adds to the chosen tally text element. Mark the last app{' '}
                 <b>Finale</b> for the big red number.
-              </div>
+              </Help>
             </>
           )}
         </Accordion>
@@ -7432,14 +7357,40 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
         <ElementSound el={el} />
       </Accordion>
 
-      <div className="group-title" />
-      <StyleButtons />
-      <button className="wide" onClick={duplicateSelected}>
-        Duplicate (Ctrl+D)
-      </button>
-      <button className="wide danger" onClick={removeSelected}>
-        Delete
-      </button>
+      {!activeVariant &&
+        el.type !== 'game-mount' &&
+        el.type !== 'endscene' &&
+        (() => {
+          const curKey: ConvertTo = el.type === 'bar' ? (el.mode === 'fit' ? 'rect' : 'bar') : (el.type as ConvertTo)
+          const opts: { to: ConvertTo; label: string }[] = el.assetId
+            ? [
+                { to: 'image', label: 'Image' },
+                { to: 'bar', label: 'Header' },
+                { to: 'rect', label: 'Rectangle' },
+                { to: 'cta', label: 'CTA' },
+                { to: 'background', label: 'Background' },
+                { to: 'handguide', label: 'Hand guide' },
+              ]
+            : el.type === 'text'
+              ? [
+                  { to: 'text', label: 'Text' },
+                  { to: 'cta', label: 'CTA' },
+                ]
+              : [
+                  { to: 'bar', label: 'Header' },
+                  { to: 'rect', label: 'Rectangle' },
+                  { to: 'cta', label: 'CTA' },
+                  { to: 'text', label: 'Text' },
+                ]
+          return (
+            <>
+              <div className="group-title">Convert to</div>
+              <Chips items={opts.map((o) => ({ key: o.to, label: o.label, active: curKey === o.to, onClick: () => convertElement(id, o.to) }))} />
+            </>
+          )
+        })()}
+
+      <ElementActions />
     </div>
   )
 }

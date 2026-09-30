@@ -191,7 +191,7 @@ export function ProjectSettings(props: { onClose: () => void }): JSX.Element {
         <NumField label="Base W" value={m.baseW} suffix="px" onChange={(n) => patchMeta({ baseW: n })} />
         <NumField label="Base H" value={m.baseH} suffix="px" onChange={(n) => patchMeta({ baseH: n })} />
       </div>
-      <ColorField label="Background colour" value={m.bgMatchColor || '#000000'} onChange={(c) => patchMeta({ bgMatchColor: c ?? '#000000' })} />
+      <ColorField label="Background color" value={m.bgMatchColor || '#000000'} onChange={(c) => patchMeta({ bgMatchColor: c ?? '#000000' })} />
       <Row label="Vertical align">
         <Select
           value={m.vAlign ?? 'top'}

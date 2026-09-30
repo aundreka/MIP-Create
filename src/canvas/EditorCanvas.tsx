@@ -12,7 +12,8 @@ import type { AssetMap } from '../../runtime/types'
 import { ContextMenu, type MenuItem } from '../panels/ContextMenu'
 import { getFramePos, setFramePos } from '../canvasLayout'
 import { clampZoom, flipbookBoxes, flipbookOpts, resizeBox, type Box } from './geometry'
-import { orientOf, ownsSlot, patchSlot, resolvedLayout, withoutSlot } from '../headerLayout'
+import { Icon, X as XIcon } from '../icons'
+import { orientOf, patchSlot, resolvedLayout, withoutSlot } from '../headerLayout'
 import { isSceneHidden, useCanvasView } from '../canvasView'
 import { useActiveVariant } from '../variantMode'
 import { endPathDraw, pathDrawTarget, usePathDraw } from '../drawMode'
@@ -46,7 +47,6 @@ import {
   sendToBack,
   bringToFront,
   setActiveScene,
-  setOrientation,
   setSelection,
   toggleLock,
   undo,
@@ -2646,6 +2646,34 @@ export function EditorCanvas(props: Props): JSX.Element {
     ]
   }
 
+  // One on-canvas control for every edit mode: what you are doing, and a way out.
+  // Done sends the key each mode already finishes on (Enter closes a crop or shape
+  // outline, Escape ends the rest), so there is exactly one exit path per mode.
+  const editModeLabel = cropEdit
+    ? 'Cropping'
+    : shapeEdit
+      ? shapeDrawing
+        ? 'Drawing a shape'
+        : 'Reshaping'
+      : revealEdit
+        ? 'Placing the reveal'
+        : zoneEdit
+          ? 'Editing the area'
+          : thoughtZoneEdit
+            ? 'Editing spawn areas'
+            : trackerEdit
+              ? 'Editing tracker symbols'
+              : spineEdit
+                ? 'Sizing the book'
+                : headerEdit
+                  ? 'Placing the header'
+                  : dateEdit
+                    ? 'Placing the date'
+                    : null
+  const finishEditMode = (): void => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: cropEdit || shapeEdit ? 'Enter' : 'Escape' }))
+  }
+
   return (
     <div
       className={'canvas-area' + (panning ? ' panning' : '')}
@@ -2663,6 +2691,14 @@ export function EditorCanvas(props: Props): JSX.Element {
           backgroundPosition: `${pan.x}px ${pan.y}px`,
         }}
       />
+      {editModeLabel && (
+        <div className="edit-mode-pill" onPointerDown={(e) => e.stopPropagation()}>
+          <span>{editModeLabel}</span>
+          <button className="primary" onClick={finishEditMode}>
+            Done
+          </button>
+        </div>
+      )}
       <div className="world" style={{ transform: `translate(${pan.x}px,${pan.y}px) scale(${zoom})`, ['--hz' as string]: String(1 / zoom) } as React.CSSProperties}>
         {visibleScenes.map((sd) => {
           const pos = positions[sd.id] ?? { x: 0, y: 0 }
@@ -2682,21 +2718,6 @@ export function EditorCanvas(props: Props): JSX.Element {
                 onPointerCancel={onFrameLabelUp}
               >
                 {sd.name}
-                {active && (
-                  <button
-                    className="frame-chip"
-                    title={landscape ? 'Switch the canvas to portrait' : 'Switch the canvas to landscape'}
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onClick={() => setOrientation(landscape ? 'portrait' : 'landscape')}
-                  >
-                    {landscape ? '▯ portrait' : '▭ landscape'}
-                  </button>
-                )}
-                {lsN > 0 && (
-                  <span className="frame-chip frame-chip-ls" title={`${lsN}/${sd.elements.length} elements in this scene have their own landscape layout`}>
-                    ▭ {lsN}
-                  </span>
-                )}
               </div>
               {/* One-click entry into a separate landscape layout, right where you edit:
                   shown only on the active frame, in landscape, while the scene still
@@ -2720,7 +2741,7 @@ export function EditorCanvas(props: Props): JSX.Element {
                     <span>Landscape mirrors portrait</span>
                     <button onClick={() => seedLandscapeLayout()}>Create separate landscape layout</button>
                     <button className="ls-banner-close" title="Hide for this scene" onClick={() => setLsBannerClosed((m) => ({ ...m, [sd.id]: true }))}>
-                      ✕
+                      <Icon icon={XIcon} size={12} />
                     </button>
                   </div>
                 )}
@@ -2782,8 +2803,10 @@ export function EditorCanvas(props: Props): JSX.Element {
                         className={'scratch-mark-wrap' + (e.scratch ? ' is-cover' : '') + (e.reveal ? ' is-reveal' : '')}
                         style={{ left: r.x, top: r.y, width: r.w, height: r.h }}
                       >
-                        {e.scratch && <span className="scratch-mark cover">scratch</span>}
-                        {e.reveal && <span className="scratch-mark reveal">$ reveal</span>}
+                        {/* The outline marks every scratch/reveal area; the name tag only
+                            on the selected one, so the canvas isn't covered in pills. */}
+                        {e.scratch && selectedIds.includes(e.id) && <span className="scratch-mark cover">scratch</span>}
+                        {e.reveal && selectedIds.includes(e.id) && <span className="scratch-mark reveal">reveal</span>}
                       </div>
                     )
                   })}
@@ -2988,9 +3011,6 @@ export function EditorCanvas(props: Props): JSX.Element {
                               />
                             ))}
                           </div>
-                          <div className="dim-badge" style={{ left: rx + rw / 2, top: ry + rh, transform: `translate(-50%, 6px) scale(${1 / zoom})`, whiteSpace: 'nowrap' }}>
-                            drag edges to crop · drag middle to move · scroll to zoom · Enter when done
-                          </div>
                         </>
                       )
                     })()}
@@ -3062,19 +3082,6 @@ export function EditorCanvas(props: Props): JSX.Element {
                                 />
                               )
                             })}
-                          <div
-                            className="dim-badge"
-                            style={{
-                              left: shapeRect.x + shapeRect.w / 2,
-                              top: shapeRect.y + shapeRect.h,
-                              transform: `translate(-50%, 6px) scale(${1 / zoom})`,
-                              whiteSpace: 'nowrap',
-                            }}
-                          >
-                            {shapeDrawing
-                              ? 'click to add corners · drag to trace freehand · click the first corner (or Enter) to close'
-                              : 'drag a corner to reshape · drag a small dot to add one · Alt-click to remove · Enter when done'}
-                          </div>
                         </>
                       )
                     })()}
@@ -3257,20 +3264,6 @@ export function EditorCanvas(props: Props): JSX.Element {
                           pointerEvents: 'none',
                         }}
                       >
-                        <div
-                          style={{
-                            position: 'absolute',
-                            left: 4,
-                            top: 4,
-                            padding: '2px 7px',
-                            borderRadius: 4,
-                            background: 'var(--accent)',
-                            color: '#fff',
-                            font: '600 11px/1.5 system-ui,sans-serif',
-                          }}
-                        >
-                          Draw spawn areas · drag the SUBJECT marker · Enter when done
-                        </div>
                       </div>
                       {currentThoughtZones.map((zone, i) => {
                         const bx = {
@@ -3316,7 +3309,7 @@ export function EditorCanvas(props: Props): JSX.Element {
                               }}
                               onPointerDown={(e) => removeThoughtZone(e, i)}
                             >
-                              ×
+                              <Icon icon={XIcon} size={12} />
                             </div>
                             {CORNERS.map((h) => (
                               <div
@@ -3450,8 +3443,7 @@ export function EditorCanvas(props: Props): JSX.Element {
                       }}
                     >
                       <span className="scratch-mark cover" style={{ pointerEvents: 'none' }}>
-                        header · this scene · {landscape ? 'landscape' : 'portrait'} · {curHeaderOff.x || curHeaderOff.y ? `${curHeaderOff.x}, ${curHeaderOff.y}` : 'pinned top'}
-                        {ownsSlot(headerScene, orientOf(landscape)) ? '' : ' · from project'}
+                        Header
                       </span>
                     </div>
                   )}

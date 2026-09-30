@@ -15,7 +15,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { SceneElement } from '../../runtime/scene'
 import { beginTransaction, endTransaction, patchElement, patchSceneDef, selectWithGroups, useEditorState } from '../store'
 import { clipEnd, setTimeline, timelineLength, useTimeline } from '../timeline'
-import { ChevronRight, Icon, Pause, Play, Repeat, SkipBack } from '../icons'
+import { ChevronRight, Icon, Pause, Play, Plus, Repeat, SkipBack, X } from '../icons'
 
 const LABEL_W = 138 // px reserved for the element-name column
 const SNAP_PX = 7 // pointer distance within which a drag snaps to a guide time
@@ -302,7 +302,6 @@ export function Timeline(): JSX.Element {
           />
           <span>s</span>
         </label>
-        <span className="tl-hint">Drag a clip to move it · drag its edges to trim</span>
       </div>
 
       <div className="tl-body">
@@ -325,7 +324,7 @@ export function Timeline(): JSX.Element {
                     patchElement(el.id, { timing: undefined })
                   }}
                 >
-                  ✕
+                  <Icon icon={X} size={12} />
                 </button>
               ) : (
                 <button
@@ -336,7 +335,7 @@ export function Timeline(): JSX.Element {
                     addClip(el)
                   }}
                 >
-                  +
+                  <Icon icon={Plus} size={12} />
                 </button>
               )}
             </div>
@@ -364,9 +363,7 @@ export function Timeline(): JSX.Element {
             if (!timing) {
               return (
                 <div key={el.id} className="tl-lane" onDoubleClick={(e) => addClip(el, toMs(e.clientX))}>
-                  <div className="tl-always" title="Always visible — double-click to give it an in/out window">
-                    always on
-                  </div>
+                  <div className="tl-always" title="Always visible. Double-click to give it an in/out window" />
                 </div>
               )
             }

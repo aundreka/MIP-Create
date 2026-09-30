@@ -152,6 +152,7 @@ Build with these; don't drop raw `<select>` / `<input type="color">` /
 | `Select<T>` | `{value, onChange, options:[{value,label,disabled?}], label?, title?, className?}` | real `<select>` + chevron overlay; preserves keyboard + the canvas keydown guard |
 | `Checkbox` | `{label, checked, onChange, title?}` | themed box + check |
 | `Tooltip` | `{label, side?, children}` | CSS-only, keyboard-friendly via `:focus-within` |
+| `Help` | `{children}` | collapsed (i) that expands how-it-works text in place |
 | `Modal` | `{title, onClose, size?, headerExtra?, children}` | backdrop blur, Esc, focus, enter animation |
 | `Accordion` | `{id, title, defaultOpen?, children}` | open state persisted by `id` in `uiState.ts` |
 
@@ -168,8 +169,9 @@ guard (which ignores `SELECT`) keep working.
 - Hover/press transitions on `button, .tool, .scene-chip, .layer-row, .chip, …`
   via `--t-fast`/`--ease`; subtle `:active` translate/scale.
 - Modals: backdrop fade + panel `modal-pop` (translate+scale).
-- Row actions (Layers, Scenes) **reveal on hover/focus** (`opacity` transition) to
-  cut clutter at rest.
+- Row actions: a scene row keeps its extra actions behind one always-visible `⋯`
+  (and right-click). Layer rows show lock / hide on hover and keep them visible
+  while on; the rest is in the right-click menu. Nothing important is hover-only.
 - Everything is gated by `@media (prefers-reduced-motion: reduce)`.
 
 ---
@@ -180,8 +182,14 @@ guard (which ignores `SELECT`) keep working.
   dividers where practical.
 - **Modals** share the `Modal` shell (`.modal-overlay` + `.modal`). Sizes:
   `sm/md/lg/preview/full`. Use `headerExtra` for rich bars (Preview).
-- **Inspector** long sections are `Accordion`s (Animation + Background box default
-  collapsed) to manage cognitive load.
+- **Inspector** order for an element: name + lock, the element's own section
+  (open), Position & size (open), then collapsed sections. Visibility & layering
+  shows a one-line summary of any non-default setting in its header. Short labels
+  (≤16 chars) sit left of one-line controls (`.field.short`).
+- **Tool rail**: Text, Image, Background are direct; everything else is in labelled
+  group menus (`ToolGroup`). Add a tool to the matching group, not as a new icon.
+- **Canvas edit modes** (crop, shape, zones, header…) show the shared
+  `.edit-mode-pill` (mode name + Done). Don't add per-mode instruction badges.
 - **Layers** render a one-level tree (`src/layersTree.ts` → `buildLayerTree`):
   consecutive same-`groupId` elements collapse under a folder header; DnD reorder
   stays on the flat id list so `reorderLayers` is untouched.
@@ -213,6 +221,12 @@ guard (which ignores `SELECT`) keep working.
 - Use the `ui.tsx` primitives for selects, colors, checkboxes, modals, tooltips, accordions.
 - Put new UI preferences in `theme.ts` / `uiState.ts` (localStorage), never `store.ts`.
 - Give icon-only controls a `Tooltip` and an `aria-label`.
+- Keep one `.primary` button per screen; toggled/selected states use `.on`, a tint,
+  never the accent fill.
+- Put explanations in `<Help>`, not inline paragraphs. Inline `.hint` lines are for
+  live status, empty states and warnings only.
+- Give each action one visible home. Right-click, shortcuts and the command palette
+  are the second route; don't add another visible button for it.
 
 **Don't**
 - Hardcode hex (except `#fff` on accent/artboard) or magic radii/shadows.

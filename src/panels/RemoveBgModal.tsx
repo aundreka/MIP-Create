@@ -151,7 +151,7 @@ export function RemoveBgModal(props: { elementId: string; assetId: string; onClo
             ) : !base && !error ? (
               <div className="hint pad">Reading image…</div>
             ) : (
-              <canvas ref={canvasRef} className="rmbg-canvas" onClick={pick} title="Click a background area to sample its colour" />
+              <canvas ref={canvasRef} className="rmbg-canvas" onClick={pick} title="Click a background area to sample its color" />
             )}
           </div>
           <div className="rmbg-side">

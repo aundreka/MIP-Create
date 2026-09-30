@@ -200,9 +200,12 @@ button:disabled {
   opacity: 0.4;
   cursor: default;
 }
+/* Selected / toggled-on state: a tint, not a fill, so only .primary (one per
+   screen) reads as the main action. */
 button.on {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 20%, var(--panel-2));
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  color: var(--ink);
 }
 button.primary {
   background: var(--accent);
@@ -214,8 +217,20 @@ button.primary:hover:not(:disabled) {
   border-color: color-mix(in srgb, #fff 12%, var(--accent));
 }
 button.on:hover:not(:disabled) {
-  background: color-mix(in srgb, #fff 8%, var(--accent));
-  border-color: color-mix(in srgb, #fff 8%, var(--accent));
+  background: color-mix(in srgb, var(--accent) 28%, var(--panel-2));
+  border-color: color-mix(in srgb, var(--accent) 70%, var(--line));
+}
+/* Split button: main action + caret menu, joined into one pill. */
+.split-btn {
+  display: inline-flex;
+}
+.split-btn > button:first-child {
+  border-radius: var(--r-sm) 0 0 var(--r-sm);
+}
+.split-btn > .split-caret {
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  border-left-color: color-mix(in srgb, #000 25%, var(--accent));
+  padding: 5px 6px;
 }
 button.danger {
   color: var(--danger);
@@ -353,10 +368,6 @@ button:active:not(:disabled),
   background: rgba(180, 84, 10, 0.34);
 }
 
-.topbar .hint {
-  color: var(--muted);
-  font-size: 12px;
-}
 .locale-pick {
   width: auto;
   min-width: 84px;
@@ -671,10 +682,9 @@ button.icon {
 .scenes-strip.vertical .scene-chip.drop-after {
   box-shadow: inset 0 -2px 0 var(--accent);
 }
-.scenes-strip.vertical .scenes-add {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px;
+.scenes-add-btn {
+  flex: 0 0 auto;
+  font-size: var(--fs-sm);
   margin-top: 2px;
 }
 .scenes-label {
@@ -728,13 +738,27 @@ button.icon {
   background: var(--artboard-void);
 }
 .scene-name {
-  max-width: 110px;
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.scene-num {
+/* Row actions live behind one always-visible ⋯ (and right-click), not a strip of
+   hover-only icons. */
+.scene-more,
+.scene-hidden-flag {
+  flex: 0 0 auto;
+  background: transparent;
+  border: 0;
+  padding: 3px;
+  min-width: 0;
   color: var(--muted);
-  font-size: 10px;
+}
+.scene-more:hover:not(:disabled),
+.scene-hidden-flag:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  color: var(--ink);
 }
 .scene-star {
   background: transparent;
@@ -745,41 +769,6 @@ button.icon {
 }
 .scene-star.on {
   color: #ffd34d;
-}
-.scene-mini {
-  background: transparent;
-  border: 0;
-  padding: 0 2px;
-  color: var(--muted);
-  font-size: 11px;
-  opacity: 0;
-  transition:
-    opacity var(--t-fast) var(--ease),
-    color var(--t-fast) var(--ease);
-}
-.scene-chip:hover .scene-mini,
-.scene-chip:focus-within .scene-mini {
-  opacity: 1;
-}
-.scene-mini:hover {
-  color: var(--ink);
-}
-.scene-mini.has-language {
-  color: var(--accent);
-  opacity: 1;
-}
-.scene-mini.scene-language-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  opacity: 1;
-}
-.scene-language-label {
-  display: none;
-  font-size: 9px;
-}
-.scene-chip.active .scene-language-label {
-  display: inline;
 }
 /* kind badge — always visible, colored by type */
 .scene-kind-badge {
@@ -829,6 +818,16 @@ button.icon {
   max-height: 260px;
   overflow-y: auto;
 }
+.scene-picker-search {
+  position: sticky;
+  top: -4px;
+  margin: -4px -4px 4px;
+  width: calc(100% + 8px);
+  border-radius: var(--r-md) var(--r-md) 0 0;
+  border-width: 0 0 1px;
+  padding: 7px 10px;
+  background: var(--panel);
+}
 .scene-picker-header {
   font-size: 10px;
   font-weight: 600;
@@ -856,16 +855,6 @@ button.icon {
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
-.scenes-add {
-  display: flex;
-  gap: 4px;
-  margin-left: 6px;
-}
-.scenes-add button {
-  font-size: 12px;
-  padding: 4px 8px;
-}
-
 /* ---- body ---- */
 .body {
   flex: 1;
@@ -923,6 +912,16 @@ button.icon {
   border-radius: 0 2px 2px 0;
   background: var(--accent);
 }
+/* Group tools open a menu: a small corner tick says "more inside". */
+.tool-group::after {
+  content: '';
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  border: 3px solid transparent;
+  border-right-color: var(--muted);
+  border-bottom-color: var(--muted);
+}
 .rail-sep {
   width: 20px;
   height: 1px;
@@ -948,7 +947,6 @@ button.icon {
   background: var(--glass-strong);
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
-  text-transform: capitalize;
   z-index: 1;
 }
 .layers {
@@ -1029,7 +1027,7 @@ button.icon {
   margin: 10px auto 0;
 }
 
-/* ---- Canvas column + context toolbar ---- */
+/* ---- Canvas column ---- */
 .canvas-col {
   flex: 1;
   min-width: 0;
@@ -1037,75 +1035,6 @@ button.icon {
   display: flex;
   flex-direction: column;
 }
-.context-toolbar {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 5px 8px;
-  border-bottom: 1px solid var(--glass-border);
-  background: var(--glass-bg);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-}
-.ct-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 5px;
-  background: transparent;
-  border: 0;
-  border-radius: var(--r-sm);
-  color: var(--ink);
-  cursor: pointer;
-  transition: background var(--t-fast) var(--ease);
-}
-.ct-btn:disabled {
-  opacity: 0.32;
-  cursor: default;
-}
-.ct-btn:hover:not(:disabled) {
-  background: var(--panel-2);
-}
-.ct-sep {
-  width: 1px;
-  height: 18px;
-  background: var(--line);
-  margin: 0 5px;
-}
-.context-toolbar .spacer {
-  flex: 1;
-}
-.ct-hint {
-  font-size: 11px;
-  color: var(--muted);
-}
-
-/* ---- Status bar ---- */
-.statusbar {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 26px;
-  padding: 0 12px;
-  font-size: 11px;
-  color: var(--muted);
-  border-top: 1px solid var(--glass-border);
-  background: var(--glass-bg);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-}
-.statusbar .spacer {
-  flex: 1;
-}
-.statusbar .sb-dot {
-  opacity: 0.5;
-}
-.statusbar .sb-dirty {
-  color: var(--accent);
-}
-
 /* layers */
 .layer-list {
   padding: 4px;
@@ -1135,13 +1064,7 @@ button.icon {
   opacity: 0.6;
 }
 .layer-btn.on {
-  opacity: 1;
   color: var(--accent);
-}
-.layer-grip {
-  color: var(--muted);
-  cursor: grab;
-  font-size: 11px;
 }
 .layer-icon {
   width: 16px;
@@ -1154,25 +1077,27 @@ button.icon {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Lock / hide take no room until hovered, and stay put while switched on, so the
+   name gets the whole row at rest. */
 .layer-btn {
+  display: none;
   padding: 2px 5px;
+  min-width: 0;
   background: transparent;
   border: 0;
-  opacity: 0;
-  transition:
-    opacity var(--t-fast) var(--ease),
-    color var(--t-fast) var(--ease);
+  color: var(--muted);
 }
 .layer-row:hover .layer-btn,
-.layer-row:focus-within .layer-btn {
-  opacity: 1;
+.layer-row:focus-within .layer-btn,
+.layer-btn.on {
+  display: inline-flex;
 }
 .layer-btn:hover {
   color: var(--ink);
 }
 .layer-row.is-hidden .layer-name {
   opacity: 0.45;
-  text-decoration: line-through;
+
 }
 .layer-row.child {
   padding-left: 24px;
@@ -1269,31 +1194,6 @@ button.icon {
 }
 /* Small chips in the frame label row: orientation flip (active frame) + a
    per-scene "has landscape layout" count. Stop frame-drag via stopPropagation. */
-.frame-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 0 6px;
-  height: 16px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--panel);
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 1;
-  cursor: pointer;
-  white-space: nowrap;
-}
-button.frame-chip:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-.frame-chip-ls {
-  cursor: default;
-  color: var(--accent-2);
-  border-color: color-mix(in srgb, var(--accent-2) 55%, transparent);
-}
 /* Landscape-mirrors-portrait banner: floats at the top of the active frame while
    the scene has no landscape overrides; one click seeds the separate layout. */
 .ls-banner {
@@ -1731,6 +1631,24 @@ button.frame-chip:hover {
   font-size: 11px;
   margin-bottom: 2px;
 }
+/* Inspector: a short label and a one-line control share a row, label left. Long
+   labels, multi-line controls (chips, swatches, textareas) and the two-up .grid2
+   cells keep the stacked layout. */
+.inspector .field.short:has(> .num-input, > .select-wrap, > input:not([type='range'], [type='checkbox'])) {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 8px;
+}
+.inspector .field.short:has(> .num-input, > .select-wrap, > input:not([type='range'], [type='checkbox'])) > span {
+  margin-bottom: 0;
+}
+.inspector .grid2 .field.short:has(> .num-input, > .select-wrap, > input:not([type='range'], [type='checkbox'])) {
+  display: block;
+}
+.inspector .grid2 .field.short:has(> .num-input, > .select-wrap, > input:not([type='range'], [type='checkbox'])) > span {
+  margin-bottom: 2px;
+}
 .num-input {
   position: relative;
   display: flex;
@@ -1769,11 +1687,6 @@ button.frame-chip:hover {
 .grid3 button {
   width: 100%;
 }
-.scene-meta-row {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  align-items: start;
-}
 .group-title {
   margin: 10px 10px 2px;
   font-size: 11px;
@@ -1800,7 +1713,40 @@ button.frame-chip:hover {
   color: var(--muted);
 }
 .hint.pad {
-  padding: 12px 10px;
+  padding: 4px 10px;
+  font-size: var(--fs-sm);
+}
+/* Help: a collapsed (i) under the control it explains; opens the text in place. */
+.help {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  margin: -2px 0 2px;
+  padding: 0 8px;
+}
+.help-btn {
+  padding: 2px;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  opacity: 0.7;
+}
+.help-btn:hover:not(:disabled),
+.help.open .help-btn {
+  background: transparent;
+  color: var(--accent);
+  opacity: 1;
+}
+.help-body {
+  align-self: stretch;
+  margin-top: 2px;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: var(--input-bg);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
 }
 /* A hint that is telling you something is wrong (a deleted morph target, a setting
    that cancels the one above it) rather than just explaining the control. */
@@ -1835,10 +1781,16 @@ button.frame-chip:hover {
 .scrub:hover {
   color: var(--accent);
 }
+/* Sub-heading inside a section: ink + weight so it reads above the field labels. */
 .group-title2 {
-  margin: 8px 10px 2px;
-  font-size: 11px;
-  color: var(--muted);
+  margin: 12px 10px 2px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--ink);
+}
+.color-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
 }
 .muted {
   color: var(--muted);
@@ -1927,8 +1879,8 @@ button.frame-chip:hover {
   transform: scale(0.93);
 }
 .chip.on {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 20%, var(--panel-2));
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
 }
 .swatches {
   display: flex;
@@ -2211,14 +2163,55 @@ button.frame-chip:hover {
   border-radius: 0;
   justify-content: flex-start;
   padding: 9px 10px;
-  font-size: var(--fs-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--ink);
   cursor: pointer;
 }
+.acc-head > span {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
 .acc-head:hover {
-  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+}
+/* Non-default settings of a collapsed section, on one muted line in its header. */
+.acc-summary {
+  font-weight: 400;
+  font-size: var(--fs-xs);
+  color: var(--accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Name field + lock toggle on one line at the top of the element panel. */
+.name-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  padding-right: 10px;
+}
+.name-row > .field {
+  flex: 1;
+  min-width: 0;
+  padding-right: 0;
+}
+.name-row > button.icon {
+  margin-bottom: 4px;
+}
+/* Element actions: one compact row at the foot of the panel. */
+.el-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 10px 10px 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.el-actions .spacer {
+  flex: 1;
 }
 .acc-chevron {
   transition: transform var(--t-fast) var(--ease);
@@ -2401,7 +2394,6 @@ svg {
   gap: 5px;
 }
 .layer-icon,
-.layer-grip,
 .scene-icon,
 .proj-thumb,
 .flow-arrow {
@@ -2434,6 +2426,8 @@ svg {
 /* The trigger is a <button> dressed as the native select above, so a row that swaps
    one for the other does not shift by a pixel. */
 .search-select-btn {
+  /* block, not the global inline-flex button, so text-overflow can clip the end */
+  display: block;
   font: inherit;
   color: var(--ink);
   background: var(--input-bg);
@@ -2702,6 +2696,31 @@ svg {
 }
 
 /* ---- canvas extras ---- */
+/* Edit-mode pill: floats at the top of the canvas while a crop / shape / zone /
+   header… editor is open — the mode's name and its one exit. */
+.edit-mode-pill {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 5px 5px 14px;
+  border-radius: var(--r-pill);
+  background: var(--glass-strong);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--sh-2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.edit-mode-pill button {
+  border-radius: var(--r-pill);
+  padding: 4px 14px;
+}
 .sel-box.group {
   border-style: dashed;
 }
@@ -3900,7 +3919,7 @@ svg {
 .scene-language-inspector {
   justify-content: center;
   gap: 7px;
-  margin: 8px 0 12px;
+  margin: 6px 10px 8px;
 }
 .scene-translation-body {
   display: block;
@@ -4181,11 +4200,6 @@ svg {
 .scene-rename {
   width: 90px;
   font-size: 12px;
-}
-.scope-hint {
-  padding: 0 12px 8px;
-  font-size: 11px;
-  color: var(--muted);
 }
 
 /* ---- templates modal ---- */
@@ -5119,11 +5133,6 @@ svg {
   font-family: inherit;
   font-size: var(--fs-xs);
 }
-.tl-hint {
-  margin-left: auto;
-  font-size: var(--fs-xs);
-  color: var(--muted);
-}
 .tl-body {
   display: flex;
   max-height: 190px;
@@ -5165,8 +5174,12 @@ svg {
 }
 .tl-name-btn {
   flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
   padding: 0;
   border: 0;
   border-radius: var(--r-sm);
@@ -5175,7 +5188,7 @@ svg {
   font-size: 11px;
   line-height: 1;
   cursor: pointer;
-  opacity: 0;
+  opacity: 0.6;
 }
 .tl-name:hover .tl-name-btn,
 .tl-name.sel .tl-name-btn {

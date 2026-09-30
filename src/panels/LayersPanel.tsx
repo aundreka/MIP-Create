@@ -1,14 +1,16 @@
 // Layers — draggable to reorder (top of list = front). Drag a row onto another
 // to restack; the drop rewrites z-order. Click selects (Shift to multi-select).
+// Lock / hide show on hover and stay visible while on; right-click for the rest.
 // Grouped elements (shared groupId) collapse under a folder header.
 
 import { useEffect, useState } from 'react'
-import { patchElement, removeElement, reorderLayers, selectOnly, selectWithGroups, setSelection, toggleLock, toggleSelect, useEditorState } from '../store'
+import { bringToFront, duplicateSelected, patchElement, removeElement, reorderLayers, sendToBack, selectOnly, selectWithGroups, setSelection, toggleLock, toggleSelect, useEditorState } from '../store'
 import type { SceneElement } from '../../runtime/scene'
 import { resolveMorphTarget } from '../../runtime/morph'
 import { buildLayerTree } from '../layersTree'
 import { getGroupCollapsed, pruneGroupCollapsed, setGroupCollapsed } from '../uiState'
-import { ChevronRight, Eye, EyeOff, Folder, FolderOpen, GripVertical, Icon, LAYER_TYPE_ICON, LayoutGrid, Lock, LockOpen, X } from '../icons'
+import { ChevronRight, Eye, EyeOff, Folder, FolderOpen, Icon, LAYER_TYPE_ICON, LayoutGrid, Lock, LockOpen } from '../icons'
+import { ContextMenu, type MenuItem } from './ContextMenu'
 
 export function LayersPanel(): JSX.Element {
   const { project, scene, activeSceneId, selectedIds, orientation } = useEditorState()
@@ -33,6 +35,20 @@ export function LayersPanel(): JSX.Element {
   const [dragId, setDragId] = useState<string | null>(null)
   const [over, setOver] = useState<{ id: string; pos: 'before' | 'after' } | null>(null)
   const [, force] = useState(0)
+  const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null)
+  const menuEl = menu ? scene.elements.find((e) => e.id === menu.id) : undefined
+  const menuItems: MenuItem[] = menuEl
+    ? [
+        { label: 'Duplicate', onClick: duplicateSelected },
+        { label: 'Bring to front', onClick: () => bringToFront(menuEl.id) },
+        { label: 'Send to back', onClick: () => sendToBack(menuEl.id) },
+        { sep: true, label: '' },
+        { label: menuEl.locked ? 'Unlock' : 'Lock', onClick: () => toggleLock(menuEl.id) },
+        { label: menuEl.hidden ? 'Show' : 'Hide', onClick: () => patchElement(menuEl.id, { hidden: !menuEl.hidden }) },
+        { sep: true, label: '' },
+        { label: 'Delete', onClick: () => removeElement(menuEl.id) },
+      ]
+    : []
 
   // drop stale group-collapse flags so a reused groupId can't inherit them
   const groupKey = tree
@@ -85,10 +101,12 @@ export function LayersPanel(): JSX.Element {
         setOver(null)
       }}
       onClick={(e) => (e.shiftKey ? toggleSelect(el.id) : selectOnly(el.id))}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        if (!selectedIds.includes(el.id)) selectOnly(el.id)
+        setMenu({ id: el.id, x: e.clientX, y: e.clientY })
+      }}
     >
-      <span className="layer-grip">
-        <Icon icon={GripVertical} size={14} />
-      </span>
       <span className="layer-icon">
         <Icon icon={LAYER_TYPE_ICON[el.type] ?? LayoutGrid} size={14} />
       </span>
@@ -121,7 +139,7 @@ export function LayersPanel(): JSX.Element {
         <Icon icon={el.locked ? Lock : LockOpen} size={14} />
       </button>
       <button
-        className="layer-btn"
+        className={'layer-btn' + (effHidden(el) ? ' on' : '')}
         title={el.hidden ? 'Show' : 'Hide'}
         onClick={(e) => {
           e.stopPropagation()
@@ -129,16 +147,6 @@ export function LayersPanel(): JSX.Element {
         }}
       >
         <Icon icon={effHidden(el) ? EyeOff : Eye} size={14} />
-      </button>
-      <button
-        className="layer-btn"
-        title="Delete"
-        onClick={(e) => {
-          e.stopPropagation()
-          removeElement(el.id)
-        }}
-      >
-        <Icon icon={X} size={14} />
       </button>
     </div>
   )
@@ -179,6 +187,7 @@ export function LayersPanel(): JSX.Element {
         })}
         {ordered.length === 0 && <div className="empty">No elements yet. Add one from the tool rail.</div>}
       </div>
+      {menu && menuEl && <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />}
     </div>
   )
 }
