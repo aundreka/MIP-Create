@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { addAsset, patchHeader, patchMeta, useEditorState } from '../store'
-import { ColorField, Help, NumField, Row, Select, Toggle } from '../ui'
+import { Accordion, ColorField, Help, NumField, Row, Select, Toggle } from '../ui'
 import { Icon, Upload, X } from '../icons'
 import { importFont } from '../bridge'
 import { DATE_LOCALE_OPTIONS } from '../dateLocales'
@@ -231,7 +231,7 @@ export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): 
                 </Row>
               )
             })()}
-            <div className="group-title">Layout {lsLayout ? '(landscape)' : h.landscape ? '(portrait)' : ''}</div>
+            <Accordion id="header.layout" title={<>Layout{lsLayout ? <span className="acc-summary">landscape</span> : h.landscape ? <span className="acc-summary">portrait</span> : null}</>} defaultOpen={false}>
             {(() => {
               // Scenes that own this orientation are independent by design — say so, so a
               // project-level edit that "does nothing" to them is never a mystery.
@@ -305,6 +305,7 @@ export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): 
                 </Help>
               </>
             )}
+            </Accordion>
             <div className="grid2">
               <Row label="Prefix">
                 <input
@@ -321,6 +322,7 @@ export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): 
               <ColorField label="Background" value={h.bgColor || ''} onChange={(c) => set({ bgColor: c ?? undefined })} allowNone />
               <ColorField label="Text color" value={h.color || '#ffffff'} onChange={(c) => set({ color: c ?? '#ffffff' })} />
             </div>
+            <Accordion id="header.animation" title={<>Animation{[h.entrance ? 'entrance' : '', h.loopFollowsCta ? 'pulses with CTA' : h.loop ? 'loop' : ''].filter(Boolean).join(' · ') ? <span className="acc-summary">{[h.entrance ? 'entrance' : '', h.loopFollowsCta ? 'pulses with CTA' : h.loop ? 'loop' : ''].filter(Boolean).join(' · ')}</span> : null}</>} defaultOpen={false}>
             <Toggle label="Entrance animation" checked={!!h.entrance} onChange={(v) => set({ entrance: v ? DEFAULT_HEADER_ENTRANCE : undefined })} />
             {h.entrance && (
               <>
@@ -356,6 +358,7 @@ export function HeaderPopover(props: { anchor: DOMRect; onClose: () => void }): 
                 </div>
               </>
             )}
+            </Accordion>
             <Help>
               {h.mode === 'countdown'
                 ? h.countdownTarget === 'midnight'

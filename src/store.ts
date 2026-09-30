@@ -700,7 +700,23 @@ export function ungroupSelected(): void {
       .map((e) => e.groupId),
   )
   if (!groups.size) return
-  mapActiveScene((sd) => ({ ...sd, elements: sd.elements.map((e) => (e.groupId && groups.has(e.groupId) ? { ...e, groupId: undefined } : e)) }))
+  mapActiveScene((sd) => {
+    const groupNames = sd.groupNames ? Object.fromEntries(Object.entries(sd.groupNames).filter(([g]) => !groups.has(g))) : undefined
+    return {
+      ...sd,
+      elements: sd.elements.map((e) => (e.groupId && groups.has(e.groupId) ? { ...e, groupId: undefined } : e)),
+      groupNames: groupNames && Object.keys(groupNames).length ? groupNames : undefined,
+    }
+  })
+}
+/** Name (or, with an empty name, un-name) a layer group in the active scene. */
+export function renameGroup(groupId: string, name: string): void {
+  mapActiveScene((sd) => {
+    const next = { ...(sd.groupNames ?? {}) }
+    if (name.trim()) next[groupId] = name.trim()
+    else delete next[groupId]
+    return { ...sd, groupNames: Object.keys(next).length ? next : undefined }
+  })
 }
 export function selectWithGroups(id: string, additive: boolean): void {
   const el = activeSceneDef().elements.find((e) => e.id === id)

@@ -4,7 +4,7 @@
 // Grouped elements (shared groupId) collapse under a folder header.
 
 import { useEffect, useState } from 'react'
-import { bringToFront, duplicateSelected, patchElement, removeElement, reorderLayers, sendToBack, selectOnly, selectWithGroups, setSelection, toggleLock, toggleSelect, useEditorState } from '../store'
+import { bringToFront, duplicateSelected, patchElement, removeElement, renameGroup, reorderLayers, sendToBack, ungroupSelected, selectOnly, selectWithGroups, setSelection, toggleLock, toggleSelect, useEditorState } from '../store'
 import type { SceneElement } from '../../runtime/scene'
 import { resolveMorphTarget } from '../../runtime/morph'
 import { buildLayerTree } from '../layersTree'
@@ -19,6 +19,7 @@ export function LayersPanel(): JSX.Element {
   // in landscape) — so a landscape-only element isn't dimmed while editing landscape.
   const effHidden = (el: SceneElement): boolean => (orientation === 'landscape' ? !!(el.landscape?.hidden ?? el.hidden) : !!el.hidden)
   const tree = buildLayerTree(ordered)
+  const groupNames = project.scenes.find((s) => s.id === activeSceneId)?.groupNames
   // Where a morphing element hands over to (see MorphConfig) — named, so the badge can
   // say which screens without opening the Inspector. A morph reaches every screen its
   // automatic match finds a counterpart on, so the tooltip lists what it resolves to
@@ -38,6 +39,8 @@ export function LayersPanel(): JSX.Element {
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null)
   // Inline rename: double-click a name (or Rename in the menu); Enter / blur commits.
   const [editId, setEditId] = useState<string | null>(null)
+  const [editGroup, setEditGroup] = useState<string | null>(null)
+  const [groupMenu, setGroupMenu] = useState<{ id: string; x: number; y: number } | null>(null)
   const menuEl = menu ? scene.elements.find((e) => e.id === menu.id) : undefined
   const menuItems: MenuItem[] = menuEl
     ? [
@@ -189,6 +192,11 @@ export function LayersPanel(): JSX.Element {
               <div
                 className={'layer-row group-head' + (groupSel ? ' sel' : '')}
                 onClick={(e) => (e.shiftKey ? setSelection([...new Set([...selectedIds, ...node.children.map((c) => c.id)])]) : selectWithGroups(node.children[0].id, false))}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  if (!groupSel) selectWithGroups(node.children[0].id, false)
+                  setGroupMenu({ id: node.groupId, x: e.clientX, y: e.clientY })
+                }}
               >
                 <button
                   className="layer-collapse"
@@ -204,7 +212,29 @@ export function LayersPanel(): JSX.Element {
                 <span className="layer-icon">
                   <Icon icon={collapsed ? Folder : FolderOpen} size={14} />
                 </span>
-                <span className="layer-name">Group · {node.children.length}</span>
+                {editGroup === node.groupId ? (
+                  <input
+                    className="layer-rename"
+                    autoFocus
+                    defaultValue={groupNames?.[node.groupId] ?? ''}
+                    placeholder={`Group · ${node.children.length}`}
+                    onClick={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onBlur={(e) => {
+                      renameGroup(node.groupId, e.target.value)
+                      setEditGroup(null)
+                    }}
+                    onKeyDown={(e) => {
+                      e.stopPropagation()
+                      if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                      if (e.key === 'Escape') setEditGroup(null)
+                    }}
+                  />
+                ) : (
+                  <span className="layer-name" title="Double-click to rename" onDoubleClick={(e) => { e.stopPropagation(); setEditGroup(node.groupId) }}>
+                    {groupNames?.[node.groupId] || `Group · ${node.children.length}`}
+                  </span>
+                )}
               </div>
               {!collapsed && node.children.map((c) => row(c, true))}
             </div>
@@ -213,6 +243,17 @@ export function LayersPanel(): JSX.Element {
         {ordered.length === 0 && <div className="empty">No elements yet. Add one from the tool rail.</div>}
       </div>
       {menu && menuEl && <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />}
+      {groupMenu && (
+        <ContextMenu
+          x={groupMenu.x}
+          y={groupMenu.y}
+          onClose={() => setGroupMenu(null)}
+          items={[
+            { label: 'Rename group', onClick: () => setEditGroup(groupMenu.id) },
+            { label: 'Ungroup', hint: 'Ctrl+Shift+G', onClick: ungroupSelected },
+          ]}
+        />
+      )}
     </div>
   )
 }

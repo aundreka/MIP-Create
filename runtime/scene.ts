@@ -1681,6 +1681,9 @@ export interface SceneDef {
   id: string
   name: string
   kind?: SceneKind
+  // Editor-only: a display name per element groupId (Layers panel). Unnamed groups
+  // read "Group · N". Never used at runtime.
+  groupNames?: Record<string, string>
   bgColor?: string // per-scene gradient start: top (portrait) / left (landscape)
   bgColor2?: string // per-scene gradient end: bottom (portrait) / right (landscape)
   overlay?: SceneOverlay // built-in full-screen dim/blur overlay (win/lose scenes)
