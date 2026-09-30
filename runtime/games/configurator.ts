@@ -892,7 +892,7 @@ export const CONFIGURATOR_TEMPLATE: GameTemplate = {
     { key: 'activeArtY', label: 'Selected image Y (px)', type: 'number', group: 'Selected look', min: -400, max: 400, step: 1 },
     { key: 'activeOffsetX', label: 'Selected nudge X (px)', type: 'number', group: 'Selected look', min: -400, max: 400, step: 1 },
     { key: 'activeOffsetY', label: 'Selected nudge Y (px)', type: 'number', group: 'Selected look', min: -400, max: 400, step: 1 },
-    { key: 'activeBorderColor', label: 'Selected border colour', type: 'color', group: 'Selected look' },
+    { key: 'activeBorderColor', label: 'Selected border color', type: 'color', group: 'Selected look' },
     { key: 'activeBorderPx', label: 'Selected border weight (px)', type: 'number', group: 'Selected look', min: 0, max: 40, step: 1 },
     { key: 'activeBorderRadiusPx', label: 'Selected border radius (px)', type: 'number', group: 'Selected look', min: 0, max: 999, step: 1 },
     { key: 'activeBorderGapPx', label: 'Selected border gap (px)', type: 'number', group: 'Selected look', min: -200, max: 200, step: 1 },

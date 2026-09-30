@@ -1225,10 +1225,20 @@ export function createScratch(): GameModule {
 export const SCRATCH_TEMPLATE: GameTemplate = {
   id: 'scratch',
   label: 'Scratch card',
+  // Order + group = the editor's layout: Scratching (after the scratcher / area
+  // setup), Cover, Prize, Cursor. Brush and zone keys are edited by dedicated
+  // controls (brush panel, canvas rectangles), so they carry no group.
   paramFields: [
-    { key: 'label', label: 'Reveal text (if no prize image)', type: 'text' },
-    { key: 'coverColor', label: 'Cover color (if no cover image)', type: 'color' },
-    { key: 'threshold', label: 'Reveal at', type: 'number', min: 0.3, max: 0.9, step: 0.05 },
+    { key: 'threshold', label: 'Reveal at (share scratched)', type: 'number', min: 0.3, max: 0.9, step: 0.05 },
+    { key: 'coverColor', label: 'Cover color', type: 'color', group: 'Cover' },
+    { key: 'shadowBlur', label: 'Shadow blur', type: 'number', min: 0, max: 60, step: 1, group: 'Cover' },
+    { key: 'shadowX', label: 'Shadow X', type: 'number', min: -40, max: 40, step: 1, group: 'Cover' },
+    { key: 'shadowY', label: 'Shadow Y', type: 'number', min: -40, max: 40, step: 1, group: 'Cover' },
+    { key: 'shadowColor', label: 'Shadow color', type: 'color', group: 'Cover' },
+    { key: 'label', label: 'Reveal text (when no prize image)', type: 'text', group: 'Prize' },
+    { key: 'fit', label: 'Prize sizing', type: 'select', options: ['follow', 'fit'], group: 'Prize' },
+    { key: 'revealBgColor', label: 'Prize background', type: 'color', group: 'Prize' },
+    { key: 'cursor', label: 'Style', type: 'select', options: ['inherit', 'crosshair', 'default', 'pointer', 'custom'], group: 'Cursor' },
     { key: 'brushRadius', label: 'Brush/scratch radius (% of card)', type: 'number', min: 1, max: 50, step: 1 },
     { key: 'brushScale', label: 'Brush image size (% of card)', type: 'number', min: 5, max: 200, step: 5 },
     { key: 'brushTipX', label: 'Brush tip X — reveal point (% of image, 50 = center)', type: 'number', min: 0, max: 100, step: 1 },
@@ -1237,18 +1247,12 @@ export const SCRATCH_TEMPLATE: GameTemplate = {
     { key: 'zoneY', label: 'Reveal zone top (%)', type: 'number', min: 0, max: 100, step: 1 },
     { key: 'zoneW', label: 'Reveal zone width (%)', type: 'number', min: 2, max: 100, step: 1 },
     { key: 'zoneH', label: 'Reveal zone height (%)', type: 'number', min: 2, max: 100, step: 1 },
-    { key: 'fit', label: 'Reveal sizing (cover is always contain)', type: 'select', options: ['follow', 'fit'] },
-    { key: 'cursor', label: 'Cursor style', type: 'select', options: ['inherit', 'crosshair', 'default', 'pointer', 'custom'] },
-    { key: 'shadowBlur', label: 'Shadow blur', type: 'number', min: 0, max: 60, step: 1 },
-    { key: 'shadowX', label: 'Shadow offset X', type: 'number', min: -40, max: 40, step: 1 },
-    { key: 'shadowY', label: 'Shadow offset Y', type: 'number', min: -40, max: 40, step: 1 },
-    { key: 'shadowColor', label: 'Shadow color', type: 'color' },
   ],
   assetSlots: [
-    { key: 'prize', label: 'Prize image (revealed)' },
-    { key: 'cover', label: 'Cover image (scratched off)' },
+    { key: 'prize', label: 'Prize image' },
+    { key: 'cover', label: 'Cover image' },
     { key: 'brushImage', label: 'Brush image (drag to scratch; optional)' },
-    { key: 'cursorAsset', label: 'Custom cursor image (32×32 recommended)' },
+    { key: 'cursorAsset', label: 'Cursor image (32×32)' },
   ],
   // revealScale/X/Y are edited by double-clicking the card on the canvas (no inspector
   // field) — they only apply when fit = 'fit'.

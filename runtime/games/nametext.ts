@@ -61,15 +61,15 @@ export function textFields(group: string): ParamField[] {
     { key: 'fontWeight', group, label: 'Weight', type: 'number', min: 100, max: 900, step: 100 },
     { key: 'letterSpacingPx', group, label: 'Letter spacing', type: 'number', min: -20, max: 40, step: 0.5 },
     { key: 'lineHeight', group, label: 'Line height', type: 'number', min: 0.6, max: 3, step: 0.05 },
-    { key: 'color', group, label: 'Colour', type: 'color' },
+    { key: 'color', group, label: 'Color', type: 'color' },
     { key: 'textTransform', group, label: 'Letter case', type: 'select', options: ['as typed', 'UPPERCASE', 'lowercase', 'Capitalized'] },
     { key: 'align', group, label: 'Align', type: 'select', options: ['left', 'center', 'right'] },
     { key: 'strokePx', group, label: 'Outline width', type: 'number', min: 0, max: 20, step: 0.5 },
-    { key: 'strokeColor', group, label: 'Outline colour', type: 'color', showIf: (p) => num(p.strokePx, 0) > 0 },
+    { key: 'strokeColor', group, label: 'Outline color', type: 'color', showIf: (p) => num(p.strokePx, 0) > 0 },
     { key: 'shadowX', group, label: 'Shadow X', type: 'number', step: 1 },
     { key: 'shadowY', group, label: 'Shadow Y', type: 'number', step: 1 },
     { key: 'shadowBlur', group, label: 'Shadow blur', type: 'number', min: 0, step: 1 },
-    { key: 'shadowColor', group, label: 'Shadow colour', type: 'color' },
+    { key: 'shadowColor', group, label: 'Shadow color', type: 'color' },
   ]
 }
 
@@ -170,14 +170,14 @@ export function boxFields(group: string): ParamField[] {
     { key: 'boxColor', group, label: 'Fill (none = transparent)', type: 'color' },
     { key: 'boxRadiusPx', group, label: 'Corner radius', type: 'number', min: 0, max: 999, step: 1 },
     { key: 'boxBorderPx', group, label: 'Border width', type: 'number', min: 0, max: 40, step: 1 },
-    { key: 'boxBorderColor', group, label: 'Border colour', type: 'color', showIf: (p) => num(p.boxBorderPx, 0) > 0 },
+    { key: 'boxBorderColor', group, label: 'Border color', type: 'color', showIf: (p) => num(p.boxBorderPx, 0) > 0 },
     { key: 'boxPadXPx', group, label: 'Inset left/right', type: 'number', min: 0, max: 400, step: 2 },
     { key: 'boxPadYPx', group, label: 'Inset top/bottom', type: 'number', min: 0, max: 400, step: 2 },
     { key: 'boxShadowX', group, label: 'Box shadow X', type: 'number', step: 1 },
     { key: 'boxShadowY', group, label: 'Box shadow Y', type: 'number', step: 1 },
     { key: 'boxShadowBlur', group, label: 'Box shadow blur', type: 'number', min: 0, step: 1 },
     { key: 'boxShadowSpread', group, label: 'Box shadow spread', type: 'number', step: 1 },
-    { key: 'boxShadowColor', group, label: 'Box shadow colour', type: 'color' },
+    { key: 'boxShadowColor', group, label: 'Box shadow color', type: 'color' },
   ]
 }
 

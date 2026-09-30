@@ -76,6 +76,9 @@ export interface ParamField {
    * a handful of sections instead of one long column. Ungrouped fields render exactly
    * as before, so this costs existing templates nothing. */
   group?: string
+  /** Editor-only: the unit shown inside a number field ('ms', 'px', '%', '°'), so
+   * the label can stay a plain name instead of carrying "(ms)". */
+  suffix?: string
   min?: number
   max?: number
   step?: number

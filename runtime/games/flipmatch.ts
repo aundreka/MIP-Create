@@ -175,7 +175,7 @@ export const FLIPMATCH_TEMPLATE: GameTemplate = {
   label: 'Find match (flip pairs)',
   paramFields: [
     { key: 'pairs', label: 'Pairs', type: 'number', min: 2, max: 8, step: 1 },
-    { key: 'coverColor', label: 'Tile back colour', type: 'color' },
+    { key: 'coverColor', label: 'Tile back color', type: 'color' },
   ],
   assetSlots: [
     { key: 'images', label: 'Pair image', list: true, countParam: 'pairs' },
