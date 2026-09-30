@@ -3397,8 +3397,8 @@ svg {
     color var(--t-fast) var(--ease);
 }
 .home-tabs button.on {
-  background: var(--accent);
-  color: #fff;
+  background: color-mix(in srgb, var(--accent) 22%, var(--panel));
+  color: var(--ink);
 }
 .home-body {
   flex: 1;
@@ -3662,6 +3662,7 @@ svg {
   color: var(--danger);
 }
 .tpl-tag {
+  opacity: 0;
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -3671,6 +3672,11 @@ svg {
   border: 1px dashed var(--glass-border);
   border-radius: var(--r-pill);
   color: var(--muted);
+}
+.tpl-card2:hover .tpl-tag,
+.tpl-card2:focus-within .tpl-tag,
+.tpl-tag:focus-visible {
+  opacity: 1;
 }
 .tpl-tag:hover {
   color: var(--ink);
@@ -3781,23 +3787,27 @@ svg {
   font-size: 11px;
   color: var(--muted);
 }
-.proj-actions {
-  display: flex;
-  gap: 4px;
-  padding: 4px 8px 8px;
+/* One ⋯ per card (and right-click) instead of a row of five icon buttons. */
+.proj-card {
+  position: relative;
 }
-.proj-actions button {
-  flex: 1;
-  background: var(--input-bg);
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
+.proj-more {
+  position: absolute;
+  right: 6px;
+  bottom: 8px;
+  padding: 3px;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+}
+.proj-more:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
   color: var(--ink);
-  cursor: pointer;
-  padding: 4px 0;
 }
-.proj-actions button:disabled {
-  opacity: 0.4;
-  cursor: default;
+.proj-meta {
+  padding-right: 34px;
+  padding-bottom: 10px;
 }
 
 /* ---- combine translated playables ---- */
@@ -5561,9 +5571,6 @@ svg {
 }
 .home-search.proj-search {
   margin: 8px 10px 12px;
-}
-.home-search.proj-search.el-search {
-  margin-top: -4px;
 }
 .brand-filter.proj-game-filter {
   margin: 0 10px 12px;

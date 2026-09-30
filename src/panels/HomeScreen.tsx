@@ -18,7 +18,8 @@ import { AssetFlipModal } from './AssetFlipModal'
 import { TranslationMergeModal } from './TranslationMergeModal'
 import { exportAllData, backupFilename, importAllData, readBackupInfo } from '../backup'
 import { downloadBlob } from '../export'
-import { ArrowDownToLine, ArrowUpToLine, Copy, Diamond, FolderOpen, Icon, Languages, LayoutGrid, ListChecks, Pencil, Plus, ScanSearch, Search, Share2, Star, Upload, User, X } from '../icons'
+import { Copy, Diamond, FolderOpen, Icon, Languages, LayoutGrid, ListChecks, MoreHorizontal, Plus, Search, Star, Upload, User, X } from '../icons'
+import { ContextMenu, type MenuItem } from './ContextMenu'
 
 // Team library loads lazily (keeps Supabase out of the Home chunk until the tab opens).
 const TeamLibrary = lazy(() => import('./TeamPanel').then((m) => ({ default: m.TeamLibrary })))
@@ -176,6 +177,8 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
       // Let a focused field (e.g. the rename input) handle its own Escape first.
       const tag = (document.activeElement?.tagName ?? '').toLowerCase()
       if (tag === 'input' || tag === 'textarea' || tag === 'select') return
+      // An open menu or dialog takes the Escape; Home only closes when nothing else is up.
+      if (document.querySelector('.ctx-menu, .modal-overlay, .drawer-backdrop')) return
       props.onClose()
     }
     window.addEventListener('keydown', onKey)
@@ -195,7 +198,9 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
   }
   const [query, setQuery] = useState('')
   const [projQuery, setProjQuery] = useState('')
-  const [elQuery, setElQuery] = useState('')
+  // ⋯ menus: the top bar's tools/backup menu, and one per playable card.
+  const [moreMenu, setMoreMenu] = useState<{ x: number; y: number } | null>(null)
+  const [cardMenu, setCardMenu] = useState<{ id: string; x: number; y: number; alignRight: boolean } | null>(null)
   const [gameType, setGameType] = useState<string | null>(null)
   const [hover, setHover] = useState<string | null>(null)
   const hoverTimer = useRef<number | undefined>(undefined)
@@ -283,14 +288,12 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
     .map(([id, count]) => ({ id, count, label: getTemplate(id)?.label ?? id }))
     .sort((a, b) => a.label.localeCompare(b.label))
   const activeGameType = gameType && gameTypeCounts.has(gameType) ? gameType : null
-  // Element search keeps MIPs that contain an element whose name includes the text.
-  const eq = elQuery.trim().toLowerCase()
+  // One search box: the MIP's name, its project's name, or any element name inside it.
   const shownProjects = projects.filter((p) => {
     if (activeGameType && !projectGameTypes(p).includes(activeGameType)) return false
-    if (eq && !projectElementNames(p).some((n) => n.includes(eq))) return false
-    return !pq || p.name.toLowerCase().includes(pq) || (p.projectName ?? '').toLowerCase().includes(pq)
+    return !pq || p.name.toLowerCase().includes(pq) || (p.projectName ?? '').toLowerCase().includes(pq) || projectElementNames(p).some((n) => n.includes(pq))
   })
-  const filteringProjects = !!pq || !!eq || !!activeGameType
+  const filteringProjects = !!pq || !!activeGameType
   const blocks: Block[] = []
   const groupBlock = new Map<string, Block & { kind: 'group' }>()
   for (const p of shownProjects) {
@@ -320,7 +323,14 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
   }
 
   const renderCard = (p: (typeof projects)[number]): JSX.Element => (
-    <div key={p.id} className={'proj-card' + (p.id === curId ? ' current' : '')}>
+    <div
+      key={p.id}
+      className={'proj-card' + (p.id === curId ? ' current' : '')}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        setCardMenu({ id: p.id, x: e.clientX, y: e.clientY, alignRight: false })
+      }}
+    >
       <button
         className="proj-open"
         onClick={() => { endHover(); void open(p.id) }}
@@ -352,37 +362,17 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
         )}
         <span className="proj-date">{when(p.updatedAt)}</span>
       </div>
-      <div className="proj-actions">
-        <button title="Rename" onClick={() => setEditId(p.id)}>
-          <Icon icon={Pencil} size={13} />
-        </button>
-        <button title="Copy / Asset flip" onClick={() => setAssetFlipSource(p.id)}>
-          <Icon icon={Copy} size={13} />
-        </button>
-        {props.onUploadProject && (
-          <button title="Build and upload this playable" onClick={() => props.onUploadProject!([p.id], p.name)}>
-            <Icon icon={Upload} size={13} />
-          </button>
-        )}
-        {props.onShareProject && (
-          <button title="Share this playable — get a code / link to hand someone an editable copy" onClick={() => props.onShareProject!(p.id, p.name)}>
-            <Icon icon={Share2} size={13} />
-          </button>
-        )}
-        <button
-          className="danger"
-          title="Delete"
-          disabled={projects.length <= 1}
-          onClick={() => {
-            if (confirm(`Delete "${p.name}"? This can't be undone.`)) {
-              deleteProject(p.id)
-              refresh()
-            }
-          }}
-        >
-          <Icon icon={X} size={13} />
-        </button>
-      </div>
+      <button
+        className="proj-more"
+        title="Playable actions"
+        aria-label="Playable actions"
+        onClick={(e) => {
+          const r = e.currentTarget.getBoundingClientRect()
+          setCardMenu({ id: p.id, x: r.right, y: r.bottom + 4, alignRight: true })
+        }}
+      >
+        <Icon icon={MoreHorizontal} size={15} />
+      </button>
     </div>
   )
 
@@ -398,11 +388,15 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
             <button className={view === 'team' ? 'on' : ''} onClick={() => setView('team')}>Team library</button>
           </span>
           <span className="spacer" />
-          <button onClick={() => void doBackup()} title="Download all your data — every project, MIP, media file & setting — as one backup file">
-            <Icon icon={ArrowDownToLine} size={14} /> Download all
-          </button>
-          <button onClick={() => backupInputRef.current?.click()} title="Restore projects from a backup file">
-            <Icon icon={ArrowUpToLine} size={14} /> Restore
+          <button
+            title="Tools and backup"
+            aria-label="Tools and backup"
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect()
+              setMoreMenu({ x: r.right, y: r.bottom + 4 })
+            }}
+          >
+            <Icon icon={MoreHorizontal} size={15} />
           </button>
           <input
             ref={backupInputRef}
@@ -441,18 +435,6 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
                 </span>
                 <span>New blank playable</span>
               </button>
-              <button className="new-card" onClick={() => setAssetFlipSource(curId ?? projects[0]?.id ?? '')} title="Copy a playable as-is or bulk-replace its image assets by filename">
-                <span className="plus">
-                  <Icon icon={Copy} size={22} />
-                </span>
-                <span>Copy / Asset flip</span>
-              </button>
-              <button className="new-card" disabled={projects.length < 2} onClick={() => setTranslationMergeIds(convenientTranslationIds())} title="Select language copies and combine them into one browser-language-aware playable">
-                <span className="plus">
-                  <Icon icon={Languages} size={22} />
-                </span>
-                <span>Combine translations</span>
-              </button>
               {props.onGenerate && (
                 <button className="new-card" onClick={() => props.onGenerate!()} title="Scaffold a MIP from a logo + product (coded SVG art + MRAID end card)">
                   <span className="plus">
@@ -480,31 +462,14 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
                   <span>Import by code</span>
                 </button>
               )}
-              {props.onQaCheck && (
-                <button className="new-card" onClick={() => props.onQaCheck!()} title="Compare a built MIP/SIP against the Figma mockup: overlay, side by side, color pick & auto-diff">
-                  <span className="plus">
-                    <Icon icon={ScanSearch} size={22} />
-                  </span>
-                  <span>QA checker</span>
-                </button>
-              )}
             </div>
 
             <div className="group-title">Your playables ({filteringProjects ? `${shownProjects.length} of ${projects.length}` : projects.length})</div>
             <label className="home-search proj-search">
               <Icon icon={Search} size={15} />
-              <input value={projQuery} placeholder="Search your playables…" onChange={(e) => setProjQuery(e.target.value)} />
+              <input value={projQuery} placeholder="Search playables, projects or elements…" onChange={(e) => setProjQuery(e.target.value)} />
               {projQuery && (
                 <button className="home-search-x" onClick={() => setProjQuery('')} title="Clear">
-                  <Icon icon={X} size={13} />
-                </button>
-              )}
-            </label>
-            <label className="home-search proj-search el-search">
-              <Icon icon={LayoutGrid} size={15} />
-              <input value={elQuery} placeholder="Search by element name…" onChange={(e) => setElQuery(e.target.value)} />
-              {elQuery && (
-                <button className="home-search-x" onClick={() => setElQuery('')} title="Clear">
                   <Icon icon={X} size={13} />
                 </button>
               )}
@@ -529,7 +494,6 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
             {filteringProjects && !shownProjects.length && (
               <div className="hint pad">
                 No playables match{pq ? ` “${projQuery}”` : ''}
-                {eq ? ` with an element named “${elQuery.trim()}”` : ''}
                 {activeGameType ? ` with a ${getTemplate(activeGameType)?.label ?? activeGameType} minigame` : ''}.
               </div>
             )}
@@ -634,6 +598,45 @@ export function HomeScreen(props: { onClose: () => void; onProfile: () => void; 
         </div>
       </div>
       {hover && <HoverPreview key={hover} id={hover} />}
+      {moreMenu && (
+        <ContextMenu
+          x={moreMenu.x}
+          y={moreMenu.y}
+          alignRight
+          onClose={() => setMoreMenu(null)}
+          items={[
+            { label: 'Copy / Asset flip...', onClick: () => setAssetFlipSource(curId ?? projects[0]?.id ?? '') },
+            { label: 'Combine translations...', disabled: projects.length < 2, onClick: () => setTranslationMergeIds(convenientTranslationIds()) },
+            ...(props.onQaCheck ? [{ label: 'QA checker (vs Figma mockup)...', onClick: () => props.onQaCheck!() }] : []),
+            { sep: true, label: '' },
+            { label: 'Download a backup of everything', onClick: () => void doBackup() },
+            { label: 'Restore from a backup...', onClick: () => backupInputRef.current?.click() },
+          ]}
+        />
+      )}
+      {cardMenu && (() => {
+        const p = projects.find((x) => x.id === cardMenu.id)
+        if (!p) return null
+        const items: MenuItem[] = [
+          { label: 'Open', onClick: () => void open(p.id) },
+          { label: 'Rename', onClick: () => setEditId(p.id) },
+          { label: 'Copy / Asset flip...', onClick: () => setAssetFlipSource(p.id) },
+          ...(props.onUploadProject ? [{ label: 'Upload...', onClick: () => props.onUploadProject!([p.id], p.name) }] : []),
+          ...(props.onShareProject ? [{ label: 'Share (get a code / link)...', onClick: () => props.onShareProject!(p.id, p.name) }] : []),
+          { sep: true, label: '' },
+          {
+            label: 'Delete',
+            disabled: projects.length <= 1,
+            onClick: () => {
+              if (confirm(`Delete "${p.name}"? This can't be undone.`)) {
+                deleteProject(p.id)
+                refresh()
+              }
+            },
+          },
+        ]
+        return <ContextMenu x={cardMenu.x} y={cardMenu.y} alignRight={cardMenu.alignRight} items={items} onClose={() => setCardMenu(null)} />
+      })()}
       {assetFlipSource !== null && projects.length > 0 && (
         <AssetFlipModal
           projects={projects}
