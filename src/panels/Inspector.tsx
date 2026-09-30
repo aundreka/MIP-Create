@@ -4024,6 +4024,11 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
       for (const sid of state.selectedIds) patchElement(sid, { adjust })
       endTransaction()
     }
+    const patchAllOpacity = (opacity: number | undefined): void => {
+      beginTransaction()
+      for (const sid of state.selectedIds) patchElement(sid, { opacity })
+      endTransaction()
+    }
     const patchAllPhase = (
       phase:
         | 'entrance'
@@ -4080,7 +4085,15 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
         <div className="group-title">Align to canvas</div>
         <AlignRow />
         <Accordion id="inspector.multiAdjust" title="Adjust (all selected)" defaultOpen={false}>
-          <Help>Sets the same brightness / contrast / saturation on every selected element — the usual way a batch of art is matched to one another.</Help>
+          <Help>Sets the same opacity / brightness / contrast / saturation on every selected element — the usual way a batch of art is matched to one another.</Help>
+          <Slider
+            label="Opacity"
+            value={Math.round((first?.opacity ?? 1) * 100)}
+            min={0}
+            max={100}
+            suffix="%"
+            onChange={(n) => patchAllOpacity(n === 100 ? undefined : n / 100)}
+          />
           {first && <AdjustFields el={first} onPatch={(adjust) => patchAllAdjust(adjust)} />}
         </Accordion>
         <Accordion id="inspector.multiAnimation" title="Animation (all selected)" defaultOpen={false}>
@@ -6911,7 +6924,6 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
             <NumField label="Border" suffix="px" value={el.box?.borderPx ?? 0} onChange={(n) => setBox({ borderPx: n })} />
             <ColorField label="Border col" value={el.box?.borderColor ?? '#000000'} onChange={(c) => setBox({ borderColor: c ?? '#000000' })} />
           </div>
-          <Slider label="Opacity" value={(el.opacity ?? 1) * 100} min={10} max={100} suffix="%" onChange={(n) => patchElement(id, { opacity: n / 100 })} />
           {el.type === 'text' && (
             <div className="grid2">
               <NumField label="Box W (0=auto)" value={el.w ?? 0} onChange={(n) => patchGeometry(id, { w: n > 0 ? n : undefined })} />
@@ -6936,6 +6948,19 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
       )}
 
       <Accordion id="inspector.effects" title="Effects" defaultOpen={false}>
+        {/* Opacity lives here because it is the one effect EVERY element type has —
+            confetti, bars, games, video, shapes — and the per-type panels only ever
+            offered it to images and text boxes. Undefined (not 1) is the identity, so
+            an untouched element stays out of the saved project. */}
+        <Slider
+          label="Opacity"
+          value={Math.round((el.opacity ?? 1) * 100)}
+          min={0}
+          max={100}
+          suffix="%"
+          onChange={(n) => patchElement(id, { opacity: n === 100 ? undefined : n / 100 })}
+        />
+        <Help>Fades the whole element — its art, text and any particles it draws. Works on every element type, confetti included.</Help>
         <AdjustFields el={el} />
         <div className="group-title2">Blur</div>
         <Slider label="Layer blur" value={el.blur ?? 0} min={0} max={80} suffix="px" onChange={(n) => patchElement(id, { blur: n || undefined })} />
