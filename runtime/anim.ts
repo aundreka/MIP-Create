@@ -110,30 +110,39 @@ const KEYFRAMES = `
    nodes outside the stage that borrow these keyframes (a game's own art). */
 @keyframes pa-shine{0%,100%{filter:var(--pa-filter,) brightness(1)}50%{filter:var(--pa-filter,) brightness(1.45)}}
 @keyframes pa-glow{0%,100%{filter:var(--pa-filter,) drop-shadow(0 0 0 rgba(255,255,255,0))}50%{filter:var(--pa-filter,) drop-shadow(0 0 14px rgba(255,255,255,.85))}}
-/* light-ray reflection sweep: a glossy highlight slides across the asset, clipped to its box
-   (overflow:hidden). TWO layers sweep together on the SAME box (so they stay in sync): ::before is
-   a wide soft halo/glow and ::after is a narrow bright core — together they read as a real specular
-   reflection instead of a flat white line. 'screen' blend keeps it additive (lightens only). The
-   band is rotated by --pa-lightray-ang and translated along its own x-axis, so ONE angle sets the
-   direction: 0=left→right, 90=top→bottom, 180=right→left, 45=corner→corner, etc.
-   TWO classes, because the sweep is not always ambient: .pa-lightray sets the box up (clipping +
-   the two parked bands) for the element's whole life, and .pa-lightray--run is what actually
-   animates them. A lightray authored as a LOOP runs from mount; one authored in a one-shot phase
-   (entrance / exit / tap / game win / a game event) stays parked until that phase fires and then
-   sweeps its authored iteration count — applyLightray() in stage.ts adds and restarts the --run class.
-   Duration/delay/easing/angle/iterations/keyframes all come from CSS vars set there. */
-.pa-lightray{position:relative;overflow:hidden}
-.pa-lightray::before,.pa-lightray::after{content:'';position:absolute;top:50%;left:50%;width:70%;height:320%;margin:-160% 0 0 -35%;pointer-events:none;z-index:2;mix-blend-mode:screen;transform:rotate(var(--pa-lightray-ang,20deg)) translateX(var(--pa-lightray-from,-340%));will-change:transform}
-.pa-lightray--run::before,.pa-lightray--run::after{animation-name:var(--pa-lightray-name,pa-lightray-kf);animation-duration:var(--pa-lightray-dur,2400ms);animation-timing-function:var(--pa-lightray-ease,ease-in-out);animation-delay:var(--pa-lightray-delay,0ms);animation-iteration-count:var(--pa-lightray-iter,infinite);animation-fill-mode:var(--pa-lightray-fill,none)}
+/* light-ray reflection sweep: a glossy highlight slides across the asset. It lives in its OWN
+   layer (.pa-ray, built by applyLightray in stage.ts) rather than on the element's pseudo-
+   elements, for two reasons: the layer can be clipped or masked to a carved-out region without
+   touching the element's own content, and mix-blend-mode on the layer composites the finished
+   band onto the art in one pass.
+   TWO bands sweep together on the SAME layer (so they stay in sync): ::before is a wide soft
+   halo/glow and ::after is a narrow bright core — together they read as a real specular
+   reflection instead of a flat white line. Both gradients are rebuilt by stage.ts from the
+   authored size / softness / colour; the fallbacks below are the original hardcoded bands, so a
+   node that borrows this CSS without the vars (a game's own art) looks exactly as it used to.
+   The band is rotated by --pa-lightray-ang and translated along its own x-axis, so ONE angle
+   sets the direction: 0=left->right, 90=top->bottom, 180=right->left, 45=corner->corner, etc.
+   The band element's own size is FIXED (200% x 320% of the box) and the authored width only
+   moves the gradient stops inside it — so narrowing the streak can never shorten the travel.
+   TWO classes, because the sweep is not always ambient: .pa-lightray sets the box up for the
+   element's whole life, and .pa-lightray--run is what actually animates the bands. A lightray
+   authored as a LOOP runs from mount; one authored in a one-shot phase (entrance / exit / tap /
+   game win / a game event) stays parked until that phase fires and then sweeps its authored
+   iteration count — applyLightray() adds and restarts the --run class.
+   Duration/delay/easing/angle/iterations/keyframes/look all come from CSS vars set there. */
+.pa-lightray{position:relative}
+.pa-ray{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:2;mix-blend-mode:var(--pa-lightray-blend,screen);opacity:var(--pa-lightray-op,1);clip-path:var(--pa-lightray-clip,none);-webkit-mask:var(--pa-lightray-mask,none);mask:var(--pa-lightray-mask,none)}
+.pa-ray::before,.pa-ray::after{content:'';position:absolute;top:50%;left:50%;width:200%;height:320%;margin:-160% 0 0 -100%;transform:rotate(var(--pa-lightray-ang,20deg)) translateX(var(--pa-lightray-from,-119%));will-change:transform}
+.pa-lightray--run .pa-ray::before,.pa-lightray--run .pa-ray::after{animation-name:var(--pa-lightray-name,pa-lightray-kf);animation-duration:var(--pa-lightray-dur,2400ms);animation-timing-function:var(--pa-lightray-ease,ease-in-out);animation-delay:var(--pa-lightray-delay,0ms);animation-iteration-count:var(--pa-lightray-iter,infinite);animation-fill-mode:var(--pa-lightray-fill,none)}
 /* wide soft halo (the glow around the glint) */
-.pa-lightray::before{background:linear-gradient(90deg,rgba(255,255,255,0) 30%,rgba(255,255,255,0.07) 42%,rgba(255,255,255,0.20) 50%,rgba(255,255,255,0.07) 58%,rgba(255,255,255,0) 70%)}
+.pa-ray::before{background:var(--pa-lightray-halo,linear-gradient(90deg,rgba(255,255,255,0) 43%,rgba(255,255,255,0.07) 47.2%,rgba(255,255,255,0.20) 50%,rgba(255,255,255,0.07) 52.8%,rgba(255,255,255,0) 57%))}
 /* narrow bright core with soft shoulders (the specular streak itself) */
-.pa-lightray::after{background:linear-gradient(90deg,rgba(255,255,255,0) 41%,rgba(255,255,255,0.28) 46%,rgba(255,255,255,0.85) 49.5%,rgba(255,255,255,0.98) 50%,rgba(255,255,255,0.85) 50.5%,rgba(255,255,255,0.28) 54%,rgba(255,255,255,0) 59%)}
-@keyframes pa-lightray-kf{0%{transform:rotate(var(--pa-lightray-ang,20deg)) translateX(var(--pa-lightray-from,-340%))}55%,100%{transform:rotate(var(--pa-lightray-ang,20deg)) translateX(var(--pa-lightray-to,340%))}}
+.pa-ray::after{background:var(--pa-lightray-core,linear-gradient(90deg,rgba(255,255,255,0) 46.85%,rgba(255,255,255,0.28) 48.6%,rgba(255,255,255,0.85) 49.82%,rgba(255,255,255,0.98) 50%,rgba(255,255,255,0.85) 50.18%,rgba(255,255,255,0.28) 51.4%,rgba(255,255,255,0) 53.15%))}
+@keyframes pa-lightray-kf{0%{transform:rotate(var(--pa-lightray-ang,20deg)) translateX(var(--pa-lightray-from,-119%))}55%,100%{transform:rotate(var(--pa-lightray-ang,20deg)) translateX(var(--pa-lightray-to,119%))}}
 /* The looping sweep parks at the far side for the last 45% of its duration so consecutive passes
    have a gap between them. A ONE-SHOT sweep has nothing to gap against, so it gets its own
    keyframes that spend the whole authored duration crossing the box. */
-@keyframes pa-lightray-once{0%{transform:rotate(var(--pa-lightray-ang,20deg)) translateX(var(--pa-lightray-from,-340%))}100%{transform:rotate(var(--pa-lightray-ang,20deg)) translateX(var(--pa-lightray-to,340%))}}
+@keyframes pa-lightray-once{0%{transform:rotate(var(--pa-lightray-ang,20deg)) translateX(var(--pa-lightray-from,-119%))}100%{transform:rotate(var(--pa-lightray-ang,20deg)) translateX(var(--pa-lightray-to,119%))}}
 @keyframes pa-spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
 @keyframes pa-float{0%,100%{transform:translateY(0)}50%{transform:translateY(calc(-10px * var(--pa-s,1)))}}
 @keyframes pa-subtle-float{0%,100%{transform:translateY(0)}50%{transform:translateY(calc(-3px * var(--pa-s,1)))}}
@@ -463,7 +472,7 @@ function ctaPulseCss(el: SceneElement, delayMs: number): string {
  * - includeEntrance=false (mount, runs everywhere incl. editor): loop only.
  * - includeEntrance=true (interactive playback): entrances, then the loop delayed to
  *   start when the LAST entrance ends, so transform-based presets don't fight.
- * 'lightray' loop specs are excluded here — that sweep lives on the .pa-lightray pseudo-element.
+ * 'lightray' loop specs are excluded here — that sweep lives on its own .pa-ray layer.
  */
 export function composeElementAnim(el: SceneElement, includeEntrance: boolean): string {
   return composeElementAnimParts(el, includeEntrance).join(', ') || 'none'

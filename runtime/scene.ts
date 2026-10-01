@@ -90,6 +90,45 @@ export interface KeyframeStep {
 
 export type AnimTrigger = 'onMount' | 'onGameStart' | 'onGameWin' | 'onEndscene'
 
+// Which part of the element the 'lightray' sweep is allowed to light up. 'box' is the whole
+// frame (how it always behaved), 'rounded' and 'ellipse' cut that frame down to a shape, and
+// 'art' masks the light to the element image's OWN transparency — so a shine on a cut-out
+// bottle runs down the bottle instead of across the rectangle it happens to sit in.
+export type ShineShape = 'box' | 'rounded' | 'ellipse' | 'art'
+// How the light composites onto the art underneath. 'screen' is additive (lightens only) and
+// is what a real reflection does; 'normal' paints the colour flat over the art, which is the
+// only way a DARK sweep reads at all.
+export type ShineBlend = 'screen' | 'normal' | 'overlay' | 'plus-lighter'
+
+/**
+ * The look of the 'lightray' reflection sweep. Every field is optional, and every default
+ * here reproduces the sweep exactly as it was before any of this was authorable — so an old
+ * project with a bare `{ preset: 'lightray' }` renders unchanged.
+ *
+ * Geometry note: the band travels across the element on its own rotated x-axis (see the
+ * .pa-ray CSS in anim.ts). `widthPct` is the width of the LIT STREAK measured across the
+ * element, not the width of the band element carrying it — the band's own size is fixed, so
+ * narrowing the streak can never shorten the distance the sweep travels.
+ */
+export interface ShineStyle {
+  // Width of the lit streak across the element, as a % of the element's width. Default 28.
+  widthPct?: number
+  // 0..1 — how gradually the streak fades out to its edges. 0 is a hard-edged bar, 1 is a
+  // pure linear falloff with no bright plateau. Default 0.5, the original falloff.
+  softness?: number
+  // The light's colour, '#rrggbb'. Default '#ffffff'.
+  color?: string
+  // 0..1 overall strength of the whole sweep. Default 1.
+  opacity?: number
+  blend?: ShineBlend
+  // The carved region: a shape, plus how far each side of it is pulled in from the element's
+  // own edges, in % of the element box. All zero = the full frame.
+  shape?: ShineShape
+  inset?: { top?: number; right?: number; bottom?: number; left?: number }
+  // Corner radius for shape 'rounded', as a % of the carved region. Default 12.
+  radiusPct?: number
+}
+
 export interface AnimSpec {
   preset: AnimPresetId | 'custom'
   custom?: KeyframeStep[]
@@ -101,6 +140,8 @@ export interface AnimSpec {
   // Direction of the 'lightray' reflection sweep, in degrees: 0 = left→right, 90 = top→bottom,
   // 180 = right→left, 270 = bottom→top, 45 = top-left→bottom-right, etc. Ignored by other presets.
   angleDeg?: number
+  // Size / colour / opacity / carved area of the 'lightray' sweep. Ignored by other presets.
+  shine?: ShineStyle
 }
 
 export interface ElementAnimations {

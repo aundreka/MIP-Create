@@ -39,6 +39,9 @@ import type {
   SceneOverlay,
   SfxBinding,
   ShadowPreset,
+  ShineBlend,
+  ShineShape,
+  ShineStyle,
   TextConfig,
   TimingConfig,
   TransitionType,
@@ -1306,6 +1309,71 @@ const LIGHTRAY_DIRECTIONS: { value: number; label: string }[] = [
   { value: 315, label: 'corner ↗ (bottom-left → top-right)' },
   { value: 225, label: 'corner ↖ (bottom-right → top-left)' },
 ]
+// The look of the 'lightray' sweep. Every default here matches the runtime's (applyShineStyle in
+// stage.ts), so a spec with no `shine` at all previews exactly as it renders.
+const SHINE_DEFAULTS = { widthPct: 28, softness: 0.5, color: '#ffffff', opacity: 1, radiusPct: 12 }
+const SHINE_SHAPES: { value: ShineShape; label: string }[] = [
+  { value: 'box', label: 'the whole element' },
+  { value: 'rounded', label: 'rounded rectangle' },
+  { value: 'ellipse', label: 'ellipse' },
+  { value: 'art', label: "the artwork's own shape" },
+]
+const SHINE_BLENDS: { value: ShineBlend; label: string }[] = [
+  { value: 'screen', label: 'screen (lightens only)' },
+  { value: 'plus-lighter', label: 'add (brightest)' },
+  { value: 'overlay', label: 'overlay (keeps contrast)' },
+  { value: 'normal', label: 'normal (paints flat — use for a dark sweep)' },
+]
+
+// Size / colour / opacity of the moving reflection, plus the region it is carved to. Pulled out
+// of AnimRow because it is the one preset with a whole look to author rather than a timing.
+function ShineControls(props: { shine?: ShineStyle; onChange: (s: ShineStyle) => void }): JSX.Element {
+  const sh = props.shine ?? {}
+  const set = (p: Partial<ShineStyle>): void => props.onChange({ ...sh, ...p })
+  const shape = sh.shape ?? 'box'
+  const inset = sh.inset ?? {}
+  const setInset = (p: Partial<NonNullable<ShineStyle['inset']>>): void => set({ inset: { ...inset, ...p } })
+  // A carved region only means something once it is actually pulled in from the edges, so the
+  // four sides open together with the shape rather than hiding behind another disclosure.
+  const carved = shape !== 'box' || !!(inset.top || inset.right || inset.bottom || inset.left)
+  return (
+    <>
+      <Slider
+        label="Size"
+        value={sh.widthPct ?? SHINE_DEFAULTS.widthPct}
+        min={2}
+        max={120}
+        step={1}
+        suffix="% of width"
+        onChange={(n) => set({ widthPct: n })}
+      />
+      <Slider label="Softness" value={sh.softness ?? SHINE_DEFAULTS.softness} min={0} max={1} step={0.05} onChange={(n) => set({ softness: n })} />
+      <ColorField label="Color" value={sh.color ?? SHINE_DEFAULTS.color} onChange={(c) => set({ color: c ?? SHINE_DEFAULTS.color })} />
+      <Row label="Light mode">
+        <Select value={sh.blend ?? 'screen'} onChange={(v) => set({ blend: v as ShineBlend })} options={SHINE_BLENDS} />
+      </Row>
+      <Slider label="Opacity" value={sh.opacity ?? SHINE_DEFAULTS.opacity} min={0} max={1} step={0.05} onChange={(n) => set({ opacity: n })} />
+      <Row label="Shine area">
+        <Select value={shape} onChange={(v) => set({ shape: v as ShineShape })} options={SHINE_SHAPES} />
+      </Row>
+      {shape === 'art' && <Help>The light is masked to the image&rsquo;s own transparency, so it runs over the artwork instead of the rectangle around it. Needs a plain (uncropped) image.</Help>}
+      {shape === 'rounded' && (
+        <Slider label="Corner radius" value={sh.radiusPct ?? SHINE_DEFAULTS.radiusPct} min={0} max={50} step={1} suffix="%" onChange={(n) => set({ radiusPct: n })} />
+      )}
+      {carved && (
+        <>
+          <Help>Pull the lit region in from each edge, in % of the element &mdash; that is how you carve the shine down to one panel of the art.</Help>
+          <div className="grid2">
+            <NumField label="Inset top" suffix="%" value={inset.top ?? 0} step={1} onChange={(n) => setInset({ top: n })} />
+            <NumField label="Inset bottom" suffix="%" value={inset.bottom ?? 0} step={1} onChange={(n) => setInset({ bottom: n })} />
+            <NumField label="Inset left" suffix="%" value={inset.left ?? 0} step={1} onChange={(n) => setInset({ left: n })} />
+            <NumField label="Inset right" suffix="%" value={inset.right ?? 0} step={1} onChange={(n) => setInset({ right: n })} />
+          </div>
+        </>
+      )}
+    </>
+  )
+}
 // Brush params rendered by the custom <BrushControls> block instead of the generic field list.
 const BRUSH_PARAM_KEYS = new Set([
   'brushRadius',
@@ -1363,13 +1431,16 @@ function AnimRow(props: {
           </Row>
           {spec.preset === 'custom' && <KeyframeEditor steps={spec.custom ?? []} onChange={(c) => patch({ custom: c })} />}
           {spec.preset === 'lightray' && (
-            <Row label="Direction">
-              <Select
-                value={String(spec.angleDeg ?? 20)}
-                onChange={(v) => patch({ angleDeg: Number(v) })}
-                options={LIGHTRAY_DIRECTIONS.map((d) => ({ value: String(d.value), label: d.label }))}
-              />
-            </Row>
+            <>
+              <Row label="Direction">
+                <Select
+                  value={String(spec.angleDeg ?? 20)}
+                  onChange={(v) => patch({ angleDeg: Number(v) })}
+                  options={LIGHTRAY_DIRECTIONS.map((d) => ({ value: String(d.value), label: d.label }))}
+                />
+              </Row>
+              <ShineControls shine={spec.shine} onChange={(sh) => patch({ shine: sh })} />
+            </>
           )}
           {isMarqueePreset(spec.preset) ? (
             // Speed IS the duration for an endless scroll — the time one full pass across the

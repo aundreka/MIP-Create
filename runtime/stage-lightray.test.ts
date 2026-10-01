@@ -121,6 +121,104 @@ describe('lightray sweep', () => {
     expect(running(rec.anim)).toBe(true)
   })
 
+  // The sweep lives in its OWN layer rather than on the element's pseudo-elements, so the
+  // light can be clipped down to a carved region without clipping the element's content too.
+  it('builds the shine layer, and takes it away with the preset', () => {
+    const { rec, stage } = mount(imageEl({ loop: ray() }))
+    const layer = rec.anim.querySelector('.pa-ray')
+    expect(layer).toBeTruthy()
+    expect(layer!.parentElement).toBe(rec.anim)
+    expect(stage.update(scene([imageEl({})]), ASSETS)).toBe(true)
+    expect(rec.anim.querySelector('.pa-ray')).toBeNull()
+  })
+
+  // Every default reproduces the sweep as it was before any of it was authorable, so an old
+  // project with a bare { preset: 'lightray' } renders unchanged.
+  it('defaults to the original band: 28%-wide white streak, screen blend, full opacity, no carve', () => {
+    const { rec } = mount(imageEl({ loop: ray() }))
+    expect(v(rec.anim, 'op')).toBe('1')
+    expect(v(rec.anim, 'blend')).toBe('screen')
+    expect(v(rec.anim, 'clip')).toBe('none')
+    expect(v(rec.anim, 'mask')).toBe('none')
+    // halo half-width: 28% of the element over a band element 200% of it, so 7% either side
+    expect(v(rec.anim, 'halo')).toContain('rgba(255,255,255,0) 43.000%')
+    expect(v(rec.anim, 'halo')).toContain('rgba(255,255,255,0.2) 50.000%')
+    // the core keeps a fixed 0.45 of the halo's width
+    expect(v(rec.anim, 'core')).toContain('rgba(255,255,255,0) 46.850%')
+  })
+
+  it('widens the streak without shortening the travel', () => {
+    const { rec } = mount(imageEl({ loop: ray({ shine: { widthPct: 56 } }) }))
+    // twice the width = twice the half-spread; the band element and the keyframes are untouched
+    expect(v(rec.anim, 'halo')).toContain('rgba(255,255,255,0) 36.000%')
+    expect(v(rec.anim, 'from')).toBe('')
+    expect(v(rec.anim, 'to')).toBe('')
+  })
+
+  it('tints both bands with the authored colour', () => {
+    const { rec } = mount(imageEl({ loop: ray({ shine: { color: '#ffcc00' } }) }))
+    expect(v(rec.anim, 'halo')).toContain('rgba(255,204,0,0.2)')
+    expect(v(rec.anim, 'core')).toContain('rgba(255,204,0,0.98)')
+  })
+
+  it('shrugs off a half-typed colour instead of blanking the sweep', () => {
+    const { rec } = mount(imageEl({ loop: ray({ shine: { color: '#ff' } }) }))
+    expect(v(rec.anim, 'halo')).toContain('rgba(255,255,255,0.2)')
+  })
+
+  it('carries opacity and blend through', () => {
+    const { rec } = mount(imageEl({ loop: ray({ shine: { opacity: 0.4, blend: 'normal' } }) }))
+    expect(v(rec.anim, 'op')).toBe('0.4')
+    expect(v(rec.anim, 'blend')).toBe('normal')
+  })
+
+  // Softness moves the gradient's inner stops: out to the band's edge for a hard bar, onto
+  // the centre for a pure linear fade.
+  it('hardens and softens the streak edges', () => {
+    const hard = mount(imageEl({ loop: ray({ shine: { softness: 0 } }) })).rec
+    expect(v(hard.anim, 'halo')).toContain('rgba(255,255,255,0.07) 44.400%')
+    const soft = mount(imageEl({ loop: ray({ shine: { softness: 1 } }) })).rec
+    expect(v(soft.anim, 'halo')).toContain('rgba(255,255,255,0.07) 50.000%')
+  })
+
+  describe('the carved shine area', () => {
+    it('clips the light to an inset rectangle', () => {
+      const { rec } = mount(imageEl({ loop: ray({ shine: { inset: { top: 10, right: 20, bottom: 30, left: 40 } } }) }))
+      expect(v(rec.anim, 'clip')).toBe('inset(10% 20% 30% 40%)')
+    })
+
+    it('rounds that rectangle off', () => {
+      const { rec } = mount(imageEl({ loop: ray({ shine: { shape: 'rounded', radiusPct: 25 } }) }))
+      expect(v(rec.anim, 'clip')).toBe('inset(0% 0% 0% 0% round 25%)')
+    })
+
+    it('centres an ellipse in the inset region', () => {
+      const { rec } = mount(imageEl({ loop: ray({ shine: { shape: 'ellipse', inset: { left: 20 } } }) }))
+      expect(v(rec.anim, 'clip')).toBe('ellipse(40% 50% at 60% 50%)')
+    })
+
+    // The whole point of the 'art' shape: a shine on a cut-out bottle runs down the bottle,
+    // not across the rectangle it happens to sit in.
+    it("masks the light to the image's own transparency", () => {
+      const { rec } = mount(imageEl({ loop: ray({ shine: { shape: 'art' } }) }))
+      expect(v(rec.anim, 'mask')).toContain('url("data:image/png;base64,')
+      expect(v(rec.anim, 'mask')).toContain('0 0 / 100% 100% no-repeat')
+    })
+
+    // A cropped image positions its own <img> inside the box, so a box-sized mask would not
+    // line up with the art — it keeps the shape clip alone rather than masking to the wrong thing.
+    it('leaves a cropped image on the shape clip', () => {
+      const cropped = { ...imageEl({ loop: ray({ shine: { shape: 'art' } }) }), crop: { x: 0, y: 0, scale: 1.5 } } as SceneElement
+      const { rec } = mount(cropped)
+      expect(v(rec.anim, 'mask')).toBe('none')
+    })
+
+    it('ignores a nonsense inset instead of emitting broken CSS', () => {
+      const { rec } = mount(imageEl({ loop: ray({ shine: { inset: { top: 400, left: Number.NaN } } }) }))
+      expect(v(rec.anim, 'clip')).toBe('inset(95% 0% 0% 0%)')
+    })
+  })
+
   it('leaves an element with no lightray untouched', () => {
     const { rec } = mount(imageEl({ loop: { preset: 'pulse', durationMs: 1200, delayMs: 0, easing: 'ease-in-out' } }))
     expect(rec.anim.classList.contains('pa-lightray')).toBe(false)

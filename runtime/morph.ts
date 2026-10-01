@@ -217,6 +217,9 @@ function freezeClone(el: HTMLElement): HTMLElement {
     node.style.transition = 'none'
     node.classList.remove('pa-lightray', 'pa-lightray--run')
   }
+  // The shine layer only exists to sweep; a frozen copy of it is dead weight the flight
+  // would carry along, so drop it outright rather than park it.
+  for (const ray of Array.from(copy.querySelectorAll('.pa-ray'))) ray.remove()
   copy.style.pointerEvents = 'none'
   return copy
 }

@@ -16,7 +16,7 @@
 //                 animation, i.e. nearly all of them, get none of these.
 //   content       the <img> / text / button, mounted inside the innermost box.
 
-import type { Anchor, AnimSpec, Scene, SceneElement, SceneOverlay, SfxBinding } from './scene'
+import type { Anchor, AnimSpec, Scene, SceneElement, SceneOverlay, SfxBinding, ShineStyle } from './scene'
 import { adjustFilterCss, cropShapeCss } from './scene'
 import type { AssetEntry, AssetMap, RuntimeCtx } from './types'
 import { cssFontFamily } from './font'
@@ -99,6 +99,11 @@ interface Rec {
   // strip instead of a slide that restarts. Built on demand by applyMarquee and parked
   // beside the content, so every animation layer's transform carries them along.
   marquee?: HTMLDivElement
+  // The layer the 'lightray' reflection sweeps in (two gradient bands on its pseudo-elements).
+  // Its own layer rather than the element's pseudo-elements, so the light can be clipped or
+  // masked down to a carved-out region without clipping the element's content with it.
+  // Built on demand by applyLightray.
+  ray?: HTMLDivElement
   hg?: { stop(): void } // handguide animator
   confetti?: ConfettiController // confetti particle system
   idle?: { stop(): void } // generic idle visibility animator
@@ -1320,7 +1325,12 @@ function ensureAnimLayers(rec: Rec, want: number): void {
     const inner = rec.layers[rec.layers.length - 1]
     const next = document.createElement('div')
     next.className = 'pa-el-anim-l'
-    while (inner.firstChild) next.appendChild(inner.firstChild)
+    // The shine layer is not content: it stays on the box it was put on, or a newly nested
+    // animation would start dragging the reflection around with whatever it is animating.
+    for (const child of Array.from(inner.childNodes)) {
+      if (child === rec.ray) continue
+      next.appendChild(child)
+    }
     inner.appendChild(next)
     rec.layers.push(next)
   }
@@ -1358,9 +1368,122 @@ function applyMountAnim(rec: Rec): void {
   applyAnimParts(rec, composeElementAnimParts(rec.el, false), false)
   applyLightray(rec) // no active phase: only an ambient (loop) sweep runs
 }
-// The 'lightray' preset is a pseudo-element glare sweep (see anim.ts). Feed its timing via CSS
-// vars and toggle the two driving classes: .pa-lightray sets the box up for the element's whole
-// life (so its clipping never changes underfoot), .pa-lightray--run is what actually sweeps.
+// ── the sliding shine ───────────────────────────────────────────────────────────────────────
+// Every CSS var the sweep publishes, so turning a lightray off clears all of them.
+const RAY_VARS = ['dur', 'delay', 'ease', 'ang', 'iter', 'name', 'fill', 'halo', 'core', 'op', 'blend', 'clip', 'mask'] as const
+// The defaults, which together reproduce the sweep exactly as it was before any of it was
+// authorable. RAY_WIDTH_PCT is the lit streak measured across the ELEMENT; the band element
+// carrying it is RAY_BAND_PCT wide (see .pa-ray in anim.ts), which is what the gradient stops
+// below are expressed in.
+const RAY_WIDTH_PCT = 28
+const RAY_SOFTNESS = 0.5
+const RAY_BAND_PCT = 200
+// The core streak is a fixed fraction of the halo's width — the two were 18% and 40% of the old
+// band, and keeping that ratio is what makes a resized shine still read as a specular highlight
+// rather than a bar with a line in it.
+const RAY_CORE_RATIO = 0.45
+// Stops as [offset from the centre as a fraction of the half-spread, alpha]. The offsets of the
+// INNER stops are what `softness` moves: outward for a hard-edged bar, inward for a long fade.
+const RAY_HALO_STOPS: [number, number][] = [[-1, 0], [-0.4, 0.07], [0, 0.2], [0.4, 0.07], [1, 0]]
+const RAY_CORE_STOPS: [number, number][] = [
+  [-1, 0],
+  [-0.4444, 0.28],
+  [-0.0556, 0.85],
+  [0, 0.98],
+  [0.0556, 0.85],
+  [0.4444, 0.28],
+  [1, 0],
+]
+
+const clamp01 = (n: number, lo: number, hi: number): number => (Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : lo)
+
+/** '#ffcc00' / 'ffc0' / '#fc0' → '255,204,0', for dropping into rgba(). Anything unparseable
+ * falls back to white, so a half-typed hex in the inspector never blanks the sweep out. */
+function rayRgb(hex?: string): string {
+  let h = (hex ?? '').trim().replace(/^#/, '')
+  if (h.length === 3 || h.length === 4) h = h.slice(0, 3).split('').map((c) => c + c).join('')
+  if (!/^[0-9a-fA-F]{6}$/.test(h.slice(0, 6))) return '255,255,255'
+  const n = parseInt(h.slice(0, 6), 16)
+  return `${(n >> 16) & 255},${(n >> 8) & 255},${n & 255}`
+}
+
+/** One band's gradient. `halfPct` is its half-width as a % of the band element, `spread` scales
+ * the inner stops (softness), and the stops' alphas are tinted with the authored colour. */
+function rayGradient(rgb: string, halfPct: number, spread: number, stops: [number, number][]): string {
+  const parts = stops.map(([f, a]) => {
+    const at = 50 + clamp01(f === -1 || f === 1 ? f : f * spread, -1, 1) * halfPct
+    return `rgba(${rgb},${a}) ${at.toFixed(3)}%`
+  })
+  return `linear-gradient(90deg,${parts.join(',')})`
+}
+
+/** The carved region, as a clip-path and a mask for the shine layer. The inset pulls each side
+ * in from the element's own edges, the shape cuts that rectangle down, and 'art' additionally
+ * masks the light to the element image's own transparency (only an <img> has one to follow —
+ * anything else keeps the shape clip alone). */
+function rayArea(rec: Rec, sh?: ShineStyle): { clip: string; mask: string } {
+  const i = sh?.inset ?? {}
+  const t = clamp01(i.top ?? 0, 0, 95)
+  const r = clamp01(i.right ?? 0, 0, 95)
+  const b = clamp01(i.bottom ?? 0, 0, 95)
+  const l = clamp01(i.left ?? 0, 0, 95)
+  const shape = sh?.shape ?? 'box'
+  let clip = 'none'
+  if (shape === 'ellipse') {
+    const w = Math.max(0, 100 - l - r) / 2
+    const h = Math.max(0, 100 - t - b) / 2
+    clip = `ellipse(${w}% ${h}% at ${l + w}% ${t + h}%)`
+  } else if (shape === 'rounded') {
+    clip = `inset(${t}% ${r}% ${b}% ${l}% round ${clamp01(sh?.radiusPct ?? 12, 0, 50)}%)`
+  } else if (t || r || b || l) {
+    clip = `inset(${t}% ${r}% ${b}% ${l}%)`
+  }
+  let mask = 'none'
+  if (shape === 'art') {
+    const img = rec.content
+    const src = img && img.tagName === 'IMG' ? (img as HTMLImageElement).src : ''
+    // The art fills the box (.pa-img is 100%x100% with no object-fit), so the mask lines up at
+    // the same size. A cropped image positions its <img> itself and is left on the shape clip.
+    if (src && !rec.el.crop) mask = `url("${src}") 0 0 / 100% 100% no-repeat`
+  }
+  return { clip, mask }
+}
+
+/** Size / softness / colour / opacity / blend / carved area → the CSS vars the bands read.
+ * Called on every applyLightray pass, so an inspector edit shows up without a remount. */
+function applyShineStyle(rec: Rec, sh?: ShineStyle): void {
+  const rgb = rayRgb(sh?.color)
+  // Half-width of the lit streak, converted from "% of the element" to the "% of the band
+  // element" the gradient stops live in.
+  const haloHalf = clamp01(sh?.widthPct ?? RAY_WIDTH_PCT, 1, 2 * RAY_BAND_PCT) / 2 / (RAY_BAND_PCT / 100)
+  // softness 0.5 reproduces the original falloff; 0 pushes the inner stops out to the band's
+  // edge (a hard bar), 1 pulls them onto the centre (a pure linear fade).
+  const spread = (0.8 - 0.8 * clamp01(sh?.softness ?? RAY_SOFTNESS, 0, 1)) / 0.4
+  const style = rec.anim.style
+  style.setProperty('--pa-lightray-halo', rayGradient(rgb, haloHalf, spread, RAY_HALO_STOPS))
+  style.setProperty('--pa-lightray-core', rayGradient(rgb, haloHalf * RAY_CORE_RATIO, spread, RAY_CORE_STOPS))
+  style.setProperty('--pa-lightray-op', String(clamp01(sh?.opacity ?? 1, 0, 1)))
+  style.setProperty('--pa-lightray-blend', sh?.blend ?? 'screen')
+  const { clip, mask } = rayArea(rec, sh)
+  style.setProperty('--pa-lightray-clip', clip)
+  style.setProperty('--pa-lightray-mask', mask)
+}
+
+/** The shine layer, parked on the element's outermost animation box (last child, above the
+ * content via z-index) and kept there — ensureAnimLayers skips it when it nests a new box. */
+function ensureRayLayer(rec: Rec): void {
+  let ray = rec.ray
+  if (!ray) {
+    ray = document.createElement('div')
+    ray.className = 'pa-ray'
+    rec.ray = ray
+  }
+  if (ray.parentElement !== rec.anim) rec.anim.appendChild(ray)
+}
+
+// The 'lightray' preset is a glare sweep in its own layer (see anim.ts). Feed its timing and its
+// authored look via CSS vars and toggle the two driving classes: .pa-lightray sets the box up for
+// the element's whole life, .pa-lightray--run is what actually sweeps.
 //
 // WHICH PHASE authored it decides when that happens. A `loop` lightray is ambient: it runs from
 // mount, forever, everywhere (including the static editor canvas), exactly as it always has. A
@@ -1373,10 +1496,14 @@ function applyLightray(rec: Rec, activePhase?: Phase): void {
   const hit = lightrayHit(rec.el) // a lightray in ANY phase, primary or extra
   if (!hit) {
     rec.anim.classList.remove('pa-lightray', 'pa-lightray--run')
-    for (const v of ['dur', 'delay', 'ease', 'ang', 'iter', 'name', 'fill']) rec.anim.style.removeProperty('--pa-lightray-' + v)
+    for (const v of RAY_VARS) rec.anim.style.removeProperty('--pa-lightray-' + v)
+    rec.ray?.remove()
+    rec.ray = undefined
     return
   }
   const { spec: ray, phase } = hit
+  ensureRayLayer(rec)
+  applyShineStyle(rec, ray.shine)
   // The static editor canvas plays no entrance, so a one-shot reflection parked there would
   // give the author NO feedback at all — unlike every other preset, a lightray's resting
   // state is nothing to look at. Preview it ambiently on the canvas; real playback keeps it
