@@ -63,6 +63,12 @@ export type AnimPresetId =
   // way, then rocks slightly past rest. The name says which way it TRAVELS.
   | 'roll-right'
   | 'roll-left'
+  // An endless sideways scroll (a ticker / press-logo strip): the art slides out of the
+  // element box while an identical copy follows it in, forever. The name says which way
+  // it TRAVELS — marquee-left scrolls right→left. Loop phase only; duration is the time
+  // for one full pass, i.e. the speed.
+  | 'marquee-left'
+  | 'marquee-right'
   | 'shake'
   | 'wave'
   | 'shine'

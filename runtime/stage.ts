@@ -30,6 +30,7 @@ import {
   exitCssParts,
   injectAnimStyles,
   lightrayHit,
+  marqueeSpec,
   phaseFrameCssParts,
   phaseLeadDelayMs,
   phaseTotalMs,
@@ -94,6 +95,10 @@ interface Rec {
   // scale the last layout pass computed. Set by layoutText; called again whenever the
   // ticker rewrites the text, since a longer label has to shrink further.
   refit?: () => void
+  // The two trailing copies of the element that make a 'marquee' loop read as an endless
+  // strip instead of a slide that restarts. Built on demand by applyMarquee and parked
+  // beside the content, so every animation layer's transform carries them along.
+  marquee?: HTMLDivElement
   hg?: { stop(): void } // handguide animator
   confetti?: ConfettiController // confetti particle system
   idle?: { stop(): void } // generic idle visibility animator
@@ -1404,6 +1409,74 @@ function applyLightray(rec: Rec, activePhase?: Phase): void {
   void rec.anim.offsetWidth
   rec.anim.classList.add('pa-lightray--run')
 }
+/**
+ * The 'marquee' presets scroll the element sideways forever (see anim.ts). The keyframes
+ * move it exactly one box width, so for the pass to look endless an identical copy has to
+ * be waiting one box width away — this builds that copy on BOTH sides (so left and right
+ * share one DOM shape) and keeps each in step with the live content.
+ *
+ * The copies are parked beside the content inside the innermost animation layer, which is
+ * what makes them travel with it: whichever layer ends up carrying the marquee, they are
+ * below it in the tree and inherit its transform. (ensureAnimLayers moves the innermost
+ * box's children down when it nests a further layer, so they stay there.)
+ *
+ * Copies are CLONED rather than re-created from the asset, so a marquee works for anything
+ * with a visual — an image strip, a line of text, a bar. The clone is refreshed in place
+ * (styles and inner markup only) unless the element's source actually changed, so a resize
+ * or an inspector edit never makes the copies reload their picture and flicker.
+ */
+function applyMarquee(rec: Rec): void {
+  const spec = marqueeSpec(rec.el)
+  if (!spec) {
+    if (rec.marquee) {
+      rec.marquee.remove()
+      rec.marquee = undefined
+    }
+    rec.outer.classList.remove('pa-marquee-clip')
+    return
+  }
+  rec.outer.classList.add('pa-marquee-clip')
+  let copies = rec.marquee
+  if (!copies) {
+    copies = document.createElement('div')
+    copies.className = 'pa-marquee-copies'
+    for (const side of ['prev', 'next']) {
+      const tile = document.createElement('div')
+      tile.className = `pa-marquee-tile pa-marquee-tile--${side}`
+      copies.appendChild(tile)
+    }
+    rec.marquee = copies
+  }
+  // The content's parent is the innermost layer, which ensureAnimLayers can deepen at any
+  // time — so follow the content rather than caching a host.
+  const host = rec.content?.parentElement ?? rec.layers[rec.layers.length - 1]
+  if (copies.parentElement !== host) host.appendChild(copies)
+  for (const tile of Array.from(copies.children) as HTMLElement[]) syncMarqueeTile(tile, rec)
+}
+
+/** Make one copy match the live content: a fresh clone when the source changed, otherwise
+ * just the inline styles and markup layout has since rewritten on it. */
+function syncMarqueeTile(tile: HTMLElement, rec: Rec): void {
+  const live = rec.content
+  if (!live) {
+    tile.textContent = ''
+    delete tile.dataset.src
+    return
+  }
+  // What a clone cannot be patched into being: a different kind of node, or the same
+  // <img> pointing at a different picture.
+  const src = `${live.tagName}|${rec.el.assetId ?? ''}|${rec.el.type}`
+  const copy = tile.firstElementChild as HTMLElement | null
+  if (!copy || tile.dataset.src !== src) {
+    tile.textContent = ''
+    tile.appendChild(live.cloneNode(true))
+    tile.dataset.src = src
+    return
+  }
+  copy.style.cssText = live.style.cssText
+  if (copy.innerHTML !== live.innerHTML) copy.innerHTML = live.innerHTML
+}
+
 function restartAnim(node: HTMLElement, css: string): void {
   node.style.animation = 'none'
   void node.offsetWidth // force reflow so the next assignment restarts the animation
@@ -3363,6 +3436,14 @@ function fadeOffClass(rec: Rec, cls: string, off: boolean, ms: number): void {
 }
 
 function layoutRec(rec: Rec): void {
+  layoutRecBox(rec)
+  // After the box, never before: a marquee copies whatever layout just wrote onto the
+  // live content (an image's crop rect, a text's fitted font size), so it has to read a
+  // settled element. Cheap and idempotent for everything without a marquee.
+  applyMarquee(rec)
+}
+
+function layoutRecBox(rec: Rec): void {
   const e = effective(rec.el)
   const outer = rec.outer
 
@@ -3488,8 +3569,13 @@ function applyFrame(rec: Rec, s = scale()): void {
   const anim = rec.anim
   const radius = !box ? '' : box.pill ? '9999px' : box.radiusPx ? box.radiusPx * s + 'px' : ''
   anim.style.borderRadius = radius
+  // A marquee's trailing copies sit OUTSIDE this box by design, so a clip here would hide
+  // them and the strip would scroll away into nothing. The rounding moves up to .pa-el,
+  // which already clips the scroll (.pa-marquee-clip) and doesn't travel with it.
+  const marquee = !!marqueeSpec(rec.el)
+  rec.outer.style.borderRadius = marquee ? radius : ''
   // Clip the box for rounded corners OR when an image is being cropped to it.
-  anim.style.overflow = radius || (rec.el.type === 'image' && rec.el.crop) ? 'hidden' : ''
+  anim.style.overflow = !marquee && (radius || (rec.el.type === 'image' && rec.el.crop)) ? 'hidden' : ''
   anim.style.background = box?.bgColor ?? ''
   anim.style.boxShadow = box ? shadowCss(box.shadow, s) : ''
   if (box?.borderPx) {

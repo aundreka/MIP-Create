@@ -85,6 +85,22 @@ const KEYFRAMES = `
    Rotation is about the element centre. */
 @keyframes pa-roll-right{0%{transform:translateX(calc(-190px * var(--pa-s,1))) rotate(-26deg);opacity:0}18%{opacity:1}72%{transform:translateX(calc(16px * var(--pa-s,1))) rotate(5deg);opacity:1}100%{transform:translateX(0) rotate(0);opacity:1}}
 @keyframes pa-roll-left{0%{transform:translateX(calc(190px * var(--pa-s,1))) rotate(26deg);opacity:0}18%{opacity:1}72%{transform:translateX(calc(-16px * var(--pa-s,1))) rotate(-5deg);opacity:1}100%{transform:translateX(0) rotate(0);opacity:1}}
+/* MARQUEE — an endless sideways scroll (a ticker, a press-logo strip). The element's own
+   art is tile 1; .pa-marquee-copies parks an identical copy one box-width to EITHER side,
+   and the keyframes travel exactly one box width — so the copy that follows the travel
+   direction lands pixel-on-pixel where the original started and the strip reads as endless
+   rather than as a loop that restarts. Both copies always exist, so one DOM shape serves
+   both directions (stage.ts applyMarquee builds and syncs them).
+   The clip lives on the OUTER .pa-el (.pa-marquee-clip), not on the animating box: the
+   copies sit outside that box by definition, so a clip there would simply hide them.
+   Timing is forced linear in animationCss — any easing stutters at the seam. */
+.pa-marquee-clip{overflow:hidden}
+.pa-marquee-copies{position:absolute;inset:0;pointer-events:none}
+.pa-marquee-tile{position:absolute;top:0;bottom:0;width:100%;overflow:hidden}
+.pa-marquee-tile--prev{right:100%}
+.pa-marquee-tile--next{left:100%}
+@keyframes pa-marquee-left{from{transform:translateX(0)}to{transform:translateX(-100%)}}
+@keyframes pa-marquee-right{from{transform:translateX(0)}to{transform:translateX(100%)}}
 @keyframes pa-shake{0%,100%{transform:translateX(0)}20%{transform:translateX(calc(-6px * var(--pa-s,1)))}40%{transform:translateX(calc(6px * var(--pa-s,1)))}60%{transform:translateX(calc(-4px * var(--pa-s,1)))}80%{transform:translateX(calc(4px * var(--pa-s,1)))}}
 @keyframes pa-wave{0%,100%{transform:rotate(-4deg)}50%{transform:rotate(4deg)}}
 /* Both of these ANIMATE the filter property, which replaces it wholesale for the animation's
@@ -186,6 +202,19 @@ function ensureCustomKeyframes(steps: KeyframeStep[]): string {
   return name
 }
 
+// ---- marquee ---------------------------------------------------------------
+/** The endless-scroll presets. They need the copies + clip stage.ts builds for them,
+ * so several places have to recognise one without spelling both names out. */
+export function isMarqueePreset(preset: AnimSpec['preset']): boolean {
+  return preset === 'marquee-left' || preset === 'marquee-right'
+}
+
+/** The element's marquee spec, if it has one. Only the LOOP phase is searched: a scroll
+ * that never ends is a loop by definition, and the Inspector only offers it there. */
+export function marqueeSpec(el: SceneElement): AnimSpec | undefined {
+  return phaseSpecs(el, 'loop').find((s) => isMarqueePreset(s.preset))
+}
+
 // ---- shorthand builders ----------------------------------------------------
 function keyframeName(spec: AnimSpec): string {
   if (spec.preset === 'typewriter') return ''
@@ -200,7 +229,11 @@ function animationCss(spec: AnimSpec, loop: boolean, delayOverrideMs?: number): 
   const iter = loop ? (spec.iterations === 'infinite' || spec.iterations == null ? 'infinite' : spec.iterations) : (spec.iterations ?? 1)
   const delay = delayOverrideMs != null ? delayOverrideMs : spec.delayMs || 0
   const fill = loop ? 'none' : 'both'
-  return `${name} ${spec.durationMs}ms ${spec.easing || 'ease'} ${delay}ms ${iter} normal ${fill}`
+  // A marquee hands off to its own copy at the end of every pass, so any easing but
+  // linear visibly slows down and speeds up again at the seam — the one place the join
+  // must be invisible. The author's easing is ignored rather than offered and broken.
+  const easing = isMarqueePreset(spec.preset) ? 'linear' : spec.easing || 'ease'
+  return `${name} ${spec.durationMs}ms ${easing} ${delay}ms ${iter} normal ${fill}`
 }
 
 /** Public one-shot shorthand for non-stage surfaces (such as the pinned header)

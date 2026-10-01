@@ -45,6 +45,7 @@ import type {
   UnboxingConfig,
 } from '../../runtime/scene'
 import { headerAllowedFor } from '../../runtime/scene'
+import { isMarqueePreset } from '../../runtime/anim'
 import { autoMorphMatch, morphTargets, MORPH_DEFAULT_EASING, MORPH_DEFAULT_MS } from '../../runtime/morph'
 import { ownsSlot, patchSlot, projectLayoutPatch, resolvedLayout, seedSlot, withOwnSlot, withoutSlot, type Orient } from '../headerLayout'
 import { TAP_FADE_DEFAULT_MS } from '../../runtime/elements/button'
@@ -1204,7 +1205,23 @@ const ENTRANCE_PRESETS: AnimPresetId[] = [
   'spin',
   'lightray',
 ]
-const LOOP_PRESETS: AnimPresetId[] = ['pulse', 'float', 'subtle-float', 'bounce', 'bounce-reverse', 'roll-right', 'roll-left', 'shake', 'wave', 'shine', 'lightray', 'glow', 'spin']
+const LOOP_PRESETS: AnimPresetId[] = [
+  'pulse',
+  'float',
+  'subtle-float',
+  'bounce',
+  'bounce-reverse',
+  'roll-right',
+  'roll-left',
+  'marquee-left',
+  'marquee-right',
+  'shake',
+  'wave',
+  'shine',
+  'lightray',
+  'glow',
+  'spin',
+]
 const EXIT_PRESETS: AnimPresetId[] = ['fade-out', 'typewriter', 'wipe-out-left', 'wipe-out-right', 'wipe-out-up', 'scale-out', 'swipe-out-left', 'swipe-out-right', 'lightray']
 // Presets offered for STACKED (extra) animations: every node-driven preset + the reflection.
 const NODE_PRESETS: AnimPresetId[] = [
@@ -1242,7 +1259,9 @@ const NODE_PRESETS: AnimPresetId[] = [
   'swipe-out-right',
   'lightray',
 ]
-const LOOP_EXTRA_PRESETS: AnimPresetId[] = NODE_PRESETS
+// Loop extras get the scroll too, so a strip can drift sideways while something else
+// (a float, a glow) rides on top of it — each spec drives its own nested box.
+const LOOP_EXTRA_PRESETS: AnimPresetId[] = [...NODE_PRESETS, 'marquee-left', 'marquee-right']
 // Friendly labels so effects are findable in the dropdown (the raw ids are terse).
 const PRESET_LABELS: Partial<Record<AnimPresetId, string>> = {
   shine: 'shine (brightness glint)',
@@ -1264,6 +1283,8 @@ const PRESET_LABELS: Partial<Record<AnimPresetId, string>> = {
   'bounce-reverse': 'bounce reverse (dips downward)',
   'roll-right': 'roll → (rolls in from the left)',
   'roll-left': 'roll ← (rolls in from the right)',
+  'marquee-left': 'scroll ← (endless, right to left)',
+  'marquee-right': 'scroll → (endless, left to right)',
   'swipe-right': 'slide across → (flies in from the left)',
   'swipe-out-left': 'slide off ← (flies past the left edge)',
   'swipe-out-right': 'slide off → (flies past the right edge)',
@@ -1306,6 +1327,17 @@ const DEFAULT_CUSTOM: KeyframeStep[] = [
   { at: 100, opacity: 1, transform: 'scale(1)' },
 ]
 
+// Switching preset normally just sets the name. Two want more: 'custom' needs a starting
+// keyframe set to edit, and a marquee would otherwise inherit a duration written for a
+// half-second flourish — which reads as a frantic blur once it is scrolling forever — so
+// it opens at a calm pass unless the author already has something long dialled in.
+const MARQUEE_DEFAULT_MS = 12000
+function presetPatch(preset: AnimSpec['preset'], spec: AnimSpec): Partial<AnimSpec> {
+  if (preset === 'custom') return spec.custom?.length ? { preset } : { preset, custom: DEFAULT_CUSTOM }
+  if (isMarqueePreset(preset) && !isMarqueePreset(spec.preset) && spec.durationMs < 4000) return { preset, durationMs: MARQUEE_DEFAULT_MS }
+  return { preset }
+}
+
 function AnimRow(props: {
   title: string
   spec?: AnimSpec
@@ -1325,7 +1357,7 @@ function AnimRow(props: {
           <Row label="Preset">
             <Select
               value={spec.preset}
-              onChange={(v) => (v === 'custom' && !spec.custom?.length ? patch({ preset: 'custom', custom: DEFAULT_CUSTOM }) : patch({ preset: v as AnimSpec['preset'] }))}
+              onChange={(v) => patch(presetPatch(v as AnimSpec['preset'], spec))}
               options={[...props.presets.map((p) => ({ value: p as string, label: presetLabel(p) })), { value: 'custom', label: '✦ custom keyframes' }]}
             />
           </Row>
@@ -1339,13 +1371,34 @@ function AnimRow(props: {
               />
             </Row>
           )}
-          <div className="grid2">
-            <NumField label="Duration" value={spec.durationMs} step={50} onChange={(n) => patch({ durationMs: n })} />
-            <NumField label="Delay" value={spec.delayMs} step={50} onChange={(n) => patch({ delayMs: n })} />
-          </div>
-          <Row label="Easing">
-            <Select value={spec.easing} onChange={(v) => patch({ easing: v })} options={EASINGS} />
-          </Row>
+          {isMarqueePreset(spec.preset) ? (
+            // Speed IS the duration for an endless scroll — the time one full pass across the
+            // element takes — so it gets a slider in seconds instead of a millisecond field:
+            // a marquee is tuned by eye, over a far wider range than any other preset. No
+            // easing row: the scroll is always linear, or it stutters where the copies join.
+            <>
+              <Slider
+                label="Seconds per loop"
+                value={Math.min(60, Math.max(1, spec.durationMs / 1000))}
+                min={1}
+                max={60}
+                step={0.5}
+                suffix="s"
+                onChange={(n) => patch({ durationMs: Math.round(n * 1000) })}
+              />
+              <NumField label="Delay" suffix="ms" value={spec.delayMs} step={50} onChange={(n) => patch({ delayMs: n })} />
+            </>
+          ) : (
+            <>
+              <div className="grid2">
+                <NumField label="Duration" value={spec.durationMs} step={50} onChange={(n) => patch({ durationMs: n })} />
+                <NumField label="Delay" value={spec.delayMs} step={50} onChange={(n) => patch({ delayMs: n })} />
+              </div>
+              <Row label="Easing">
+                <Select value={spec.easing} onChange={(v) => patch({ easing: v })} options={EASINGS} />
+              </Row>
+            </>
+          )}
           {props.trigger && (
             <Row label="Plays">
               <Select
