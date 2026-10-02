@@ -76,6 +76,32 @@ function mraidUsable(mraid: any): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Tap de-duplication for CTA surfaces (CTA buttons, end cards).
+// ---------------------------------------------------------------------------
+let _lastTap = -Infinity
+/**
+ * Run `run` once per gesture, collapsing the ghost pair iOS emits for one tap (the
+ * touchend/pointerup, then the synthesised click ~300ms later).
+ *
+ * The export shell publishes this as window.handleTap, written longhand with a lastTapAt
+ * timestamp (MRAID_HEAD in src/export.ts), because the runtime's own guards survive
+ * minification only as mangled identifiers and a creative scanner that cannot see a
+ * debounce reports the ad as having none. Prefer the shell's copy so both halves share one
+ * window; the local one below is the fallback for shells without it (editor preview, Vite
+ * source export). Returns true when the tap was accepted.
+ */
+export function tapOnce(run: () => void): boolean {
+  try {
+    if (typeof W.handleTap === 'function') return W.handleTap(run) === true
+  } catch { /* fall through to the local copy */ }
+  const t = Date.now()
+  if (t - _lastTap < 500) return false
+  _lastTap = t
+  run()
+  return true
+}
+
+// ---------------------------------------------------------------------------
 // CTA fallback chain (AGENTS.md priority order).
 // ---------------------------------------------------------------------------
 // -Infinity, not 0: with 0 the "was there a CTA in the last 800ms" test reads a tap in the
@@ -88,7 +114,15 @@ let _lastCta = -Infinity
 // their next tap is a fresh, deliberate interaction that must redirect on the FIRST
 // click. Without this reset that return tap lands inside the lingering 800ms window and
 // gets swallowed, so the endcard "needs two clicks" to redirect the second time around.
-export function resetCtaCooldown(): void { _lastCta = -Infinity }
+// The shell's shorter tap window (handleTap above) is dropped with it, for the same reason.
+export function resetCtaCooldown(): void {
+  _lastCta = -Infinity
+  _lastTap = -Infinity
+  try {
+    if (typeof W.PA_TAP_RESET === 'function') W.PA_TAP_RESET()
+  } catch { /* */ }
+}
+
 export function triggerCTA(): void {
   // Cooldown so a whole-scene endcard tap + the CTA button tap (or rapid double-taps)
   // can't fire the store open twice. CRITICAL: arm it only AFTER a redirect ACTUALLY
@@ -161,15 +195,17 @@ export function triggerCTA(): void {
   // violates the MRAID spec and is what creative audits flag — that tap is dropped and
   // the cooldown stays disarmed, so the next tap gets a fresh try.
   //
-  // The export shell publishes the same guarded open as window.PA_CLICKOUT (MRAID_HEAD in
-  // src/export.ts) written longhand, so the guard + try/catch + click-macro chain survive
+  // The export shell publishes the same guarded open as window.handleMraidOpen — and
+  // window.PA_CLICKOUT, the same function under its older name (MRAID_HEAD in
+  // src/export.ts) — written longhand, so the guard + try/catch + click-macro chain survive
   // in scannable source instead of only as mangled bundle identifiers. Prefer it when it
   // is there; this branch is the fallback for shells without it (preview, Vite source
   // export). It returns true only when the container accepted the open.
   if (W.mraid && typeof W.mraid.open === 'function') {
     try {
-      if (typeof W.PA_CLICKOUT === 'function') {
-        if (W.PA_CLICKOUT(clickDest) === true) _lastCta = t
+      const shellOpen = typeof W.handleMraidOpen === 'function' ? W.handleMraidOpen : W.PA_CLICKOUT
+      if (typeof shellOpen === 'function') {
+        if (shellOpen(clickDest) === true) _lastCta = t
       } else if (clickDest && mraidUsable(W.mraid)) {
         done(() => W.mraid.open(clickDest))
       }

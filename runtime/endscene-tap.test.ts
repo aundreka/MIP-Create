@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { buildScene } from './stage'
 import { computeMetrics, setDesign } from './responsive'
-import { notifyGameEnd, triggerCTA } from './networks'
+import { notifyGameEnd, resetCtaCooldown, triggerCTA } from './networks'
 import type { Scene, SceneElement } from './scene'
 import type { AssetMap } from './types'
 
@@ -63,6 +63,10 @@ const release = (wrap: HTMLElement): void => {
 describe('endscene tap-to-install', () => {
   beforeEach(() => {
     vi.useFakeTimers()
+    // Each case rewinds the clock to "now", so the previous case's tap can still sit inside
+    // the 500ms one-action-per-gesture window (tapOnce). Clearing it is what the ad itself
+    // does whenever it is re-shown.
+    resetCtaCooldown()
     vi.mocked(triggerCTA).mockClear()
     vi.mocked(notifyGameEnd).mockClear()
   })

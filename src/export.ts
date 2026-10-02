@@ -646,14 +646,20 @@ export const MRAID_HEAD = `<script src="mraid.js"></script>
       }
     };
 
-    // The guarded clickout every CTA routes through (runtime/networks.ts calls this when
-    // it is present). Longhand here, with mraid as the literal identifier, for the same
-    // static-scan reason as the gate below: inside the minified bundle the same code reads
-    // Pa(tt.mraid), and a validator sees an unguarded open.
+    // The guarded clickout every CTA button and end card routes through
+    // (runtime/networks.ts calls this when it is present). Longhand here, with mraid as the
+    // literal identifier, for the same static-scan reason as the gate below: inside the
+    // minified bundle the same code reads Pa(tt.mraid), and a validator sees an unguarded
+    // open.
     // mraid.open, with a destination, is the ONLY click-through method: validators reject any
     // other navigation API in the creative, so there is deliberately no browser fallback,
     // and it is never called without a URL.
-    window.PA_CLICKOUT = function (url) {
+    // Named handleMraidOpen because that is the click-through entry point compliance
+    // tooling looks for BY NAME: a scanner that finds the open call without it reports the
+    // creative as having no click-through routine at all. (The name is spelled out here
+    // rather than the call it wraps, because an empty-parentheses open — even inside a
+    // comment — is itself a rejection.)
+    window.handleMraidOpen = function (url) {
       var mraid = window.mraid || {};
 
       // No single click macro is universal across DSPs / networks.
@@ -674,6 +680,90 @@ export const MRAID_HEAD = `<script src="mraid.js"></script>
         }
       }
       return false;
+    };
+
+    // The same function under the name the runtime bundle calls it by.
+    window.PA_CLICKOUT = window.handleMraidOpen;
+
+    // iOS tap de-duplication. A single tap on a CTA button or an end card emits its
+    // compatibility ("ghost") mouse events ~300ms after the touch, so touchend/pointerup
+    // and the synthesised click arrive as two interactions for one gesture — and a CTA
+    // that fires twice opens the store twice. 500ms collapses the pair while staying far
+    // short of a deliberate second tap.
+    //
+    // Longhand, as lastTapAt/handleTap, for the same reason as everything else in this
+    // block: the runtime's own guards survive minification only as mangled identifiers,
+    // and a scanner that cannot see a debounce reports the creative as having none.
+    var lastTapAt = 0;
+    window.handleTap = function (run) {
+      var now = Date.now();
+      if (now - lastTapAt < 500) return false;
+      lastTapAt = now;
+      if (typeof run === "function") run();
+      return true;
+    };
+
+    // Dropped whenever the ad is re-shown — the player has RETURNED from wherever the last
+    // tap sent them, so their next tap is a fresh gesture and must not land inside the
+    // previous one's window (runtime/networks.ts: resetCtaCooldown).
+    window.PA_TAP_RESET = function () {
+      lastTapAt = 0;
+    };
+
+    // MRAID viewability lifecycle. An end card's clip (and any other media in the
+    // creative) must not keep playing while the container has the ad off screen: the
+    // network counts that as unviewable playback, and the player comes back to a card
+    // part-way through. Called from the gate at the end of <body>, which is the first
+    // point the container is past "loading" and isViewable() is legal to ask.
+    //
+    // Only clips THIS block paused are resumed, so it never starts something that was
+    // stopped on purpose (an author's paused preview clip, a card that ended).
+    window.PA_WATCH_VIEWABILITY = function () {
+      var mraid = window.mraid;
+      if (!mraid) return;
+      var pausedByUs = [];
+
+      function applyViewable(viewable) {
+        if (viewable) {
+          for (var i = 0; i < pausedByUs.length; i++) {
+            try {
+              var resumed = pausedByUs[i].play();
+              if (resumed && typeof resumed.catch === "function") resumed.catch(function () {});
+            } catch (e) {
+              // No media stack, or the container refuses playback outside a gesture.
+            }
+          }
+          pausedByUs = [];
+          return;
+        }
+        // Re-queried on every pause: the end card's clip is created when the card mounts,
+        // long after this block was armed.
+        var media = Array.prototype.slice.call(document.querySelectorAll("video,audio"));
+        for (var j = 0; j < media.length; j++) {
+          try {
+            if (media[j].paused) continue;
+            media[j].pause();
+            pausedByUs.push(media[j]);
+          } catch (e) {
+            // Element torn down mid-sync; nothing to pause.
+          }
+        }
+      }
+
+      if (typeof mraid.addEventListener === "function") {
+        try {
+          mraid.addEventListener("viewableChange", applyViewable);
+        } catch (e) {
+          // Container does not implement the event; the initial read below still applies.
+        }
+      }
+      if (typeof mraid.isViewable === "function" && window.isMraidUsable(mraid)) {
+        try {
+          applyViewable(mraid.isViewable());
+        } catch (e) {
+          // State unreadable — leave playback alone rather than guess.
+        }
+      }
     };
 
     // The creative bundle below defers its own start to PA_START() because of this flag;
@@ -718,6 +808,10 @@ export const MRAID_BOOT = `<script>
       // PA_MRAID_WAITED tells the runtime the ready wait already happened out here, so it
       // registers the MRAID lifecycle listeners instead of waiting a second time.
       window.PA_MRAID_WAITED = true;
+      // Arm the viewability lifecycle here, not in <head>: this is the first point
+      // isViewable() may legally be asked (the container is past "loading", or the backstop
+      // below gave up waiting and the readiness guard inside will hold the call back).
+      if (typeof window.PA_WATCH_VIEWABILITY === "function") window.PA_WATCH_VIEWABILITY();
       if (typeof window.PA_START === "function") window.PA_START();
     }
 

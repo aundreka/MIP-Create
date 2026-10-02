@@ -14,7 +14,7 @@
 
 import type { SceneElement } from '../scene'
 import type { RuntimeCtx } from '../types'
-import { triggerCTA, notifyGameClose, notifyGameEnd } from '../networks'
+import { triggerCTA, notifyGameClose, notifyGameEnd, tapOnce } from '../networks'
 import { on } from '../emitter'
 import { videoSrc } from '../mediaSrc'
 
@@ -40,7 +40,10 @@ function armCtaTap(el: HTMLElement, run: () => void): void {
   el.addEventListener('pointerup', () => {
     if (!pressed) return
     pressed = false
-    run()
+    // tapOnce as well as the press/release pairing: the pairing stops a bare pointerdown
+    // installing, the 500ms window stops the compatibility click iOS fires after the same
+    // touch from installing a second time (see tapOnce in ../networks).
+    tapOnce(run)
   })
 }
 
@@ -190,9 +193,13 @@ export function createEndsceneContent(el: SceneElement, ctx: RuntimeCtx): HTMLEl
         notifyGameEnd()
       } else if (d && d.__paEnd === 'cta') {
         if (Date.now() - armedAt < ARM_MS) return
-        ctx.emit('sfx', 'ctaClick')
-        notifyGameClose()
-        triggerCTA()
+        // Same 500ms collapse the plain card gets: a card whose own button fires on both
+        // touchend and click posts the signal twice for one tap.
+        tapOnce(() => {
+          ctx.emit('sfx', 'ctaClick')
+          notifyGameClose()
+          triggerCTA()
+        })
       }
     }
     const view = wrap.ownerDocument.defaultView ?? window

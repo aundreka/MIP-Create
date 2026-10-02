@@ -101,6 +101,9 @@ function startCreative(): void {
   // Tells the runtime the ready wait already happened here, so it registers the MRAID
   // lifecycle listeners instead of waiting a second time.
   W.PA_MRAID_WAITED = true
+  // Viewability lifecycle: armed here, the first point isViewable() is legal to ask
+  // (index.html defines it alongside the readiness guard).
+  if (typeof W.PA_WATCH_VIEWABILITY === 'function') W.PA_WATCH_VIEWABILITY()
   void withInlineFonts(assets as unknown as AssetMap).then((list) =>
     boot(project as unknown as Project, list, {
       mount: document.getElementById('app') ?? document.body,

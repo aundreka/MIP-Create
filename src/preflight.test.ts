@@ -7,13 +7,18 @@ import type { Project } from '../runtime/scene'
 const NET: Network = { name: 'AppLovin', tag: 'al' }
 // Stand-in for the export shell's MRAID head + gate: the bridge tag, isMraidUsable, the
 // literal ready listener and "loading" comparison validators scan for, and a guarded
-// open() behind the full click-macro chain.
+// open() behind the full click-macro chain, under the handleMraidOpen name.
 const CLICKOUT =
+  `window.handleMraidOpen=function(){` +
   `var t=window.clickTag||window.clickTag1||window.clickthrough||window.clickThrough||"";` +
-  `if(window.isMraidUsable(mraid)){try{mraid.open(t);return}catch(e){}}`
+  `if(window.isMraidUsable(mraid)){try{mraid.open(t);return}catch(e){}}};`
+// The other two CTA-surface rules the shell carries longhand: one action per gesture, and
+// media that stops when the container takes the ad off screen.
+const TAP_DEDUP = `var lastTapAt=0;window.handleTap=function(r){if(Date.now()-lastTapAt<500)return false;lastTapAt=Date.now();r();return true};`
+const VIEWABILITY = `mraid.addEventListener("viewableChange",sync);sync(mraid.isViewable());`
 const MRAID_OK =
   `<script src="mraid.js"></script><script>window.isMraidUsable=function(m){return m.getState()!=="loading"};` +
-  `if(mraid.getState()==="loading"){mraid.addEventListener("ready",start)}${CLICKOUT}</script>`
+  `if(mraid.getState()==="loading"){mraid.addEventListener("ready",start)}${CLICKOUT}${TAP_DEDUP}${VIEWABILITY}</script>`
 const baseProject = (over: Partial<Project['meta']> = {}): Project => ({
   meta: { schemaVersion: 1, name: 'p', clickUrl: { ios: 'https://apps.apple.com/app/id123', android: 'https://play.google.com/store/apps/details?id=com.real.app' }, baseW: 1080, baseH: 1920, ...over },
   scenes: [{ id: 's1', name: 's1', kind: 'overlay', advance: { on: 'manual' }, elements: [{ id: 'c', type: 'cta', name: 'CTA', x: 0, y: 0, anchor: 'center', zIndex: 0, mode: 'fit' }] }],
@@ -116,6 +121,29 @@ describe('preflightNetwork', () => {
 
   // End to end against the shell + real runtime bundle, not a stand-in: the MRAID rules are
   // only worth anything if the file that actually ships clears them, on every network.
+  it('flags a build with no handleMraidOpen entry point', () => {
+    // The open call is there and guarded; what is missing is the NAME tooling scans for,
+    // which on its own reads as "no click-through routine".
+    const html = MRAID_OK.replace('window.handleMraidOpen=function(){', '(function(){')
+    const r = preflightNetwork(NET, html, 1000, baseProject())
+    expect(r.findings.some((f) => /handleMraidOpen/.test(f.message))).toBe(true)
+  })
+  it('flags a build whose CTA taps are not de-duplicated', () => {
+    const html = MRAID_OK.replace(TAP_DEDUP, '')
+    const r = preflightNetwork(NET, html, 1000, baseProject())
+    expect(r.findings.some((f) => /handleTap/.test(f.message))).toBe(true)
+  })
+  it('flags a build with no media viewability lifecycle', () => {
+    const html = MRAID_OK.replace(VIEWABILITY, '')
+    const r = preflightNetwork(NET, html, 1000, baseProject())
+    expect(r.findings.some((f) => /viewableChange/.test(f.message))).toBe(true)
+  })
+  it('flags viewability handling that is only half there', () => {
+    // One without the other is what a validator reports as partial handling.
+    const html = MRAID_OK.replace('sync(mraid.isViewable());', '')
+    const r = preflightNetwork(NET, html, 1000, baseProject())
+    expect(r.findings.some((f) => /viewability/.test(f.message))).toBe(true)
+  })
   it('the real export clears every MRAID rule on all networks', () => {
     const project = baseProject()
     const base = buildBaseHtml(project, {})

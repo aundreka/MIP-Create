@@ -5,7 +5,7 @@
 
 import type { SceneElement } from '../scene'
 import type { RuntimeCtx } from '../types'
-import { triggerCTA, notifyGameClose } from '../networks'
+import { triggerCTA, notifyGameClose, tapOnce } from '../networks'
 import { localize } from '../i18n'
 
 export function createCtaContent(el: SceneElement, ctx: RuntimeCtx): HTMLButtonElement {
@@ -26,11 +26,16 @@ export function createCtaContent(el: SceneElement, ctx: RuntimeCtx): HTMLButtonE
     btn.textContent = localize(el.text) || 'PLAY'
   }
 
+  // tapOnce: one gesture, one CTA. On iOS the touch and the compatibility click it
+  // synthesises ~300ms later both land on this button, and without the 500ms collapse the
+  // store opens twice (see tapOnce in ../networks).
   btn.addEventListener('click', (ev) => {
     ev.stopPropagation()
-    ctx.emit('sfx', 'ctaClick')
-    notifyGameClose()
-    triggerCTA()
+    tapOnce(() => {
+      ctx.emit('sfx', 'ctaClick')
+      notifyGameClose()
+      triggerCTA()
+    })
   })
 
   return btn

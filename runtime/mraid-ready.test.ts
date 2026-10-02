@@ -65,7 +65,7 @@ async function load() {
 afterEach(() => {
   vi.useRealTimers()
   const W = window as unknown as Record<string, unknown>
-  for (const key of ['mraid', 'isMraidUsable', 'PA_CLICKOUT', 'clickTag', 'clickTag1', 'clickthrough', 'clickThrough']) delete W[key]
+  for (const key of ['mraid', 'isMraidUsable', 'PA_CLICKOUT', 'handleMraidOpen', 'handleTap', 'PA_TAP_RESET', 'clickTag', 'clickTag1', 'clickthrough', 'clickThrough']) delete W[key]
   vi.restoreAllMocks()
 })
 
@@ -222,6 +222,22 @@ describe('MRAID readiness', () => {
     expect(open).not.toHaveBeenCalled()
   })
 
+  it('prefers window.handleMraidOpen over the older PA_CLICKOUT name', async () => {
+    // The shell publishes one guarded open under both names. handleMraidOpen is the name
+    // compliance tooling scans for, so it is the one the runtime reaches for first.
+    const mraid = makeMraid({ state: 'default' })
+    const W = window as unknown as Record<string, unknown>
+    W.mraid = mraid
+    const seen: string[] = []
+    W.handleMraidOpen = (url: string) => { seen.push('handleMraidOpen:' + url); return true }
+    W.PA_CLICKOUT = (url: string) => { seen.push('PA_CLICKOUT:' + url); return true }
+    const { net } = await load()
+    net.setStoreUrl({ ios: 'https://apps.apple.com/x', android: 'https://apps.apple.com/x' })
+
+    net.triggerCTA()
+    expect(seen).toEqual(['handleMraidOpen:https://apps.apple.com/x'])
+  })
+
   it('does not fall back to the browser when the shell handler reports nothing opened', async () => {
     const mraid = makeMraid({ state: 'loading' })
     const W = window as unknown as Record<string, unknown>
@@ -254,4 +270,52 @@ describe('click macro chain', () => {
       expect(open).not.toHaveBeenCalled()
     })
   }
+})
+
+describe('one action per gesture (tapOnce)', () => {
+  it('collapses the ghost pair iOS fires for a single tap', async () => {
+    const { net } = await load()
+    const ran: number[] = []
+
+    expect(net.tapOnce(() => ran.push(1))).toBe(true)
+    // The compatibility click for the SAME touch, ~300ms later.
+    expect(net.tapOnce(() => ran.push(2))).toBe(false)
+    expect(ran).toEqual([1])
+  })
+
+  it('lets a deliberate second tap through once the window has passed', async () => {
+    vi.useFakeTimers()
+    const { net } = await load()
+    const ran: number[] = []
+
+    net.tapOnce(() => ran.push(1))
+    vi.advanceTimersByTime(500)
+    net.tapOnce(() => ran.push(2))
+    expect(ran).toEqual([1, 2])
+  })
+
+  it('defers to the shell debounce (window.handleTap) when the export installs one', async () => {
+    // Both halves must share ONE window, or a tap collapsed by the runtime still counts
+    // against the shell's and the ad needs two taps to redirect.
+    const W = window as unknown as Record<string, unknown>
+    const seen: string[] = []
+    W.handleTap = (run: () => void) => { seen.push('shell'); run(); return true }
+    const { net } = await load()
+
+    expect(net.tapOnce(() => seen.push('ran'))).toBe(true)
+    expect(seen).toEqual(['shell', 'ran'])
+  })
+
+  it('clears the shell window too when the ad is re-shown', async () => {
+    // Returning from the store is a fresh gesture: it must redirect on the FIRST tap.
+    const W = window as unknown as Record<string, unknown>
+    let reset = 0
+    W.PA_TAP_RESET = () => { reset++ }
+    const { net } = await load()
+
+    net.tapOnce(() => {})
+    net.resetCtaCooldown()
+    expect(reset).toBe(1)
+    expect(net.tapOnce(() => {})).toBe(true)
+  })
 })

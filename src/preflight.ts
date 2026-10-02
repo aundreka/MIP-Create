@@ -141,6 +141,21 @@ export function preflightNetwork(net: Network, html: string, bytes: number, proj
   // — is flagged by the same scanners, even inside a comment.
   if (/mraid\s*\.\s*open\(\s*(?:(["'])\1)?\s*\)/.test(html))
     findings.push({ level: 'error', message: 'mraid.open called with no URL: every click-through must pass its destination (mraid.open(clickTarget)).' })
+  // The click-through entry point by name. Scanners that find mraid.open() without it read
+  // the creative as having no click-through routine at all ("mraid present but no
+  // mraid.open() click-through"), so the name is as much the check as the call is.
+  if (!/handleMraidOpen/.test(html))
+    findings.push({ level: 'error', message: 'No handleMraidOpen in the output: the click-through entry point every CTA and end card routes through must be present under that name.' })
+  // CTA surfaces debounce their taps — iOS fires a compatibility click ~300ms after the
+  // touch for the same gesture, and an undebounced CTA opens the store twice. The runtime's
+  // guard minifies to mangled identifiers, so the shell writes it out longhand.
+  if (!/handleTap/.test(html) || !/lastTapAt/.test(html))
+    findings.push({ level: 'error', message: 'No handleTap/lastTapAt tap de-duplication in the output: a CTA or end card tap must be collapsed to one action per gesture.' })
+  // Media viewability: an end card's clip must stop when the container takes the ad off
+  // screen. Both halves ship — the event and the initial read — since a creative with only
+  // one reads as partial viewability handling.
+  if (!/viewableChange/.test(html) || !/mraid\.isViewable\(\)/.test(html))
+    findings.push({ level: 'error', message: 'No MRAID viewability lifecycle in the output: media must pause on viewableChange and honour mraid.isViewable() when the ad is armed.' })
 
   return {
     net: net.name,

@@ -148,6 +148,41 @@ describe('source map stripping', () => {
     expect(html.indexOf('window.PA_CLICKOUT')).toBeLessThan(html.indexOf('</head>'))
   })
 
+  it('names the clickout handleMraidOpen, with PA_CLICKOUT as the same function', () => {
+    const html = buildBaseHtml(proj, {}, 'x')
+    // Compliance tooling scans for the click-through entry point BY NAME; the runtime
+    // bundle still calls it by its older one, so both have to resolve to one function.
+    expect(html).toContain('window.handleMraidOpen = function (url)')
+    expect(html).toContain('window.PA_CLICKOUT = window.handleMraidOpen')
+    expect(html.indexOf('window.handleMraidOpen')).toBeLessThan(html.indexOf('</head>'))
+  })
+
+  it('ships the tap de-duplication longhand, as lastTapAt/handleTap', () => {
+    const html = buildBaseHtml(proj, {}, 'x')
+    // One gesture, one CTA: on iOS the touch and the click it synthesises ~300ms later both
+    // reach the same button. The runtime's own guard minifies to mangled identifiers, so a
+    // scanner only sees a debounce if the shell writes one out.
+    expect(html).toContain('var lastTapAt = 0')
+    expect(html).toContain('window.handleTap = function (run)')
+    expect(html).toMatch(/now - lastTapAt < 500/)
+    // ...and it is dropped when the ad is re-shown, so a return tap redirects on the first try.
+    expect(html).toContain('window.PA_TAP_RESET')
+  })
+
+  it('ships the viewability lifecycle, armed from the gate rather than in head', () => {
+    const html = buildBaseHtml(proj, {}, 'x')
+    // An end card's clip must stop when the container takes the ad off screen. Both halves
+    // ship: the event, and the initial read.
+    expect(html).toContain('mraid.addEventListener("viewableChange", applyViewable)')
+    expect(html).toContain('applyViewable(mraid.isViewable())')
+    // isViewable() is illegal while the container is still loading, so the read is guarded
+    // and the whole block is armed from the boot gate, not from <head>.
+    expect(html).toContain('window.isMraidUsable(mraid)')
+    expect(html).toContain('window.PA_WATCH_VIEWABILITY()')
+    expect(html.indexOf('window.PA_WATCH_VIEWABILITY =')).toBeLessThan(html.indexOf('</head>'))
+    expect(html.indexOf('window.PA_WATCH_VIEWABILITY()')).toBeGreaterThan(html.indexOf('/*runtime*/'))
+  })
+
   it('does not double-inject mraid.js on the MRAID networks', () => {
     const base = buildBaseHtml(proj, {}, 'x')
     for (const net of NETWORKS) {
