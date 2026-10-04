@@ -7,6 +7,7 @@ import { useSyncExternalStore } from 'react'
 import type { HeaderConfig, OrientationOverride, Project, ProjectMeta, Scene, SceneDef, SceneElement, Variant } from '../runtime/scene'
 import { morphTargets } from '../runtime/morph'
 import type { AssetEntry, AssetMap, CompressProfile } from '../runtime/types'
+import { appAlert } from './panels/AppDialogs'
 import { getActiveVariant } from './variantMode'
 import { applyVariantPatches } from './variants'
 import { migrateProject } from './migrate'
@@ -464,13 +465,14 @@ export function addGameHint(gameId: string): void {
     mode: 'fit',
     assetId: HAND_ASSET_ID,
     // A scratch card worked with a placed scratcher is a drag, not a rub.
-    handguide: game.game?.templateId === 'scratch' && game.game.params?.scratcherId
-      ? { mode: 'scratchdrag', periodMs: 1800 }
-      : tpl?.defaultHandguide?.mode // game-aware logic template (e.g. 'match' follows the game's next card)
-      ? { mode: tpl.defaultHandguide.mode, periodMs: tpl.defaultHandguide.periodMs ?? 900 }
-      : pts.length > 1
-        ? { mode: 'slide', nodes: pts.slice(1), periodMs: tpl?.defaultHandguide?.periodMs ?? 1800 }
-        : { mode: 'tap', periodMs: 900 },
+    handguide:
+      game.game?.templateId === 'scratch' && game.game.params?.scratcherId
+        ? { mode: 'scratchdrag', periodMs: 1800 }
+        : tpl?.defaultHandguide?.mode // game-aware logic template (e.g. 'match' follows the game's next card)
+          ? { mode: tpl.defaultHandguide.mode, periodMs: tpl.defaultHandguide.periodMs ?? 900 }
+          : pts.length > 1
+            ? { mode: 'slide', nodes: pts.slice(1), periodMs: tpl?.defaultHandguide?.periodMs ?? 1800 }
+            : { mode: 'tap', periodMs: 900 },
   }
   addElement(hg)
 }
@@ -871,7 +873,7 @@ export function toggleSyncToProject(id: string): void {
   if (!el) return
   if (el.sync) return unsyncElement(id)
   if (!state.project.meta.projectId) {
-    alert('Assign this MIP to a project first. Open Project settings and set the “Project” field.')
+    void appAlert('Assign this MIP to a project first. Open Project settings and set the “Project” field.')
     return
   }
   const key = nextId('sync')

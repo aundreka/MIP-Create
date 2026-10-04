@@ -368,6 +368,19 @@ button:active:not(:disabled),
   background: rgba(180, 84, 10, 0.34);
 }
 
+/* Quick GitHub repo link in the topbar — paste owner/repo, Enter/blur saves. */
+.repo-quick {
+  width: 170px;
+  min-width: 0;
+  flex: 0 1 auto;
+  padding: 5px 9px;
+  font-size: 12px;
+}
+.repo-quick.bad {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 20%, transparent);
+}
+
 .locale-pick {
   width: auto;
   min-width: 84px;
@@ -414,6 +427,47 @@ button:active:not(:disabled),
 .share-actions button {
   flex: 1;
 }
+/* Project settings: the generated names (MIP / export file / delivery folder)
+   as one compact click-to-copy block instead of three read-only input rows. */
+.meta-names {
+  margin: 6px 10px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+.meta-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 9px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  text-align: left;
+}
+.meta-name-row + .meta-name-row {
+  border-top: 1px solid var(--line);
+}
+.meta-name-row:hover:not(:disabled) {
+  background: var(--fill-subtle);
+}
+.meta-name-row > span {
+  flex: 0 0 72px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.meta-name-row code {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .var-row {
   display: flex;
   align-items: center;
@@ -1097,7 +1151,6 @@ button.icon {
 }
 .layer-row.is-hidden .layer-name {
   opacity: 0.45;
-
 }
 .layer-row.child {
   padding-left: 24px;
@@ -1634,19 +1687,23 @@ button.icon {
 /* Inspector: a short label and a one-line control share a row, label left. Long
    labels, multi-line controls (chips, swatches, textareas) and the two-up .grid2
    cells keep the stacked layout. */
-.inspector .field.short:has(> .num-input, > .select-wrap, > input:not([type='range'], [type='checkbox'])) {
+.inspector .field.short:has(> .num-input, > .select-wrap, > input:not([type='range'], [type='checkbox'])),
+.drawer .field.short:has(> .num-input, > .select-wrap, > input:not([type='range'], [type='checkbox'])) {
   display: grid;
   grid-template-columns: 92px minmax(0, 1fr);
   align-items: center;
   column-gap: 8px;
 }
-.inspector .field.short:has(> .num-input, > .select-wrap, > input:not([type='range'], [type='checkbox'])) > span {
+.inspector .field.short:has(> .num-input, > .select-wrap, > input:not([type='range'], [type='checkbox'])) > span,
+.drawer .field.short:has(> .num-input, > .select-wrap, > input:not([type='range'], [type='checkbox'])) > span {
   margin-bottom: 0;
 }
-.inspector .grid2 .field.short:has(> .num-input, > .select-wrap, > input:not([type='range'], [type='checkbox'])) {
+.inspector .grid2 .field.short:has(> .num-input, > .select-wrap, > input:not([type='range'], [type='checkbox'])),
+.drawer .grid2 .field.short:has(> .num-input, > .select-wrap, > input:not([type='range'], [type='checkbox'])) {
   display: block;
 }
-.inspector .grid2 .field.short:has(> .num-input, > .select-wrap, > input:not([type='range'], [type='checkbox'])) > span {
+.inspector .grid2 .field.short:has(> .num-input, > .select-wrap, > input:not([type='range'], [type='checkbox'])) > span,
+.drawer .grid2 .field.short:has(> .num-input, > .select-wrap, > input:not([type='range'], [type='checkbox'])) > span {
   margin-bottom: 2px;
 }
 .num-input {
@@ -2619,6 +2676,28 @@ svg {
   color: var(--muted);
   font-size: 20px;
   cursor: pointer;
+  transition: border-color var(--t-fast) var(--ease);
+}
+.assetpick .asset-thumb:hover {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+}
+/* Inspector asset slots: label + thumb share one row (stacking them wasted a
+   full line per slot and made game inspectors scroll forever). The label takes
+   the free width and may wrap; the thumb keeps a fixed size on the right. */
+.inspector .field.assetpick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.inspector .field.assetpick > span {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-bottom: 0;
+}
+.inspector .field.assetpick .asset-thumb {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
 }
 .pop-backdrop {
   position: fixed;
@@ -3370,10 +3449,16 @@ svg {
   border-bottom: 1px solid var(--line);
 }
 .home-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-family: var(--font-display);
   font-weight: 700;
   font-size: 18px;
   letter-spacing: -0.2px;
+}
+.home-brand svg {
+  color: var(--accent);
 }
 .home-tabs {
   display: inline-flex;
@@ -3411,6 +3496,32 @@ svg {
   min-width: 0;
   overflow: auto;
   padding: 18px;
+}
+/* Home sections: flush-left headers (drop the inspector .group-title's 10px
+   indent + top rule here) with the count as a quiet badge, not parentheses. */
+.home-main .group-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 26px 0 12px;
+  padding-top: 0;
+  border-top: 0;
+  font-weight: 600;
+}
+.home-main .group-title:first-child {
+  margin-top: 0;
+}
+.count-badge {
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  padding: 3px 8px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line);
+  background: var(--fill-subtle);
+  color: var(--muted);
+  letter-spacing: 0;
 }
 .home-side {
   flex: 0 0 340px;
@@ -3458,25 +3569,41 @@ svg {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  height: 88px;
+  gap: 9px;
+  height: 92px;
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
   background: var(--input-bg);
   color: var(--ink);
   cursor: pointer;
   font-size: 13px;
+  font-weight: 500;
+  transition:
+    border-color var(--t-fast) var(--ease),
+    background var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease),
+    transform var(--t-fast) var(--ease);
 }
 .new-card:hover {
   border-color: color-mix(in srgb, var(--accent) 60%, var(--line));
   background: color-mix(in srgb, var(--accent) 9%, var(--input-bg));
   color: var(--ink);
+  transform: translateY(-1px);
+  box-shadow: var(--sh-1);
 }
 .new-card.blank {
   background: var(--surface-sunken);
+  border-style: dashed;
 }
 .new-card .plus {
-  font-size: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--accent);
 }
 .home-templates {
   display: grid;
@@ -3519,6 +3646,16 @@ svg {
   border-radius: var(--r-md);
   background: var(--fill-subtle);
   color: var(--muted);
+  transition:
+    border-color var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease),
+    background var(--t-fast) var(--ease);
+}
+.home-search:focus-within {
+  color: var(--ink);
+  background: var(--input-bg);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--glass-border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
 }
 .home-search input {
   border: 0;
@@ -3537,7 +3674,8 @@ svg {
   color: var(--muted);
   flex: 0 0 auto;
 }
-/* Brand filter chips — pick a brand to narrow the template list (many-to-many). */
+/* Filter chips (brands / minigame types) — a label plus a count badge. The count
+   is its own little pill so it reads as metadata, not part of the name. */
 .brand-filter {
   display: flex;
   flex-wrap: wrap;
@@ -3547,9 +3685,11 @@ svg {
 .brand-chip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   font-size: var(--fs-sm);
-  padding: 4px 10px;
+  font-weight: 500;
+  line-height: 1;
+  padding: 4px 5px 4px 11px;
   border-radius: var(--r-pill);
   border: 1px solid var(--glass-border);
   background: var(--fill-subtle);
@@ -3558,19 +3698,28 @@ svg {
 .brand-chip:hover {
   color: var(--ink);
   border-color: color-mix(in srgb, var(--accent) 45%, var(--glass-border));
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 .brand-chip.on {
   color: #fff;
   background: var(--accent);
   border-color: var(--accent);
+  box-shadow: 0 1px 8px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 .brand-count {
   font-size: 10px;
   font-weight: 700;
-  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  min-width: 20px;
+  padding: 4px 6px;
+  text-align: center;
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--ink) 9%, transparent);
+  transition: background var(--t-fast) var(--ease);
 }
 .brand-chip.on .brand-count {
-  opacity: 0.9;
+  background: rgba(255, 255, 255, 0.24);
 }
 .tpl-grid {
   display: grid;
@@ -3727,16 +3876,36 @@ svg {
   padding: 0 7px;
   line-height: 17px;
 }
+/* Per-group actions (Upload / Combine) read as quiet ghost pills until hovered,
+   so the group name stays the loudest thing on the row. */
+.proj-group-head button {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: var(--r-pill);
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+}
+.proj-group-head button:where(:hover):where(:not(:disabled)) {
+  color: var(--ink);
+  background: var(--fill-subtle);
+  border-color: var(--line);
+}
 .proj-card {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
-  background: var(--input-bg);
+  background: var(--panel);
   overflow: hidden;
+  transition:
+    border-color var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease),
+    transform var(--t-fast) var(--ease);
 }
 .proj-card.current {
   border-color: var(--accent, #4a86ff);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
 }
 .proj-card:hover {
   border-color: color-mix(in srgb, var(--ink) 22%, var(--line));
@@ -5569,11 +5738,22 @@ svg {
   opacity: 0;
   cursor: pointer;
 }
+/* Search + minigame filter stick to the top while the long playables list
+   scrolls, so refining the filter never means scrolling back up. */
+.proj-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  margin: 0 -18px;
+  padding: 6px 18px 2px;
+  background: var(--bg);
+}
 .home-search.proj-search {
-  margin: 8px 10px 12px;
+  margin: 0 0 10px;
+  max-width: 460px;
 }
 .brand-filter.proj-game-filter {
-  margin: 0 10px 12px;
+  margin: 0 0 12px;
 }
 /* Hover-and-hold live preview of a project's first scene on Home: a centered modal
    that ignores the pointer, so hovering "through" it keeps the card's hover alive. */
@@ -5613,4 +5793,255 @@ svg {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ==== TODO ticket 1: Make the hover-held live preview discoverable ==== */
+/* Corner chip on a playable thumbnail hinting at the hold-to-preview gesture.
+   Absolutely positioned (no layout shift); fades in ~300ms into the hover and
+   is gone the moment the pointer leaves — the live preview itself opens at 600ms. */
+.proj-hover-hint {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  border: 1px solid var(--glass-border);
+  color: var(--ink);
+  font-size: 10px;
+  line-height: 14px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--t-fast) var(--ease);
+}
+.proj-open:hover .proj-hover-hint,
+.proj-open:focus-visible .proj-hover-hint {
+  opacity: 1;
+  transition-delay: 300ms;
+}
+
+/* ==== TODO ticket 2: Undo-able delete instead of permanent confirm ==== */
+.undo-toasts {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  z-index: 70; /* above .home-overlay (60), below menus/dialogs */
+  pointer-events: none;
+}
+.undo-toast {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px 8px 14px;
+  border-radius: var(--r-pill);
+  background: var(--panel);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--sh-2);
+  color: var(--ink);
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: auto;
+  /* slide in, then fade just before the UNDO_DELETE_MS (8s) purge in HomeScreen */
+  animation:
+    undo-toast-in var(--t-fast) var(--ease),
+    undo-toast-out 0.35s var(--ease) 7.6s forwards;
+}
+.undo-toast-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 42vw;
+}
+.undo-toast-btn {
+  flex: none;
+  padding: 3px 12px;
+  border-radius: var(--r-pill);
+  color: var(--accent);
+  font-weight: 600;
+}
+@keyframes undo-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@keyframes undo-toast-out {
+  to {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* ==== TODO ticket 4: Discoverable rename on playable cards ==== */
+.proj-name-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.proj-name-row .proj-name {
+  min-width: 0;
+}
+.proj-rename {
+  opacity: 0;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  border-radius: var(--r-pill);
+  color: var(--muted);
+  transition: opacity var(--t-fast) var(--ease);
+}
+.proj-card:hover .proj-rename,
+.proj-card:focus-within .proj-rename,
+.proj-rename:focus-visible {
+  opacity: 1;
+}
+.proj-rename:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+}
+
+/* ==== TODO ticket 3: Replace native alert/confirm with in-app dialogs ==== */
+/* Dialogs stack above every other overlay (modals/drawers sit at z-index 1000). */
+.modal-overlay:has(> .app-dialog) {
+  z-index: 1100;
+}
+.app-dialog-msg {
+  white-space: pre-line; /* native alert() strings carry \n line breaks */
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 2px 0 14px;
+}
+/* Primary first in DOM (gets Modal's autofocus → Enter confirms), shown on the
+   right via row-reverse. */
+.app-dialog-btns {
+  display: flex;
+  flex-direction: row-reverse;
+  gap: 8px;
+}
+.app-dialog-btns button {
+  min-width: 72px;
+}
+.app-dialog .primary.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+.app-dialog .primary.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, #fff 12%, var(--danger));
+  border-color: color-mix(in srgb, #fff 12%, var(--danger));
+}
+
+/* ==== TODO ticket 6: Colorblind-safe WIN/LOSE cell markers ==== */
+.cell-pick-btn {
+  aspect-ratio: 1;
+  min-height: 32px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+.cell-pick-tag {
+  font-size: 10px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.cell-pick-tag.win {
+  color: var(--accent-2);
+}
+.cell-pick-tag.lose {
+  color: var(--danger);
+}
+
+/* ==== TODO ticket 10: Storage persistence + backup nudge ==== */
+/* Dismissible reminder above the playables grid: library lives in browser
+   storage, so nudge for a backup when it's big and the last one is stale. */
+.backup-nudge {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin: 0 0 var(--s3);
+  padding: 6px 8px 6px 12px;
+  font-size: var(--fs-sm);
+  background: var(--fill-subtle);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+.backup-nudge-text {
+  flex: 1;
+  min-width: 0;
+}
+.backup-nudge-btn {
+  flex: none;
+  padding: 4px 12px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  border: 0;
+  border-radius: var(--r-pill);
+  cursor: pointer;
+  transition: filter var(--t-fast) var(--ease);
+}
+.backup-nudge-btn:hover {
+  filter: brightness(1.1);
+}
+.backup-nudge-x {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  color: var(--muted);
+  background: none;
+  border: 0;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.backup-nudge-x:hover {
+  color: var(--text);
+  background: var(--fill-subtle);
+}
+
+/* ==== Home: minigame filter folded into a dropdown button ==== */
+.proj-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 8px;
+}
+.home-search.proj-search {
+  flex: 1;
+  margin: 0;
+}
+.proj-filter-btn {
+  flex: none;
+  gap: 5px;
+  padding: 7px 9px 7px 11px;
+  cursor: pointer;
+}
+.proj-filter-x {
+  flex: none;
+}
+/* A menu listing every minigame type must not outgrow the screen. */
+.ctx-menu {
+  max-height: min(70vh, 480px);
+  overflow-y: auto;
 }

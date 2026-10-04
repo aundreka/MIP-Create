@@ -7,6 +7,7 @@ import { Navigator } from './panels/Navigator'
 import { Timeline } from './panels/Timeline'
 import { ToolRail } from './panels/ToolRail'
 import { Topbar } from './panels/Topbar'
+import { AppDialogHost, appAlert, appConfirm } from './panels/AppDialogs'
 import { DockPanel } from './ui'
 import { currentProjectId, openProject } from './projects'
 import { addAsset, addElement, getState, hasElementClip, nextId, pasteElements, selectOnly, setActiveScene } from './store'
@@ -65,7 +66,10 @@ export function App(): JSX.Element {
   // Set when Home shares one specific playable (its card's share button) rather than
   // whatever project is open — null means the modal shows both send and receive.
   const [shareTarget, setShareTarget] = useState<{ id: string; name: string } | null>(null)
-  const closeShare = (): void => { setShare(false); setShareTarget(null) }
+  const closeShare = (): void => {
+    setShare(false)
+    setShareTarget(null)
+  }
   const [cmdK, setCmdK] = useState(false)
   const [quickExportBusy, setQuickExportBusy] = useState(false)
   const [quickViteExportBusy, setQuickViteExportBusy] = useState(false)
@@ -84,7 +88,10 @@ export function App(): JSX.Element {
   const commands = useMemo(
     () =>
       buildCommands({
-        openPreview: () => { setPreviewScene(null); setPreview(true) },
+        openPreview: () => {
+          setPreviewScene(null)
+          setPreview(true)
+        },
         openExport: () => setExportOpen(true),
         openFigma: () => setFigma(true),
         openProjectSettings: () => setSettings(true),
@@ -93,7 +100,10 @@ export function App(): JSX.Element {
         openQuizFunnel: () => setQuiz(true),
         openQa: () => setQa(true),
         openQaCheck: () => setQaCheck(true),
-        openTeam: () => { setHomeTab('team'); setHome(true) },
+        openTeam: () => {
+          setHomeTab('team')
+          setHome(true)
+        },
         openShare: () => setShare(true),
         openGenerateMip: () => setGenMip(true),
         openUpload: () => setUploadRequest({}),
@@ -107,6 +117,18 @@ export function App(): JSX.Element {
     // render's closures stay valid for the palette's lifetime.
     [],
   )
+
+  // Ask the browser to protect this origin's storage (localStorage + IndexedDB
+  // hold the whole library) from eviction under disk pressure. Fire-and-forget;
+  // the desktop app (window.editorAPI) persists to disk itself, so skip it there.
+  useEffect(() => {
+    if ((window as unknown as { editorAPI?: unknown }).editorAPI) return
+    try {
+      void navigator.storage?.persist?.()?.catch(() => {})
+    } catch {
+      // Older browsers without the Storage API — nothing to do.
+    }
+  }, [])
 
   // Cmd/Ctrl+K opens the command palette, Cmd/Ctrl+Shift+H toggles the canvas
   // resize handles (both ignored while typing in a field).
@@ -133,7 +155,7 @@ export function App(): JSX.Element {
       const mod = await import('./quickExport')
       await mod.quickExportCurrent(true)
     } catch (e) {
-      alert('Quick export failed: ' + String(e))
+      await appAlert('Quick export failed: ' + String(e))
     } finally {
       setQuickExportBusy(false)
     }
@@ -145,7 +167,7 @@ export function App(): JSX.Element {
       const mod = await import('./quickExport')
       await mod.quickExportSip()
     } catch (e) {
-      alert('Quick SIP export failed: ' + String((e as Error)?.message ?? e))
+      await appAlert('Quick SIP export failed: ' + String((e as Error)?.message ?? e))
     } finally {
       setQuickSipBusy(false)
     }
@@ -154,7 +176,7 @@ export function App(): JSX.Element {
   const doGithubPush = async (): Promise<void> => {
     const mod = await import('./github')
     if (!mod.readGithubLink() || !(await mod.readGithubToken())) {
-      alert('Link a GitHub repository first: Project settings > GitHub.')
+      await appAlert('Link a GitHub repository first: Project settings > GitHub.')
       setSettings(true)
       return
     }
@@ -162,10 +184,16 @@ export function App(): JSX.Element {
     try {
       const r = await mod.pushProjectGroup((msg) => setGithubBusy(msg))
       const over = r.skipped.length ? `\n\nNot included (over 5 MB): ${r.skipped.join(', ')}` : ''
-      if (!r.changed) alert(`${r.repo} is already up to date.${over}`)
-      else if (confirm(`Pushed ${r.folders.join(', ')} to ${r.repo} (${r.changed} file(s) changed).${over}\n\nOpen the commit on GitHub?`)) window.open(r.commitUrl, '_blank')
+      if (!r.changed) await appAlert(`${r.repo} is already up to date.${over}`)
+      else if (
+        await appConfirm(`Pushed ${r.folders.join(', ')} to ${r.repo} (${r.changed} file(s) changed).${over}\n\nOpen the commit on GitHub?`, {
+          title: 'Pushed to GitHub',
+          okLabel: 'Open commit',
+        })
+      )
+        window.open(r.commitUrl, '_blank')
     } catch (e) {
-      alert('Push to GitHub failed: ' + String((e as Error)?.message ?? e))
+      await appAlert('Push to GitHub failed: ' + String((e as Error)?.message ?? e))
     } finally {
       setGithubBusy(null)
     }
@@ -178,7 +206,7 @@ export function App(): JSX.Element {
       const { project, assets } = getState()
       await mod.exportViteProject(project, assets)
     } catch (e) {
-      alert('Quick Vite export failed: ' + String(e))
+      await appAlert('Quick Vite export failed: ' + String(e))
     } finally {
       setQuickViteExportBusy(false)
     }
@@ -190,7 +218,7 @@ export function App(): JSX.Element {
       const mod = await import('./viteExport')
       await mod.exportViteProjectGroup()
     } catch (e) {
-      alert('Quick project Vite export failed: ' + String(e))
+      await appAlert('Quick project Vite export failed: ' + String(e))
     } finally {
       setQuickProjectViteExportBusy(false)
     }
@@ -253,7 +281,30 @@ export function App(): JSX.Element {
         // Home route — the editor is unmounted behind it (its state lives in the
         // module-level store, so nothing is lost). Opening a project enters the editor.
         <Suspense fallback={null}>
-          <HomeScreen onClose={() => setHome(false)} initialTab={homeTab} onProfile={() => setProfile(true)} onGenerate={() => { setHome(false); setGenMip(true) }} onQuizFunnel={() => { setHome(false); setQuiz(true) }} onImportBuilt={() => { setHome(false); setImportBuilt(true) }} onShare={() => setShare(true)} onShareProject={(id, name) => { setShareTarget({ id, name }); setShare(true) }} onUploadProject={(projectIds, label) => setUploadRequest({ projectIds, label })} onQaCheck={() => setQaCheck(true)} />
+          <HomeScreen
+            onClose={() => setHome(false)}
+            initialTab={homeTab}
+            onProfile={() => setProfile(true)}
+            onGenerate={() => {
+              setHome(false)
+              setGenMip(true)
+            }}
+            onQuizFunnel={() => {
+              setHome(false)
+              setQuiz(true)
+            }}
+            onImportBuilt={() => {
+              setHome(false)
+              setImportBuilt(true)
+            }}
+            onShare={() => setShare(true)}
+            onShareProject={(id, name) => {
+              setShareTarget({ id, name })
+              setShare(true)
+            }}
+            onUploadProject={(projectIds, label) => setUploadRequest({ projectIds, label })}
+            onQaCheck={() => setQaCheck(true)}
+          />
         </Suspense>
       ) : (
         <>
@@ -263,9 +314,15 @@ export function App(): JSX.Element {
             showHandles={showHandles}
             onToggleHandles={toggleHandles}
             onFit={() => setFitSignal((n) => n + 1)}
-            onPreview={() => { setPreviewScene(null); setPreview(true) }}
+            onPreview={() => {
+              setPreviewScene(null)
+              setPreview(true)
+            }}
             onSaveTemplate={() => setTemplates(true)}
-            onHome={() => { setHomeTab('projects'); setHome(true) }}
+            onHome={() => {
+              setHomeTab('projects')
+              setHome(true)
+            }}
             onProfile={() => setProfile(true)}
             onProjectSettings={() => setSettings(true)}
             onQuickExport={() => void doQuickExport()}
@@ -288,7 +345,12 @@ export function App(): JSX.Element {
           <div className="body">
             <ToolRail />
             <DockPanel id="nav" side="left" defaultWidth={224} min={170} max={420}>
-              <Navigator onPreviewScene={(id) => { setPreviewScene(id); setPreview(true) }} />
+              <Navigator
+                onPreviewScene={(id) => {
+                  setPreviewScene(id)
+                  setPreview(true)
+                }}
+              />
             </DockPanel>
             <div className="canvas-col">
               <EditorCanvas zoom={zoom} pan={pan} setZoom={(z) => setZoom(clampZoom(z))} setPan={setPan} fitSignal={fitSignal} showHandles={showHandles} />
@@ -307,15 +369,35 @@ export function App(): JSX.Element {
         {settings && <ProjectSettings onClose={() => setSettings(false)} />}
         {templates && <TemplatesModal onClose={() => setTemplates(false)} />}
         {quiz && <QuizFunnel onClose={() => setQuiz(false)} />}
-        {genMip && <GenerateMip onClose={() => setGenMip(false)} onQaCheck={() => { setGenMip(false); setHome(false); setQaCheck(true) }} />}
+        {genMip && (
+          <GenerateMip
+            onClose={() => setGenMip(false)}
+            onQaCheck={() => {
+              setGenMip(false)
+              setHome(false)
+              setQaCheck(true)
+            }}
+          />
+        )}
         {profile && <ProfilePanel onClose={() => setProfile(false)} />}
         {exportOpen && <ExportModal onClose={() => setExportOpen(false)} onQaCheck={() => setQaCheck(true)} />}
         {uploadRequest && <UploadModal onClose={() => setUploadRequest(null)} projectIds={uploadRequest.projectIds} label={uploadRequest.label} />}
         {qa && <QaPanel onClose={() => setQa(false)} onNavigate={qaNavigate} />}
         {qaCheck && <QaCheckPanel onClose={() => setQaCheck(false)} />}
-        {share && <ShareModal initialCode={shareCode} target={shareTarget ?? undefined} onClose={closeShare} onImported={() => { closeShare(); setHome(false) }} />}
+        {share && (
+          <ShareModal
+            initialCode={shareCode}
+            target={shareTarget ?? undefined}
+            onClose={closeShare}
+            onImported={() => {
+              closeShare()
+              setHome(false)
+            }}
+          />
+        )}
         {cmdK && <CommandPalette commands={commands} onClose={() => setCmdK(false)} />}
       </Suspense>
+      <AppDialogHost />
     </div>
   )
 }

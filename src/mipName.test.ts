@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { fileBaseName, mipFolderName } from './mipName'
+import { fileBaseName, mipFolderName, mipName } from './mipName'
 import type { Project } from '../runtime/scene'
 
 function project(overrides: Partial<Project['meta']> = {}, templateId: string | null = 'scratch'): Project {
@@ -15,15 +15,15 @@ function project(overrides: Partial<Project['meta']> = {}, templateId: string | 
       exportDate: '2026-07-30',
       ...overrides,
     },
-    scenes: [{
-      id: 'scene1',
-      name: 'Game',
-      kind: 'game',
-      advance: { on: 'manual' },
-      elements: templateId
-        ? [{ id: 'game1', type: 'game-mount', name: 'Game', x: 0, y: 0, anchor: 'center', zIndex: 1, mode: 'fit', game: { templateId, params: {} } }]
-        : [],
-    }],
+    scenes: [
+      {
+        id: 'scene1',
+        name: 'Game',
+        kind: 'game',
+        advance: { on: 'manual' },
+        elements: templateId ? [{ id: 'game1', type: 'game-mount', name: 'Game', x: 0, y: 0, anchor: 'center', zIndex: 1, mode: 'fit', game: { templateId, params: {} } }] : [],
+      },
+    ],
     startSceneId: 'scene1',
   }
 }
@@ -38,8 +38,9 @@ describe('fileBaseName', () => {
   })
 
   it('names the mechanic slot unknown when the MIP has no minigame', () => {
-    expect(fileBaseName(project({ client: 'Laura Geller', mip: 'MIP2', exportDate: '2026-08-17' }, null)))
-      .toBe('laura_geller_acslanot_mip_20260817_02_emily_game_unknown_human_none_unique')
+    expect(fileBaseName(project({ client: 'Laura Geller', mip: 'MIP2', exportDate: '2026-08-17' }, null))).toBe(
+      'laura_geller_acslanot_mip_20260817_02_emily_game_unknown_human_none_unique',
+    )
   })
 
   it('names the subconcept slot before the unique slot', () => {
@@ -53,8 +54,9 @@ describe('fileBaseName', () => {
   })
 
   it('ends in none when the MIP is marked non-unique', () => {
-    expect(fileBaseName(project({ client: 'Laura Geller', mip: 'MIP2', exportDate: '2026-08-17', unique: false }, null)))
-      .toBe('laura_geller_acslanot_mip_20260817_02_emily_game_unknown_human_none_none')
+    expect(fileBaseName(project({ client: 'Laura Geller', mip: 'MIP2', exportDate: '2026-08-17', unique: false }, null))).toBe(
+      'laura_geller_acslanot_mip_20260817_02_emily_game_unknown_human_none_none',
+    )
     expect(fileBaseName(project({ unique: true }))).toBe('the_loaded_tea_shop_acslanot_mip_20260730_04_emily_game_scratch_human_none_unique')
   })
 
@@ -84,9 +86,30 @@ describe('fileBaseName', () => {
   it('falls back to mipDate and today when export pieces are missing', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-03T09:00:00'))
-    expect(fileBaseName(project({ client: '', mip: '', exportDate: '', mipDate: '2026-07-05' }, 'merge'))).toBe('client_acslanot_mip_20260705_00_emily_game_merge_human_none_unique')
+    expect(fileBaseName(project({ client: '', mip: '', exportDate: '', mipDate: '2026-07-05' }, 'merge'))).toBe(
+      'client_acslanot_mip_20260705_00_emily_game_merge_human_none_unique',
+    )
     expect(fileBaseName(project({ client: '', mip: '', exportDate: '', mipDate: '' }, 'merge'))).toBe('client_acslanot_mip_20260803_00_emily_game_merge_human_none_unique')
     vi.useRealTimers()
+  })
+})
+
+describe('mipName', () => {
+  it('joins Client + MIP + Date, keeping a stored mipDate authoritative', () => {
+    expect(mipName({ client: 'Bioma', mip: 'MIP3', mipDate: '2026-07-01', name: 'x' })).toBe('Bioma MIP3 2026-07-01')
+  })
+
+  it('falls back to exportDate, then today, when mipDate is blank but an identity is set', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-03T09:00:00'))
+    expect(mipName({ client: 'Bioma', mip: 'MIP3', mipDate: '', exportDate: '2026-07-30', name: 'x' })).toBe('Bioma MIP3 2026-07-30')
+    expect(mipName({ client: 'Bioma', mip: '', mipDate: '', exportDate: '', name: 'x' })).toBe('Bioma 2026-08-03')
+    vi.useRealTimers()
+  })
+
+  it('keeps the free-text name fallback when no identity is set, dateless', () => {
+    expect(mipName({ client: '', mip: '', mipDate: '', exportDate: '2026-07-30', name: 'My draft' })).toBe('My draft')
+    expect(mipName({ client: '', mip: '', mipDate: '', name: '' })).toBe('Untitled')
   })
 })
 

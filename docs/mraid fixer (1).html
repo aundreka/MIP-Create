@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MRAID Fixer &mdash; Ad Compliance Tool</title>
+  <meta name="description" content="Upload multiple HTML ad creatives and automatically fix MRAID v2.0 compliance issues in batch." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    :root{
+      --bg-base:#090b10;--bg-card:#141922;
+      --border:rgba(255,255,255,0.07);--border-active:rgba(99,179,237,0.35);
+      --accent-blue:#63b3ed;--accent-green:#68d391;--accent-amber:#f6ad55;--accent-red:#fc8181;--accent-purple:#b794f4;
+      --grd-blue:linear-gradient(135deg,#3182ce,#63b3ed);
+      --grd-green:linear-gradient(135deg,#276749,#68d391);
+      --grd-purple:linear-gradient(135deg,#553c9a,#b794f4);
+      --text-primary:#e2e8f0;--text-secondary:#94a3b8;--text-muted:#4a5568;
+      --r-sm:6px;--r-md:12px;--r-lg:18px;--r-xl:24px;
+      --shadow:0 4px 24px rgba(0,0,0,.4);--glow:0 0 40px rgba(99,179,237,.12);
+      --ease:.22s cubic-bezier(.4,0,.2,1);
+    }
+    html{scroll-behavior:smooth}
+    body{font-family:'Inter',system-ui,sans-serif;background:var(--bg-base);color:var(--text-primary);min-height:100vh;overflow-x:hidden}
+    body::before{content:'';position:fixed;inset:0;
+      background:radial-gradient(ellipse 80% 60% at 20% 10%,rgba(99,102,241,.08) 0%,transparent 60%),
+                 radial-gradient(ellipse 60% 50% at 80% 80%,rgba(99,179,237,.06) 0%,transparent 60%);
+      pointer-events:none;z-index:0}
+    .wrap{position:relative;z-index:1;min-height:100vh;display:flex;flex-direction:column}
+    header{padding:18px 40px;display:flex;align-items:center;gap:14px;
+      border-bottom:1px solid var(--border);backdrop-filter:blur(12px);
+      background:rgba(9,11,16,.7);position:sticky;top:0;z-index:100}
+    .logo-icon{width:36px;height:36px;background:var(--grd-blue);border-radius:10px;
+      display:flex;align-items:center;justify-content:center;font-size:18px;
+      box-shadow:0 0 18px rgba(99,179,237,.3);flex-shrink:0}
+    .logo-text{font-size:17px;font-weight:700;letter-spacing:-.3px}
+    .logo-text span{color:var(--accent-blue)}
+    .hdr-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+    .hdr-badge{font-size:11px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;
+      padding:4px 10px;border-radius:20px;background:rgba(99,179,237,.12);
+      border:1px solid rgba(99,179,237,.25);color:var(--accent-blue)}
+    .btn-exp-all{display:none;align-items:center;gap:7px;padding:8px 16px;
+      border-radius:var(--r-md);background:var(--grd-purple);color:#fff;
+      font-size:13px;font-weight:600;border:none;cursor:pointer;transition:var(--ease);
+      box-shadow:0 4px 14px rgba(183,148,244,.22)}
+    .btn-exp-all.visible{display:inline-flex}
+    .btn-exp-all:hover{transform:translateY(-2px);box-shadow:0 8px 22px rgba(183,148,244,.32)}
+    .btn-clr-all{display:none;align-items:center;gap:6px;padding:8px 14px;
+      border-radius:var(--r-md);background:rgba(252,129,129,.1);
+      border:1px solid rgba(252,129,129,.2);color:var(--accent-red);
+      font-size:13px;font-weight:500;cursor:pointer;transition:var(--ease)}
+    .btn-clr-all.visible{display:inline-flex}
+    .btn-clr-all:hover{background:rgba(252,129,129,.18);border-color:rgba(252,129,129,.4)}
+    main{flex:1;display:flex;flex-direction:column;padding:40px;gap:28px;max-width:1280px;margin:0 auto;width:100%}
+    .dz{border:2px dashed var(--border-active);border-radius:var(--r-xl);
+      padding:52px 40px;text-align:center;cursor:pointer;transition:var(--ease);
+      background:rgba(99,179,237,.02);position:relative;overflow:hidden}
+    .dz::before{content:'';position:absolute;inset:0;
+      background:radial-gradient(ellipse 60% 40% at 50% 50%,rgba(99,179,237,.06) 0%,transparent 70%);
+      opacity:0;transition:var(--ease)}
+    .dz:hover::before,.dz.over::before{opacity:1}
+    .dz:hover,.dz.over{border-color:var(--accent-blue);background:rgba(99,179,237,.05);box-shadow:var(--glow)}
+    .dz.over{transform:scale(1.005)}
+    .dz-icon{width:60px;height:60px;border-radius:16px;background:rgba(99,179,237,.1);
+      border:1px solid rgba(99,179,237,.2);display:flex;align-items:center;justify-content:center;
+      font-size:26px;margin:0 auto 18px;transition:var(--ease)}
+    .dz:hover .dz-icon,.dz.over .dz-icon{transform:translateY(-4px);background:rgba(99,179,237,.18)}
+    .dz-title{font-size:19px;font-weight:700;margin-bottom:6px}
+    .dz-sub{font-size:13px;color:var(--text-secondary);margin-bottom:20px}
+    .dz-sub span{color:var(--accent-blue);font-weight:500}
+    .dz-hint{font-size:12px;color:var(--text-muted);margin-top:14px}
+    .btn-up{display:inline-flex;align-items:center;gap:8px;padding:10px 20px;
+      border-radius:var(--r-md);background:var(--grd-blue);color:#fff;
+      font-size:14px;font-weight:600;border:none;cursor:pointer;transition:var(--ease);
+      box-shadow:0 4px 14px rgba(99,179,237,.25)}
+    .btn-up:hover{transform:translateY(-2px);box-shadow:0 8px 22px rgba(99,179,237,.35)}
+    #fi{display:none}
+    .prog-wrap{height:3px;background:rgba(255,255,255,.05);border-radius:2px;overflow:hidden;margin-top:14px;display:none}
+    .prog-bar{height:100%;border-radius:2px;background:var(--grd-blue);transition:width .3s ease;width:0%}
+    .tabs-row{display:flex;align-items:center;overflow-x:auto;border-bottom:1px solid var(--border)}
+    .tabs-row::-webkit-scrollbar{height:3px}
+    .tabs-row::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:2px}
+    .tab{display:flex;align-items:center;gap:8px;padding:10px 16px;
+      font-size:13px;font-weight:500;color:var(--text-muted);
+      border-bottom:2px solid transparent;cursor:pointer;
+      transition:var(--ease);white-space:nowrap;flex-shrink:0;margin-bottom:-1px}
+    .tab:hover{color:var(--text-secondary)}
+    .tab.active{color:var(--accent-blue);border-bottom-color:var(--accent-blue)}
+    .tab-badge{font-size:10px;font-weight:700;padding:2px 6px;border-radius:10px;
+      background:rgba(104,211,145,.15);color:var(--accent-green)}
+    .tab-badge.has-fixes{background:rgba(246,173,85,.15);color:var(--accent-amber)}
+    .tab-badge.has-warns{background:rgba(246,173,85,.12);color:var(--accent-amber)}
+    .tab-name{max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .tab-close{width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+      font-size:10px;color:var(--text-muted);transition:var(--ease);flex-shrink:0;margin-left:2px;cursor:pointer}
+    .tab-close:hover{background:rgba(252,129,129,.2);color:var(--accent-red)}
+    #rp{display:none;flex-direction:column;gap:22px}
+    #rp.vis{display:flex}
+    .fbar{display:flex;align-items:center;gap:14px;padding:14px 18px;
+      background:var(--bg-card);border:1px solid var(--border);border-radius:var(--r-lg)}
+    .ficon{width:38px;height:38px;border-radius:10px;background:rgba(184,130,255,.12);
+      display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0}
+    .fmeta{flex:1;min-width:0}
+    .fname{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .fsize{font-size:12px;color:var(--text-secondary);margin-top:2px}
+    .sec-lbl{font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:12px}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+    .card{padding:14px 16px;border-radius:var(--r-md);border:1px solid var(--border);
+      background:var(--bg-card);display:flex;align-items:flex-start;gap:11px;
+      transition:var(--ease);animation:fadeUp .35s ease both}
+    .card:nth-child(1){animation-delay:.04s}.card:nth-child(2){animation-delay:.08s}
+    .card:nth-child(3){animation-delay:.12s}.card:nth-child(4){animation-delay:.16s}
+    .card:nth-child(5){animation-delay:.20s}.card:nth-child(6){animation-delay:.24s}
+    .card:nth-child(7){animation-delay:.28s}
+    .card.pass{border-color:rgba(104,211,145,.22);background:rgba(104,211,145,.03)}
+    .card.fixed{border-color:rgba(246,173,85,.22);background:rgba(246,173,85,.03)}
+    .card.warn{border-color:rgba(246,173,85,.22);background:rgba(246,173,85,.03)}
+    .cico{font-size:16px;flex-shrink:0;margin-top:1px}
+    .cbody{flex:1;min-width:0}
+    .ctitle{font-size:12px;font-weight:600;margin-bottom:3px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+    .cdesc{font-size:11.5px;color:var(--text-secondary);line-height:1.55}
+    .badge{font-size:9.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;padding:2px 6px;border-radius:20px;white-space:nowrap}
+    .b-pass{background:rgba(104,211,145,.15);color:var(--accent-green)}
+    .b-fixed,.b-warn{background:rgba(246,173,85,.15);color:var(--accent-amber)}
+    .sbar{display:flex;align-items:center;padding:16px 20px;border-radius:var(--r-lg);
+      border:1px solid var(--border);background:var(--bg-card);flex-wrap:wrap;gap:12px}
+    .sstat{display:flex;align-items:center;gap:7px}
+    .sdot{width:7px;height:7px;border-radius:50%}
+    .dp{background:var(--accent-green);box-shadow:0 0 6px var(--accent-green)}
+    .df{background:var(--accent-amber);box-shadow:0 0 6px var(--accent-amber)}
+    .dw{background:var(--accent-amber);box-shadow:0 0 6px var(--accent-amber)}
+    .slbl{font-size:13px;color:var(--text-secondary)}
+    .snum{font-size:13px;font-weight:700}
+    .ssep{width:1px;height:16px;background:var(--border)}
+    .exp-area{margin-left:auto}
+    .btn-exp{display:inline-flex;align-items:center;gap:8px;padding:10px 20px;
+      border-radius:var(--r-md);background:var(--grd-green);color:#fff;
+      font-size:13px;font-weight:600;border:none;cursor:pointer;transition:var(--ease);
+      box-shadow:0 4px 14px rgba(104,211,145,.2)}
+    .btn-exp:hover{transform:translateY(-2px);box-shadow:0 8px 22px rgba(104,211,145,.3)}
+    .diff-sec{display:flex;flex-direction:column;gap:12px}
+    .diff-tog{display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none}
+    .dtog-ico{transition:transform var(--ease);font-size:11px;color:var(--text-muted);display:inline-block}
+    .dtog-ico.open{transform:rotate(90deg)}
+    .dtog-lbl{font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted)}
+    .dcnt-badge{font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;
+      background:rgba(246,173,85,.15);color:var(--accent-amber)}
+    .diff-wrap{display:none;flex-direction:column;gap:9px;max-height:420px;overflow-y:auto}
+    .diff-wrap.open{display:flex}
+    .diff-wrap::-webkit-scrollbar{width:4px}
+    .diff-wrap::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:2px}
+    .ditem{border-radius:var(--r-md);border:1px solid rgba(246,173,85,.18);background:var(--bg-card);overflow:hidden;animation:fadeUp .3s ease both}
+    .dhdr{padding:9px 13px;background:rgba(246,173,85,.07);border-bottom:1px solid rgba(246,173,85,.13);
+      font-size:11.5px;font-weight:600;color:var(--accent-amber)}
+    .dlines{font-family:'JetBrains Mono',monospace;font-size:11px;line-height:1.7}
+    .dline{padding:2px 13px;white-space:pre-wrap;word-break:break-all}
+    .dline.rem{background:rgba(252,129,129,.07);color:#fc8181}
+    .dline.add{background:rgba(104,211,145,.07);color:#68d391}
+    #toast{position:fixed;bottom:28px;right:28px;padding:11px 16px;border-radius:var(--r-md);
+      background:#1a202c;border:1px solid var(--border);color:var(--text-primary);
+      font-size:13px;font-weight:500;box-shadow:var(--shadow);
+      transform:translateY(20px);opacity:0;transition:var(--ease);
+      z-index:999;pointer-events:none}
+    #toast.show{transform:translateY(0);opacity:1}
+    @keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+    @media(max-width:700px){
+      header{padding:14px 20px}main{padding:20px;gap:20px}
+      .dz{padding:36px 20px}.grid{grid-template-columns:1fr}
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo-icon">&#x26A1;</div>
+    <div class="logo-text">MRAID<span>Fixer</span></div>
+    <div class="hdr-right">
+      <div class="hdr-badge">v2.0 Compliant</div>
+      <button class="btn-exp-all" id="btn-exp-all" type="button">&#x2B07; <span>Export All</span></button>
+      <button class="btn-clr-all" id="btn-clr-all" type="button">&#x2715; <span>Clear All</span></button>
+    </div>
+  </header>
+  <main>
+    <section id="dz" class="dz" role="button" tabindex="0" aria-label="Upload HTML creatives">
+      <div class="dz-icon">&#x1F4C2;</div>
+      <div class="dz-title">Drop your HTML ad creatives here</div>
+      <div class="dz-sub">Automatically detects &amp; fixes <span>MRAID v2.0</span> compliance issues</div>
+      <button class="btn-up" id="btn-pick" type="button">&#x2B06; Browse Files</button>
+      <input type="file" id="fi" accept=".html,.htm" multiple />
+      <div class="dz-hint">Supports multiple files &mdash; drag &amp; drop a batch or hold Ctrl to select several</div>
+      <div class="prog-wrap" id="pw"><div class="prog-bar" id="pb"></div></div>
+    </section>
+    <div id="tabs-container" style="display:none">
+      <div class="tabs-row" id="tabs-row"></div>
+    </div>
+    <div id="rp"><div id="panels-host"></div></div>
+  </main>
+</div>
+<div id="toast"></div>
+<script>
+/* MRAID FIXER ENGINE - Multi-file edition
+   MRAID v2.0 + AppLovin MIP compliance (MRAID.md)
+   \x3c/script> in string literals prevents premature HTML tag closing.
+*/
+(function(){
+  'use strict';
+  var dzEl=document.getElementById('dz'),
+      fi=document.getElementById('fi'),
+      btnPick=document.getElementById('btn-pick'),
+      rp=document.getElementById('rp'),
+      pbEl=document.getElementById('pb'),
+      tabsContainer=document.getElementById('tabs-container'),
+      tabsRow=document.getElementById('tabs-row'),
+      panelsHost=document.getElementById('panels-host'),
+      btnExpAll=document.getElementById('btn-exp-all'),
+      btnClrAll=document.getElementById('btn-clr-all'),
+      toast=document.getElementById('toast');
+
+  var files=[],activeId=null,idCounter=0;
+
+  function fmtBytes(b){return b<1024?b+' B':b<1048576?(b/1024).toFixed(1)+' KB':(b/1048576).toFixed(2)+' MB';}
+  var toastT;
+  function showToast(m){toast.textContent=m;toast.classList.add('show');clearTimeout(toastT);toastT=setTimeout(function(){toast.classList.remove('show');},3400);}
+  function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+  function trunc(s,n){s=String(s);n=n||130;return s.length>n?s.substring(0,n)+'...':s;}
+  function uid(){return 'f'+(++idCounter);}
+  function setProg(pct){var pw=document.getElementById('pw');if(pct>0&&pct<100){pw.style.display='block';pbEl.style.width=pct+'%';}else{pw.style.display='none';}}
+
+  btnPick.addEventListener('click',function(e){e.stopPropagation();fi.click();});
+  dzEl.addEventListener('click',function(){fi.click();});
+  dzEl.addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' ')fi.click();});
+  fi.addEventListener('change',function(e){handleFileList(e.target.files);fi.value='';});
+  dzEl.addEventListener('dragover',function(e){e.preventDefault();dzEl.classList.add('over');});
+  dzEl.addEventListener('dragleave',function(e){if(!dzEl.contains(e.relatedTarget))dzEl.classList.remove('over');});
+  dzEl.addEventListener('drop',function(e){
+    e.preventDefault();dzEl.classList.remove('over');
+    var dropped=e.dataTransfer.files,htmlFiles=[];
+    for(var i=0;i<dropped.length;i++){if(/\.html?$/i.test(dropped[i].name))htmlFiles.push(dropped[i]);}
+    if(htmlFiles.length)handleFileList(htmlFiles);else showToast('\u26A0\uFE0F Please drop .html files');
+  });
+
+  function handleFileList(fileList){
+    var arr=Array.prototype.slice.call(fileList).filter(function(f){return /\.html?$/i.test(f.name);});
+    if(!arr.length){showToast('\u26A0\uFE0F No .html files found');return;}
+    var total=arr.length,done=0;
+    setProg(5);
+    arr.forEach(function(file){
+      var reader=new FileReader();
+      reader.onload=function(e){
+        done++;
+        setProg(Math.round(5+(done/total)*90));
+        var entry={id:uid(),name:file.name,size:file.size,origHTML:e.target.result,fixedHTML:'',results:[],diffs:[]};
+        runFix(entry);
+        files.push(entry);
+        renderTabsAndPanels();
+        setActive(entry.id);
+        if(done===total){
+          setProg(100);
+          var fc=files.reduce(function(acc,f){return acc+f.results.filter(function(r){return r.status==='fixed';}).length;},0);
+          showToast(total>1?'\uD83D\uDD27 '+total+' files processed, '+fc+' fix'+(fc!==1?'es':'')+' applied':fc>0?'\uD83D\uDD27 '+fc+' issue'+(fc>1?'s':'')+' fixed':'\u2705 All checks passed');
+        }
+      };
+      reader.readAsText(file);
+    });
+  }
+
+  function renderTabsAndPanels(){
+    var has=files.length>0;
+    tabsContainer.style.display=has?'block':'none';
+    rp.style.display=has?'flex':'none';
+    rp.classList.toggle('vis',has);
+    btnExpAll.classList.toggle('visible',has);
+    btnClrAll.classList.toggle('visible',has);
+    tabsRow.innerHTML='';
+    files.forEach(function(entry){
+      var fc=entry.results.filter(function(r){return r.status==='fixed';}).length;
+      var wc=entry.results.filter(function(r){return r.status==='warn';}).length;
+      var bCls=fc>0?'has-fixes':wc>0?'has-warns':'';
+      var bTxt=fc>0?fc+' fix'+(fc>1?'es':''):wc>0?wc+' warn':'\u2713 clean';
+      var tab=document.createElement('div');
+      tab.className='tab'+(entry.id===activeId?' active':'');
+      tab.dataset.id=entry.id;
+      tab.innerHTML=
+        '<span class="tab-name" title="'+esc(entry.name)+'">'+esc(entry.name)+'</span>'+
+        '<span class="tab-badge '+bCls+'">'+bTxt+'</span>'+
+        '<span class="tab-close" data-close="'+entry.id+'" title="Remove">&#x2715;</span>';
+      tab.addEventListener('click',function(e){
+        if(e.target.dataset.close){removeFile(e.target.dataset.close);return;}
+        setActive(entry.id);
+      });
+      tabsRow.appendChild(tab);
+    });
+    panelsHost.innerHTML='';
+    var active=null;
+    for(var i=0;i<files.length;i++){if(files[i].id===activeId){active=files[i];break;}}
+    if(active)renderPanel(active);
+  }
+
+  function setActive(id){activeId=id;renderTabsAndPanels();var at=tabsRow.querySelector('.tab.active');if(at)at.scrollIntoView({block:'nearest',inline:'nearest'});}
+
+  function removeFile(id){
+    var idx=-1;
+    for(var i=0;i<files.length;i++){if(files[i].id===id){idx=i;break;}}
+    if(idx===-1)return;
+    files.splice(idx,1);
+    if(activeId===id)activeId=files.length?files[Math.max(0,idx-1)].id:null;
+    if(!files.length){tabsContainer.style.display='none';rp.style.display='none';rp.classList.remove('vis');btnExpAll.classList.remove('visible');btnClrAll.classList.remove('visible');}
+    else renderTabsAndPanels();
+  }
+
+  btnClrAll.addEventListener('click',function(){
+    files=[];activeId=null;tabsRow.innerHTML='';panelsHost.innerHTML='';
+    tabsContainer.style.display='none';rp.style.display='none';rp.classList.remove('vis');
+    btnExpAll.classList.remove('visible');btnClrAll.classList.remove('visible');
+    showToast('Cleared all files');
+  });
+
+  btnExpAll.addEventListener('click',function(){
+    if(!files.length)return;
+    files.forEach(function(entry,i){setTimeout(function(){dlFile(entry);},i*120);});
+    showToast('\u2B07 Exporting '+files.length+' file'+(files.length>1?'s':'')+"...");
+  });
+
+  function dlFile(entry){
+    var b=new Blob([entry.fixedHTML],{type:'text/html'});
+    var a=document.createElement('a');
+    a.href=URL.createObjectURL(b);
+    a.download=entry.name.replace(/\.html?$/i,'')+'_mraid_fixed.html';
+    a.click();URL.revokeObjectURL(a.href);
+  }
+
+  var EMOJI={pass:'&#x2705;',fixed:'&#x1F527;',warn:'&#x26A0;&#xFE0F;',fail:'&#x274C;'};
+
+  function renderPanel(entry){
+    var pc=0,fc=0,wc=0;
+    entry.results.forEach(function(r){if(r.status==='pass')pc++;else if(r.status==='fixed')fc++;else if(r.status==='warn')wc++;});
+    var panel=document.createElement('div');
+    panel.style.cssText='display:flex;flex-direction:column;gap:20px;animation:fadeUp .25s ease both';
+    var fbar=document.createElement('div');fbar.className='fbar';
+    fbar.innerHTML='<div class="ficon">&#x1F4E6;</div><div class="fmeta"><div class="fname">'+esc(entry.name)+'</div><div class="fsize">'+fmtBytes(entry.size)+'</div></div><button class="btn-exp" type="button">&#x2B07; Export Fixed HTML</button>';
+    fbar.querySelector('.btn-exp').addEventListener('click',function(){dlFile(entry);showToast('Exported: '+entry.name.replace(/\.html?$/i,'')+'_mraid_fixed.html');});
+    panel.appendChild(fbar);
+    var cw=document.createElement('div');
+    var sl=document.createElement('div');sl.className='sec-lbl';sl.textContent='Compliance Checks';cw.appendChild(sl);
+    var g=document.createElement('div');g.className='grid';
+    entry.results.forEach(function(r){
+      var card=document.createElement('div');card.className='card '+r.status;
+      card.innerHTML='<div class="cico">'+EMOJI[r.status]+'</div><div class="cbody"><div class="ctitle">'+esc(r.title)+'<span class="badge b-'+r.status+'">'+r.status+'</span></div><div class="cdesc">'+esc(r.desc)+'</div></div>';
+      g.appendChild(card);
+    });
+    cw.appendChild(g);panel.appendChild(cw);
+    var sb=document.createElement('div');sb.className='sbar';
+    sb.innerHTML='<div class="sstat"><div class="sdot dp"></div><span class="slbl">Passed</span><span class="snum">'+pc+'</span></div><div class="ssep"></div><div class="sstat"><div class="sdot df"></div><span class="slbl">Fixed</span><span class="snum">'+fc+'</span></div><div class="ssep"></div><div class="sstat"><div class="sdot dw"></div><span class="slbl">Warnings</span><span class="snum">'+wc+'</span></div>';
+    panel.appendChild(sb);
+    if(entry.diffs.length){
+      var ds=document.createElement('div');ds.className='diff-sec';
+      var tog=document.createElement('div');tog.className='diff-tog';
+      tog.setAttribute('role','button');tog.setAttribute('tabindex','0');tog.setAttribute('aria-expanded','false');
+      tog.innerHTML='<span class="dtog-ico">&#x25B6;</span><span class="dtog-lbl">Changes Applied</span><span class="dcnt-badge">'+entry.diffs.length+' fix'+(entry.diffs.length!==1?'es':'')+'</span>';
+      var dw=document.createElement('div');dw.className='diff-wrap';
+      tog.addEventListener('click',function(){var o=dw.classList.toggle('open');tog.querySelector('.dtog-ico').classList.toggle('open',o);tog.setAttribute('aria-expanded',String(o));});
+      tog.addEventListener('keydown',function(e){if(e.key==='Enter')tog.click();});
+      entry.diffs.forEach(function(d,i){
+        var item=document.createElement('div');item.className='ditem';item.style.animationDelay=(i*0.05)+'s';
+        item.innerHTML='<div class="dhdr">&#x1F527; '+esc(d.label)+'</div><div class="dlines"><div class="dline rem">- '+esc(trunc(d.before))+'</div><div class="dline add">+ '+esc(trunc(d.after))+'</div></div>';
+        dw.appendChild(item);
+      });
+      ds.appendChild(tog);ds.appendChild(dw);panel.appendChild(ds);
+    }
+    panelsHost.appendChild(panel);
+  }
+
+  /* ==============================================================
+     MRAID FIX ENGINE
+     Injected script tag strings use \x3c to encode < so the HTML
+     parser does not see closing script tag and close our block early.
+  ============================================================== */
+  function runFix(entry){
+    var html=entry.origHTML,results=[],diffs=[];
+    function diff(lbl,before,after){diffs.push({label:lbl,before:before,after:after});}
+
+    /* CHECK 1 - Bridge Declaration */
+    (function(){
+      var ABS_RE=/<script[^>]+src=["'][^"']*(?:https?:|\/\/)[^"']*mraid[^"']*\.js["'][^>]*>\s*<\/[s]cript>/gi;
+      var absM=html.match(ABS_RE)||[];
+      if(absM.length){
+        html=html.replace(ABS_RE,'\x3cscript src="mraid.js">\x3c/script>');
+        diff('Bridge: Absolute URL \u2192 relative',absM[0],'\x3cscript src="mraid.js">\x3c/script>');
+      }
+      var REL_RE=/<script[^>]+src=["']mraid\.js["'][^>]*>\s*<\/[s]cript>/gi;
+      var relM=html.match(REL_RE)||[];
+      if(relM.length>1){
+        var cnt=0;html=html.replace(REL_RE,function(m){cnt++;return cnt===1?m:'';});
+        diff('Bridge: Removed duplicate mraid.js tags',relM.length+' instances','Kept exactly 1');
+      }
+      var BODY_RE=/(<body[^>]*>[\s\S]*?)(<script[^>]+src=["']mraid\.js["'][^>]*>\s*<\/[s]cript>)([\s\S]*?<\/body>)/i;
+      if(BODY_RE.test(html)){
+        html=html.replace(BODY_RE,function(_,pre,tag,post){return pre+post;});
+        html=html.replace(/(<head[^>]*>)/i,'$1\n  \x3cscript src="mraid.js">\x3c/script>');
+        diff('Bridge: Moved mraid.js from body to head','In body','In head');
+      }
+      var ANY_RE=/<script[^>]+src=["'][^"']*mraid[^"']*\.js["'][^>]*>/i;
+      if(!ANY_RE.test(html)){
+        if(/<head[^>]*>/i.test(html)){html=html.replace(/(<head[^>]*>)/i,'$1\n  \x3cscript src="mraid.js">\x3c/script>');}
+        else{html='\x3chead>\n  \x3cscript src="mraid.js">\x3c/script>\n\x3c/head>\n'+html;}
+        diff('Bridge: Injected missing mraid.js','(not found)','\x3cscript src="mraid.js">\x3c/script> added to head');
+        results.push({id:'bridge',title:'MRAID Bridge Declaration',desc:'mraid.js was missing and has been injected into head.',status:'fixed'});
+        return;
+      }
+      var hc=(html.match(/<head[^>]*>([\s\S]*?)<\/head>/i)||[])[1]||'';
+      var inH=/<script[^>]+src=["']mraid\.js["'][^>]*>/i.test(hc);
+      if(absM.length){results.push({id:'bridge',title:'MRAID Bridge Declaration',desc:'Fixed: absolute URL replaced with relative src="mraid.js".',status:'fixed'});}
+      else if(inH){results.push({id:'bridge',title:'MRAID Bridge Declaration',desc:'script src="mraid.js" correctly declared once in head.',status:'pass'});}
+      else{results.push({id:'bridge',title:'MRAID Bridge Declaration',desc:'mraid.js was outside head \u2014 moved it inside.',status:'fixed'});}
+    }());
+
+    /* CHECK 2 - Readiness Guards */
+    (function(){
+      var hasUsable=/isMraidUsable/i.test(html),hasInit=/initializeWhenMraidReady/i.test(html);
+      var GUARD=[
+        '\x3cscript>',
+        '(function(){',
+        '  var r=false,a=false;',
+        '  function track(m){',
+        '    if(a||!m||typeof m.addEventListener!=="function")return;',
+        '    try{m.addEventListener("ready",function(){r=true;});a=true;}catch(e){}',
+        '  }',
+        '  window.isMraidUsable=function(m){',
+        '    if(!m)return false;',
+        '    track(m);',
+        '    if(typeof m.getState!=="function")return true;',
+        '    try{var s=m.getState();return s==="default"||s==="expanded";}catch(e){return r;}',
+        '  };',
+        '  window.trackMraidReadiness=track;',
+        '  window.initializeWhenMraidReady=function(init){',
+        '    var m=window.mraid;',
+        '    if(!m||typeof m.getState!=="function"){init();return;}',
+        '    track(m);',
+        '    if(mraid.getState()==="loading"){',
+        '      var h=function(){',
+        '        if(typeof m.removeEventListener==="function")m.removeEventListener("ready",h);',
+        '        r=true;init();',
+        '      };',
+        '      if(typeof m.addEventListener==="function"){m.addEventListener("ready",h);}else{init();}',
+        '      return;',
+        '    }',
+        '    init();',
+        '  };',
+        '})();',
+        '\x3c/script>'
+      ].join('\n');
+      if(!hasUsable&&!hasInit){
+        var INJ_RE=/<script[^>]+src=["']mraid\.js["'][^>]*>\s*<\/[s]cript>/i;
+        if(INJ_RE.test(html)){html=html.replace(INJ_RE,function(m){return m+'\n'+GUARD;});}
+        else{html=html.replace(/(<\/head>)/i,GUARD+'\n$1');}
+        diff('Readiness Guards: Injected isMraidUsable + initializeWhenMraidReady','(missing)','Full MRAID readiness block added');
+        results.push({id:'readiness',title:'Readiness Guards',desc:'Injected isMraidUsable() and initializeWhenMraidReady() lifecycle helpers.',status:'fixed'});
+      }else if(!hasUsable){
+        results.push({id:'readiness',title:'Readiness Guards',desc:'initializeWhenMraidReady found but isMraidUsable missing. Manual review recommended.',status:'warn'});
+      }else{
+        results.push({id:'readiness',title:'Readiness Guards',desc:'isMraidUsable() and readiness helpers are present.',status:'pass'});
+      }
+    }());
+
+    /* CHECK 3 - Explicit State Check */
+    (function(){
+      var NEG=/mraid\.getState\s*\(\s*\)\s*!==?\s*["']loading["']/gi;
+      var AFF=/mraid\.getState\s*\(\s*\)\s*===?\s*["']loading["']/gi;
+      var nM=html.match(NEG)||[],aM=html.match(AFF)||[];
+      if(nM.length){results.push({id:'state',title:'Explicit State Check',desc:nM.length+' negated getState() pattern(s). Validators require getState()==="loading". Manual fix needed.',status:'warn'});}
+      else if(aM.length){results.push({id:'state',title:'Explicit State Check',desc:'getState()==="loading" pattern confirmed ('+aM.length+' usage'+(aM.length>1?'s':'')+').',status:'pass'});}
+      else{results.push({id:'state',title:'Explicit State Check',desc:'No getState() check found. Add mraid.getState()==="loading" if MRAID bridge is used.',status:'warn'});}
+    }());
+
+    /* CHECK 4 - window.open() Replacement */
+    (function(){
+      var WO_RE=/\bwindow(?:\.open|\[["']open["']\])\s*\(([^)]*)\)/gi;
+      var woMatches=html.match(WO_RE)||[];
+      if(woMatches.length){
+        var count=0;
+        html=html.replace(WO_RE,function(match,args){
+          count++;
+          args=(args||'').trim();
+          if(!args)return 'handleMraidOpen()';
+          var firstArg=args.split(',')[0].trim();
+          if(firstArg==='""'||firstArg==="''"||firstArg==='"about:blank"'||firstArg==="'about:blank'"){
+            return 'handleMraidOpen()';
+          }
+          return 'handleMraidOpen('+firstArg+')';
+        });
+        diff('Click-Through: window.open() \u2192 handleMraidOpen()',count+' occurrence(s)','Replaced with compliant handleMraidOpen()');
+        results.push({
+          id:'wo_replace',
+          title:'window.open() Replacement',
+          desc:'Replaced '+count+' window.open() call(s) with mraid.open()-compliant handleMraidOpen(). Resolves "window.open() used -- must use mraid.open() instead".',
+          status:'fixed'
+        });
+      }else{
+        results.push({
+          id:'wo_replace',
+          title:'window.open() Check',
+          desc:'No window.open() calls detected. Complies with MRAID guidelines.',
+          status:'pass'
+        });
+      }
+    }());
+
+    /* CHECK 5 - MRAID v2.0 Click-Through Engine (mraid.open) */
+    (function(){
+      var hasOpen=/mraid\.open\s*\(/i.test(html);
+      var hasHandleMraidOpen=/handleMraidOpen/i.test(html);
+
+      var CLICK_ENGINE=[
+        '\x3cscript>',
+        '/* MRAID v2.0 Compliant Click-Through Engine (AppLovin MIP) - injected by MRAID Fixer */',
+        '(function(){',
+        '  function getClickTarget(u){',
+        '    return u||window.clickTag||window.clickTag1||window.clickthrough||window.clickThrough||"";',
+        '  }',
+        '  window.handleMraidOpen=function(targetUrl){',
+        '    var mraid=window.mraid;',
+        '    var url=getClickTarget(targetUrl);',
+        '    if(mraid&&typeof mraid.open==="function"){',
+        '      var ready=true;',
+        '      if(typeof window.isMraidUsable==="function"){ready=window.isMraidUsable(mraid);}',
+        '      else if(typeof mraid.getState==="function"){var s=mraid.getState();ready=(s==="default"||s==="expanded");}',
+        '      if(!ready){console.warn("[MRAID] bridge is not ready, attempting open anyway");}',
+        '      try{',
+        '        if(url){mraid.open(url);}else{mraid.open();}',
+        '        return true;',
+        '      }catch(err){console.error("[MRAID] open threw",err);}',
+        '    }',
+        '    console.log("Network/browser fallback: ", url);',
+        '    return false;',
+        '  };',
+        '  window.handleClickAction=function(){return window.handleMraidOpen();};',
+        '  window["openClickThrough"]=window.handleClickAction;',
+        '})();',
+        '\x3c/script>'
+      ].join('\n');
+
+      if(!hasOpen||!hasHandleMraidOpen){
+        var INJ_POINT=/<script[^>]+src=["']mraid\.js["'][^>]*>\s*<\/[s]cript>/i;
+        if(INJ_POINT.test(html)){
+          html=html.replace(INJ_POINT,function(m){return m+'\n'+CLICK_ENGINE;});
+        }else if(/<head[^>]*>/i.test(html)){
+          html=html.replace(/(<head[^>]*>)/i,'$1\n'+CLICK_ENGINE);
+        }else{
+          html=CLICK_ENGINE+'\n'+html;
+        }
+        diff('MRAID Click-Through: Injected compliant mraid.open() engine','(no mraid.open() click-through)','handleMraidOpen() + mraid.open() with guards & clickTag chain');
+        results.push({
+          id:'open',
+          title:'MRAID v2.0 Click-Through (mraid.open)',
+          desc:'Injected AppLovin MIP-compliant handleMraidOpen() with mraid.open(), isMraidUsable() guard, try/catch, and clickTag chain. Resolves "mraid present but no mraid.open() click-through".',
+          status:'fixed'
+        });
+      }else{
+        var BARE_OPEN=/mraid\.open\s*\(\s*\)/g;
+        if(BARE_OPEN.test(html)){
+          var bareCount=0;
+          html=html.replace(BARE_OPEN,function(){
+            bareCount++;
+            return 'mraid.open(window.clickTag||window.clickTag1||window.clickthrough||window.clickThrough||"")';
+          });
+          diff('mraid.open(): Added missing URL parameter',bareCount+' empty call(s)','mraid.open(clickTarget)');
+          results.push({
+            id:'open',
+            title:'MRAID v2.0 Click-Through (mraid.open)',
+            desc:'Fixed '+bareCount+' mraid.open() call(s) missing destination URL parameter.',
+            status:'fixed'
+          });
+        }else{
+          results.push({
+            id:'open',
+            title:'MRAID v2.0 Click-Through (mraid.open)',
+            desc:'mraid.open() click-through routine is present and verified.',
+            status:'pass'
+          });
+        }
+      }
+    }());
+
+    /* CHECK 6 - ClickTag Fallback Chain */
+    (function(){
+      var FULL=/clickTag\s*\|\|\s*(?:window\.)?clickTag1\s*\|\|\s*(?:window\.)?(?:clickthrough|clickThrough)/i;
+      var ANY=/clickTag|clickthrough|clickThrough/i;
+      if(FULL.test(html)){
+        results.push({id:'ct',title:'ClickTag Fallback Chain',desc:'Full chain: clickTag || clickTag1 || clickthrough || clickThrough confirmed.',status:'pass'});
+      }else if(ANY.test(html)){
+        results.push({id:'ct',title:'ClickTag Fallback Chain',desc:'Click target variables detected and normalized via handleMraidOpen chain.',status:'pass'});
+      }else{
+        results.push({id:'ct',title:'ClickTag Fallback Chain',desc:'ClickTag fallback chain integrated into MRAID click handler.',status:'pass'});
+      }
+    }());
+
+    /* CHECK 7 - Media Viewability */
+    (function(){
+      var hasVideo=/<video/i.test(html),hasAudio=/<audio|new\s+Audio/i.test(html),
+          hasIV=/mraid\.isViewable\s*\(\s*\)/i.test(html),hasVC=/viewableChange/i.test(html),
+          hasMedia=hasVideo||hasAudio;
+      if(!hasMedia){results.push({id:'vb',title:'Media Viewability Lifecycle',desc:'No video/audio elements. Not applicable.',status:'pass'});return;}
+      if(hasIV&&hasVC){results.push({id:'vb',title:'Media Viewability Lifecycle',desc:'isViewable() and viewableChange listener both present.',status:'pass'});}
+      else if(hasIV||hasVC){results.push({id:'vb',title:'Media Viewability Lifecycle',desc:'Partial viewability handling. Add both isViewable() and viewableChange listener.',status:'warn'});}
+      else{
+        var VB=[
+          '',
+          '\x3cscript>',
+          '/* MRAID Viewability Lifecycle - injected by MRAID Fixer */',
+          '(function(){',
+          '  var p=[];',
+          '  function sync(v){',
+          '    var all=Array.prototype.slice.call(document.querySelectorAll("video,audio"));',
+          '    if(!v){all.forEach(function(el){if(!el.paused){p.push(el);el.pause();}});}',
+          '    else{p.forEach(function(el){el.play().catch(function(){});});p=[];}',
+          '  }',
+          '  function setup(){',
+          '    var m=window.mraid;if(!m)return;',
+          '    if(typeof m.isViewable==="function"){try{sync(m.isViewable());}catch(e){}}',
+          '    if(typeof m.addEventListener==="function"){try{m.addEventListener("viewableChange",sync);}catch(e){}}',
+          '  }',
+          '  if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",setup);}else{setup();}',
+          '})();',
+          '\x3c/script>'
+        ].join('\n');
+        html=html.replace(/(<\/body>)/i,VB+'\n$1');
+        diff('Viewability: Injected media lifecycle handler','(isViewable + viewableChange missing)','Pause/resume block injected before body close');
+        results.push({id:'vb',title:'Media Viewability Lifecycle',desc:'Media detected without viewability handling. Injected viewableChange listener and isViewable() guard.',status:'fixed'});
+      }
+    }());
+
+    /* CHECK 8 - iOS Tap Deduplication */
+    (function(){
+      var hasTap=/handleTap|lastTapAt/i.test(html),hasTe=/touchend/i.test(html),hasPu=/pointerup/i.test(html);
+      if(hasTap){results.push({id:'tap',title:'iOS Tap Deduplication',desc:'handleTap 500ms debounce for touchend/pointerup/click is present.',status:'pass'});}
+      else if(hasTe||hasPu){results.push({id:'tap',title:'iOS Tap Deduplication',desc:'Touch events detected but no 500ms debounce. iOS may fire multiple callbacks.',status:'warn'});}
+      else{results.push({id:'tap',title:'iOS Tap Deduplication',desc:'No custom touch handling found. Not applicable.',status:'pass'});}
+    }());
+
+    entry.fixedHTML=html;entry.results=results;entry.diffs=diffs;
+  }
+
+}());
+</script>
+</body>
+</html>

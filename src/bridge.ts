@@ -9,6 +9,7 @@
 import type { Project, Scene } from '../runtime/scene'
 import type { AssetMap } from '../runtime/types'
 import type { TraceState } from './store'
+import { appAlert } from './panels/AppDialogs'
 
 export interface ProjectData {
   project: Project
@@ -72,11 +73,7 @@ export interface TranscodeOpts {
 interface NativeAPI {
   saveProject(json: string, currentPath: string | null): Promise<{ ok: boolean; path?: string; error?: string }>
   loadProject(): Promise<{ ok: boolean; json?: string; path?: string; canceled?: boolean }>
-  transcodeMedia?(
-    dataUrl: string,
-    kind: 'video' | 'audio',
-    opts?: TranscodeOpts,
-  ): Promise<{ ok: boolean; dataUrl?: string; bytes?: number; reencoded?: boolean; error?: string }>
+  transcodeMedia?(dataUrl: string, kind: 'video' | 'audio', opts?: TranscodeOpts): Promise<{ ok: boolean; dataUrl?: string; bytes?: number; reencoded?: boolean; error?: string }>
   readRuntimeSrc?(): Promise<{ ok: boolean; src?: string; error?: string }>
   compressHtml?(html: string): Promise<{ ok: boolean; html?: string; bytes?: number; error?: string }>
   captureRect?(rect: { x: number; y: number; width: number; height: number }): Promise<{ ok: boolean; dataUrl?: string; error?: string }>
@@ -158,11 +155,7 @@ export async function compressHtmlScript(html: string): Promise<string | null> {
 
 /** Re-encode a video/audio data URL via the Electron ffmpeg pipeline (desktop
  * only). Returns the (smaller) re-encoded data URL, or null in the browser. */
-export async function transcodeMedia(
-  dataUrl: string,
-  kind: 'video' | 'audio',
-  opts?: TranscodeOpts,
-): Promise<string | null> {
+export async function transcodeMedia(dataUrl: string, kind: 'video' | 'audio', opts?: TranscodeOpts): Promise<string | null> {
   if (!native?.transcodeMedia) return null
   try {
     const r = await native.transcodeMedia(dataUrl, kind, opts)
@@ -243,7 +236,8 @@ export function readImageFile(file: File): Promise<{ id: string; name: string; s
     reader.onload = () => {
       const src = String(reader.result ?? '')
       const img = new Image()
-      img.onload = () => resolve({ id: file.name.replace(/\.[^.]+$/, '').replace(/[^a-z0-9_-]+/gi, '_'), name: file.name, src, w: img.naturalWidth || 100, h: img.naturalHeight || 100 })
+      img.onload = () =>
+        resolve({ id: file.name.replace(/\.[^.]+$/, '').replace(/[^a-z0-9_-]+/gi, '_'), name: file.name, src, w: img.naturalWidth || 100, h: img.naturalHeight || 100 })
       img.onerror = () => resolve(null)
       img.src = src
     }
@@ -271,10 +265,7 @@ function pickFile(): Promise<string | null> {
   })
 }
 
-export async function saveProject(
-  data: ProjectData,
-  currentPath: string | null,
-): Promise<{ ok: boolean; path?: string; error?: string }> {
+export async function saveProject(data: ProjectData, currentPath: string | null): Promise<{ ok: boolean; path?: string; error?: string }> {
   const json = JSON.stringify(data, null, 2)
   if (native) return native.saveProject(json, currentPath)
   localStorage.setItem(LS_KEY, json)
@@ -389,10 +380,9 @@ export function importFont(): Promise<{ id: string; name: string; src: string; w
         // Reject anything that isn't font data — the accept filter is advisory
         // and users can bypass it, producing a broken @font-face export.
         const mime = src.slice(5, src.indexOf(';'))
-        const ok = mime.startsWith('font/') || mime === 'application/x-font-ttf' ||
-          mime === 'application/octet-stream' || mime === ''
+        const ok = mime.startsWith('font/') || mime === 'application/x-font-ttf' || mime === 'application/octet-stream' || mime === ''
         if (!ok) {
-          alert(`"${file.name}" doesn't look like a font file (detected: ${mime || 'unknown'}). Please pick a .ttf, .otf, .woff, or .woff2 file.`)
+          void appAlert(`"${file.name}" doesn't look like a font file (detected: ${mime || 'unknown'}). Please pick a .ttf, .otf, .woff, or .woff2 file.`)
           return resolve(null)
         }
         resolve({

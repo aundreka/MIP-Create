@@ -48,6 +48,7 @@ import {
   LayoutTemplate,
   Languages,
   ListChecks,
+  ListFilter,
   Lock,
   LockOpen,
   Film,
@@ -142,6 +143,7 @@ export {
   LayoutTemplate,
   Languages,
   ListChecks,
+  ListFilter,
   Lock,
   LockOpen,
   Film,
@@ -188,14 +190,7 @@ export {
 }
 
 // Thin wrapper so callers don't repeat size/stroke and we can theme centrally.
-export function Icon(props: {
-  icon: LucideIcon
-  size?: number
-  strokeWidth?: number
-  className?: string
-  title?: string
-  fill?: string
-}): JSX.Element {
+export function Icon(props: { icon: LucideIcon; size?: number; strokeWidth?: number; className?: string; title?: string; fill?: string }): JSX.Element {
   const I = props.icon
   return (
     <I

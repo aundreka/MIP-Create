@@ -6,7 +6,8 @@ import { getToken, importFigma, importFigmaFunnel, setToken, type FunnelImportRe
 import { addImportedScene, loadProject } from '../store'
 import { buildFunnel, DEFAULT_STYLE } from '../quizFunnel'
 import { Check, Icon, Plus } from '../icons'
-import { Checkbox, confirmDestructive, Modal } from '../ui'
+import { Checkbox, Modal } from '../ui'
+import { confirmDestructive } from './AppDialogs'
 
 export function FigmaImport(props: { onClose: () => void }): JSX.Element {
   const [token, setTok] = useState(getToken())
@@ -25,7 +26,7 @@ export function FigmaImport(props: { onClose: () => void }): JSX.Element {
   }
 
   const run = async (mode: 'scene' | 'project'): Promise<void> => {
-    if (mode === 'project' && !confirmDestructive('Import as a new project? This replaces your current project and cannot be undone.')) return
+    if (mode === 'project' && !(await confirmDestructive('Import as a new project? This replaces your current project and cannot be undone.'))) return
     setBusy(true)
     setStatus(null)
     setProg({ phase: 'Starting…' })
@@ -37,7 +38,14 @@ export function FigmaImport(props: { onClose: () => void }): JSX.Element {
       } else {
         loadProject(
           {
-            meta: { schemaVersion: 1, name: r.name, clickUrl: { ios: 'https://apps.apple.com/app/id000000000', android: 'https://play.google.com/store/apps/details?id=com.example.app' }, baseW: r.baseW, baseH: r.baseH, bgMatchColor: r.bgColor },
+            meta: {
+              schemaVersion: 1,
+              name: r.name,
+              clickUrl: { ios: 'https://apps.apple.com/app/id000000000', android: 'https://play.google.com/store/apps/details?id=com.example.app' },
+              baseW: r.baseW,
+              baseH: r.baseH,
+              bgMatchColor: r.bgColor,
+            },
             scenes: [{ id: 'scene1', name: r.name, kind: 'overlay', bgColor: r.bgColor, elements: r.elements, advance: { on: 'tap' } }],
             startSceneId: 'scene1',
           },
@@ -79,10 +87,10 @@ export function FigmaImport(props: { onClose: () => void }): JSX.Element {
   }
 
   // Step 2: build the reviewed funnel into editable scenes (replaces the project).
-  const generateFunnel = (): void => {
+  const generateFunnel = async (): Promise<void> => {
     const r = funnel
     if (!r) return
-    if (!confirmDestructive('Generate this funnel as a new project? This replaces your current project and cannot be undone.')) return
+    if (!(await confirmDestructive('Generate this funnel as a new project? This replaces your current project and cannot be undone.'))) return
     const style = { ...DEFAULT_STYLE, brand: r.name, accent: r.accent ?? DEFAULT_STYLE.accent, bg: r.bgColor ?? DEFAULT_STYLE.bg, addIntro: false }
     const dims = { baseW: r.baseW, baseH: r.baseH }
     const images: Record<number, string> = {}
@@ -137,7 +145,13 @@ export function FigmaImport(props: { onClose: () => void }): JSX.Element {
       </label>
       <div className="grid2">
         <button className="primary" disabled={busy || !token.trim() || !url.trim()} onClick={() => void run('scene')}>
-          {busy ? '…' : <><Icon icon={Plus} size={14} /> Add as new scene</>}
+          {busy ? (
+            '…'
+          ) : (
+            <>
+              <Icon icon={Plus} size={14} /> Add as new scene
+            </>
+          )}
         </button>
         <button className="danger" disabled={busy || !token.trim() || !url.trim()} onClick={() => void run('project')} title="Replaces your current project">
           Replace project
@@ -147,7 +161,11 @@ export function FigmaImport(props: { onClose: () => void }): JSX.Element {
         <div className="fig-prog">
           <div className="fig-prog-row">
             <span>{prog.phase}</span>
-            {prog.total ? <strong>{prog.done ?? 0}/{prog.total}</strong> : null}
+            {prog.total ? (
+              <strong>
+                {prog.done ?? 0}/{prog.total}
+              </strong>
+            ) : null}
           </div>
           <div className="bar-track">
             <div className={'bar-fill' + (prog.total ? '' : ' indet')} style={prog.total ? { width: `${Math.round(((prog.done ?? 0) / prog.total) * 100)}%` } : undefined} />
@@ -156,9 +174,8 @@ export function FigmaImport(props: { onClose: () => void }): JSX.Element {
       )}
       {status && <div className="figma-status">{status}</div>}
       <div className="hint pad">
-        “Add as new scene” appends this frame to your project and merges its images into the library; import several
-        frames to build the flow. Text layers become editable text unless you flatten everything to images above; all
-        other layers import as faithful images. Token is stored only on this computer.
+        “Add as new scene” appends this frame to your project and merges its images into the library; import several frames to build the flow. Text layers become editable text
+        unless you flatten everything to images above; all other layers import as faithful images. Token is stored only on this computer.
       </div>
 
       <div className="group-title">Quiz / survey funnel</div>
@@ -168,10 +185,9 @@ export function FigmaImport(props: { onClose: () => void }): JSX.Element {
             {busy ? '…' : 'Detect funnel from parent frame'}
           </button>
           <div className="hint pad">
-            Point the URL at a <b>parent frame whose children are your question screens</b>. This detects each frame’s question,
-            options, image and Continue button so you can <b>review before generating</b>. For best results name layers{' '}
-            <b>question</b>, <b>option</b> (add <b>correct</b> to the right one), <b>image</b>, <b>continue</b>; otherwise it falls
-            back to position (largest top text = question, answers stacked above the button).
+            Point the URL at a <b>parent frame whose children are your question screens</b>. This detects each frame’s question, options, image and Continue button so you can{' '}
+            <b>review before generating</b>. For best results name layers <b>question</b>, <b>option</b> (add <b>correct</b> to the right one), <b>image</b>, <b>continue</b>;
+            otherwise it falls back to position (largest top text = question, answers stacked above the button).
           </div>
         </>
       ) : (
@@ -205,7 +221,14 @@ export function FigmaImport(props: { onClose: () => void }): JSX.Element {
             ))}
           </div>
           <div className="grid2">
-            <button onClick={() => { setFunnel(null); setStatus(null) }}>Back</button>
+            <button
+              onClick={() => {
+                setFunnel(null)
+                setStatus(null)
+              }}
+            >
+              Back
+            </button>
             <button className="danger" onClick={generateFunnel} title="Replaces your current project">
               Generate {funnel.questions.length + 1} scenes
             </button>

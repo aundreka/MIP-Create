@@ -21,6 +21,22 @@ export interface GithubLink {
   branch: string
   /** Optional folder inside the repo the MIP folders go under ('' = repo root). */
   dir: string
+  /** Custom commit message; {folders} and {project} expand. '' = the default. */
+  message?: string
+}
+
+/** "MIP8 - SCRATCH" reads "MIP8 - Scratch" in a commit message (SIP stays SIP). */
+const prettyFolder = (f: string): string =>
+  f.replace(/ - (.+)$/, (_, g: string) => ' - ' + (g.trim().toUpperCase() === 'SIP' ? 'SIP' : g.toLowerCase().replace(/(^|\s)\S/g, (c) => c.toUpperCase())))
+
+/** The commit message a push uses when the user hasn't written their own. */
+export const defaultCommitMessage = (folders: string[]): string => `Completed ${folders.map(prettyFolder).join(', ')}`
+
+/** The user's template with {folders}/{project} expanded, or the default. */
+export function commitMessageFor(link: GithubLink, folders: string[], project: string): string {
+  const template = (link.message ?? '').trim()
+  if (!template) return defaultCommitMessage(folders)
+  return template.replace(/\{folders\}/g, folders.map(prettyFolder).join(', ')).replace(/\{project\}/g, project)
 }
 
 // ---- link + token storage -------------------------------------------------------------
@@ -46,7 +62,7 @@ export function readGithubLink(): GithubLink | null {
     if (!raw) return null
     const v = JSON.parse(raw) as Partial<GithubLink>
     if (!v.owner || !v.repo) return null
-    return { owner: v.owner, repo: v.repo, branch: v.branch || 'main', dir: normalizeDir(v.dir ?? '') }
+    return { owner: v.owner, repo: v.repo, branch: v.branch || 'main', dir: normalizeDir(v.dir ?? ''), message: typeof v.message === 'string' ? v.message : '' }
   } catch {
     return null
   }
@@ -61,7 +77,12 @@ export function writeGithubLink(link: GithubLink | null): void {
   }
 }
 
-const normalizeDir = (dir: string): string => dir.split('/').map((s) => s.trim()).filter(Boolean).join('/')
+const normalizeDir = (dir: string): string =>
+  dir
+    .split('/')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .join('/')
 
 interface SecretApi {
   secretGet?(name: string): Promise<{ ok: boolean; value?: string }>
@@ -237,10 +258,7 @@ export async function pushFiles(opts: {
     const parent = await headSha()
     if (!parent) throw new Error(`Branch "${branch}" could not be created`)
     const commit = await gh<{ tree: { sha: string } }>('GET', `${base}/git/commits/${parent}`)
-    const tree = await gh<{ tree: Array<{ path: string; type: string; sha: string }>; truncated: boolean }>(
-      'GET',
-      `${base}/git/trees/${commit.tree.sha}?recursive=1`,
-    )
+    const tree = await gh<{ tree: Array<{ path: string; type: string; sha: string }>; truncated: boolean }>('GET', `${base}/git/trees/${commit.tree.sha}?recursive=1`)
     const existing = new Map(tree.tree.filter((t) => t.type === 'blob').map((t) => [t.path, t.sha]))
     const known = new Set(existing.values())
 
@@ -327,7 +345,7 @@ export async function pushProjectGroup(onProgress: (msg: string) => void = () =>
     link,
     files,
     ownedDirs: folders.map((f) => prefix + f),
-    message: `Update ${project}: ${folders.join(', ')}`,
+    message: commitMessageFor(link, folders, project),
     onProgress,
   })
   return { ...result, repo: `${link.owner}/${link.repo}`, folders, skipped }

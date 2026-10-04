@@ -18,26 +18,37 @@ export function todayLabel(): string {
  * skipped so a half-filled MIP still gets a sensible name; when no identity is
  * set at all it falls back to the existing free-text name (or 'Untitled').
  */
-export function mipName(meta: Pick<ProjectMeta, 'client' | 'mip' | 'mipDate' | 'name'>): string {
-  const parts = [meta.client, meta.mip, meta.mipDate].map((s) => (s ?? '').trim()).filter(Boolean)
+export function mipName(meta: Pick<ProjectMeta, 'client' | 'mip' | 'mipDate' | 'exportDate' | 'name'>): string {
+  const client = (meta.client ?? '').trim()
+  const mip = (meta.mip ?? '').trim()
+  // A blank mipDate is only defaulted here, at read time - never written back by
+  // merely looking at the project (Project settings used to do that on open).
+  const date = (meta.mipDate ?? '').trim() || (client || mip ? (meta.exportDate ?? '').trim() || todayLabel() : '')
+  const parts = [client, mip, date].filter(Boolean)
   return parts.join(' ') || (meta.name ?? '').trim() || 'Untitled'
 }
 
 /**
- * Return `meta` with the canonical name applied: fills a default date (today) the
- * first time the MIP has a client or MIP id, then keeps `meta.name` equal to
- * mipName(). Call this from every meta writer so the name is always in step.
+ * Return `meta` with the canonical name applied: fills a default date (the
+ * export date, else today) the first time the MIP has a client or MIP id, then
+ * keeps `meta.name` equal to mipName(). Call this from every meta writer so the
+ * name is always in step - and ONLY from writers: reading a project never
+ * defaults its date on disk, mipName/fileBaseName fall back at read time.
  */
 export function syncMipName(meta: ProjectMeta): ProjectMeta {
   const hasIdentity = (meta.client ?? '').trim() !== '' || (meta.mip ?? '').trim() !== ''
   let m = meta
-  if (hasIdentity && (meta.mipDate ?? '').trim() === '') m = { ...m, mipDate: todayLabel() }
+  if (hasIdentity && (meta.mipDate ?? '').trim() === '') m = { ...m, mipDate: (meta.exportDate ?? '').trim() || todayLabel() }
   const name = mipName(m)
   return name === m.name ? m : { ...m, name }
 }
 
 function slugToken(value: string | undefined, fallback: string): string {
-  const safe = (value ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+  const safe = (value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
   return safe || fallback
 }
 
@@ -145,13 +156,7 @@ export function mipFolderName(project: Pick<Project, 'meta' | 'scenes'>, index =
   const digits = (project.meta.mip ?? '').match(/\d+/g)?.join('')
   const head = `MIP${digits ? Number(digits) : index + 1}`
   const custom = (project.meta.gameName ?? '').trim()
-  const game = custom
-    ? custom
-    : isSip(project)
-      ? 'SIP'
-      : firstGameTemplateId(project)
-        ? exportMechanicToken(project).replace(/_+/g, ' ')
-        : ''
+  const game = custom ? custom : isSip(project) ? 'SIP' : firstGameTemplateId(project) ? exportMechanicToken(project).replace(/_+/g, ' ') : ''
   const tail = stripControl(game).replace(FOLDER_UNSAFE, ' ').replace(/\s+/g, ' ').trim().toUpperCase()
   return tail ? `${head} - ${tail}` : head
 }

@@ -9,7 +9,7 @@ import { addScene, addGameScene, duplicateScene, patchSceneDef, removeScene, reo
 import { Eye, EyeOff, Icon, LayoutGrid, MoreHorizontal, Plus, SCENE_KIND_ICON, Star } from '../icons'
 import { ContextMenu, type MenuItem } from './ContextMenu'
 import { SceneThumb } from '../preview/SceneThumb'
-import { confirmDestructive } from '../ui'
+import { confirmDestructive } from './AppDialogs'
 import { hiddenCount, isSceneHidden, showAllScenes, soloScene, toggleSceneHidden, useCanvasView } from '../canvasView'
 import { GAME_TEMPLATES } from '../../runtime/games/registry'
 import type { SceneKind } from '../../runtime/scene'
@@ -20,8 +20,17 @@ const MAX_THUMBS = 8
 const KIND_LABELS: Record<string, string> = { game: 'Game', overlay: 'Overlay', endscene: 'End', win: 'Overlay', custom: 'Overlay' }
 const SCENE_KINDS: SceneKind[] = ['game', 'overlay', 'endscene']
 
-interface PickerPos { x: number; y: number; up: boolean; maxH: number }
-interface KindPickerPos { x: number; y: number; id: string }
+interface PickerPos {
+  x: number
+  y: number
+  up: boolean
+  maxH: number
+}
+interface KindPickerPos {
+  x: number
+  y: number
+  id: string
+}
 
 export function ScenesStrip(props: { onPreviewScene: (id: string) => void; vertical?: boolean }): JSX.Element {
   const { project, assets, activeSceneId } = useEditorState()
@@ -96,7 +105,12 @@ export function ScenesStrip(props: { onPreviewScene: (id: string) => void; verti
       {project.scenes.map((s) => (
         <div
           key={s.id}
-          className={'scene-chip' + (s.id === activeSceneId ? ' active' : '') + (isSceneHidden(s.id) ? ' canvas-hidden' : '') + (over?.id === s.id ? (over.pos === 'before' ? ' drop-before' : ' drop-after') : '')}
+          className={
+            'scene-chip' +
+            (s.id === activeSceneId ? ' active' : '') +
+            (isSceneHidden(s.id) ? ' canvas-hidden' : '') +
+            (over?.id === s.id ? (over.pos === 'before' ? ' drop-before' : ' drop-after') : '')
+          }
           draggable={editId !== s.id}
           onDragStart={() => setDragId(s.id)}
           onDragOver={(e) => {
@@ -178,11 +192,7 @@ export function ScenesStrip(props: { onPreviewScene: (id: string) => void; verti
               <Icon icon={EyeOff} size={13} />
             </button>
           )}
-          <button
-            className={`scene-kind-badge kind-${s.kind ?? 'overlay'}`}
-            title="Change scene type"
-            onClick={(e) => openKindPicker(e, s.id)}
-          >
+          <button className={`scene-kind-badge kind-${s.kind ?? 'overlay'}`} title="Change scene type" onClick={(e) => openKindPicker(e, s.id)}>
             {KIND_LABELS[s.kind ?? 'overlay']}
             {/* An overlay doubling as the MRAID end card reads as both in the strip. */}
             {s.kind === 'overlay' && s.asEndscene ? ' · End' : ''}
@@ -209,99 +219,129 @@ export function ScenesStrip(props: { onPreviewScene: (id: string) => void; verti
       <button className="scenes-add-btn" onClick={openGamePicker} title="Add a scene">
         <Icon icon={Plus} size={13} /> Add scene
       </button>
-      {rowMenu && (() => {
-        const sc = project.scenes.find((x) => x.id === rowMenu.id)
-        if (!sc) return null
-        const langs = Object.keys(sc.localeOverrides ?? {})
-        const hidden = isSceneHidden(sc.id)
-        const items: MenuItem[] = [
-          { label: 'Preview this scene', onClick: () => props.onPreviewScene(sc.id) },
-          { label: 'Rename', onClick: () => setEditId(sc.id) },
-          { label: 'Duplicate', onClick: () => duplicateScene(sc.id) },
-          { label: langs.length ? `Language versions (${langs.join(', ')})...` : 'Language versions...', onClick: () => { setActiveScene(sc.id); setTranslationSceneId(sc.id) } },
-          { sep: true, label: '' },
-          { label: hidden ? 'Show on canvas' : 'Hide from canvas', onClick: () => toggleSceneHidden(sc.id) },
-          { label: 'Show only this scene', onClick: () => { soloScene(sc.id, allIds); setActiveScene(sc.id) } },
-          { sep: true, label: '' },
-          {
-            label: 'Delete scene',
-            disabled: project.scenes.length <= 1,
-            onClick: () => {
-              if (sc.elements.length && !confirmDestructive(`Delete scene "${sc.name}" and its ${sc.elements.length} element${sc.elements.length === 1 ? '' : 's'}? (Ctrl+Z to undo)`)) return
-              removeScene(sc.id)
+      {rowMenu &&
+        (() => {
+          const sc = project.scenes.find((x) => x.id === rowMenu.id)
+          if (!sc) return null
+          const langs = Object.keys(sc.localeOverrides ?? {})
+          const hidden = isSceneHidden(sc.id)
+          const items: MenuItem[] = [
+            { label: 'Preview this scene', onClick: () => props.onPreviewScene(sc.id) },
+            { label: 'Rename', onClick: () => setEditId(sc.id) },
+            { label: 'Duplicate', onClick: () => duplicateScene(sc.id) },
+            {
+              label: langs.length ? `Language versions (${langs.join(', ')})...` : 'Language versions...',
+              onClick: () => {
+                setActiveScene(sc.id)
+                setTranslationSceneId(sc.id)
+              },
             },
-          },
-        ]
-        return <ContextMenu x={rowMenu.x} y={rowMenu.y} alignRight={rowMenu.alignRight} items={items} onClose={() => setRowMenu(null)} />
-      })()}
+            { sep: true, label: '' },
+            { label: hidden ? 'Show on canvas' : 'Hide from canvas', onClick: () => toggleSceneHidden(sc.id) },
+            {
+              label: 'Show only this scene',
+              onClick: () => {
+                soloScene(sc.id, allIds)
+                setActiveScene(sc.id)
+              },
+            },
+            { sep: true, label: '' },
+            {
+              label: 'Delete scene',
+              disabled: project.scenes.length <= 1,
+              onClick: () => {
+                void (async () => {
+                  if (
+                    sc.elements.length &&
+                    !(await confirmDestructive(`Delete scene "${sc.name}" and its ${sc.elements.length} element${sc.elements.length === 1 ? '' : 's'}? (Ctrl+Z to undo)`))
+                  )
+                    return
+                  removeScene(sc.id)
+                })()
+              },
+            },
+          ]
+          return <ContextMenu x={rowMenu.x} y={rowMenu.y} alignRight={rowMenu.alignRight} items={items} onClose={() => setRowMenu(null)} />
+        })()}
 
       {translationSceneId && <SceneTranslationModal sceneId={translationSceneId} onClose={() => setTranslationSceneId(null)} />}
 
       {/* Game template picker popup */}
-      {gamePicker && createPortal(
-        <div
-          className="scene-picker"
-          style={{ left: gamePicker.x, top: gamePicker.y, maxHeight: Math.min(gamePicker.maxH, 420), transform: gamePicker.up ? 'translateY(-100%)' : undefined }}
-        >
-          <button className="scene-picker-item" onClick={() => { addScene('overlay'); setGamePicker(null) }}>
-            Overlay (win / lose card)
-          </button>
-          <button className="scene-picker-item" onClick={() => { addScene('endscene'); setGamePicker(null) }}>
-            End card
-          </button>
-          <div className="scene-picker-header">Game</div>
-          <input
-            className="scene-picker-search"
-            autoFocus
-            placeholder="Search games"
-            value={gameQuery}
-            onChange={(e) => setGameQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') setGamePicker(null)
-            }}
-          />
-          {GAME_TEMPLATES.filter((t) => t.label.toLowerCase().includes(gameQuery.trim().toLowerCase())).map((t) => (
+      {gamePicker &&
+        createPortal(
+          <div
+            className="scene-picker"
+            style={{ left: gamePicker.x, top: gamePicker.y, maxHeight: Math.min(gamePicker.maxH, 420), transform: gamePicker.up ? 'translateY(-100%)' : undefined }}
+          >
             <button
-              key={t.id}
               className="scene-picker-item"
               onClick={() => {
-                addGameScene(t.id)
+                addScene('overlay')
                 setGamePicker(null)
               }}
             >
-              {t.label}
+              Overlay (win / lose card)
             </button>
-          ))}
-        </div>,
-        document.body,
-      )}
-
-      {/* Kind picker popup */}
-      {kindPicker && createPortal(
-        <div
-          className="scene-picker"
-          style={{ left: kindPicker.x, top: kindPicker.y }}
-        >
-          <div className="scene-picker-header">Change scene type</div>
-          {SCENE_KINDS.map((k) => {
-            const current = project.scenes.find((s) => s.id === kindPicker.id)?.kind ?? 'overlay'
-            return (
+            <button
+              className="scene-picker-item"
+              onClick={() => {
+                addScene('endscene')
+                setGamePicker(null)
+              }}
+            >
+              End card
+            </button>
+            <div className="scene-picker-header">Game</div>
+            <input
+              className="scene-picker-search"
+              autoFocus
+              placeholder="Search games"
+              value={gameQuery}
+              onChange={(e) => setGameQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setGamePicker(null)
+              }}
+            />
+            {GAME_TEMPLATES.filter((t) => t.label.toLowerCase().includes(gameQuery.trim().toLowerCase())).map((t) => (
               <button
-                key={k}
-                className={'scene-picker-item' + (k === current ? ' active' : '')}
+                key={t.id}
+                className="scene-picker-item"
                 onClick={() => {
-                  // asEndscene / overlayBase are overlay-only — clear them when leaving that kind (see Inspector).
-                  patchSceneDef(kindPicker.id, { kind: k, ...(k === 'overlay' ? {} : { asEndscene: undefined, overlayBase: undefined }) })
-                  setKindPicker(null)
+                  addGameScene(t.id)
+                  setGamePicker(null)
                 }}
               >
-                {KIND_LABELS[k]}
+                {t.label}
               </button>
-            )
-          })}
-        </div>,
-        document.body,
-      )}
+            ))}
+          </div>,
+          document.body,
+        )}
+
+      {/* Kind picker popup */}
+      {kindPicker &&
+        createPortal(
+          <div className="scene-picker" style={{ left: kindPicker.x, top: kindPicker.y }}>
+            <div className="scene-picker-header">Change scene type</div>
+            {SCENE_KINDS.map((k) => {
+              const current = project.scenes.find((s) => s.id === kindPicker.id)?.kind ?? 'overlay'
+              return (
+                <button
+                  key={k}
+                  className={'scene-picker-item' + (k === current ? ' active' : '')}
+                  onClick={() => {
+                    // asEndscene / overlayBase are overlay-only — clear them when leaving that kind (see Inspector).
+                    patchSceneDef(kindPicker.id, { kind: k, ...(k === 'overlay' ? {} : { asEndscene: undefined, overlayBase: undefined }) })
+                    setKindPicker(null)
+                  }}
+                >
+                  {KIND_LABELS[k]}
+                </button>
+              )
+            })}
+          </div>,
+          document.body,
+        )}
     </div>
   )
 }

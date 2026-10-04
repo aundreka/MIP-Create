@@ -25,6 +25,7 @@ import { fileBaseName } from '../mipName'
 import { readExportPrefs, readStoredMediaDefaults, writeExportPrefs } from '../exportPrefs'
 import { compressHtmlScript } from '../bridge'
 import { Help, Modal, NumField, Slider, Toggle } from '../ui'
+import { appConfirm } from './AppDialogs'
 import { AlertTriangle, Check, Icon, ScanSearch, Settings } from '../icons'
 import { FlowPreview } from '../preview/FlowPreview'
 import type { Project } from '../../runtime/scene'
@@ -113,9 +114,7 @@ export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void
         // Use the stripped project (no variants JSON) so the size displayed here
         // matches the base export exactly — variants are stripped at export time too.
         const stripped = stripVariants(project)
-        const { assets: out, report, quality: usedQ } = await processAssetsAutoFit(
-          pruneAssets(stripped, assets), optimize, quality / 100, media, stripped, runtimeSrc,
-        )
+        const { assets: out, report, quality: usedQ } = await processAssetsAutoFit(pruneAssets(stripped, assets), optimize, quality / 100, media, stripped, runtimeSrc)
         if (cancelled) return
         const { baseBytes } = buildOutputs(stripped, out, [{ name: 'base', tag: 'base' }], runtimeSrc)
         setPreviewRuntimeSrc(runtimeSrc)
@@ -155,8 +154,9 @@ export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void
   const review = useMemo<EngagementFinding[]>(() => lintEngagement(project, assets), [project, assets])
   const reviewErrors = review.filter((f) => f.severity === 'error').length
   const blockingErrors = preflightErrors + reviewErrors
-  const confirmIfBlocked = (): boolean =>
-    blockingErrors === 0 || confirm(`Review found ${blockingErrors} blocking issue(s) (network-rejection or no-interaction). Export anyway?`)
+  const confirmIfBlocked = async (): Promise<boolean> =>
+    blockingErrors === 0 ||
+    appConfirm(`Review found ${blockingErrors} blocking issue(s) (network-rejection or no-interaction). Export anyway?`, { title: 'Blocking issues', okLabel: 'Export anyway' })
 
   // Export one project (base or a variant) for the selected networks.
   const exportOne = async (proj: Project, name: string, runtimeSrc: string): Promise<void> => {
@@ -164,7 +164,12 @@ export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void
     // project that buildOutputs will use — eliminates any project-JSON discrepancy.
     const named: Project = { ...proj, meta: { ...proj.meta, name } }
     const { assets: out } = await processAssetsAutoFit(pruneAssets(proj, assets), optimize, quality / 100, media, named, runtimeSrc)
-    const { outputs } = buildOutputs(named, out, NETWORKS.filter((n) => nets.has(n.name)), runtimeSrc)
+    const { outputs } = buildOutputs(
+      named,
+      out,
+      NETWORKS.filter((n) => nets.has(n.name)),
+      runtimeSrc,
+    )
     for (const o of outputs) downloadBlob(o.filename, await o.make())
   }
 
@@ -172,14 +177,19 @@ export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void
   // append "_<variant>" below to keep each download distinct.
   const baseName = fileBaseName(project)
   const doExportAll = async (): Promise<void> => {
-    if (!confirmIfBlocked()) return
+    if (!(await confirmIfBlocked())) return
     setBusy(true)
     try {
-      const runtimeSrc = previewRuntimeSrc ?? await fetchRuntimeSrc()
+      const runtimeSrc = previewRuntimeSrc ?? (await fetchRuntimeSrc())
       // Base: reuse proc (already compressed + measured) — no second processAssetsAutoFit.
       const stripped = stripVariants(project)
       const namedBase: Project = { ...stripped, meta: { ...stripped.meta, name: baseName } }
-      const { outputs: baseOuts } = buildOutputs(namedBase, proc, NETWORKS.filter((n) => nets.has(n.name)), runtimeSrc)
+      const { outputs: baseOuts } = buildOutputs(
+        namedBase,
+        proc,
+        NETWORKS.filter((n) => nets.has(n.name)),
+        runtimeSrc,
+      )
       for (const o of baseOuts) downloadBlob(o.filename, await o.make())
       // Variants: re-process (different asset sets possible via patches).
       for (const v of variants.filter((x) => selVars.has(x.id))) await exportOne(applyVariant(project, v), `${baseName}_${slug(v.name)}`, runtimeSrc)
@@ -189,14 +199,14 @@ export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void
   }
 
   const doExport = async (): Promise<void> => {
-    if (!confirmIfBlocked()) return
+    if (!(await confirmIfBlocked())) return
     setBusy(true)
     setErr(null)
     try {
       const selected = NETWORKS.filter((n) => nets.has(n.name))
       // Reuse the preview runtime and stripped project so the downloaded file is
       // byte-for-byte what the modal measured (no variants JSON, same runtime binary).
-      const runtimeSrc = previewRuntimeSrc ?? await fetchRuntimeSrc()
+      const runtimeSrc = previewRuntimeSrc ?? (await fetchRuntimeSrc())
       const stripped = stripVariants(project)
       const named: Project = { ...stripped, meta: { ...stripped.meta, name: baseName } }
       const { outputs } = buildOutputs(named, proc, selected, runtimeSrc)
@@ -213,7 +223,9 @@ export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void
               const cb = new Blob([compressed], { type: 'text/html' })
               if (cb.size < blob.size) blob = cb
             }
-          } catch { /* keep original */ }
+          } catch {
+            /* keep original */
+          }
         }
         downloadBlob(o.filename, blob)
       }
@@ -233,16 +245,16 @@ export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void
       )}
 
       {/* flow preview — scenes + transitions of what you're exporting */}
-      <div className="group-title">Flow · {project.scenes.length} {project.scenes.length === 1 ? 'scene' : 'scenes'}</div>
+      <div className="group-title">
+        Flow · {project.scenes.length} {project.scenes.length === 1 ? 'scene' : 'scenes'}
+      </div>
       <FlowPreview project={project} assets={proc} />
 
       {/* size meter */}
       <div className="size-meter">
         <div className="size-row">
           <span>Estimated size</span>
-          <strong className={over ? 'danger' : ''}>
-            {busy ? '…' : fmtBytes(baseBytes)} / 5 MB
-          </strong>
+          <strong className={over ? 'danger' : ''}>{busy ? '…' : fmtBytes(baseBytes)} / 5 MB</strong>
         </div>
         <div className="bar-track">
           <div className={'bar-fill' + (over ? ' over' : '')} style={{ width: `${pct}%` }} />
@@ -251,9 +263,7 @@ export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void
 
       <Toggle label="Optimize assets (WebP · end card · audio)" checked={optimize} onChange={setOptimize} />
       {optimize && <Slider label="Quality" value={quality} min={50} max={100} suffix="%" onChange={setQuality} />}
-      {optimize && autoQ !== null && (
-        <div className="hint pad">Auto-compressed images to {autoQ}% quality to fit 5 MB.</div>
-      )}
+      {optimize && autoQ !== null && <div className="hint pad">Auto-compressed images to {autoQ}% quality to fit 5 MB.</div>}
 
       {/* video/audio compression (ffmpeg, desktop) */}
       {optimize && hasVideo && (
@@ -270,8 +280,8 @@ export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void
       )}
       {optimize && (hasVideo || hasAudio) && (
         <Help>
-          Re-encoded on export with ffmpeg (desktop). Lower CRF = sharper but bigger; Max bitrate caps peaks (e.g. <b>536k</b>);
-          Trim cuts length. These are the defaults; give any clip its own recipe below.
+          Re-encoded on export with ffmpeg (desktop). Lower CRF = sharper but bigger; Max bitrate caps peaks (e.g. <b>536k</b>); Trim cuts length. These are the defaults; give any
+          clip its own recipe below.
         </Help>
       )}
 
@@ -286,13 +296,16 @@ export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void
             <div className="asset-row-wrap" key={r.id}>
               <div className="asset-row">
                 <span className="a-id">{r.id}</span>
-                <span className="a-dim">{r.w}×{r.h}</span>
+                <span className="a-dim">
+                  {r.w}×{r.h}
+                </span>
                 <span className="a-bytes">{fmtBytes(r.bytes)}</span>
                 {r.optimized && <span className="a-tag ok">{isMedia ? a.kind : 'webp'}</span>}
                 {r.remote && <span className="a-tag warn">remote</span>}
                 {isMedia && (
                   <button type="button" className={'a-tag btn' + (has ? ' on' : '')} onClick={() => setOpenRow(openRow === r.id ? null : r.id)} title="Per-asset compression">
-                    <Icon icon={Settings} size={12} />{has ? ' custom' : ''}
+                    <Icon icon={Settings} size={12} />
+                    {has ? ' custom' : ''}
                   </button>
                 )}
               </div>
@@ -362,17 +375,27 @@ export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void
             <div className="preflight-net" key={p.tag}>
               <div className="preflight-head">
                 {p.errors ? (
-                  <span className="pf-badge err"><Icon icon={AlertTriangle} size={12} /> {p.errors}</span>
+                  <span className="pf-badge err">
+                    <Icon icon={AlertTriangle} size={12} /> {p.errors}
+                  </span>
                 ) : p.warns ? (
-                  <span className="pf-badge warn"><Icon icon={AlertTriangle} size={12} /> {p.warns}</span>
+                  <span className="pf-badge warn">
+                    <Icon icon={AlertTriangle} size={12} /> {p.warns}
+                  </span>
                 ) : (
-                  <span className="pf-badge ok"><Icon icon={Check} size={12} strokeWidth={3} /></span>
+                  <span className="pf-badge ok">
+                    <Icon icon={Check} size={12} strokeWidth={3} />
+                  </span>
                 )}
                 <b>{p.net}</b>
-                <span className="hint">{fmtBytes(p.bytes)} / {fmtBytes(p.max)}</span>
+                <span className="hint">
+                  {fmtBytes(p.bytes)} / {fmtBytes(p.max)}
+                </span>
               </div>
               {p.findings.map((f, i) => (
-                <div className={'preflight-line ' + f.level} key={i}>{f.message}</div>
+                <div className={'preflight-line ' + f.level} key={i}>
+                  {f.message}
+                </div>
               ))}
             </div>
           ))}
@@ -391,8 +414,8 @@ export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void
         Export {nets.size} {nets.size === 1 ? 'file' : 'files'}
       </button>
       <Help>
-        Single self-contained HTML per network (zipped where the network requires it). Exports download to your browser; the
-        desktop app saves to disk. Preflight above flags rejection-class issues per network before you ship.
+        Single self-contained HTML per network (zipped where the network requires it). Exports download to your browser; the desktop app saves to disk. Preflight above flags
+        rejection-class issues per network before you ship.
       </Help>
 
       {variants.length > 0 && (
@@ -421,7 +444,6 @@ export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void
           <Help>Emits one playable per variant per selected network, named “{baseName}_variant_network”. Languages stay inside each file (auto-detected at runtime).</Help>
         </>
       )}
-
     </Modal>
   )
 }

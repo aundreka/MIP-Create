@@ -12,7 +12,8 @@ import { importBuiltFile, type ImportResult } from '../importBuilt'
 import type { Project, SceneElement } from '../../runtime/scene'
 import type { AssetEntry, AssetMap } from '../../runtime/types'
 import { AlertTriangle, Icon, Plus, Upload } from '../icons'
-import { confirmDestructive, Modal } from '../ui'
+import { Modal } from '../ui'
+import { confirmDestructive } from './AppDialogs'
 
 const DEFAULT_CLICK = {
   ios: 'https://apps.apple.com/app/id000000000',
@@ -67,7 +68,7 @@ export function ImportBuilt(props: { onClose: () => void }): JSX.Element {
   // Tier 1 — load a recovered own-editor project as a new library entry.
   const importOwn = async (): Promise<void> => {
     if (!result?.data) return
-    if (result.schemaTooNew && !confirmDestructive('This build was made with a newer editor and may not import cleanly. Import anyway?')) return
+    if (result.schemaTooNew && !(await confirmDestructive('This build was made with a newer editor and may not import cleanly. Import anyway?'))) return
     const data = result.data
     const base = data.project.meta.name || result.sourceName?.replace(/\.[^.]+$/, '') || 'Imported playable'
     data.project.meta = { ...data.project.meta, name: base.replace(/\s*\(imported\)$/i, '') + ' (imported)' }
@@ -89,7 +90,7 @@ export function ImportBuilt(props: { onClose: () => void }): JSX.Element {
       props.onClose()
       return
     }
-    if (!confirmDestructive('Create a new project from this embedded ad?')) return
+    if (!(await confirmDestructive('Create a new project from this embedded ad?'))) return
     const baseW = 1080
     const baseH = 1920
     const el = foreignEmbedElement(assetId, baseW, baseH)
@@ -108,14 +109,19 @@ export function ImportBuilt(props: { onClose: () => void }): JSX.Element {
   return (
     <Modal title="Import built playable" onClose={props.onClose} size="md">
       <button className="wide" disabled={busy} onClick={() => void choose()}>
-        {busy ? 'Reading…' : <><Icon icon={Upload} size={14} /> Choose a built .html or .zip…</>}
+        {busy ? (
+          'Reading…'
+        ) : (
+          <>
+            <Icon icon={Upload} size={14} /> Choose a built .html or .zip…
+          </>
+        )}
       </button>
 
       {!result && (
         <div className="hint pad">
-          Recover an editable project from a playable you already built. Files exported by this editor come back{' '}
-          <b>fully editable</b> (every export embeds its own project data). A third-party or React ad with no editor
-          data is embedded as a single block you can frame with CTAs, overlays and end-cards.
+          Recover an editable project from a playable you already built. Files exported by this editor come back <b>fully editable</b> (every export embeds its own project data). A
+          third-party or React ad with no editor data is embedded as a single block you can frame with CTAs, overlays and end-cards.
         </div>
       )}
 
@@ -139,8 +145,7 @@ export function ImportBuilt(props: { onClose: () => void }): JSX.Element {
             <>
               <div className="hint pad">
                 Recovered <b>{result.data.project.scenes.length}</b> scene
-                {result.data.project.scenes.length === 1 ? '' : 's'} and{' '}
-                <b>{Object.keys(result.data.assets).length}</b> asset
+                {result.data.project.scenes.length === 1 ? '' : 's'} and <b>{Object.keys(result.data.assets).length}</b> asset
                 {Object.keys(result.data.assets).length === 1 ? '' : 's'}. It will be added as a new project in your library.
               </div>
               <button className="primary wide" disabled={busy} onClick={() => void importOwn()}>
@@ -152,8 +157,8 @@ export function ImportBuilt(props: { onClose: () => void }): JSX.Element {
           {result.kind === 'foreign-html' && (
             <>
               <div className="hint pad">
-                No editor project data was found; this looks like a third-party build. It can be embedded as a single
-                block (an iframe you can wrap with CTAs / overlays), but its internals can’t be edited here.
+                No editor project data was found; this looks like a third-party build. It can be embedded as a single block (an iframe you can wrap with CTAs / overlays), but its
+                internals can’t be edited here.
               </div>
               <div className="grid2">
                 <button className="primary" disabled={busy} onClick={() => void embedForeign('scene')} title="Append as a new scene in the current project">

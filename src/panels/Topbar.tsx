@@ -2,13 +2,15 @@
 // file I/O, save-as-template, Profile, theme) live in the app menu on the brand
 // button. Create methods live on Home's Create gallery; insert is on the tool rail.
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { loadProject as bridgeLoad, saveProject } from '../bridge'
+import { parseRepo, readGithubLink, writeGithubLink } from '../github'
 import { getState, joinProjectGroup, loadProject as storeLoad, markSaved, redo, refreshScene, setOrientation, undo, useEditorState } from '../store'
 import { createProject, currentProjectId, openProject, projectsInGroup, saveCurrent } from '../projects'
+import { appAlert } from './AppDialogs'
 import { ContextMenu, type MenuItem } from './ContextMenu'
 import { HeaderPopover } from './HeaderPopover'
-import { CalendarDays, ChevronDown, FolderOpen, Frame, Icon, Menu, PanelTop, Minus, Play, Plus, Redo2, Undo2, X } from '../icons'
+import { CalendarDays, ChevronDown, FolderOpen, Frame, Icon, Menu, PanelTop, Minus, Play, Plus, RectangleHorizontal, RectangleVertical, Redo2, Undo2, X } from '../icons'
 import { endcardScenes } from '../sip'
 import { toggleTheme, useTheme } from '../theme'
 import { setEditLocale, useEditLocale } from '../locale'
@@ -19,12 +21,63 @@ async function doSave(): Promise<void> {
   const s = getState()
   const r = await saveProject({ project: s.project, assets: s.assets, trace: s.trace }, s.projectPath)
   if (r.ok) markSaved(r.path ?? null)
-  else if (r.error && r.error !== 'canceled') alert('Save failed: ' + r.error)
+  else if (r.error && r.error !== 'canceled') await appAlert('Save failed: ' + r.error)
 }
 
 async function doOpen(): Promise<void> {
   const r = await bridgeLoad()
   if (r) storeLoad(r.data.project, r.data.assets, r.path, r.data.trace)
+}
+
+// Paste-and-go GitHub repo link for the current project, right where Push to
+// GitHub lives. Branch, folder, commit text and the token stay whatever Project
+// settings > GitHub says — this only swaps which repository the push targets.
+function RepoQuickInput(props: { groupKey: string }): JSX.Element {
+  const [val, setVal] = useState('')
+  const [bad, setBad] = useState(false)
+  useEffect(() => {
+    const l = readGithubLink()
+    setVal(l ? `${l.owner}/${l.repo}` : '')
+    setBad(false)
+  }, [props.groupKey])
+  const commit = (): void => {
+    const txt = val.trim()
+    const prev = readGithubLink()
+    if (!txt) {
+      if (prev) writeGithubLink(null)
+      setBad(false)
+      return
+    }
+    const parsed = parseRepo(txt)
+    if (!parsed) {
+      setBad(true)
+      return
+    }
+    writeGithubLink({ owner: parsed.owner, repo: parsed.repo, branch: prev?.branch || 'main', dir: prev?.dir ?? '', message: prev?.message ?? '' })
+    setVal(`${parsed.owner}/${parsed.repo}`)
+    setBad(false)
+  }
+  return (
+    <input
+      className={'repo-quick' + (bad ? ' bad' : '')}
+      value={val}
+      spellCheck={false}
+      placeholder="GitHub repo…"
+      title={
+        bad
+          ? 'Paste owner/repo or a github.com link'
+          : 'Repository Push to GitHub targets for this project — paste owner/repo or a github.com link. Token and branch live in Project settings > GitHub.'
+      }
+      onChange={(e) => {
+        setVal(e.target.value)
+        setBad(false)
+      }}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+      }}
+    />
+  )
 }
 
 export function Topbar(props: {
@@ -97,7 +150,13 @@ export function Topbar(props: {
   }
   const busy =
     props.githubBusy ??
-    (props.quickExportBusy ? 'Exporting...' : props.quickSipBusy ? 'Exporting SIP...' : props.quickViteExportBusy || props.quickProjectViteExportBusy ? 'Exporting source...' : null)
+    (props.quickExportBusy
+      ? 'Exporting...'
+      : props.quickSipBusy
+        ? 'Exporting SIP...'
+        : props.quickViteExportBusy || props.quickProjectViteExportBusy
+          ? 'Exporting source...'
+          : null)
   const exportItems: MenuItem[] = [
     { label: 'Quick export (saved settings)', onClick: props.onQuickExport },
     { label: hasEndcard ? 'End card only (SIP)' : 'End card only (SIP) - no end card', onClick: props.onQuickSip, disabled: !hasEndcard },
@@ -122,7 +181,9 @@ export function Topbar(props: {
         ...projectsInGroup(projectId).map((r) => ({
           label: r.name + (r.id === curId ? '  (open)' : ''),
           disabled: r.id === curId,
-          onClick: () => { if (r.id !== curId) void openProject(r.id) },
+          onClick: () => {
+            if (r.id !== curId) void openProject(r.id)
+          },
         })),
         { sep: true, label: '' },
         { label: '+ New MIP in this project', onClick: () => void newMipInProject() },
@@ -143,6 +204,13 @@ export function Topbar(props: {
     { label: 'QA checker (vs Figma mockup)...', onClick: props.onQaCheck },
     { label: 'Profile...', onClick: props.onProfile },
     { label: theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme', onClick: () => toggleTheme() },
+    // Narrow windows hide the zoom cluster and handles toggle from the bar;
+    // these keep them reachable (harmless duplicates at full width).
+    { sep: true, label: '' },
+    { label: 'Zoom in', onClick: () => props.onZoom(props.zoom * 1.2) },
+    { label: 'Zoom out', onClick: () => props.onZoom(props.zoom / 1.2) },
+    { label: 'Fit zoom (Shift+1)', onClick: props.onFit },
+    { label: (props.showHandles ? 'Hide' : 'Show') + ' selection handles (Ctrl+Shift+H)', onClick: props.onToggleHandles },
   ]
 
   return (
@@ -160,12 +228,16 @@ export function Topbar(props: {
           — including which holiday label is on screen — so it gets a chip nobody can miss
           and a one-click way back to today. Export is never affected. */}
       {previewDate && (
-        <button className="preview-date-chip" title="The editor is rendering another day (dynamic holiday preview). Click to go back to today." onClick={() => setPreviewDate(null)}>
+        <button
+          className="preview-date-chip"
+          title="The editor is rendering another day (dynamic holiday preview). Click to go back to today."
+          onClick={() => setPreviewDate(null)}
+        >
           <Icon icon={CalendarDays} size={12} /> {previewDate} <Icon icon={X} size={11} />
         </button>
       )}
 
-      <span className="seg">
+      <span className="seg tb-orient-seg">
         <button className={orientation === 'portrait' ? 'on' : ''} onClick={() => setOrientation('portrait')}>
           Portrait
         </button>
@@ -173,6 +245,14 @@ export function Topbar(props: {
           Landscape
         </button>
       </span>
+      {/* Narrow windows (<1100px) swap the labeled seg for this icon toggle — CSS shows one or the other. */}
+      <button
+        className="icon tb-orient"
+        title={orientation === 'portrait' ? 'Portrait - switch to landscape' : 'Landscape - switch to portrait'}
+        onClick={() => setOrientation(orientation === 'portrait' ? 'landscape' : 'portrait')}
+      >
+        <Icon icon={orientation === 'portrait' ? RectangleVertical : RectangleHorizontal} size={15} />
+      </button>
 
       {locales.length > 0 && (
         <select
@@ -194,7 +274,10 @@ export function Topbar(props: {
           className={'locale-pick' + (activeVariant ? ' editing' : '')}
           value={activeVariant ?? ''}
           title="Edit the base MIP or one of its variants"
-          onChange={(e) => { setActiveVariant(e.target.value || null); refreshScene() }}
+          onChange={(e) => {
+            setActiveVariant(e.target.value || null)
+            refreshScene()
+          }}
         >
           <option value="">Base MIP</option>
           {variants.map((v) => (
@@ -213,7 +296,7 @@ export function Topbar(props: {
         <Icon icon={Redo2} />
       </button>
 
-      <span className="sep" />
+      <span className="sep tb-zoom-sep" />
       <span className="zoom">
         <button className="icon" title="Zoom out" onClick={() => props.onZoom(props.zoom / 1.2)}>
           <Icon icon={Minus} size={14} />
@@ -226,7 +309,7 @@ export function Topbar(props: {
         </button>
       </span>
       <button
-        className={'icon' + (props.showHandles ? ' on' : '')}
+        className={'icon tb-handles' + (props.showHandles ? ' on' : '')}
         title={(props.showHandles ? 'Hide' : 'Show') + ' selection handles (Ctrl+Shift+H)'}
         aria-pressed={props.showHandles}
         onClick={props.onToggleHandles}
@@ -235,13 +318,8 @@ export function Topbar(props: {
       </button>
 
       <span className="spacer" />
-      <button
-        ref={headerBtn}
-        className={'icon' + (scene.meta.header ? ' on' : '')}
-        title="Header (date or countdown)"
-        aria-pressed={!!scene.meta.header}
-        onClick={toggleHeaderPop}
-      >
+      <RepoQuickInput groupKey={projectId ?? curId ?? ''} />
+      <button ref={headerBtn} className={'icon' + (scene.meta.header ? ' on' : '')} title="Header (date or countdown)" aria-pressed={!!scene.meta.header} onClick={toggleHeaderPop}>
         <Icon icon={PanelTop} size={15} />
       </button>
       <button onClick={props.onPreview} title="Preview the ad">

@@ -12,12 +12,13 @@ import { currentProjectId, patchProjectMeta, saveCurrent } from '../projects'
 import { getState, loadProject, patchMeta } from '../store'
 import { cmpNumber, cmpText, toggleSort, type SortState } from '../sort'
 import { Modal, Select, SortButton } from '../ui'
+import { appConfirm } from './AppDialogs'
 import { AlertTriangle, Check, Icon } from '../icons'
 
 const UNASSIGNED = '(unassigned)'
 type ResultSortKey = 'creative' | 'matchedMip' | 'network' | 'ipm' | 'ctr' | 'installs' | 'impressions'
 type RosterSortKey = 'mip' | 'client' | 'findings'
-const clientRank = (name: string): number => name === UNASSIGNED ? 2 : /^stakeholders?$/i.test(name.trim()) ? 1 : 0
+const clientRank = (name: string): number => (name === UNASSIGNED ? 2 : /^stakeholders?$/i.test(name.trim()) ? 1 : 0)
 
 export function QaPanel(props: { onClose: () => void; onNavigate: (projectId: string, sceneId?: string, elementId?: string) => void }): JSX.Element {
   // Persist the open project first so its latest client/MIP (and edits) are seen.
@@ -57,10 +58,13 @@ export function QaPanel(props: { onClose: () => void; onNavigate: (projectId: st
     const dir = resultSort.dir === 'asc' ? 1 : -1
     return [...boardBase].sort((a, b) => {
       const base =
-        resultSort.key === 'creative' ? cmpText(a.creative, b.creative) :
-        resultSort.key === 'matchedMip' ? cmpText(a.matchedMip, b.matchedMip) :
-        resultSort.key === 'network' ? cmpText(a.network, b.network) :
-        cmpNumber(a[resultSort.key], b[resultSort.key])
+        resultSort.key === 'creative'
+          ? cmpText(a.creative, b.creative)
+          : resultSort.key === 'matchedMip'
+            ? cmpText(a.matchedMip, b.matchedMip)
+            : resultSort.key === 'network'
+              ? cmpText(a.network, b.network)
+              : cmpNumber(a[resultSort.key], b[resultSort.key])
       return base * dir || cmpText(a.creative, b.creative)
     })
   }, [boardBase, resultSort])
@@ -92,9 +96,13 @@ export function QaPanel(props: { onClose: () => void; onNavigate: (projectId: st
     setVerNote('')
     setVerNonce((n) => n + 1)
   }
-  const doRestore = (vid: string): void => {
+  const doRestore = async (vid: string): Promise<void> => {
     const v = versions.find((x) => x.id === vid)
-    if (!v || !confirm(`Restore “${v.label}”? This replaces the current design (shared assets are kept).`)) return
+    if (
+      !v ||
+      !(await appConfirm(`Restore “${v.label}”? This replaces the current design (shared assets are kept).`, { title: 'Restore version', okLabel: 'Restore', danger: true }))
+    )
+      return
     loadProject(v.project, getState().assets, getState().projectPath ?? null)
     saveCurrent()
     props.onClose()
@@ -111,9 +119,11 @@ export function QaPanel(props: { onClose: () => void; onNavigate: (projectId: st
     const dir = rosterSort.dir === 'asc' ? 1 : -1
     return [...selProfiles].sort((a, b) => {
       const base =
-        rosterSort.key === 'mip' ? cmpText(a.mip, b.mip) :
-        rosterSort.key === 'client' ? cmpText(a.client, b.client) :
-        cmpNumber(findingsByMip.get(a.projectId) ?? 0, findingsByMip.get(b.projectId) ?? 0)
+        rosterSort.key === 'mip'
+          ? cmpText(a.mip, b.mip)
+          : rosterSort.key === 'client'
+            ? cmpText(a.client, b.client)
+            : cmpNumber(findingsByMip.get(a.projectId) ?? 0, findingsByMip.get(b.projectId) ?? 0)
       return base * dir || cmpText(a.mip, b.mip)
     })
   }, [findingsByMip, rosterSort, selProfiles])
@@ -136,10 +146,18 @@ export function QaPanel(props: { onClose: () => void; onNavigate: (projectId: st
   return (
     <Modal title="QA" onClose={props.onClose} size="lg" className="qa-modal">
       <div className="seg qa-tabs">
-        <button className={tab === 'consistency' ? 'on' : ''} onClick={() => setTab('consistency')}>Consistency</button>
-        <button className={tab === 'engagement' ? 'on' : ''} onClick={() => setTab('engagement')}>Engagement</button>
-        <button className={tab === 'results' ? 'on' : ''} onClick={() => setTab('results')}>Results</button>
-        <button className={tab === 'history' ? 'on' : ''} onClick={() => setTab('history')}>History</button>
+        <button className={tab === 'consistency' ? 'on' : ''} onClick={() => setTab('consistency')}>
+          Consistency
+        </button>
+        <button className={tab === 'engagement' ? 'on' : ''} onClick={() => setTab('engagement')}>
+          Engagement
+        </button>
+        <button className={tab === 'results' ? 'on' : ''} onClick={() => setTab('results')}>
+          Results
+        </button>
+        <button className={tab === 'history' ? 'on' : ''} onClick={() => setTab('history')}>
+          History
+        </button>
       </div>
 
       {tab === 'history' ? (
@@ -147,7 +165,9 @@ export function QaPanel(props: { onClose: () => void; onNavigate: (projectId: st
           <div className="ver-save">
             <input className="text-input" value={verLabel} placeholder="Version label (e.g. v2, bigger CTA)" onChange={(e) => setVerLabel(e.target.value)} />
             <input className="text-input" value={verNote} placeholder="Note (optional)" onChange={(e) => setVerNote(e.target.value)} />
-            <button className="primary" disabled={!openId} onClick={doSaveVersion}>Save version</button>
+            <button className="primary" disabled={!openId} onClick={doSaveVersion}>
+              Save version
+            </button>
           </div>
           {!openId ? (
             <div className="hint pad">Save this project to your library first to start versioning it.</div>
@@ -159,10 +179,23 @@ export function QaPanel(props: { onClose: () => void; onNavigate: (projectId: st
                 <div key={v.id} className={'ver-row' + (v.id === diffId ? ' sel' : '')}>
                   <div className="ver-main" onClick={() => setDiffId(v.id === diffId ? null : v.id)} title="Show changes since this version">
                     <span className="ver-label">{v.label}</span>
-                    <span className="hint">{new Date(v.createdAt).toLocaleString()}{v.note ? ' · ' + v.note : ''}</span>
+                    <span className="hint">
+                      {new Date(v.createdAt).toLocaleString()}
+                      {v.note ? ' · ' + v.note : ''}
+                    </span>
                   </div>
-                  <button onClick={() => doRestore(v.id)} title="Replace the current design with this version">Restore</button>
-                  <button className="icon-btn" title="Delete version" onClick={() => { deleteVersion(openId, v.id); if (diffId === v.id) setDiffId(null); setVerNonce((n) => n + 1) }}>
+                  <button onClick={() => void doRestore(v.id)} title="Replace the current design with this version">
+                    Restore
+                  </button>
+                  <button
+                    className="icon-btn"
+                    title="Delete version"
+                    onClick={() => {
+                      deleteVersion(openId, v.id)
+                      if (diffId === v.id) setDiffId(null)
+                      setVerNonce((n) => n + 1)
+                    }}
+                  >
                     <Icon icon={AlertTriangle} size={13} />
                   </button>
                 </div>
@@ -173,7 +206,9 @@ export function QaPanel(props: { onClose: () => void; onNavigate: (projectId: st
             <>
               <div className="group-title">Changes since “{diffVersion.label}” → now</div>
               {diff.length === 0 ? (
-                <div className="qa-allgood"><Icon icon={Check} size={16} /> Identical: no design changes since this version.</div>
+                <div className="qa-allgood">
+                  <Icon icon={Check} size={16} /> Identical: no design changes since this version.
+                </div>
               ) : (
                 <div className="ver-diff">
                   {diff.map((d, i) => (
@@ -187,22 +222,32 @@ export function QaPanel(props: { onClose: () => void; onNavigate: (projectId: st
             </>
           )}
           <div className="hint pad">
-            Versions snapshot the <b>design</b> (scenes, elements, settings); assets are shared, so snapshots stay small.
-            Click a version to see what changed since then; Restore swaps the current design back to it.
+            Versions snapshot the <b>design</b> (scenes, elements, settings); assets are shared, so snapshots stay small. Click a version to see what changed since then; Restore
+            swaps the current design back to it.
           </div>
         </>
       ) : tab === 'results' ? (
         <>
           <div className="qa-head">
             <Select label="Rank by" value={metric} onChange={(v) => setMetric(v as Metric)} options={METRICS} />
-            <span className="hint">{results.length} creative{results.length === 1 ? '' : 's'} imported</span>
+            <span className="hint">
+              {results.length} creative{results.length === 1 ? '' : 's'} imported
+            </span>
           </div>
           <label className="field">
             <span>Paste a network results CSV (header row + rows; creative/IPM/CTR/installs auto-detected)</span>
-            <textarea className="quiz-paste" style={{ minHeight: 120 }} value={csv} placeholder={'creative,network,ipm,ctr,installs\nBioma_MIP3_scratch_al,AppLovin,8.2,1.9%,1240\n…'} onChange={(e) => setCsv(e.target.value)} />
+            <textarea
+              className="quiz-paste"
+              style={{ minHeight: 120 }}
+              value={csv}
+              placeholder={'creative,network,ipm,ctr,installs\nBioma_MIP3_scratch_al,AppLovin,8.2,1.9%,1240\n…'}
+              onChange={(e) => setCsv(e.target.value)}
+            />
           </label>
           <div className="grid2">
-            <button onClick={() => importCsv(csv)} disabled={!csv.trim()}>Import CSV</button>
+            <button onClick={() => importCsv(csv)} disabled={!csv.trim()}>
+              Import CSV
+            </button>
             <label className="field" style={{ padding: 0 }}>
               <input
                 type="file"
@@ -220,13 +265,41 @@ export function QaPanel(props: { onClose: () => void; onNavigate: (projectId: st
                 <thead>
                   <tr>
                     <th>#</th>
-                    <th><SortButton field="creative" sort={resultSort} onSort={(k) => setResultSort((cur) => toggleSort(cur, k))}>Creative</SortButton></th>
-                    <th><SortButton field="matchedMip" sort={resultSort} onSort={(k) => setResultSort((cur) => toggleSort(cur, k))}>MIP</SortButton></th>
-                    <th><SortButton field="network" sort={resultSort} onSort={(k) => setResultSort((cur) => toggleSort(cur, k))}>Net</SortButton></th>
-                    <th><SortButton field="ipm" sort={resultSort} onSort={(k) => setResultSort((cur) => toggleSort(cur, k))}>IPM</SortButton></th>
-                    <th><SortButton field="ctr" sort={resultSort} onSort={(k) => setResultSort((cur) => toggleSort(cur, k))}>CTR</SortButton></th>
-                    <th><SortButton field="installs" sort={resultSort} onSort={(k) => setResultSort((cur) => toggleSort(cur, k))}>Installs</SortButton></th>
-                    <th><SortButton field="impressions" sort={resultSort} onSort={(k) => setResultSort((cur) => toggleSort(cur, k))}>Impressions</SortButton></th>
+                    <th>
+                      <SortButton field="creative" sort={resultSort} onSort={(k) => setResultSort((cur) => toggleSort(cur, k))}>
+                        Creative
+                      </SortButton>
+                    </th>
+                    <th>
+                      <SortButton field="matchedMip" sort={resultSort} onSort={(k) => setResultSort((cur) => toggleSort(cur, k))}>
+                        MIP
+                      </SortButton>
+                    </th>
+                    <th>
+                      <SortButton field="network" sort={resultSort} onSort={(k) => setResultSort((cur) => toggleSort(cur, k))}>
+                        Net
+                      </SortButton>
+                    </th>
+                    <th>
+                      <SortButton field="ipm" sort={resultSort} onSort={(k) => setResultSort((cur) => toggleSort(cur, k))}>
+                        IPM
+                      </SortButton>
+                    </th>
+                    <th>
+                      <SortButton field="ctr" sort={resultSort} onSort={(k) => setResultSort((cur) => toggleSort(cur, k))}>
+                        CTR
+                      </SortButton>
+                    </th>
+                    <th>
+                      <SortButton field="installs" sort={resultSort} onSort={(k) => setResultSort((cur) => toggleSort(cur, k))}>
+                        Installs
+                      </SortButton>
+                    </th>
+                    <th>
+                      <SortButton field="impressions" sort={resultSort} onSort={(k) => setResultSort((cur) => toggleSort(cur, k))}>
+                        Impressions
+                      </SortButton>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -247,19 +320,20 @@ export function QaPanel(props: { onClose: () => void; onNavigate: (projectId: st
             </div>
           )}
           <div className="hint pad">
-            Import the performance export from your network dashboard to rank variants/MIPs and learn which mechanics win. Rows are
-            matched to your library by name (the export names creatives <b>client_mip_variant_network</b>). Stored locally.
+            Import the performance export from your network dashboard to rank variants/MIPs and learn which mechanics win. Rows are matched to your library by name (the export
+            names creatives <b>client_mip_variant_network</b>). Stored locally.
           </div>
         </>
       ) : tab === 'engagement' ? (
         <>
           <div className="qa-head">
             <div className="qa-summary">
-              {countEng(engagement, 'error')} error{countEng(engagement, 'error') === 1 ? '' : 's'} ·{' '}
-              {countEng(engagement, 'warn')} warning{countEng(engagement, 'warn') === 1 ? '' : 's'} ·{' '}
-              {countEng(engagement, 'info')} note{countEng(engagement, 'info') === 1 ? '' : 's'}
+              {countEng(engagement, 'error')} error{countEng(engagement, 'error') === 1 ? '' : 's'} · {countEng(engagement, 'warn')} warning
+              {countEng(engagement, 'warn') === 1 ? '' : 's'} · {countEng(engagement, 'info')} note{countEng(engagement, 'info') === 1 ? '' : 's'}
             </div>
-            <button className="qa-rerun" onClick={refresh} title="Re-scan the open MIP">Re-run</button>
+            <button className="qa-rerun" onClick={refresh} title="Re-scan the open MIP">
+              Re-run
+            </button>
           </div>
           {engagement.length === 0 ? (
             <div className="qa-allgood">
@@ -272,19 +346,25 @@ export function QaPanel(props: { onClose: () => void; onNavigate: (projectId: st
                   <Icon icon={f.severity === 'info' ? Check : AlertTriangle} size={13} className="qa-sev-icon" />
                   <span className="qa-f-main">
                     <span className="qa-f-msg">{f.message}</span>
-                    {f.sceneName && <span className="qa-f-meta"><strong>{f.sceneName}</strong></span>}
+                    {f.sceneName && (
+                      <span className="qa-f-meta">
+                        <strong>{f.sceneName}</strong>
+                      </span>
+                    )}
                   </span>
                 </button>
               ))}
             </div>
           )}
           <div className="hint pad">
-            Heuristic checks on the open MIP: missing interaction / CTA, dead-end scenes, small tap targets, tiny text, broken
-            asset references and sounds that never fire. Click a finding to jump to it.
+            Heuristic checks on the open MIP: missing interaction / CTA, dead-end scenes, small tap targets, tiny text, broken asset references and sounds that never fire. Click a
+            finding to jump to it.
           </div>
         </>
       ) : !clients.length ? (
-        <div className="hint pad">No projects in your library yet. Create or open a couple of MIPs, tag them with a Client (in the Inspector → Project section), then run this check.</div>
+        <div className="hint pad">
+          No projects in your library yet. Create or open a couple of MIPs, tag them with a Client (in the Inspector → Project section), then run this check.
+        </div>
       ) : (
         <>
           <div className="qa-head">
@@ -294,13 +374,19 @@ export function QaPanel(props: { onClose: () => void; onNavigate: (projectId: st
               onChange={setClient}
               options={clients.map((c) => ({ value: c, label: `${c} · ${(groups.get(c) ?? []).length} MIP${(groups.get(c) ?? []).length === 1 ? '' : 's'}` }))}
             />
-            <button className="qa-rerun" onClick={refresh} title="Re-scan the library">Re-run</button>
+            <button className="qa-rerun" onClick={refresh} title="Re-scan the library">
+              Re-run
+            </button>
           </div>
 
           {client === UNASSIGNED ? (
-            <div className="hint pad">These MIPs have no Client set, so they can't be compared. Assign each one to a client below, then pick that client above to see the report.</div>
+            <div className="hint pad">
+              These MIPs have no Client set, so they can't be compared. Assign each one to a client below, then pick that client above to see the report.
+            </div>
           ) : selProfiles.length < 2 ? (
-            <div className="hint pad">Only {selProfiles.length} MIP under “{client}”. Add at least one more MIP to the same client to compare them.</div>
+            <div className="hint pad">
+              Only {selProfiles.length} MIP under “{client}”. Add at least one more MIP to the same client to compare them.
+            </div>
           ) : findings.length === 0 ? (
             <div className="qa-allgood">
               <Icon icon={Check} size={16} /> All {selProfiles.length} MIPs are consistent. No divergences found.
@@ -308,9 +394,8 @@ export function QaPanel(props: { onClose: () => void; onNavigate: (projectId: st
           ) : (
             <>
               <div className="qa-summary">
-                {countSeverity(findings, 'error')} error{countSeverity(findings, 'error') === 1 ? '' : 's'} ·{' '}
-                {countSeverity(findings, 'warn')} warning{countSeverity(findings, 'warn') === 1 ? '' : 's'} ·{' '}
-                {countSeverity(findings, 'info')} note{countSeverity(findings, 'info') === 1 ? '' : 's'}
+                {countSeverity(findings, 'error')} error{countSeverity(findings, 'error') === 1 ? '' : 's'} · {countSeverity(findings, 'warn')} warning
+                {countSeverity(findings, 'warn') === 1 ? '' : 's'} · {countSeverity(findings, 'info')} note{countSeverity(findings, 'info') === 1 ? '' : 's'}
               </div>
               <div className="qa-findings">
                 {findings.map((f) => (
@@ -329,13 +414,27 @@ export function QaPanel(props: { onClose: () => void; onNavigate: (projectId: st
           )}
 
           {/* MIP roster — also where (re)assignment happens */}
-          <div className="group-title">MIPs under “{client}” ({selProfiles.length})</div>
+          <div className="group-title">
+            MIPs under “{client}” ({selProfiles.length})
+          </div>
           <div className="qa-roster">
             <div className="qa-mip qa-roster-head">
-              <span className="qa-mip-name"><SortButton field="mip" sort={rosterSort} onSort={(k) => setRosterSort((cur) => toggleSort(cur, k))}>MIP</SortButton></span>
-              <span className="qa-assign"><SortButton field="client" sort={rosterSort} onSort={(k) => setRosterSort((cur) => toggleSort(cur, k))}>Client</SortButton></span>
+              <span className="qa-mip-name">
+                <SortButton field="mip" sort={rosterSort} onSort={(k) => setRosterSort((cur) => toggleSort(cur, k))}>
+                  MIP
+                </SortButton>
+              </span>
+              <span className="qa-assign">
+                <SortButton field="client" sort={rosterSort} onSort={(k) => setRosterSort((cur) => toggleSort(cur, k))}>
+                  Client
+                </SortButton>
+              </span>
               <span className="qa-assign">MIP id</span>
-              <span className="qa-findings-col"><SortButton field="findings" sort={rosterSort} onSort={(k) => setRosterSort((cur) => toggleSort(cur, k))}>Issues</SortButton></span>
+              <span className="qa-findings-col">
+                <SortButton field="findings" sort={rosterSort} onSort={(k) => setRosterSort((cur) => toggleSort(cur, k))}>
+                  Issues
+                </SortButton>
+              </span>
             </div>
             {rosterProfiles.map((p) => (
               <div className="qa-mip" key={p.projectId}>
@@ -368,8 +467,8 @@ export function QaPanel(props: { onClose: () => void; onNavigate: (projectId: st
             ))}
           </div>
           <div className="hint pad">
-            Compares fonts, colors, CTA pulse, entrance animations, sound events, transitions and canvas size across a client’s MIPs.
-            Edit a row’s <b>client</b> / <b>MIP id</b> to (re)file it. Only projects in this editor’s library are included.
+            Compares fonts, colors, CTA pulse, entrance animations, sound events, transitions and canvas size across a client’s MIPs. Edit a row’s <b>client</b> / <b>MIP id</b> to
+            (re)file it. Only projects in this editor’s library are included.
           </div>
         </>
       )}

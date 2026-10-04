@@ -8,6 +8,7 @@ import JSZip from 'jszip'
 import type { Project, SceneDef } from '../runtime/scene'
 import type { AssetMap, CompressProfile } from '../runtime/types'
 import { remoteToDataUrl } from './net'
+import { appAlert } from './panels/AppDialogs'
 import { canTranscode, transcodeMedia, type TranscodeOpts } from './bridge'
 
 /** Global compression defaults chosen at export time; per-asset `compress`
@@ -47,13 +48,17 @@ export async function fetchRuntimeSrc(): Promise<string> {
     try {
       const r = await nativeApi.readRuntimeSrc()
       if (r.ok && typeof r.src === 'string' && r.src.length > 100) return r.src
-    } catch { /* fallback */ }
+    } catch {
+      /* fallback */
+    }
   }
   // Web fallback: timestamp query param forces a fresh read even if Vite caches by path.
   try {
     const r = await fetch(`./runtime-dist/playable-runtime.js?t=${Date.now()}`, { cache: 'no-store' })
     if (r.ok) return await r.text()
-  } catch { /* fallback to bundled copy */ }
+  } catch {
+    /* fallback to bundled copy */
+  }
   return staticRuntimeSrc
 }
 
@@ -67,7 +72,10 @@ function addSceneAssets(scene: SceneDef, assets: AssetMap, used: Set<string>, au
     if (typeof v === 'string' && assets[v]) used.add(v)
   }
   const addNested = (value: unknown, seen = new Set<unknown>()): void => {
-    if (typeof value === 'string') { add(value); return }
+    if (typeof value === 'string') {
+      add(value)
+      return
+    }
     if (!value || typeof value !== 'object' || seen.has(value)) return
     seen.add(value)
     if (Array.isArray(value)) value.forEach((item) => addNested(item, seen))
@@ -90,8 +98,11 @@ function addSceneAssets(scene: SceneDef, assets: AssetMap, used: Set<string>, au
     if (el.unboxing) {
       const u = el.unboxing
       add(u.bgAssetId)
-      add(u.back?.assetId); add(u.front?.assetId); add(u.top?.assetId)
-      add(u.winAssetId); add(u.loseAssetId)
+      add(u.back?.assetId)
+      add(u.front?.assetId)
+      add(u.top?.assetId)
+      add(u.winAssetId)
+      add(u.loseAssetId)
       add(u.revealSyncAssetId)
     }
     if (el.endscene) {
@@ -123,9 +134,17 @@ function innerHtmlText(src: string | undefined): string {
   if (comma < 0) return ''
   const body = src.slice(comma + 1)
   if (!/;base64/i.test(src.slice(0, comma))) {
-    try { return decodeURIComponent(body) } catch { return body }
+    try {
+      return decodeURIComponent(body)
+    } catch {
+      return body
+    }
   }
-  try { return atob(body) } catch { return '' }
+  try {
+    return atob(body)
+  } catch {
+    return ''
+  }
 }
 
 // Asset ids an HTML end card reads out of the HOST at runtime: export hoists the card's
@@ -308,10 +327,19 @@ async function compressWavInBrowser(src: string): Promise<string | null> {
     const wstr = (o: number, str: string): void => {
       for (let i = 0; i < str.length; i++) out.setUint8(o + i, str.charCodeAt(i))
     }
-    wstr(0, 'RIFF'); out.setUint32(4, 36 + pcm.length * 2, true); wstr(8, 'WAVE')
-    wstr(12, 'fmt '); out.setUint32(16, 16, true); out.setUint16(20, 1, true); out.setUint16(22, 1, true)
-    out.setUint32(24, rate, true); out.setUint32(28, rate * 2, true); out.setUint16(32, 2, true); out.setUint16(34, 16, true)
-    wstr(36, 'data'); out.setUint32(40, pcm.length * 2, true)
+    wstr(0, 'RIFF')
+    out.setUint32(4, 36 + pcm.length * 2, true)
+    wstr(8, 'WAVE')
+    wstr(12, 'fmt ')
+    out.setUint32(16, 16, true)
+    out.setUint16(20, 1, true)
+    out.setUint16(22, 1, true)
+    out.setUint32(24, rate, true)
+    out.setUint32(28, rate * 2, true)
+    out.setUint16(32, 2, true)
+    out.setUint16(34, 16, true)
+    wstr(36, 'data')
+    out.setUint32(40, pcm.length * 2, true)
     for (let i = 0; i < pcm.length; i++) {
       const v = Math.max(-1, Math.min(1, pcm[i]))
       out.setInt16(44 + i * 2, v < 0 ? v * 0x8000 : v * 0x7fff, true)
@@ -407,14 +435,20 @@ export async function processAssets(
         // weight and still get stripped.
         const FONT_FACE_RE = /@font-face\s*\{[^}]*url\s*\(\s*['"]data:[^'"]+['"]\s*\)[^}]*\}/gs
         const withoutFonts = optimize ? inner.replace(FONT_FACE_RE, '') : ''
-        if (optimize) inner = inner.replace(FONT_FACE_RE, (block) => {
-          const fam = /font-family\s*:\s*(['"]?)([^;'"}]+)\1/i.exec(block)?.[2]?.trim()
-          return fam && withoutFonts.includes(fam) ? block : ''
-        })
+        if (optimize)
+          inner = inner.replace(FONT_FACE_RE, (block) => {
+            const fam = /font-family\s*:\s*(['"]?)([^;'"}]+)\1/i.exec(block)?.[2]?.trim()
+            return fam && withoutFonts.includes(fam) ? block : ''
+          })
         // Hoist portrait and landscape videos out of the inner HTML into outer PA_ASSETS.
         // The srcdoc iframe is same-origin, so window.parent.PA_ASSETS is accessible at runtime.
         // This eliminates the double-base64 encoding and saves ~33% of combined video size.
-        for (const [varName, suffix] of optimize ? [['srcPortrait', '__p'], ['srcLandscape', '__l']] : []) {
+        for (const [varName, suffix] of optimize
+          ? [
+              ['srcPortrait', '__p'],
+              ['srcLandscape', '__l'],
+            ]
+          : []) {
           const re = new RegExp(`(const\\s+${varName}\\s*=\\s*)"(data:video/mp4;base64,[^"]+)"`)
           const m = inner.match(re)
           if (!m) continue
@@ -435,7 +469,9 @@ export async function processAssets(
           src = `data:text/html;base64,${bufToBase64(newBytes.buffer as ArrayBuffer)}`
           optimized = true
         }
-      } catch { /* keep original */ }
+      } catch {
+        /* keep original */
+      }
     }
     out[id] = { src, w: a.w, h: a.h, kind: a.kind } // compress is applied here; not needed at runtime
     report.push({ id, w: a.w, h: a.h, bytes: dataUrlBytes(src), optimized, remote: !src.startsWith('data:') })
@@ -446,7 +482,7 @@ export async function processAssets(
 // Quality steps tried in order when the first-pass result is still over budget.
 // Images are re-compressed first (cheap); if that can't reach the budget, the
 // video/audio encoding itself steps down (desktop ffmpeg only — see MEDIA_STEPS).
-const AUTO_FIT_STEPS = [0.70, 0.60, 0.50, 0.40, 0.30]
+const AUTO_FIT_STEPS = [0.7, 0.6, 0.5, 0.4, 0.3]
 
 // Last-resort media ladders: progressively smaller/rougher video + thinner audio.
 // Only used when the image ladder alone can't fit the budget, and only where the
@@ -461,13 +497,21 @@ async function recompressImages(processed: AssetMap, raw: AssetMap, quality: num
   const out: AssetMap = {}
   for (const [id, p] of Object.entries(processed)) {
     const r = raw[id]
-    if (!r || r.kind === 'video' || r.kind === 'audio') { out[id] = p; continue }
+    if (!r || r.kind === 'video' || r.kind === 'audio') {
+      out[id] = p
+      continue
+    }
     const src = await ensureDataUrl(r.src)
-    if (!/^data:image\/(png|jpe?g|webp)/i.test(src)) { out[id] = p; continue }
+    if (!/^data:image\/(png|jpe?g|webp)/i.test(src)) {
+      out[id] = p
+      continue
+    }
     try {
       const webp = await encodeWebp(src, quality)
       out[id] = { ...p, src: dataUrlBytes(webp) < dataUrlBytes(src) ? webp : src }
-    } catch { out[id] = p }
+    } catch {
+      out[id] = p
+    }
   }
   return out
 }
@@ -483,8 +527,7 @@ export async function processAssetsAutoFit(
   runtimeSrc: string,
 ): Promise<{ assets: AssetMap; report: AssetReport[]; quality: number }> {
   const first = await processAssets(rawAssets, optimize, quality, media)
-  const checkBytes = (a: AssetMap): number =>
-    buildOutputs(project, a, [{ name: 'base', tag: 'base' }], runtimeSrc).baseBytes
+  const checkBytes = (a: AssetMap): number => buildOutputs(project, a, [{ name: 'base', tag: 'base' }], runtimeSrc).baseBytes
 
   if (!optimize || checkBytes(first.assets) <= MAX_BYTES) return { ...first, quality }
 
@@ -574,9 +617,14 @@ export function blurWarnings(project: Project, assets: AssetMap): string[] {
         let m: RegExpExecArray | null
         while ((m = re.exec(inner))) {
           const b = Math.floor(m[1].length * 0.75)
-          if (b > FONT_WARN) warns.push(`Embedded HTML "${id}" carries a ${fontMb(b)}MB font. Subset/convert it (WOFF2) in the source HTML — it can't be auto-compressed without breaking its layout.`)
+          if (b > FONT_WARN)
+            warns.push(
+              `Embedded HTML "${id}" carries a ${fontMb(b)}MB font. Subset/convert it (WOFF2) in the source HTML — it can't be auto-compressed without breaking its layout.`,
+            )
         }
-      } catch { /* undecodable — skip */ }
+      } catch {
+        /* undecodable — skip */
+      }
     }
   }
   // An HTML end card whose clip was hoisted into PA_ASSETS reads it back through
@@ -587,7 +635,9 @@ export function blurWarnings(project: Project, assets: AssetMap): string[] {
   for (const [id, a] of Object.entries(assets))
     for (const ref of new Set(parentAssetRefs(a.src)))
       if (!assets[ref])
-        warns.push(`End card "${id}" reads its video from PA_ASSETS["${ref}"], which is not in this export — the card will play as a bare background. Re-upload the ORIGINAL card HTML (the one with its base64 video inline) for that endscene.`)
+        warns.push(
+          `End card "${id}" reads its video from PA_ASSETS["${ref}"], which is not in this export — the card will play as a bare background. Re-upload the ORIGINAL card HTML (the one with its base64 video inline) for that endscene.`,
+        )
   return warns
 }
 
@@ -940,17 +990,23 @@ export function buildOutputs(project: Project, assets: AssetMap, networks: Netwo
 }
 
 export function downloadBlob(filename: string, blob: Blob): void {
-  const nativeApi = (window as unknown as {
-    editorAPI?: {
-      saveExportFile?(name: string, bytes: ArrayBuffer): Promise<{ ok: boolean; path?: string; error?: string }>
+  const nativeApi = (
+    window as unknown as {
+      editorAPI?: {
+        saveExportFile?(name: string, bytes: ArrayBuffer): Promise<{ ok: boolean; path?: string; error?: string }>
+      }
     }
-  }).editorAPI
+  ).editorAPI
   if (nativeApi?.saveExportFile) {
-    void blob.arrayBuffer().then((bytes) => nativeApi.saveExportFile!(filename, bytes)).then((r) => {
-      if (!r.ok) throw new Error(r.error || 'export save failed')
-    }).catch((e) => {
-      alert('Export failed: ' + String((e as Error)?.message ?? e))
-    })
+    void blob
+      .arrayBuffer()
+      .then((bytes) => nativeApi.saveExportFile!(filename, bytes))
+      .then((r) => {
+        if (!r.ok) throw new Error(r.error || 'export save failed')
+      })
+      .catch((e) => {
+        void appAlert('Export failed: ' + String((e as Error)?.message ?? e))
+      })
     return
   }
   const url = URL.createObjectURL(blob)

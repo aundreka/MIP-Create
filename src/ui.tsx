@@ -8,20 +8,7 @@ import { ArrowDown, ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight, Icon
 import type { SortState } from './sort'
 import { getAccordion, getDock, setAccordion, setDock } from './uiState'
 
-// ---- confirmDestructive: gate an unrecoverable action behind a confirm -------
-// Used before project-replacing loads (loadProject clears undo history) and other
-// destructive actions. Centralized so we can later swap to a styled dialog.
-export function confirmDestructive(message: string): boolean {
-  return typeof window !== 'undefined' && typeof window.confirm === 'function' ? window.confirm(message) : true
-}
-
-export function SortButton<K extends string>(props: {
-  field: K
-  sort: SortState<K>
-  onSort: (field: K) => void
-  children: React.ReactNode
-  className?: string
-}): JSX.Element {
+export function SortButton<K extends string>(props: { field: K; sort: SortState<K>; onSort: (field: K) => void; children: React.ReactNode; className?: string }): JSX.Element {
   const active = props.sort.key === props.field
   const nextDir = active && props.sort.dir === 'asc' ? 'descending' : 'ascending'
   return (
@@ -100,33 +87,21 @@ export function NumField(props: {
 }
 
 // ---- Slider ----------------------------------------------------------------
-export function Slider(props: {
-  label: string
-  value: number
-  onChange: (n: number) => void
-  min: number
-  max: number
-  step?: number
-  suffix?: string
-}): JSX.Element {
+export function Slider(props: { label: string; value: number; onChange: (n: number) => void; min: number; max: number; step?: number; suffix?: string }): JSX.Element {
   // Show the value at the step's precision — a fractional step (e.g. 0.05 for zoom)
   // must NOT be rounded to an integer, or 1.2 would misleadingly read as "1".
-  const dec = props.step && props.step < 1 ? String(props.step).split('.')[1]?.length ?? 0 : 0
+  const dec = props.step && props.step < 1 ? (String(props.step).split('.')[1]?.length ?? 0) : 0
   const shown = dec ? props.value.toFixed(dec).replace(/\.?0+$/, '') : String(Math.round(props.value))
   return (
     <label className="field">
       <span>
-        {props.label} <em className="muted">{shown}{props.suffix ?? ''}</em>
+        {props.label}{' '}
+        <em className="muted">
+          {shown}
+          {props.suffix ?? ''}
+        </em>
       </span>
-      <input
-        className="slider"
-        type="range"
-        min={props.min}
-        max={props.max}
-        step={props.step ?? 1}
-        value={props.value}
-        onChange={(e) => props.onChange(Number(e.target.value))}
-      />
+      <input className="slider" type="range" min={props.min} max={props.max} step={props.step ?? 1} value={props.value} onChange={(e) => props.onChange(Number(e.target.value))} />
     </label>
   )
 }
@@ -233,7 +208,10 @@ export function Swatches(props: { label: string; value?: string; onChange: (c: s
   }
 
   const handleToggle = (): void => {
-    if (open) { setOpen(false); return }
+    if (open) {
+      setOpen(false)
+      return
+    }
     if (dotRef.current) {
       const r = dotRef.current.getBoundingClientRect()
       setPos({ top: r.bottom + 6, right: window.innerWidth - r.right })
@@ -250,7 +228,10 @@ export function Swatches(props: { label: string; value?: string; onChange: (c: s
           <button
             className={'swatch-dot none' + (!props.value ? ' sel' : '')}
             title="None"
-            onClick={() => { props.onChange(undefined); setOpen(false) }}
+            onClick={() => {
+              props.onChange(undefined)
+              setOpen(false)
+            }}
           />
         )}
         <button
@@ -261,65 +242,95 @@ export function Swatches(props: { label: string; value?: string; onChange: (c: s
           title={props.value ?? 'Pick color'}
         />
         {hasEyedropper && (
-          <button className="swatch-drop" title="Pick from screen" onClick={async () => {
-            const c = await eyedrop()
-            if (c) { props.onChange(c); setPalette(addToPalette(c)) }
-          }}>⦿</button>
+          <button
+            className="swatch-drop"
+            title="Pick from screen"
+            onClick={async () => {
+              const c = await eyedrop()
+              if (c) {
+                props.onChange(c)
+                setPalette(addToPalette(c))
+              }
+            }}
+          >
+            ⦿
+          </button>
         )}
       </div>
-      {open && pos && createPortal(
-        <div ref={popRef} className="swatch-popup" style={{ top: pos.top, right: pos.right }}>
-          <div className="swatches">
-            {palette.map((c) => (
-              <button
-                key={c}
-                className={'swatch' + (props.value?.toLowerCase() === c.toLowerCase() ? ' sel' : '')}
-                style={{ background: c }}
-                title={c}
-                onClick={() => { props.onChange(c); setOpen(false) }}
-              />
-            ))}
-            <label className="swatch custom" title="Custom color">
-              +
+      {open &&
+        pos &&
+        createPortal(
+          <div ref={popRef} className="swatch-popup" style={{ top: pos.top, right: pos.right }}>
+            <div className="swatches">
+              {palette.map((c) => (
+                <button
+                  key={c}
+                  className={'swatch' + (props.value?.toLowerCase() === c.toLowerCase() ? ' sel' : '')}
+                  style={{ background: c }}
+                  title={c}
+                  onClick={() => {
+                    props.onChange(c)
+                    setOpen(false)
+                  }}
+                />
+              ))}
+              <label className="swatch custom" title="Custom color">
+                +
+                <input
+                  type="color"
+                  value={toHex6(props.value)}
+                  onChange={(e) => {
+                    props.onChange(e.target.value)
+                    setPalette(addToPalette(e.target.value))
+                  }}
+                />
+              </label>
+              {hasEyedropper && (
+                <button
+                  className="swatch eyedrop"
+                  title="Pick from screen"
+                  onClick={async () => {
+                    const c = await eyedrop()
+                    if (c) {
+                      props.onChange(c)
+                      setPalette(addToPalette(c))
+                      setOpen(false)
+                    }
+                  }}
+                >
+                  ⦿
+                </button>
+              )}
+            </div>
+            <div className="swatch-hex">
+              <span aria-hidden="true">#</span>
               <input
-                type="color"
-                value={toHex6(props.value)}
-                onChange={(e) => { props.onChange(e.target.value); setPalette(addToPalette(e.target.value)) }}
+                value={hexDraft.replace(/^#/, '')}
+                placeholder="rrggbb"
+                spellCheck={false}
+                autoComplete="off"
+                aria-label="Hex color code"
+                title="Type a hex code — 3, 4, 6 or 8 digits"
+                onChange={(e) => {
+                  const raw = e.target.value.replace(/[^0-9a-fA-F]/g, '').slice(0, 8)
+                  setHexDraft(raw)
+                  // Preview live once the code is complete; shorthand waits for Enter/blur
+                  // so typing "f00…" toward "f00baa" doesn't flash the wrong colour.
+                  if (raw.length === 6 || raw.length === 8) props.onChange('#' + raw.toLowerCase())
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    commitHex(hexDraft)
+                    setOpen(false)
+                  }
+                  if (e.key === 'Escape') setOpen(false)
+                }}
+                onBlur={() => commitHex(hexDraft)}
               />
-            </label>
-            {hasEyedropper && (
-              <button className="swatch eyedrop" title="Pick from screen" onClick={async () => {
-                const c = await eyedrop()
-                if (c) { props.onChange(c); setPalette(addToPalette(c)); setOpen(false) }
-              }}>⦿</button>
-            )}
-          </div>
-          <div className="swatch-hex">
-            <span aria-hidden="true">#</span>
-            <input
-              value={hexDraft.replace(/^#/, '')}
-              placeholder="rrggbb"
-              spellCheck={false}
-              autoComplete="off"
-              aria-label="Hex color code"
-              title="Type a hex code — 3, 4, 6 or 8 digits"
-              onChange={(e) => {
-                const raw = e.target.value.replace(/[^0-9a-fA-F]/g, '').slice(0, 8)
-                setHexDraft(raw)
-                // Preview live once the code is complete; shorthand waits for Enter/blur
-                // so typing "f00…" toward "f00baa" doesn't flash the wrong colour.
-                if (raw.length === 6 || raw.length === 8) props.onChange('#' + raw.toLowerCase())
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') { commitHex(hexDraft); setOpen(false) }
-                if (e.key === 'Escape') setOpen(false)
-              }}
-              onBlur={() => commitHex(hexDraft)}
-            />
-          </div>
-        </div>,
-        document.body
-      )}
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   )
 }
@@ -457,7 +468,12 @@ export function SearchSelect<T extends string>(props: {
       setPos({ left: r.left, top: drop === 'down' ? r.bottom + 4 : r.top - 4, width: Math.max(r.width, 180), drop })
     }
     setQ('')
-    setHl(Math.max(0, props.options.findIndex((o) => o.value === props.value)))
+    setHl(
+      Math.max(
+        0,
+        props.options.findIndex((o) => o.value === props.value),
+      ),
+    )
     setOpen(true)
   }
 
@@ -521,16 +537,7 @@ export function SearchSelect<T extends string>(props: {
             style={{ left: pos.left, width: pos.width, ...(pos.drop === 'down' ? { top: pos.top } : { bottom: window.innerHeight - pos.top }) }}
             role="listbox"
           >
-            {searchable && (
-              <input
-                ref={inputRef}
-                className="search-select-search"
-                value={q}
-                placeholder="Search…"
-                onChange={(e) => setQ(e.target.value)}
-                onKeyDown={onKey}
-              />
-            )}
+            {searchable && <input ref={inputRef} className="search-select-search" value={q} placeholder="Search…" onChange={(e) => setQ(e.target.value)} onKeyDown={onKey} />}
             <div className="search-select-list">
               {shown.map((o, i) => (
                 <button
@@ -605,7 +612,14 @@ export function Help(props: { children: React.ReactNode }): JSX.Element {
   const [open, setOpen] = useState(false)
   return (
     <div className={'help' + (open ? ' open' : '')}>
-      <button type="button" className="help-btn" aria-expanded={open} aria-label={open ? 'Hide help' : 'Show help'} title={open ? 'Hide help' : 'Help'} onClick={() => setOpen((v) => !v)}>
+      <button
+        type="button"
+        className="help-btn"
+        aria-expanded={open}
+        aria-label={open ? 'Hide help' : 'Show help'}
+        title={open ? 'Hide help' : 'Help'}
+        onClick={() => setOpen((v) => !v)}
+      >
         <Icon icon={Info} size={13} />
       </button>
       {open && <div className="help-body">{props.children}</div>}
@@ -716,7 +730,12 @@ export function DockPanel(props: { id: string; side: 'left' | 'right'; defaultWi
     drag.current = null
     setDock(props.id, { w })
   }
-  const toggle = (): void => setCollapsed((c) => { const n = !c; setDock(props.id, { collapsed: n }); return n })
+  const toggle = (): void =>
+    setCollapsed((c) => {
+      const n = !c
+      setDock(props.id, { collapsed: n })
+      return n
+    })
   // chevron points the way the click moves the panel (collapse vs expand)
   const tabIcon = (props.side === 'left') === collapsed ? ChevronRight : ChevronLeft
   const tab = (

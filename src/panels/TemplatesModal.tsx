@@ -7,7 +7,8 @@ import { downloadBlob } from '../export'
 import { loadProject, useEditorState } from '../store'
 import { buildTemplateZip, readTemplateZip, STARTERS } from '../templates'
 import { Icon, Save, Upload } from '../icons'
-import { confirmDestructive, Modal } from '../ui'
+import { Modal } from '../ui'
+import { confirmDestructive } from './AppDialogs'
 
 export function TemplatesModal(props: { onClose: () => void }): JSX.Element {
   const { project, assets } = useEditorState()
@@ -15,10 +16,10 @@ export function TemplatesModal(props: { onClose: () => void }): JSX.Element {
   const [status, setStatus] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const startFrom = (id: string): void => {
+  const startFrom = async (id: string): Promise<void> => {
     const s = STARTERS.find((x) => x.id === id)
     if (!s) return
-    if (!confirmDestructive('Start from this template? This replaces your current project and cannot be undone.')) return
+    if (!(await confirmDestructive('Start from this template? This replaces your current project and cannot be undone.'))) return
     const data = s.build()
     loadProject(data.project, data.assets, null)
     props.onClose()
@@ -39,7 +40,7 @@ export function TemplatesModal(props: { onClose: () => void }): JSX.Element {
       setStatus('Not a valid .playable-template.zip')
       return
     }
-    if (!confirmDestructive('Load this template? This replaces your current project and cannot be undone.')) return
+    if (!(await confirmDestructive('Load this template? This replaces your current project and cannot be undone.'))) return
     loadProject(data.project, data.assets, null)
     props.onClose()
   }
@@ -58,13 +59,7 @@ export function TemplatesModal(props: { onClose: () => void }): JSX.Element {
       <button className="wide" onClick={() => fileRef.current?.click()}>
         <Icon icon={Upload} size={14} /> Open .playable-template.zip…
       </button>
-      <input
-        ref={fileRef}
-        type="file"
-        accept=".zip,.playable-template.zip,application/zip"
-        style={{ display: 'none' }}
-        onChange={(e) => void onFile(e.target.files?.[0])}
-      />
+      <input ref={fileRef} type="file" accept=".zip,.playable-template.zip,application/zip" style={{ display: 'none' }} onChange={(e) => void onFile(e.target.files?.[0])} />
 
       <div className="group-title">Save current as template</div>
       <label className="field">
@@ -77,8 +72,8 @@ export function TemplatesModal(props: { onClose: () => void }): JSX.Element {
 
       {status && <div className="figma-status">{status}</div>}
       <div className="hint pad">
-        Loading a starter or template <b>replaces</b> the current project. Save the current one first if you need it. A
-        template bundles the scene flow, chrome, CTA pulse, SFX and assets, so every MIP started from it stays on-brand.
+        Loading a starter or template <b>replaces</b> the current project. Save the current one first if you need it. A template bundles the scene flow, chrome, CTA pulse, SFX and
+        assets, so every MIP started from it stays on-brand.
       </div>
     </Modal>
   )
