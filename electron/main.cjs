@@ -8,6 +8,8 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const { execFile } = require('node:child_process')
+// The JS the upload automation runs inside the upload page (shared with scripts/applovin-check.mjs).
+const { addRowsJs, collectLinksJs, fillNamesJs, probeJs, resultJs, submitJs } = require('./applovinForm.cjs')
 
 // ffmpeg-static ships a per-platform binary. Under a packaged build it lives in
 // app.asar.unpacked (see electron-builder asarUnpack), so rewrite the asar path.
@@ -360,17 +362,7 @@ ipcMain.handle('applovin:probe', async (_e, payload = {}) => {
     const wc = w.webContents
     const addText = payload.addButtonText || 'Add Another Upload'
     const uploadText = payload.uploadButtonText || 'Upload'
-    const r = await wc.executeJavaScript(`(function(){
-      function has(t,exact){ t=t.toLowerCase(); return [...document.querySelectorAll('button,a,input[type=button],input[type=submit]')].some(function(el){var s=((el.innerText||el.value||'')+'').trim().toLowerCase(); return exact ? s===t : s.indexOf(t)>=0;}); }
-      return {
-        url: location.href,
-        title: document.title,
-        fileInputs: document.querySelectorAll('input[type=file]').length,
-        textInputs: [...document.querySelectorAll('input[type=text], input:not([type])')].filter(function(el){return el.offsetParent!==null && !el.readOnly;}).length,
-        addButton: has(${JSON.stringify(addText)}, false),
-        uploadButton: has(${JSON.stringify(uploadText)}, true)
-      };
-    })()`)
+    const r = await wc.executeJavaScript(probeJs(addText, uploadText))
     return { ok: true, ...r }
   } catch (e) {
     return { ok: false, error: String(e) }
@@ -379,14 +371,7 @@ ipcMain.handle('applovin:probe', async (_e, payload = {}) => {
 
 // Every http(s) URL on the page: anchors, text fields and plain text, in page order.
 function collectPageLinks(wc, mark) {
-  return wc.executeJavaScript(`(function(){
-    var mark=${JSON.stringify(String(mark || '').toLowerCase())}, out=[];
-    function push(v){ v=(v||'').trim(); if(/^https?:/i.test(v) && (!mark || v.toLowerCase().indexOf(mark)>=0) && out.indexOf(v)<0) out.push(v); }
-    document.querySelectorAll('a[href]').forEach(function(el){ push(el.href); push(el.textContent); });
-    document.querySelectorAll('input, textarea').forEach(function(el){ push(el.value); });
-    ((document.body && document.body.innerText) || '').split(/\\s+/).forEach(push);
-    return out;
-  })()`)
+  return wc.executeJavaScript(collectLinksJs(mark))
 }
 let alBaseline = new Set()
 
@@ -445,12 +430,7 @@ ipcMain.handle('applovin:upload', async (_e, payload = {}) => {
     const uploadText = payload.uploadButtonText || 'Upload'
 
     // 1) add rows until there are enough file inputs
-    await wc.executeJavaScript(`(function(){
-      function byText(t){ t=t.toLowerCase(); return [...document.querySelectorAll('button,a,input[type=button],input[type=submit]')].find(function(el){return ((el.innerText||el.value||'')+'').trim().toLowerCase().indexOf(t)>=0;}); }
-      var target=${paths.length}, guard=0;
-      while(document.querySelectorAll('input[type=file]').length < target && guard < 60){ var b=byText(${JSON.stringify(addText)}); if(!b) break; b.click(); guard++; }
-      return document.querySelectorAll('input[type=file]').length;
-    })()`)
+    await wc.executeJavaScript(addRowsJs(paths.length, addText))
     await new Promise((r) => setTimeout(r, 350))
 
     // 2) set each file input via CDP (JS cannot set file inputs)
@@ -473,51 +453,17 @@ ipcMain.handle('applovin:upload', async (_e, payload = {}) => {
     }
 
     // 3) fill the Iteration Name fields (i-th visible text input) + fire events
-    await wc.executeJavaScript(`(function(){
-      var names=${JSON.stringify(paths.map((p) => p.iteration))};
-      var texts=[...document.querySelectorAll('input[type=text], input:not([type])')].filter(function(el){return el.offsetParent!==null && !el.readOnly;});
-      var k=Math.min(names.length, texts.length);
-      for(var i=0;i<k;i++){ texts[i].value=names[i]; texts[i].dispatchEvent(new Event('input',{bubbles:true})); texts[i].dispatchEvent(new Event('change',{bubbles:true})); }
-      return k;
-    })()`)
+    await wc.executeJavaScript(fillNamesJs(paths.map((p) => p.iteration)))
 
     // 4) optionally submit
     let submitted = false
     if (payload.submit) {
-      submitted = await wc.executeJavaScript(`(function(){
-        function byText(t){ t=t.toLowerCase(); return [...document.querySelectorAll('button,a,input[type=button],input[type=submit]')].find(function(el){return ((el.innerText||el.value||'')+'').trim().toLowerCase()===t;}); }
-        var b=byText(${JSON.stringify(uploadText)}); if(b){ b.click(); return true; } return false;
-      })()`)
+      submitted = await wc.executeJavaScript(submitJs(uploadText))
     }
 
     const waitMs = Math.max(0, Math.min(15000, Number(payload.waitForResultMs) || 0))
     if (waitMs) await new Promise((r) => setTimeout(r, waitMs))
-    const result = await wc.executeJavaScript(`(function(){
-      var selector=${JSON.stringify(payload.resultLinkSelector || '')};
-      var hrefIncludes=${JSON.stringify(payload.resultLinkHrefIncludes || '')}.toLowerCase();
-      function keep(url){
-        if(!url || !/^https?:/i.test(url)) return false;
-        return !hrefIncludes || url.toLowerCase().indexOf(hrefIncludes) >= 0;
-      }
-      function push(list, value){
-        if(keep(value) && list.indexOf(value) < 0) list.push(value);
-      }
-      var out=[];
-      if(selector){
-        try {
-          var picked=document.querySelector(selector);
-          if(picked){
-            push(out, picked.href || picked.value || picked.textContent || '');
-          }
-        } catch {}
-      }
-      document.querySelectorAll('a[href]').forEach(function(el){ push(out, el.href || ''); });
-      document.querySelectorAll('input[type=text], input:not([type]), textarea').forEach(function(el){ push(out, el.value || ''); });
-      var text=(document.body && document.body.innerText) || '';
-      var matches=text.match(/https?:\\/\\/[^\\s"'<>]+/g) || [];
-      matches.forEach(function(v){ push(out, v); });
-      return { pageUrl: location.href, link: out[0] || '' };
-    })()`)
+    const result = await wc.executeJavaScript(resultJs(payload.resultLinkSelector, payload.resultLinkHrefIncludes))
 
     return { ok: true, files: n, submitted, pageUrl: result.pageUrl, link: result.link || undefined }
   } catch (e) {

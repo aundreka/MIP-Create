@@ -49,7 +49,9 @@ export async function buildDeliveryFiles(
   project: Project,
   assets: AssetMap,
   // variantIds narrows `variants` to those ids (undefined = every variant).
-  opts: { label?: string; variants?: boolean; variantIds?: string[]; sip?: boolean; runtimeSrc?: string } = {},
+  // mip: false leaves the base build out — an upload of the SIP (or one variant)
+  // alone, which the Upload modal's per-file ticks can ask for.
+  opts: { label?: string; mip?: boolean; variants?: boolean; variantIds?: string[]; sip?: boolean; runtimeSrc?: string } = {},
 ): Promise<DeliveryBatch> {
   const runtimeSrc = opts.runtimeSrc ?? (await fetchRuntimeSrc())
   const baseName = fileBaseName(project)
@@ -66,7 +68,7 @@ export async function buildDeliveryFiles(
     batch.files.push({ kind, name: o.filename, text: await (await o.make()).text(), bytes: o.bytes, iteration })
   }
 
-  await one('mip', stripVariants(project), baseName, mipLabel)
+  if (opts.mip !== false) await one('mip', stripVariants(project), baseName, mipLabel)
   if (opts.variants) {
     for (const v of (project.meta.variants ?? []).filter((x) => !opts.variantIds || opts.variantIds.includes(x.id))) {
       await one('variant', applyVariant(project, v), `${baseName}_${variantSlug(v.name)}`, `${mipLabel} / ${v.name}`)

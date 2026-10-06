@@ -71,6 +71,7 @@ npm run app:dev         # editor in Electron (point at the dev server)
 | `npm run format` / `format:check` | Prettier write / check |
 | `npm test` | Vitest unit tests (jsdom) |
 | `npm run smoke` | Render the real exported HTML headless and assert it mounts |
+| `npm run applovin` | Drive the upload automation against a mock upload form (no AppLovin login needed) |
 | `npm run app` | Run the built app in Electron |
 | `npm run dist` | Build + package installers (electron-builder) |
 

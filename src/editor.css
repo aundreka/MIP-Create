@@ -6045,3 +6045,85 @@ svg {
   max-height: min(70vh, 480px);
   overflow-y: auto;
 }
+
+/* ---- Upload modal: the per-playable file checklist and the Slack post ------ */
+.up-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 10px;
+}
+.up-group {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel-2);
+  padding: 5px 7px;
+}
+.up-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+}
+.up-group-head .spacer {
+  flex: 1 1 auto;
+}
+/* One row per file, so a MIP and its SIP are ticked independently. */
+.up-files {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 3px 0 0 20px;
+}
+/* The file name sits after the label, dimmed — the label is what's being picked. */
+.up-files .checkbox-label .hint {
+  font-size: 10px;
+  margin-left: 4px;
+  word-break: break-all;
+}
+.up-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 10px 4px;
+}
+.up-slack {
+  margin: 4px 10px;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 160px;
+  overflow: auto;
+}
+/* One preview link per line: name, link, copy, open — a batch can print a dozen. */
+.up-links {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 2px 10px;
+}
+.up-link {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-sm);
+}
+.up-link-name {
+  flex: 0 0 90px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.up-link .text-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.up-link button {
+  flex: 0 0 auto;
+}
