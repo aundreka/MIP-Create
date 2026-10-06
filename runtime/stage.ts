@@ -78,6 +78,13 @@ interface Rec {
   mountHost: HTMLElement
   content: HTMLElement | null
   intrinsic: { w: number; h: number }
+  // performance.now() at the moment this element REACHED the player: stamped at build
+  // and re-stamped by every arrival after it (the scene's entrance pass, a timeline cue,
+  // the game win that unhides it). The origin button.armAfterMs counts from, so a button
+  // can be made dead until its entrance animation has played. Re-stamping matters because
+  // a scene can be built long before it is shown (revealWhenCardReady) and a win overlay's
+  // buttons arrive seconds after the scene did.
+  armedAt: number
   // The scene root this element was built into. Not the same as outer.parentElement:
   // immune elements (every CTA, opted-in bars) are parked out into pa-stage for the
   // scene's whole life (parkImmune in scenes.ts), so a parked element that has to find
@@ -1620,14 +1627,22 @@ function runOneShot(rec: Rec, phase: OneShotPhase): void {
   const parts = composeOneShotAnimParts(rec.el, phase)
   if (parts.length) applyAnimParts(rec, parts, true)
 }
+/** Stamp "this element just reached the player" — the origin button.armAfterMs counts
+ * from, so a tap-lock measures from the entrance the player actually saw rather than
+ * from a scene build that may have happened seconds earlier. */
+function stampArmed(rec: Rec): void {
+  rec.armedAt = performance.now()
+}
 // Entrance (+ its loop, delayed to start after the entrance) — interactive only.
 function runEntrance(rec: Rec): void {
+  stampArmed(rec)
   applyAnimParts(rec, composeElementAnimParts(rec.el, true), true)
   applyLightray(rec, 'entrance')
   const cfg = phaseTypingConfig(rec.el, 'entrance') ?? rec.el.typing
   if (cfg) startTyping(rec, 0, cfg) // the typewriter shares the entrance's origin
 }
 function runGameWin(rec: Rec): void {
+  stampArmed(rec)
   runOneShot(rec, 'gameWin')
   applyLightray(rec, 'gameWin')
   const cfg = phaseTypingConfig(rec.el, 'gameWin')
@@ -2189,6 +2204,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     // One nested box per animation this element can run at the same time as another,
     // so stacked specs compose instead of overwriting each other (see applyAnimParts).
     // Almost every element wants exactly one, and then this chain is just `anim`.
+    const bornAt = performance.now()
     const layers: HTMLDivElement[] = [anim]
     for (let i = 1; i < Math.min(animLayerCount(el), MAX_ANIM_LAYERS); i++) {
       const layer = document.createElement('div')
@@ -2200,7 +2216,9 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
 
     // Resolve through byId so handlers see live inspector edits, not the element
     // as it was at build time (the update path swaps rec.el without rebuilding).
-    const content = mountContent(el, innermost, ctx, () => byId.get(el.id)?.el ?? el)
+    // armedAt resolves through byId for the same reason as the element itself: the
+    // stamp is re-set on arrival, long after this content was built.
+    const content = mountContent(el, innermost, ctx, () => byId.get(el.id)?.el ?? el, () => byId.get(el.id)?.armedAt ?? bornAt)
     // Marker for the scene manager: background elements get a physical-gap cover
     // in pa-stage (see parkImmune in scenes.ts), found via this class.
     if (el.type === 'background') outer.classList.add('pa-el--background')
@@ -2246,7 +2264,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
 
     const a = ctx.asset(el.assetId)
     const intrinsic = a ? { w: a.w, h: a.h } : { w: 100, h: 100 }
-    const rec: Rec = { el, outer, anim, layers, mountHost: innermost, content, intrinsic, sceneRoot: root }
+    const rec: Rec = { el, outer, anim, layers, mountHost: innermost, content, intrinsic, sceneRoot: root, armedAt: bornAt }
     if (el.type === 'confetti' && content) rec.confetti = createConfetti(content as HTMLCanvasElement, () => rec.el)
     recs.push(rec)
     byId.set(el.id, rec)
@@ -3257,6 +3275,10 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     playEntrances() {
       for (const rec of recs) {
         if (rec.el.hidden) continue // hidden/showOnWin elements animate when revealed
+        // Every visible element arrives NOW, animated or not: a scene held back while its
+        // end card loads was built long before this, and a tap-lock measured from that
+        // build would already have expired. runEntrance re-stamps the animated ones.
+        stampArmed(rec)
         if (rec.el.timing) continue // the scene timeline owns this element's entrance + enter SFX
         if (entranceTriggers(rec.el, 'onMount')) runEntrance(rec)
         else if (rec.el.typing) startTyping(rec) // typing doesn't require an entrance animation
@@ -3437,7 +3459,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
 // `getEl` resolves the CURRENT element (rec.el is swapped in place by the editor's
 // live-update path) — handlers that outlive the build must read through it.
 // ---------------------------------------------------------------------------
-function mountContent(el: SceneElement, anim: HTMLDivElement, ctx: RuntimeCtx, getEl: () => SceneElement): HTMLElement | null {
+function mountContent(el: SceneElement, anim: HTMLDivElement, ctx: RuntimeCtx, getEl: () => SceneElement, armedAt: () => number): HTMLElement | null {
   switch (el.type) {
     case 'dim':
       return null
@@ -3455,7 +3477,7 @@ function mountContent(el: SceneElement, anim: HTMLDivElement, ctx: RuntimeCtx, g
       return c
     }
     case 'button': {
-      const c = createButtonContent(el, getEl, ctx)
+      const c = createButtonContent(el, getEl, ctx, armedAt)
       anim.appendChild(c) // no auto-pulse; animates only if el.animations is set
       return c
     }
@@ -3518,7 +3540,7 @@ function mountContent(el: SceneElement, anim: HTMLDivElement, ctx: RuntimeCtx, g
       // but play the tap effect on the content, which carries no animation.
       if (el.button) {
         anim.style.cursor = 'pointer'
-        wireSceneNav(anim, c, getEl, ctx)
+        wireSceneNav(anim, c, getEl, ctx, armedAt)
       }
       return c
     }

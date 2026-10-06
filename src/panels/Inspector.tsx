@@ -586,6 +586,12 @@ function ButtonTapFields(props: { cfg: ButtonConfig; others: SceneDef[]; selfId:
       <Row label="Tap effect">
         <Select value={cfg.tapEffect ?? 'none'} onChange={(v) => patch({ tapEffect: v === 'none' ? undefined : (v as ButtonTapEffect) })} options={TAP_EFFECTS} />
       </Row>
+      <Slider label="Dead for" value={cfg.armAfterMs ?? 0} min={0} max={5000} step={100} suffix="ms" onChange={(n) => patch({ armAfterMs: n || undefined })} />
+      <Help>
+        Ignores taps for this long after the element appears, so the player can&rsquo;t tap through before the entrance animations have played (or spam it while its effect is
+        running). While locked a tap does nothing at all — no screen change, no tap effect, no sound. The clock starts when the element reaches the player: the screen&rsquo;s
+        entrance pass, its timeline cue, or the game win that reveals it. 0 = tappable at once.
+      </Help>
       {cfg.tapEffect === 'fade' && (
         <>
           <AssetPicker label="Fade to image" value={cfg.tapFadeAssetId} allowNone onChange={(aid) => patch({ tapFadeAssetId: aid ?? undefined })} />
@@ -6803,6 +6809,12 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                   ]}
                 />
               </Row>
+              <Slider label="Delay" value={cfg.delayMs ?? 0} min={0} max={5000} step={50} suffix="ms" onChange={(n) => set({ delayMs: n || undefined })} />
+              {(cfg.delayMs ?? 0) > 0 && (
+                <div className="hint pad">
+                  Holds the burst {cfg.delayMs}ms after the trigger — so it can land on a beat (a win jingle, the end of an entrance) instead of the instant the screen appears.
+                </div>
+              )}
               <Slider label="Pieces" value={cfg.pieces ?? 200} min={20} max={600} step={10} onChange={(n) => set({ pieces: n })} />
               <Slider label="Size" value={cfg.scalar ?? 1} min={0.4} max={3} step={0.1} suffix="×" onChange={(n) => set({ scalar: n })} />
               {/* Pop takes its launch speed from the radius, so Power would fight it. */}

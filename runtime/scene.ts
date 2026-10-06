@@ -478,6 +478,15 @@ export interface ButtonConfig {
   tapFadeAssetId?: string
   // 'fade' only: cross-fade duration in ms; unset = TAP_FADE_DEFAULT_MS. 0 = instant swap.
   tapFadeMs?: number
+  // Dead for this many ms after the element arrives, so the player can't tap
+  // through a screen before its entrance animations have played (or spam a button
+  // whose effect is still running). While locked the tap is swallowed whole: no
+  // navigation, no tap effect, no tap sound. Unset/0 = tappable at once.
+  //
+  // The clock starts when the element REACHES the player — the scene's entrance
+  // pass, the timeline cue that reveals it, or the game win that unhides it —
+  // not when the scene was built (a scene can be built well before it is shown).
+  armAfterMs?: number
   // Ids of OTHER tappable elements on the same scene (buttons, CTAs, images marked
   // as buttons). Tapping any of them presses THIS element too: its tap effect
   // (press/glow/outline/fade) and its on-tap animation replay as if the player had
@@ -1233,6 +1242,11 @@ export interface ConfettiConfig {
   // out-of-focus pieces in front of the lens for depth.
   mode?: 'rain' | 'burst' | 'pop'
   trigger?: 'sceneEnter' | 'onGameWin' // when it fires (default sceneEnter)
+  // Hold the burst for this many ms after the trigger, so it can land ON a beat
+  // (a win jingle, the end of an entrance animation) instead of the instant the
+  // scene appears. Unset/0 = fire immediately. Rain counts durationMs from the
+  // moment it actually starts, so a delay shifts the whole emission window.
+  delayMs?: number
   pieces?: number // particle count (default 200)
   colors?: string[] // palette (default a Material-ish 16-colour set; 6 party colours for pop)
   gravity?: number // downward acceleration per frame (default 0.08 rain / 0.28 burst / 0.05 pop)

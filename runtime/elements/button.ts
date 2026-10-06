@@ -98,18 +98,36 @@ export interface TapFeedback {
 }
 export const tapFeedbackByNode = new WeakMap<HTMLElement, TapFeedback>()
 
+/**
+ * `armedAt` is the moment this element reached the player, as a performance.now()
+ * reading — the origin button.armAfterMs counts from. A getter, not a number,
+ * because a scene can be built long before it is shown and an element can arrive
+ * later still (a timeline cue, a game win unhiding it); the stage re-stamps it at
+ * each of those moments and we read the live value at tap time.
+ */
 export function wireSceneNav(
   listen: HTMLElement,
   effectNode: HTMLElement,
   getEl: () => SceneElement,
   ctx: RuntimeCtx,
+  armedAt?: () => number,
 ): void {
   let held = '' // the pa-tap-* class currently applied, '' when released
+
+  // Still inside the arm window (button.armAfterMs): the element is on screen but
+  // dead. Checked in press() as well as click, so a locked button gives no visual
+  // or audible answer at all rather than flashing its tap effect and going nowhere.
+  const locked = (): boolean => {
+    const wait = Math.max(0, getEl().button?.armAfterMs ?? 0)
+    if (!wait || !armedAt) return false
+    return performance.now() - armedAt() < wait
+  }
 
   const press = (): void => {
     const el = getEl()
     const fx = el.button?.tapEffect
     if (!fx || fx === 'none') return
+    if (locked()) return
     // The cross-fade is a one-shot swap, not a held state — it neither uses a
     // pa-tap-* class nor has anything for release() to undo.
     if (fx === 'fade') {
@@ -155,6 +173,9 @@ export function wireSceneNav(
 
   listen.addEventListener('click', (ev) => {
     ev.stopPropagation()
+    // Swallowed whole while locked: the gesture is already stopPropagation()'d, so
+    // the scene's tap-to-advance doesn't pick it up either — nothing happens.
+    if (locked()) return
     ctx.emit('sfx', 'tap')
     const cfg = getEl().button
     if (cfg?.stay) return // tap effect only — deliberately goes nowhere
@@ -184,7 +205,7 @@ export function wireSceneNav(
   })
 }
 
-export function createButtonContent(el: SceneElement, getEl: () => SceneElement, ctx: RuntimeCtx): HTMLButtonElement {
+export function createButtonContent(el: SceneElement, getEl: () => SceneElement, ctx: RuntimeCtx, armedAt?: () => number): HTMLButtonElement {
   const btn = document.createElement('button')
   btn.type = 'button'
   btn.className = 'pa-cta' // reuse CTA base styling (reset border, cursor, etc.)
@@ -202,7 +223,7 @@ export function createButtonContent(el: SceneElement, getEl: () => SceneElement,
     btn.textContent = localize(el.text) || 'BUTTON'
   }
 
-  wireSceneNav(btn, btn, getEl, ctx)
+  wireSceneNav(btn, btn, getEl, ctx, armedAt)
 
   return btn
 }

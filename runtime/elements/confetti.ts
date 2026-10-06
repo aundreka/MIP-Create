@@ -93,6 +93,7 @@ export function createConfetti(canvas: HTMLCanvasElement, getEl: () => SceneElem
   let dpr = 1
   let mode: 'live' | 'static' | 'idle' = 'idle'
   let waitRaf = 0 // rAF id for the "wait until laid out" retry (bounded)
+  let delayTimer = 0 // setTimeout id for cfg().delayMs, 0 when nothing is pending
   let prevT = 0 // timestamp of the last frame, for delta-time normalization
   let filterOK: boolean | null = null // ctx.filter support, probed once
 
@@ -427,7 +428,24 @@ export function createConfetti(canvas: HTMLCanvasElement, getEl: () => SceneElem
     waitRaf = requestAnimationFrame(() => whenSized(fn, tries + 1))
   }
 
+  // The trigger fired; `delayMs` holds the burst back so it can land ON a beat
+  // instead of the instant the scene appears. The timer is cleared by stop() and
+  // renderStatic(), so a scene change mid-countdown can't pop confetti over the
+  // next screen.
   function start(): void {
+    if (running || delayTimer) return
+    const wait = Math.max(0, cfg().delayMs ?? 0)
+    if (wait > 0) {
+      delayTimer = window.setTimeout(() => {
+        delayTimer = 0
+        begin()
+      }, wait)
+      return
+    }
+    begin()
+  }
+
+  function begin(): void {
     if (running) return
     if (waitRaf) cancelAnimationFrame(waitRaf)
     whenSized(() => {
@@ -442,6 +460,8 @@ export function createConfetti(canvas: HTMLCanvasElement, getEl: () => SceneElem
 
   function stop(): void {
     running = false
+    if (delayTimer) clearTimeout(delayTimer)
+    delayTimer = 0
     if (raf) cancelAnimationFrame(raf)
     if (waitRaf) cancelAnimationFrame(waitRaf)
     raf = 0
@@ -451,6 +471,8 @@ export function createConfetti(canvas: HTMLCanvasElement, getEl: () => SceneElem
   }
 
   function renderStatic(): void {
+    if (delayTimer) clearTimeout(delayTimer)
+    delayTimer = 0
     if (raf) cancelAnimationFrame(raf)
     if (waitRaf) cancelAnimationFrame(waitRaf)
     raf = 0
