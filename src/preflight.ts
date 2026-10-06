@@ -4,7 +4,7 @@
 // store click URL. Pure + framework-free so it can also run in CI later.
 
 import type { Project } from '../runtime/scene'
-import { fmtBytes, type Network } from './export'
+import { endsceneAssetIds, fmtBytes, type Network } from './export'
 import { coversYearFrom, usesHolidayToken, validatePromoCalendar } from './promoCalendar'
 import { subconceptToken } from './mipName'
 
@@ -68,6 +68,23 @@ function holidayFindings(project: Project): Finding[] {
   return out
 }
 
+// An asset whose src stayed an http(s) URL. RESOURCE_URL cannot see these: a PA_ASSETS
+// entry is JSON (`"src":"https://…"`), not a resource attribute, and the runtime only
+// assigns it to an element once that asset is shown. The file therefore passes every
+// attribute-level scan and still fetches over the network inside the container.
+const REMOTE_ASSET_SRC = /"src"\s*:\s*"\s*https?:/gi
+
+/** The PA_ASSETS src of one asset id in a built export, or null when the id is absent.
+ * A bounded forward scan rather than a JSON.parse: the asset map is most of a 5MB file
+ * and preflight runs once per network. */
+function assetSrcInHtml(html: string, id: string): string | null {
+  const at = html.indexOf(`${JSON.stringify(id)}:{`)
+  if (at < 0) return null
+  const window_ = html.slice(at, at + 512)
+  const m = /"src"\s*:\s*"([^"]{0,80})/.exec(window_)
+  return m ? m[1] : null
+}
+
 export function preflightNetwork(net: Network, html: string, bytes: number, project: Project): PreflightResult {
   const findings: Finding[] = []
   const max = NET_MAX[net.tag] ?? DEFAULT_MAX
@@ -77,6 +94,24 @@ export function preflightNetwork(net: Network, html: string, bytes: number, proj
 
   const ext = html.match(RESOURCE_URL) ?? []
   if (ext.length) findings.push({ level: 'error', message: `${ext.length} external resource reference(s); playables must inline everything (no http(s) in src/href/url()/fetch).` })
+
+  const remoteAssets = html.match(REMOTE_ASSET_SRC) ?? []
+  if (remoteAssets.length)
+    findings.push({
+      level: 'error',
+      message: `${remoteAssets.length} asset(s) ship a remote http(s) src instead of inline base64 — they will be fetched over the network at runtime. Re-export with those assets reachable, or re-upload them as local files.`,
+    })
+
+  // Endscene media is assigned from PA_ASSETS at runtime (<video>.src / <img>.src /
+  // iframe srcdoc), so a missing or non-base64 entry is invisible everywhere else: the
+  // card renders fine in the editor and ships as a bare background colour, or as a
+  // network fetch. Checked against the BUILT file, per id, so it also catches an asset
+  // the pruning walk dropped.
+  for (const id of endsceneAssetIds(project)) {
+    const src = assetSrcInHtml(html, id)
+    if (src === null) findings.push({ level: 'error', message: `Endscene asset "${id}" is not in PA_ASSETS; the end card will play as a bare background.` })
+    else if (!/^data:[^,]*;base64,/i.test(src)) findings.push({ level: 'error', message: `Endscene asset "${id}" is not base64-encoded in the output (src starts "${src.slice(0, 40)}").` })
+  }
 
   const ctaMode = project.meta.clickUrlMode ?? 'store'
   const click = project.meta.clickUrl

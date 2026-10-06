@@ -202,3 +202,56 @@ describe('preflight — dynamic holiday', () => {
     expect(messages(p)).toMatch(/No promo calendar/)
   })
 })
+
+describe('endscene base64 preflight', () => {
+  const endProject = (endscene: Record<string, unknown>): Project => {
+    const p = baseProject()
+    p.scenes.push({
+      id: 's2',
+      name: 'End',
+      kind: 'endscene',
+      advance: { on: 'manual' },
+      elements: [{ id: 'e', type: 'endscene', name: 'Card', x: 0, y: 0, anchor: 'center', zIndex: 0, mode: 'extend', endscene: { objectFit: 'cover', bgColor: '#000', ...endscene } as never }],
+    })
+    return p
+  }
+  const withAssets = (map: Record<string, string>): string =>
+    `<html><head>${MRAID_OK}</head><body><script>window.PA_ASSETS={\n` +
+    Object.entries(map)
+      .map(([k, v]) => `${JSON.stringify(k)}:${JSON.stringify({ src: v, w: 0, h: 0, kind: 'video' })}`)
+      .join(',\n') +
+    `\n};</script></body></html>`
+
+  it('passes when every endscene asset is base64 in the output', () => {
+    const html = withAssets({ vp: 'data:video/mp4;base64,AAAA', vl: 'data:video/mp4;base64,BBBB' })
+    const r = preflightNetwork(NET, html, 1000, endProject({ portraitVideoId: 'vp', landscapeVideoId: 'vl' }))
+    expect(r.errors).toBe(0)
+  })
+
+  it('errors when an endscene asset is absent from PA_ASSETS', () => {
+    const html = withAssets({ vp: 'data:video/mp4;base64,AAAA' })
+    const r = preflightNetwork(NET, html, 1000, endProject({ portraitVideoId: 'vp', landscapeVideoId: 'vl' }))
+    expect(r.findings.some((f) => f.level === 'error' && /"vl" is not in PA_ASSETS/.test(f.message))).toBe(true)
+  })
+
+  it('errors when an endscene asset ships a remote src', () => {
+    const html = withAssets({ vp: 'https://cdn.example.com/end.mp4' })
+    const r = preflightNetwork(NET, html, 1000, endProject({ portraitVideoId: 'vp' }))
+    // Both the generic remote-asset gate and the endscene-specific one fire.
+    expect(r.findings.some((f) => f.level === 'error' && /remote http\(s\) src/.test(f.message))).toBe(true)
+    expect(r.findings.some((f) => f.level === 'error' && /"vp" is not base64-encoded/.test(f.message))).toBe(true)
+  })
+
+  it('errors on a percent-encoded endscene data URL', () => {
+    const html = withAssets({ card: 'data:text/html,%3Chtml%3E' })
+    const r = preflightNetwork(NET, html, 1000, endProject({ mode: 'html', htmlId: 'card' }))
+    expect(r.findings.some((f) => f.level === 'error' && /"card" is not base64-encoded/.test(f.message))).toBe(true)
+  })
+
+  it('ignores a stale asset from the inactive endscene mode', () => {
+    // mode unset = video, so a leftover htmlId must not be demanded in the output.
+    const html = withAssets({ vp: 'data:video/mp4;base64,AAAA' })
+    const r = preflightNetwork(NET, html, 1000, endProject({ portraitVideoId: 'vp', htmlId: 'stale' }))
+    expect(r.errors).toBe(0)
+  })
+})

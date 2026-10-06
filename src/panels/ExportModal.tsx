@@ -7,6 +7,7 @@ import {
   buildBaseHtml,
   buildOutputs,
   downloadBlob,
+  endsceneAssetFindings,
   fetchRuntimeSrc,
   fmtBytes,
   MAX_BYTES,
@@ -122,7 +123,9 @@ export function ExportModal(props: { onClose: () => void; onQaCheck?: () => void
         setReport(report)
         setBaseBytes(baseBytes)
         setAutoQ(Math.round(usedQ * 100) < quality ? Math.round(usedQ * 100) : null)
-        setWarns(blurWarnings(project, out))
+        // Endscene findings first: a non-base64 / missing end card is a delivery
+        // failure, not a cosmetic warning, and it is invisible in the preview.
+        setWarns([...endsceneAssetFindings(project, out), ...blurWarnings(project, out)])
       } catch (e) {
         if (!cancelled) setErr('Could not process assets (compression may have failed): ' + String(e))
       } finally {

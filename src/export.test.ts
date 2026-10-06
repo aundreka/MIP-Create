@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { blurWarnings, buildBaseHtml, NETWORKS, processAssets, pruneAssets, stripSourceMap, transformForNetwork } from './export'
+import { blurWarnings, buildBaseHtml, endsceneAssetFindings, NETWORKS, processAssets, pruneAssets, stripSourceMap, transformForNetwork } from './export'
 import type { Project } from '../runtime/scene'
 import type { AssetMap } from '../runtime/types'
 
@@ -295,5 +295,84 @@ describe('font size warnings', () => {
   it('stays quiet for small fonts', () => {
     const warns = blurWarnings(projWith([]), { SmallFont: { src: 'data:font/ttf;base64,' + 'A'.repeat(1024), w: 0, h: 0, kind: 'font' } })
     expect(warns).toEqual([])
+  })
+})
+
+describe('endscene base64 encoding', () => {
+  const endsceneProject = (endscene: Record<string, unknown>): Project => ({
+    meta: { schemaVersion: 1, name: 'p', clickUrl: { ios: '', android: '' }, baseW: 1080, baseH: 1920 },
+    scenes: [
+      {
+        id: 's1',
+        name: 'End',
+        kind: 'endscene',
+        advance: { on: 'manual' },
+        elements: [{ id: 'e', type: 'endscene', name: 'Card', x: 0, y: 0, anchor: 'center', zIndex: 0, mode: 'extend', endscene: { objectFit: 'cover', bgColor: '#000', ...endscene } as never }],
+      },
+    ],
+    startSceneId: 's1',
+  })
+
+  it('keeps every active-mode endscene asset in the export', () => {
+    const assets: AssetMap = {
+      vp: { src: 'data:video/mp4;base64,AA', w: 0, h: 0, kind: 'video' },
+      vl: { src: 'data:video/mp4;base64,BB', w: 0, h: 0, kind: 'video' },
+      ip: { src: 'data:image/webp;base64,CC', w: 1, h: 1 },
+      stale: { src: 'data:text/html;base64,DD', w: 0, h: 0, kind: 'html' },
+    }
+    const p = endsceneProject({ portraitVideoId: 'vp', landscapeVideoId: 'vl', portraitImageId: 'ip', htmlId: 'stale' })
+    // mode is unset (= video), so the leftover html asset must NOT ride along.
+    expect(Object.keys(pruneAssets(p, assets)).sort()).toEqual(['ip', 'vl', 'vp'])
+  })
+
+  it('flags an endscene asset that is not in the export', () => {
+    const p = endsceneProject({ portraitVideoId: 'gone' })
+    const found = endsceneAssetFindings(p, {})
+    expect(found).toHaveLength(1)
+    expect(found[0]).toContain('"gone"')
+    expect(found[0]).toContain('not in this export')
+  })
+
+  it('flags an endscene asset left as a remote URL', () => {
+    const p = endsceneProject({ portraitVideoId: 'vp' })
+    const found = endsceneAssetFindings(p, { vp: { src: 'https://cdn.example.com/end.mp4', w: 0, h: 0, kind: 'video' } })
+    expect(found).toHaveLength(1)
+    expect(found[0]).toContain('still a remote URL')
+  })
+
+  it('flags a percent-encoded endscene data URL', () => {
+    const p = endsceneProject({ mode: 'html', htmlId: 'card' })
+    const found = endsceneAssetFindings(p, { card: { src: 'data:text/html,%3Chtml%3E', w: 0, h: 0, kind: 'html' } })
+    expect(found).toHaveLength(1)
+    expect(found[0]).toContain('percent-encoded')
+  })
+
+  it('passes a fully base64 endscene', () => {
+    const p = endsceneProject({ portraitVideoId: 'vp', landscapeVideoId: 'vl' })
+    const assets: AssetMap = {
+      vp: { src: 'data:video/mp4;base64,AA', w: 0, h: 0, kind: 'video' },
+      vl: { src: 'data:video/mp4;base64,BB', w: 0, h: 0, kind: 'video' },
+    }
+    expect(endsceneAssetFindings(p, assets)).toEqual([])
+  })
+
+  it('checks a per-language endscene override too', () => {
+    const p = endsceneProject({ portraitVideoId: 'vp' })
+    p.scenes[0].elements[0].localeOverrides = { es: { source: { ...p.scenes[0].elements[0], endscene: { objectFit: 'cover', bgColor: '#000', portraitVideoId: 'es_missing' } } } }
+    const found = endsceneAssetFindings(p, { vp: { src: 'data:video/mp4;base64,AA', w: 0, h: 0, kind: 'video' } })
+    expect(found).toHaveLength(1)
+    expect(found[0]).toContain('es_missing')
+    expect(found[0]).toContain('(es)')
+  })
+
+  it('re-encodes a percent-encoded HTML end card as base64', async () => {
+    const markup = '<html><head><script src="mraid.js"></script></head><body>End · café</body></html>'
+    const assets: AssetMap = { card: { src: 'data:text/html,' + encodeURIComponent(markup), w: 0, h: 0, kind: 'html' } }
+    const { assets: out } = await processAssets(assets, false, 1)
+    expect(out.card.src.startsWith('data:text/html;base64,')).toBe(true)
+    const decoded = new TextDecoder().decode(Uint8Array.from(atob(out.card.src.split(',')[1]), (c) => c.charCodeAt(0)))
+    // UTF-8 survives the round trip, and the duplicate inner bridge is still stripped.
+    expect(decoded).toContain('End · café')
+    expect(decoded).not.toContain('mraid.js')
   })
 })

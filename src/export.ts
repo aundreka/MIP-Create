@@ -5,7 +5,7 @@
 // variants (mraid/exitapi injection, zip where required).
 
 import JSZip from 'jszip'
-import type { Project, SceneDef } from '../runtime/scene'
+import type { EndsceneConfig, Project, SceneDef } from '../runtime/scene'
 import type { AssetMap, CompressProfile } from '../runtime/types'
 import { remoteToDataUrl } from './net'
 import { appAlert } from './panels/AppDialogs'
@@ -64,6 +64,33 @@ export async function fetchRuntimeSrc(): Promise<string> {
 
 export const MAX_BYTES = 5 * 1024 * 1024
 
+/** The asset-id fields an endscene config actually uses, as [field, id] pairs.
+ * Only the ACTIVE mode's fields: the other mode's ids may still be set from a
+ * previous mode switch, and inlining those would add several MB of video nothing
+ * plays. Shared by the collection walk (pruneAssets) and the base64 verification
+ * (endsceneAssetFindings) so the two can never disagree about what ships. */
+export function endsceneAssetFields(cfg: EndsceneConfig): [field: string, id: string][] {
+  const out: [string, string][] = []
+  const add = (field: string, id: string | undefined): void => {
+    if (id) out.push([field, id])
+  }
+  // Mode is read exactly as the runtime reads it (createEndsceneContent: `mode === 'html'`,
+  // video otherwise). The old test here was `mode !== 'video'`, which treats an UNSET mode
+  // as possibly-html and shipped a stale card from an earlier mode switch — dead weight
+  // the runtime never renders, and a false "endscene not base64" finding on an asset
+  // nothing plays.
+  if (cfg.mode === 'html') {
+    add('htmlId', cfg.htmlId)
+    add('htmlLandscapeId', cfg.htmlLandscapeId)
+  } else {
+    add('portraitVideoId', cfg.portraitVideoId)
+    add('landscapeVideoId', cfg.landscapeVideoId)
+    add('portraitImageId', cfg.portraitImageId)
+    add('landscapeImageId', cfg.landscapeImageId)
+  }
+  return out
+}
+
 // Collect the asset ids a single scene references into `used`. `audio` includes
 // per-element sound bindings (needed for a real export); the editor's static
 // frames/thumbnails pass false since a non-interactive render never plays audio.
@@ -105,24 +132,43 @@ function addSceneAssets(scene: SceneDef, assets: AssetMap, used: Set<string>, au
       add(u.loseAssetId)
       add(u.revealSyncAssetId)
     }
-    if (el.endscene) {
-      const esc = el.endscene
-      // Only include assets relevant to the active mode — the other mode's
-      // assets may still be set from a previous mode switch and would bloat
-      // the export with several MB of unused video data.
-      if (esc.mode !== 'html') {
-        add(esc.portraitVideoId)
-        add(esc.landscapeVideoId)
-        add(esc.portraitImageId)
-        add(esc.landscapeImageId)
-      }
-      if (esc.mode !== 'video') {
-        add(esc.htmlId)
-        add(esc.htmlLandscapeId)
-      }
-    }
+    if (el.endscene) for (const [, id] of endsceneAssetFields(el.endscene)) add(id)
     if (audio && el.sfx) for (const b of el.sfx) add(b.assetId)
   }
+}
+
+/** The raw bytes behind a `data:text/html` URL, base64- or percent-encoded, or null
+ * when it is neither. The caller decodes them as UTF-8; atob alone would mangle any
+ * non-ASCII glyph in an end card's copy. */
+function decodeHtmlDataUrl(src: string): Uint8Array | null {
+  if (!src.startsWith('data:text/html')) return null
+  const comma = src.indexOf(',')
+  if (comma < 0) return null
+  const body = src.slice(comma + 1)
+  if (/;base64/i.test(src.slice(0, comma))) {
+    try {
+      const bin = atob(body)
+      const out = new Uint8Array(bin.length)
+      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
+      return out
+    } catch {
+      return null
+    }
+  }
+  // Percent-encoded: each %XX is one byte, everything else is its own ASCII byte.
+  const out: number[] = []
+  for (let i = 0; i < body.length; i++) {
+    if (body[i] === '%' && i + 2 < body.length) {
+      const b = parseInt(body.slice(i + 1, i + 3), 16)
+      if (!Number.isNaN(b)) {
+        out.push(b)
+        i += 2
+        continue
+      }
+    }
+    out.push(body.charCodeAt(i) & 0xff)
+  }
+  return new Uint8Array(out)
 }
 
 /** The decoded markup of an inlined HTML asset (an imported end card), or '' for
@@ -418,12 +464,17 @@ export async function processAssets(
           optimized = true
         }
       }
-    } else if (a.kind === 'html' && src.startsWith('data:text/html;base64,')) {
+    } else if (a.kind === 'html' && src.startsWith('data:text/html')) {
       try {
-        const b64 = src.slice(src.indexOf(',') + 1)
-        const binStr = atob(b64)
-        const bytes = new Uint8Array(binStr.length)
-        for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i)
+        // An HTML end card can arrive PERCENT-encoded (`data:text/html,<html>…`) rather
+        // than base64 — a hand-written asset, or anything that round-tripped through a
+        // URL-encoding tool. Both encodings are decoded here and the card is always
+        // re-emitted as base64: percent-encoding an end card's inline mp4 costs ~3 bytes
+        // per byte against the 5MB budget, and the branch below (bridge strip, font
+        // strip, clip hoist) used to skip those cards entirely.
+        const wasBase64 = /^data:text\/html[^,]*;base64,/i.test(src)
+        const bytes = decodeHtmlDataUrl(src)
+        if (!bytes) throw new Error('undecodable HTML asset')
         let inner = new TextDecoder().decode(bytes)
         // Runs whether or not `optimize` is set: a duplicate bridge blocks delivery.
         inner = inner.replace(INNER_MRAID_BRIDGE_RE, '')
@@ -465,7 +516,10 @@ export async function processAssets(
           inner = inner.replace(m[0], m[1] + ref)
         }
         const newBytes = new TextEncoder().encode(inner)
-        if (newBytes.length < bytes.length) {
+        // A percent-encoded card is re-encoded unconditionally: even when the markup is
+        // untouched, base64 is the smaller wire form and the only one every consumer of
+        // these assets (preflight, compress-playable.py, the hoist regex) expects.
+        if (!wasBase64 || newBytes.length < bytes.length) {
           src = `data:text/html;base64,${bufToBase64(newBytes.buffer as ArrayBuffer)}`
           optimized = true
         }
@@ -639,6 +693,67 @@ export function blurWarnings(project: Project, assets: AssetMap): string[] {
           `End card "${id}" reads its video from PA_ASSETS["${ref}"], which is not in this export — the card will play as a bare background. Re-upload the ORIGINAL card HTML (the one with its base64 video inline) for that endscene.`,
         )
   return warns
+}
+
+// A `data:` URL that is actually base64, not percent-encoded. Anything else in an
+// export is either a remote reference (an http(s) fetch at runtime = instant network
+// rejection) or a percent-encoded payload, which is ~33% bigger for binary media and
+// is not what the delivery scanners read.
+const BASE64_DATA_URL = /^data:[^,]*;base64,/i
+
+/** Every endscene asset in this project, as [field, id] pairs tagged with where it
+ * came from — including per-language element and scene overrides, which can each
+ * carry a whole endscene of their own. */
+function endsceneRefs(project: Project): { scene: string; element: string; field: string; id: string }[] {
+  const out: { scene: string; element: string; field: string; id: string }[] = []
+  const walkScene = (scene: SceneDef, label: string): void => {
+    for (const el of scene.elements) {
+      const cfgs: [string, EndsceneConfig][] = []
+      if (el.endscene) cfgs.push([el.name || el.id, el.endscene])
+      for (const [loc, ov] of Object.entries(el.localeOverrides ?? {}))
+        if (ov.source?.endscene) cfgs.push([`${el.name || el.id} (${loc})`, ov.source.endscene])
+      for (const [element, cfg] of cfgs) for (const [field, id] of endsceneAssetFields(cfg)) out.push({ scene: label, element, field, id })
+    }
+    for (const [loc, ov] of Object.entries(scene.localeOverrides ?? {})) walkScene(ov.source, `${label} (${loc})`)
+  }
+  for (const scene of project.scenes) walkScene(scene, scene.name || scene.id)
+  return out
+}
+
+/** Asset ids every endscene in the project needs at runtime, deduped. */
+export function endsceneAssetIds(project: Project): string[] {
+  return [...new Set(endsceneRefs(project).map((r) => r.id))]
+}
+
+/**
+ * Endscene assets that will NOT ship as base64 — the one asset class where that
+ * failure is invisible until the creative is in a container.
+ *
+ * Every other asset either shows up wrong in the editor preview or trips the
+ * preflight's `src=`/`url()` scan. An endscene's media is assigned at RUNTIME, from
+ * `PA_ASSETS[id].src` straight onto `<video>.src` / `<img>.src` / `iframe.srcdoc`, so
+ * a src that stayed an http(s) URL sits inside a JSON string that no resource-attribute
+ * regex matches: it renders perfectly on a dev machine, then fetches over the network
+ * in the container and gets the creative rejected. A missing id is worse — the card
+ * plays as a bare background colour with no error anywhere.
+ */
+export function endsceneAssetFindings(project: Project, assets: AssetMap): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const { scene, element, field, id } of endsceneRefs(project)) {
+    if (seen.has(id)) continue
+    seen.add(id)
+    const where = `Endscene "${element}" (${scene}) ${field}`
+    const a = assets[id]
+    if (!a) {
+      out.push(`${where} points at asset "${id}", which is not in this export — the card will play as a bare background. Re-add the asset to that endscene.`)
+    } else if (!a.src.startsWith('data:')) {
+      out.push(`${where} asset "${id}" is still a remote URL (${a.src.slice(0, 60)}…) — it could not be fetched and inlined, so the card would load it over the network and the creative will be rejected. Re-upload it as a local file.`)
+    } else if (!BASE64_DATA_URL.test(a.src)) {
+      out.push(`${where} asset "${id}" is a percent-encoded data URL, not base64 — re-export, or re-upload the asset, so the endscene ships base64-encoded.`)
+    }
+  }
+  return out
 }
 
 // ---- html assembly --------------------------------------------------------
