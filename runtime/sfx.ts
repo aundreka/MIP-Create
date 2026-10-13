@@ -79,7 +79,18 @@ function getCtx(): AudioContext | null {
 // ---------------------------------------------------------------------------
 // Slot: always has el (sync); buf populated async after decode
 // ---------------------------------------------------------------------------
-interface Slot { buf: AudioBuffer | null; el: HTMLAudioElement | null }
+// `primed` records that a silent prime actually SETTLED for this element — iOS grants
+// playback per element, so a gesture having happened is not proof that this voice may
+// play. `gen` is bumped by every prime/play attempt so a late callback from an older
+// attempt can never pause or reset a newer one. `unsupported` retires a voice whose media
+// the browser refuses outright (NotSupportedError), so it is not retried forever.
+interface Slot {
+  buf: AudioBuffer | null
+  el: HTMLAudioElement | null
+  primed: boolean
+  unsupported: boolean
+  gen: number
+}
 
 // Elements currently "claimed" by active playback — priming .then() skips
 // pausing these so it doesn't interrupt a sound that started in the same gesture.
@@ -87,7 +98,7 @@ const claimedEls = new WeakSet<HTMLAudioElement>()
 
 function loadSlot(src: string, label: string, done: (slot: Slot) => void): void {
   if (!src) return
-  const slot: Slot = { buf: null, el: null }
+  const slot: Slot = { buf: null, el: null, primed: false, unsupported: false, gen: 0 }
 
   // Phase 1 — sync: HTMLAudioElement ready immediately (before first gesture)
   try {
@@ -95,6 +106,9 @@ function loadSlot(src: string, label: string, done: (slot: Slot) => void): void 
     el.preload = 'auto'
     el.src     = src
     el.load()
+    // A one-shot that reached its end releases the element: nothing is playing through it
+    // any more, so a later prime may reset it and a later cue may restart it from 0.
+    el.addEventListener('ended', () => claimedEls.delete(el))
     slot.el = el
   } catch (e) {
     dbg('el err ' + label + ': ' + (e as Error).message)
@@ -204,22 +218,36 @@ export function createSfxManager(project: Project, assets: AssetMap, mount: HTML
       return { stop: () => { try { src.stop() } catch { /* */ } } }
     }
 
-    if (slot.el) {
+    if (slot.el && !slot.unsupported) {
       const el = slot.el
       // Mark claimed BEFORE any async op so priming .then() won't pause it
       claimedEls.add(el)
+      // This attempt owns the element from here on: an older prime or play settling later
+      // sees a stale generation and leaves it alone.
+      const gen = ++slot.gen
       el.loop        = loop
       el.muted       = muted
       el.currentTime = 0
       el.volume      = Math.min(1, vol)
       const p = el.play()
       if (p) p
-        .then(() => dbg('→ el OK ' + label))
+        .then(() => {
+          // Reaching playback proves this element is authorized, whatever happened to its
+          // silent prime.
+          slot.primed = true
+          dbg('→ el OK ' + label)
+        })
         .catch((e: Error) => {
+          if (slot.gen !== gen) return // superseded — the newer request owns the element
           // iOS can reject a play after an overlay/scene handoff even though the
           // gesture that requested it was valid. Do not leave the loop registered
           // as active in that case: the next real gesture must be allowed to retry.
           claimedEls.delete(el)
+          // NotSupportedError means the media itself cannot play — retrying is pointless.
+          // Anything else (NotAllowedError above all) is an authorization failure: this
+          // voice is no longer primed, and the cue is handed to the caller to re-queue.
+          if (e?.name === 'NotSupportedError') slot.unsupported = true
+          else slot.primed = false
           onPlaybackFailure?.()
           dbg('→ el BLOCKED ' + label + ': ' + e.message)
         })
@@ -256,16 +284,50 @@ export function createSfxManager(project: Project, assets: AssetMap, mount: HTML
     delayedOneShots.clear()
   }
 
+  // Cues iOS rejected. A scene-enter sound is requested from a timer, with no gesture of
+  // its own, so a single rejection used to lose it for good — the sound simply never
+  // played. Hold it instead and re-attempt it on the next real gesture boundary (a
+  // pointerdown/up anywhere), on the SAME element: a new <audio> would not carry whatever
+  // authorization the old one has. Never retried from a timer, because a timer is not a
+  // user gesture and would not be authorized either. A cue is dropped once it is older
+  // than the freshness window, so a sound cannot arrive long after the moment it marked:
+  // roughly one scene's worth of time, past which a scene's own sound is no longer its.
+  const PENDING_TTL_MS = 4000
+  interface Pending { slot: Slot; vol: number; label: string; expires: number }
+  const pendingShots = new Set<Pending>()
+
+  const requestOneShot = (slot: Slot, vol: number, label: string): void => {
+    ensureRunning()
+    const queue = (): void => {
+      if (slot.unsupported) return
+      pendingShots.add({ slot, vol, label, expires: Date.now() + PENDING_TTL_MS })
+    }
+    makeHandle(slot, vol, false, label, queue)
+  }
+
+  // Audible recovery for cues still inside their freshness window. Runs at a gesture
+  // boundary, before any silent priming, so a sound the player is owed is requested ahead
+  // of preparation for sounds they are not.
+  const retryPendingShots = (): void => {
+    if (!pendingShots.size) return
+    const now = Date.now()
+    for (const pending of [...pendingShots]) {
+      pendingShots.delete(pending)
+      if (muted || adPaused || pending.slot.unsupported || now > pending.expires) continue
+      makeHandle(pending.slot, pending.vol, false, pending.label, () => {
+        // Still refused: keep it for the next boundary until the window closes.
+        if (!pending.slot.unsupported && Date.now() <= pending.expires) pendingShots.add(pending)
+      })
+    }
+  }
+
   const play = (event: string): void => {
     if (muted || adPaused) return
     const e = map[event]; if (!e) return
     const slot = projectSlots[event]
     if (!slot) { dbg('no slot evt:' + event); return }
     if (!unlocked) { dbg('pre-gesture drop evt:' + event); return }
-    scheduleOneShot(e.delayMs, () => {
-      ensureRunning()
-      makeHandle(slot, e.volume * master, false, 'evt:' + event)
-    })
+    scheduleOneShot(e.delayMs, () => requestOneShot(slot, e.volume * master, 'evt:' + event))
   }
 
   const playAsset = (id: string, vol: number, delayMs = 0): void => {
@@ -273,10 +335,7 @@ export function createSfxManager(project: Project, assets: AssetMap, mount: HTML
     const slot = assetSlots[id]
     if (!slot) { dbg('no slot a:' + id.slice(-6)); return }
     if (!unlocked) { dbg('pre-gesture drop a:' + id.slice(-6)); return }
-    scheduleOneShot(Math.max(0, delayMs), () => {
-      ensureRunning()
-      makeHandle(slot, vol * master, false, 'a:' + id.slice(-6))
-    })
+    scheduleOneShot(Math.max(0, delayMs), () => requestOneShot(slot, vol * master, 'a:' + id.slice(-6)))
   }
 
   // ---- Loops -----------------------------------------------------------------
@@ -386,6 +445,7 @@ export function createSfxManager(project: Project, assets: AssetMap, mount: HTML
     if (adPaused) return
     adPaused = true
     clearDelayedOneShots()
+    pendingShots.clear() // a cue owed before the ad was hidden must not fire on return
     for (const timer of loopTimers.values()) window.clearTimeout(timer)
     for (const timer of assetLoopTimers.values()) window.clearTimeout(timer)
     loopTimers.clear()
@@ -421,38 +481,43 @@ export function createSfxManager(project: Project, assets: AssetMap, mount: HTML
   }
   const setVolume = (v: number): void => { master = Math.max(0, Math.min(1, v)) }
 
-  // ---- First-gesture unlock --------------------------------------------------
-  // Fires from pointerdown (capture phase) — a direct user gesture.
-  // PRIMES every loaded audio element so subsequent plays from pointermove,
-  // setTimeout, etc. work on iOS without being blocked.
-  let unlocked = false
-  const unlock = (): void => {
-    if (unlocked) return
-    unlocked = true
+  // ---- Gesture boundaries: unlock, recovery, priming -------------------------
+  // iOS grants playback PER ELEMENT, and only from a real user gesture. Priming — a
+  // muted play() inside a gesture — is what lets a later cue from a timer or a scene
+  // change play at all. A prime can fail or never settle, so one pass is not enough:
+  // every gesture boundary re-primes the voices that still have no authorization, which
+  // is what gives a sound bound to a LATER scene more than one chance to become playable.
 
-    ensureRunning()
-
-    // Collect all sound elements to prime (not BGM — it starts directly below)
-    const slots = [...Object.values(projectSlots), ...Object.values(assetSlots)]
-    dbg('UNLOCK ctx=' + (sharedCtx?.state ?? 'null') + ' priming=' + slots.length)
-
-    for (const slot of slots) {
+  /** Silent preparation for voices that are idle and not yet known-playable. */
+  const primeIdle = (): void => {
+    if (muted || adPaused) return
+    for (const slot of [...Object.values(projectSlots), ...Object.values(assetSlots)]) {
       const el = slot.el
-      if (!el) continue
+      // Skip a voice that is already authorized, retired, or busy playing for real.
+      if (!el || slot.primed || slot.unsupported || claimedEls.has(el)) continue
+      const gen = ++slot.gen
       el.muted = true  // silent prime
       const p = el.play()
-      if (p) {
-        p.then(() => {
-          // If makeHandle already claimed this el (e.g. scratch loop fired in
-          // the same gesture), don't pause — it's already playing for real.
-          if (!claimedEls.has(el)) {
-            el.pause()
-            el.currentTime = 0
-          }
-          el.muted = muted  // restore correct mute state
-        }).catch(() => { el.muted = muted })
-      }
+      if (!p) continue
+      p.then(() => {
+        slot.primed = true
+        if (slot.gen !== gen) return // a real cue took this element over; leave it playing
+        if (!claimedEls.has(el)) {
+          el.pause()
+          el.currentTime = 0
+        }
+        el.muted = muted  // restore correct mute state
+      }).catch((e: Error) => {
+        if (e?.name === 'NotSupportedError') slot.unsupported = true
+        if (slot.gen === gen) el.muted = muted
+      })
     }
+  }
+
+  let unlocked = false
+  const unlock = (): void => {
+    unlocked = true
+    ensureRunning()
 
     bgmUnlocked = true
     if (bgmSlot) startBgm()
@@ -468,13 +533,26 @@ export function createSfxManager(project: Project, assets: AssetMap, mount: HTML
     for (const [id, pending] of heldAssetLoops) startAssetLoop(id, pending.volume, pending.delayMs)
   }
 
-  // Every gesture type that can be "the first user interaction". pointerdown/touchstart
-  // are the real paths; mousedown/click are backstops for containers that synthesize
-  // only mouse events — without an unlock, the no-autoplay gate above would leave the
-  // ad permanently silent there.
-  const UNLOCK_EVENTS = ['pointerdown', 'touchstart', 'mousedown', 'click'] as const
+  // Audible work first, silent preparation second: a sound the player is already owed
+  // must not queue behind priming for sounds that may never be needed.
+  const onGesture = (): void => {
+    if (!unlocked) {
+      dbg('UNLOCK ctx=' + (sharedCtx?.state ?? 'null'))
+      unlock()
+    } else {
+      retryPendingShots()
+    }
+    primeIdle()
+  }
+
+  // Every gesture type that can carry authorization. pointerdown/touchstart are the real
+  // paths; mousedown/click are backstops for containers that synthesize only mouse events
+  // — without them the no-autoplay gate would leave the ad permanently silent there. The
+  // release events matter as much as the presses: a cue rejected during a quick tap gets
+  // its retry on the matching up, still inside the same interaction.
+  const UNLOCK_EVENTS = ['pointerdown', 'pointerup', 'touchstart', 'touchend', 'mousedown', 'mouseup', 'click'] as const
   for (const type of UNLOCK_EVENTS)
-    window.addEventListener(type, unlock, { capture: true, once: true })
+    window.addEventListener(type, onGesture, { capture: true })
 
   // ---- Event bindings --------------------------------------------------------
   const offs = [
@@ -494,9 +572,10 @@ export function createSfxManager(project: Project, assets: AssetMap, mount: HTML
     destroy() {
       for (const off of offs) off()
       for (const type of UNLOCK_EVENTS)
-        window.removeEventListener(type, unlock, { capture: true } as EventListenerOptions)
+        window.removeEventListener(type, onGesture, { capture: true } as EventListenerOptions)
       pendingLoops.clear()
       pendingAssetLoops.clear()
+      pendingShots.clear()
       clearDelayedOneShots()
       for (const timer of loopTimers.values()) window.clearTimeout(timer)
       for (const timer of assetLoopTimers.values()) window.clearTimeout(timer)
