@@ -189,8 +189,9 @@ export function triggerCTA(): void {
   // when a container is present. There is deliberately no browser fallback: creative
   // validators reject a creative whose click-through can bypass mraid.open()
   // (docs/mraid_clickthrough_validation_fix.md).
-  // Never called without a URL: validators flag an empty open, so a mode:'none' /
-  // about:blank ad with no click macro registers no click inside a container.
+  // Called even without a URL: on AppLovin the destination belongs to the campaign, so an
+  // argument-less open is how a mode:'none' / about:blank creative still registers its
+  // click inside the container (AGENTS.md). Dropping it is what leaves the CTA dead.
   // Guarded by mraidUsable(): calling open() on a container that is still 'loading'
   // violates the MRAID spec and is what creative audits flag — that tap is dropped and
   // the cooldown stays disarmed, so the next tap gets a fresh try.
@@ -206,8 +207,8 @@ export function triggerCTA(): void {
       const shellOpen = typeof W.handleMraidOpen === 'function' ? W.handleMraidOpen : W.PA_CLICKOUT
       if (typeof shellOpen === 'function') {
         if (shellOpen(clickDest) === true) _lastCta = t
-      } else if (clickDest && mraidUsable(W.mraid)) {
-        done(() => W.mraid.open(clickDest))
+      } else if (mraidUsable(W.mraid)) {
+        done(() => (clickDest ? W.mraid.open(clickDest) : W.mraid.open()))
       }
     } catch (e) {
       console.error('mraid.open failed', e)

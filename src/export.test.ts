@@ -142,8 +142,11 @@ describe('source map stripping', () => {
       expect(html).toContain('window.' + macro)
     }
     expect(html).not.toMatch(/window\s*\.\s*open/)
-    // ...and every open carries its destination — scanners flag an empty open, even in a comment.
-    expect(html).not.toMatch(/mraid\s*\.\s*open\(\s*(?:(["'])\1)?\s*\)/)
+    // ...and both arms of the open ship: the resolved destination, plus the argument-less
+    // open that is the only thing that registers a click when the creative has no URL of
+    // its own (AppLovin supplies it from the campaign).
+    expect(html).toMatch(/mraid\s*\.\s*open\(\s*clickTarget\s*\)/)
+    expect(html).toMatch(/mraid\s*\.\s*open\(\s*\)/)
     // The guard is defined in <head>, ahead of the runtime that calls it.
     expect(html.indexOf('window.PA_CLICKOUT')).toBeLessThan(html.indexOf('</head>'))
   })

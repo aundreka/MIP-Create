@@ -816,14 +816,11 @@ export const MRAID_HEAD = `<script src="mraid.js"></script>
     // literal identifier, for the same static-scan reason as the gate below: inside the
     // minified bundle the same code reads Pa(tt.mraid), and a validator sees an unguarded
     // open.
-    // mraid.open, with a destination, is the ONLY click-through method: validators reject any
-    // other navigation API in the creative, so there is deliberately no browser fallback,
-    // and it is never called without a URL.
+    // mraid.open is the ONLY click-through method: validators reject any other navigation
+    // API in the creative, so there is deliberately no browser fallback.
     // Named handleMraidOpen because that is the click-through entry point compliance
     // tooling looks for BY NAME: a scanner that finds the open call without it reports the
-    // creative as having no click-through routine at all. (The name is spelled out here
-    // rather than the call it wraps, because an empty-parentheses open — even inside a
-    // comment — is itself a rejection.)
+    // creative as having no click-through routine at all.
     window.handleMraidOpen = function (url) {
       var mraid = window.mraid || {};
 
@@ -831,14 +828,19 @@ export const MRAID_HEAD = `<script src="mraid.js"></script>
       var clickTarget =
         url || window.clickTag || window.clickTag1 || window.clickthrough || window.clickThrough || "";
 
-      // No destination (clickUrlMode 'none'): nothing to open.
-      if (!clickTarget) return false;
-
       // Open only after the readiness guard passes, and never outside try/catch —
       // native containers throw on a bad URL or a half-built bridge.
       if (typeof mraid.open === "function" && window.isMraidUsable(mraid)) {
         try {
-          mraid.open(clickTarget);
+          if (clickTarget) {
+            mraid.open(clickTarget);
+          } else {
+            // No destination resolved by the creative. On AppLovin the click-through URL
+            // belongs to the campaign, not the creative, so the argument-less open is what
+            // tells the container to run it — and without it the tap registers nowhere at
+            // all, which is how a MIP ships with a dead CTA.
+            mraid.open();
+          }
           return true;
         } catch (e) {
           console.error("mraid.open failed", e);

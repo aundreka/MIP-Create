@@ -172,9 +172,13 @@ async function run() {
   const opens = [HEAD, runtimeSrc].join('\n').match(/window\s*\.\s*open\w*|window\s*\[\s*["']open/g)
   if (opens) problems.push(`window.open in the export (${[...new Set(opens)].join(', ')}) — click-throughs must use mraid.open() only`)
   else console.log('✓ no window.open anywhere in the export — mraid.open() is the only click-through')
-  const emptyOpens = [HEAD, runtimeSrc].join('\n').match(/mraid\s*\.\s*open\(\s*(?:(["'])\1)?\s*\)/g)
-  if (emptyOpens) problems.push(`mraid.open with no URL in the export (${[...new Set(emptyOpens)].join(', ')})`)
-  else console.log('✓ every mraid.open call carries its destination')
+  // Both arms of the open must ship. AppLovin keeps the click URL on the campaign, so a
+  // creative that resolves no destination still has to call open with no argument or its
+  // CTA registers nothing at all.
+  const src = [HEAD, runtimeSrc].join('\n')
+  if (!/mraid\s*\.\s*open\(\s*[^)\s]/.test(src)) problems.push('no mraid.open(clickTarget) in the export — a resolved destination must reach the container')
+  else if (!/mraid\s*\.\s*open\(\s*\)/.test(src)) problems.push('no argument-less mraid.open() fallback in the export — a creative with no destination would register no click')
+  else console.log('✓ mraid.open ships both arms: the resolved destination and the blank fallback')
 
   try {
     await page.setContent(buildHtml(target.project, target.assets, runtimeSrc), { waitUntil: 'load' })
@@ -245,6 +249,23 @@ async function run() {
     )
     if (sounding) problems.push(`${sounding} media element(s) still audible after viewableChange(false)`)
     else console.log('✓ audio silenced when the ad is not viewable')
+
+    // 7. a creative with NO destination of its own must still register its click. AppLovin
+    //    keeps the click URL on the campaign, so an about:blank / 'none' export that skips
+    //    the argument-less open ships a CTA that does nothing at all.
+    const blind = structuredClone(target.project)
+    blind.meta.clickUrl = { ios: 'about:blank', android: 'about:blank' }
+    await page.setContent(buildHtml(blind, target.assets, runtimeSrc), { waitUntil: 'load' })
+    await page.evaluate(() => window.__ready()) // fresh content: the stub is 'loading' again
+    await wait(200)
+    if (stats.ctas) {
+      await page.waitForSelector('.pa-cta', { timeout: 5000 })
+      await page.click('.pa-cta')
+      await wait(200)
+      const blindOpens = await page.evaluate(() => window.__mraidCalls.filter((c) => c.indexOf('open:') === 0))
+      if (!blindOpens.length) problems.push('a CTA with no click destination registered no mraid.open() at all')
+      else console.log('✓ a destination-less CTA still registers its click through mraid.open()')
+    }
 
     if (errors.length) problems.push('console/page errors:\n  ' + errors.join('\n  '))
     else console.log('✓ no console or page errors')

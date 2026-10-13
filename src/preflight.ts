@@ -172,10 +172,14 @@ export function preflightNetwork(net: Network, html: string, bytes: number, proj
   // (docs/mraid_clickthrough_validation_fix.md).
   if (/window\s*\.\s*open|window\s*\[\s*["']open/.test(html))
     findings.push({ level: 'error', message: 'window.open found in the output: click-throughs must use mraid.open() only, and validators reject any window.open reference (including comments).' })
-  // ...and it always carries the destination: an empty open — mraid.open() / mraid.open("")
-  // — is flagged by the same scanners, even inside a comment.
-  if (/mraid\s*\.\s*open\(\s*(?:(["'])\1)?\s*\)/.test(html))
-    findings.push({ level: 'error', message: 'mraid.open called with no URL: every click-through must pass its destination (mraid.open(clickTarget)).' })
+  // ...and BOTH arms of the open ship: the destination when the creative resolves one, and
+  // an argument-less open when it does not. On AppLovin the click URL belongs to the
+  // campaign rather than the creative, so without the blank arm an about:blank / 'none'
+  // export registers no click at all and the CTA is simply dead (docs/AGENTS.md).
+  if (!/mraid\s*\.\s*open\(\s*[^)\s]/.test(html))
+    findings.push({ level: 'error', message: 'No mraid.open(clickTarget) in the output: a resolved click destination must be passed to the container.' })
+  if (!/mraid\s*\.\s*open\(\s*\)/.test(html))
+    findings.push({ level: 'error', message: 'No argument-less mraid.open() fallback in the output: a creative with no resolved destination must still register its click (AppLovin supplies the URL).' })
   // The click-through entry point by name. Scanners that find mraid.open() without it read
   // the creative as having no click-through routine at all ("mraid present but no
   // mraid.open() click-through"), so the name is as much the check as the call is.

@@ -11,7 +11,7 @@ const NET: Network = { name: 'AppLovin', tag: 'al' }
 const CLICKOUT =
   `window.handleMraidOpen=function(){` +
   `var t=window.clickTag||window.clickTag1||window.clickthrough||window.clickThrough||"";` +
-  `if(window.isMraidUsable(mraid)){try{mraid.open(t);return}catch(e){}}};`
+  `if(window.isMraidUsable(mraid)){try{if(t){mraid.open(t)}else{mraid.open()}return}catch(e){}}};`
 // The other two CTA-surface rules the shell carries longhand: one action per gesture, and
 // media that stops when the container takes the ad off screen.
 const TAP_DEDUP = `var lastTapAt=0;window.handleTap=function(r){if(Date.now()-lastTapAt<500)return false;lastTapAt=Date.now();r();return true};`
@@ -100,11 +100,16 @@ describe('preflightNetwork', () => {
     const r = preflightNetwork(NET, MRAID_OK, 1000, baseProject())
     expect(r.findings.some((f) => /window\.open/.test(f.message))).toBe(false)
   })
-  it('flags mraid.open with no URL — bare, empty string, or in a comment', () => {
-    for (const extra of ['mraid.open();', 'mraid.open("")', '// falls back to mraid.open()']) {
-      const r = preflightNetwork(NET, MRAID_OK.replace('</script>', extra + '</script>'), 1000, baseProject())
-      expect(r.findings.some((f) => f.level === 'error' && /no URL/.test(f.message)), extra).toBe(true)
-    }
+  it('requires both arms of the open: the destination and the blank fallback', () => {
+    // AppLovin keeps the click URL on the campaign, so a creative that resolves no
+    // destination still has to call open with no argument or the tap registers nowhere.
+    const noBlank = MRAID_OK.replace(/mraid\.open\(\s*\)/g, 'mraid.open(clickTarget)')
+    const r = preflightNetwork(NET, noBlank, 1000, baseProject())
+    expect(r.findings.some((f) => f.level === 'error' && /argument-less mraid\.open/.test(f.message))).toBe(true)
+
+    const noTarget = MRAID_OK.replace(/mraid\.open\(\s*t\s*\)/g, 'mraid.open()')
+    const r2 = preflightNetwork(NET, noTarget, 1000, baseProject())
+    expect(r2.findings.some((f) => f.level === 'error' && /mraid\.open\(clickTarget\)/.test(f.message))).toBe(true)
   })
   it('flags any window.open reference — call, fallback or comment', () => {
     for (const extra of ['window.open(t,"_blank","noopener");', '// window.open fallback', 'window["open"](t)']) {
