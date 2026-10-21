@@ -66,6 +66,9 @@ export function createGameHost(opts: GameHostOptions): GameHost | null {
   let hand: Hand | null = null
   let idle = 0
   let destroyed = false
+  // The win ends the hint hand's job. Latched (not just "hide it once") so no pending
+  // idle timer, pointerup or retarget can bring it back during the win reveal.
+  let won = false
 
   if (opts.interactive) {
     mod.start()
@@ -77,9 +80,10 @@ export function createGameHost(opts: GameHostOptions): GameHost | null {
       let inputActive = false
       const schedule = (): void => {
         window.clearTimeout(idle)
+        if (won) return
         idle = window.setTimeout(
           () => {
-            if (destroyed || inputActive) return
+            if (destroyed || inputActive || won) return
             const move = mod.getHint()
             // The hand is drawn in screen px: multiply the game's own size hint by
             // the stage scale so it shrinks/grows with the rest of the layout.
@@ -113,8 +117,17 @@ export function createGameHost(opts: GameHostOptions): GameHost | null {
       opts.slot.addEventListener('touchcancel', onEnd, { capture: true, passive: true })
       schedule()
     }
-    if (opts.onWin) mod.onWin?.(opts.onWin)
+    // Hide the hand at the win MOMENT rather than at onComplete: a win is often
+    // followed by a reveal that runs for seconds, and a hand miming a gesture over
+    // a game that is already over reads as the ad being stuck.
+    mod.onWin?.(() => {
+      won = true
+      window.clearTimeout(idle)
+      hand?.hide()
+      opts.onWin?.()
+    })
     mod.onComplete(() => {
+      won = true
       hand?.hide()
       window.clearTimeout(idle)
       opts.onComplete()

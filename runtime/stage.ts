@@ -111,7 +111,7 @@ interface Rec {
   // masked down to a carved-out region without clipping the element's content with it.
   // Built on demand by applyLightray.
   ray?: HTMLDivElement
-  hg?: { stop(): void } // handguide animator
+  hg?: HandguideHandle // handguide animator
   confetti?: ConfettiController // confetti particle system
   idle?: { stop(): void } // generic idle visibility animator
   // Typewriter state. `typeShown` is the number of characters currently revealed —
@@ -202,10 +202,18 @@ function startIdleBehavior(rec: Rec, root: HTMLElement): { stop(): void } {
   }
 }
 
+interface HandguideHandle {
+  /** Tear the animator down (scene teardown). */
+  stop(): void
+  /** The game has been won — the gesture this hand was teaching is over. It fades
+   * out and stays out, whatever its idle/reappear settings say. */
+  finish(): void
+}
+
 // Animate a handguide element's image: loop a tap-bounce in place, or slide from
 // its position toward a target (explicit point, or 'smart' = the scene's CTA/game),
 // with a press dip at the ends. Self-contained; only runs when interactive.
-function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): void } {
+function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): HandguideHandle {
   const cfg = rec.el.handguide ?? { mode: 'smart' as const }
   console.log('[handguide] startHandguide called', { mode: cfg.mode, hasContent: !!rec.content, elId: rec.el.id, nodes: cfg.nodes })
   const content = rec.content
@@ -344,6 +352,9 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
 
   let raf = 0
   let running = false
+  // Set once the game has been won: the hand is gone for good, and no idle timer,
+  // interaction or retarget may bring it back (see finish()).
+  let done = false
   let t0 = performance.now()
   if (content) {
     content.style.transformOrigin = '22% 12%'
@@ -957,7 +968,7 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     raf = requestAnimationFrame(frame)
   }
   const show = (): void => {
-    if (running || !content) return
+    if (done || running || !content) return
     running = true
     t0 = performance.now() // replay the route from the start on each appearance
     // 'brush' / 'scratchdrag' reveal themselves inside the frame, AFTER sized + positioned — otherwise it
@@ -1005,6 +1016,14 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     interacting = false
     scheduleShow()
   }
+  const detachInteract = (): void => {
+    root.removeEventListener('pointerdown', onInteractStart, true)
+    root.removeEventListener('pointerup', onInteractEnd, true)
+    root.removeEventListener('pointercancel', onInteractEnd, true)
+    root.removeEventListener('touchstart', onInteractStart, true)
+    root.removeEventListener('touchend', onInteractEnd, true)
+    root.removeEventListener('touchcancel', onInteractEnd, true)
+  }
   if (hideOnInteract) {
     root.addEventListener('pointerdown', onInteractStart, true)
     root.addEventListener('pointerup', onInteractEnd, true)
@@ -1021,20 +1040,24 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
     show()
   }
   return {
+    finish() {
+      if (done) return
+      done = true
+      window.clearTimeout(idleTimer)
+      detachInteract() // no tap, lift or idle beat can schedule it back in
+      hide()
+    },
     stop() {
       running = false
       if (raf) cancelAnimationFrame(raf)
       ripple?.destroy()
       window.clearTimeout(idleTimer)
-      root.removeEventListener('pointerdown', onInteractStart, true)
-      root.removeEventListener('pointerup', onInteractEnd, true)
-      root.removeEventListener('pointercancel', onInteractEnd, true)
-      root.removeEventListener('touchstart', onInteractStart, true)
-      root.removeEventListener('touchend', onInteractEnd, true)
-      root.removeEventListener('touchcancel', onInteractEnd, true)
+      detachInteract()
       if (content) {
         content.style.transform = ''
-        content.style.opacity = ''
+        // A finished hand stays gone: clearing the inline opacity here would bring it
+        // back for as long as the won scene lingers behind a transition.
+        content.style.opacity = done ? '0' : ''
       }
       // The second hand was ours to create, so it is ours to take away.
       mirror?.remove()
@@ -1042,6 +1065,7 @@ function startHandguide(rec: Rec, recs: Rec[], root: HTMLElement): { stop(): voi
       // Restore a 'brush'-mode hand that was reparented onto the stage layer.
       if (brushRestore && content) {
         content.style.cssText = brushRestore.cssText
+        if (done) content.style.opacity = '0'
         if (brushRestore.parent) {
           if (brushRestore.next) brushRestore.parent.insertBefore(content, brushRestore.next)
           else brushRestore.parent.appendChild(content)
@@ -2693,9 +2717,28 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
   }
   root.addEventListener('pa-endscene-media-reset', onEndsceneMediaReset)
 
+  /**
+   * A handguide teaches the gesture the game asks for. Once the game is won there is
+   * no gesture left to teach, so every hand in the scene goes — and stays gone, which
+   * no amount of idle time or tapping can undo. Called at the win MOMENT (the host's
+   * onWin) as well as from revealOnWin, because the reveal that follows a win can be
+   * seconds long and a hand still miming over it reads as the ad being stuck.
+   *
+   * The one exception is a hand the author deliberately put ON the win — showOnWin, or
+   * an entrance that triggers onGameWin. That hand is pointing at what comes next.
+   */
+  const finishHandguides = (): void => {
+    for (const rec of recs) {
+      if (rec.el.type !== 'handguide' || !rec.hg) continue
+      if (rec.el.showOnWin || entranceTriggers(rec.el, 'onGameWin')) continue
+      rec.hg.finish()
+    }
+  }
+
   const revealOnWin = (): void => {
     if (stageWon) return // idempotent: a game may report completion more than once
     stageWon = true
+    finishHandguides()
     let winSfxDelay = Number.POSITIVE_INFINITY
     for (const rec of recs) {
       if (rec.el.showOnWin && rec.el.hidden) {
@@ -2855,6 +2898,9 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
               else emit('sfx-loop-stop', event)
             },
             onWin: () => {
+              // The instant the win lands — before the reveal, the confetti or the
+              // scene advance. The hand's job ended with the last winning gesture.
+              finishHandguides()
               for (const b of rec.el.sfx ?? []) {
                 if (b.event !== 'onReveal' || !b.assetId) continue
                 // Some games end ON a beat the player just made — the final item
@@ -2875,6 +2921,9 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
           console.log('[handguide] found handguide in startGames', { interactive, hasHg: !!rec.hg, hasContent: !!rec.content, elId: rec.el.id, assetId: rec.el.assetId })
           if (interactive && !rec.hg && rec.content) {
             rec.hg = startHandguide(rec, recs, root)
+            // A hand re-created in a scene that has ALREADY been won (a live edit, a
+            // rebuilt element list) never gets to mime even once.
+            if (stageWon) finishHandguides()
           }
         } else if (rec.el.type === 'confetti' && rec.confetti) {
           // Interactive: fire sceneEnter now (onGameWin waits for revealOnWin).
