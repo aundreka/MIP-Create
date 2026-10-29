@@ -3,6 +3,7 @@
 // hand), and reports completion. Mirrors coinsort's GameScene idle-hint driver.
 
 import { createHand, type Hand } from './hint'
+import { trackEvent } from './networks'
 import { getTemplate } from './games/registry'
 import { mulberry32, type GameModule } from './games/types'
 import { scale } from './responsive'
@@ -121,12 +122,14 @@ export function createGameHost(opts: GameHostOptions): GameHost | null {
     // followed by a reveal that runs for seconds, and a hand miming a gesture over
     // a game that is already over reads as the ad being stuck.
     mod.onWin?.(() => {
+      trackEvent('CHALLENGE_SOLVED')
       won = true
       window.clearTimeout(idle)
       hand?.hide()
       opts.onWin?.()
     })
     mod.onComplete(() => {
+      trackEvent('CHALLENGE_SOLVED')
       won = true
       hand?.hide()
       window.clearTimeout(idle)

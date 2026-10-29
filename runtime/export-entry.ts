@@ -18,12 +18,15 @@ let started = false
 const start = (): void => {
   if (started || !w.PA_PROJECT) return
   started = true
-  void boot(w.PA_PROJECT, w.PA_ASSETS ?? {})
+  // The MIP sample's body is a lone <div id="app">: the creative mounts there when the
+  // shell provides it, else on <body>.
+  const mount = document.getElementById('app') ?? undefined
+  void boot(w.PA_PROJECT, w.PA_ASSETS ?? {}, { mount })
 }
 w.PA_START = start
 
-// The export shell sets PA_MRAID_GATE in <head> and calls PA_START() from its MRAID
-// readiness gate at the end of <body> (MRAID_HEAD / MRAID_BOOT in src/export.ts), so the
-// creative genuinely does not initialize while the container reports 'loading'. Any other
-// host — editor preview, a hand-built page — has no gate, so boot immediately.
+// The export shell sets PA_MRAID_GATE ahead of this bundle and calls PA_START() from the
+// sample's MRAID readiness gate (buildBaseHtml in src/export.ts), so the creative genuinely
+// does not initialize while the container reports 'loading'. Any other host — editor
+// preview, a hand-built page — has no gate, so boot immediately.
 if (!w.PA_MRAID_GATE) start()

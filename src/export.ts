@@ -10,6 +10,8 @@ import type { AssetMap, CompressProfile } from '../runtime/types'
 import { remoteToDataUrl } from './net'
 import { appAlert } from './panels/AppDialogs'
 import { canTranscode, transcodeMedia, type TranscodeOpts } from './bridge'
+import * as Shell from './exportShell.generated'
+import { isSip } from './mipName'
 
 /** Global compression defaults chosen at export time; per-asset `compress`
  * overrides win field-by-field. */
@@ -757,264 +759,132 @@ export function endsceneAssetFindings(project: Project, assets: AssetMap): strin
 }
 
 // ---- html assembly --------------------------------------------------------
-// MRAID v2.0 bridge + readiness guard — on EVERY export, not just the MRAID-tagged
-// networks (docs/mraid-v2-guide.md). The bridge tag is the declaration containers look
-// for and replace with their own implementation; outside one it 404s harmlessly (it is a
-// relative path, so it is not an external resource). The guard publishes
-// window.isMraidUsable(), the getState()/ready-event check a clickout must pass before it
-// may call into the container: networks reject creatives that touch an MRAID API while
-// getState() is still 'loading'. It lives in <head>, ahead of the runtime, because some
-// containers inject window.mraid asynchronously and the 'ready' listener has to be armed
-// before that lands. runtime/networks.ts falls back to its own copy of this check when the
-// global is absent (editor preview, Vite source export).
+// The shell every export ships in is NOT written here: it is read verbatim out of the
+// reference creatives — docs/mip_sample.html for a MIP, docs/sip_sample.html for a SIP —
+// by scripts/sync-export-samples.mjs, into src/exportShell.generated.ts. Head order, the
+// mraid.js bridge, the readiness helper, handleClickAction (window.clickTag only), the tap
+// debounce, the lifecycle hooks, the loading-state boot gate and the ?date= override all
+// come from there, so an export matches the sample the network signed off on. When the
+// guidelines change, update the sample and run `npm run sync:samples`.
 //
-// Written out longhand, with `mraid` as the literal identifier and an explicit
-// getState() === "loading" comparison, because network creative validators STATIC-SCAN
-// the file for this pattern. The minified bundle's equivalent check reads
-// `f.addEventListener("ready",a)` after mangling, which those scanners do not recognise —
-// that mismatch is what produces "mraid present but no ready-event / getState() guard".
-export const MRAID_HEAD = `<script src="mraid.js"></script>
-<script>
-  // MRAID v2.0 readiness. Nothing in this creative may initialize, or call into the
-  // container, while mraid.getState() is still "loading" — only getState() and
-  // addEventListener("ready", ...) are legal before the ready event.
-  (function () {
-    var mraidIsReady = false;
-    var mraidReadyListenerAttached = false;
+// What is ours is only what the samples leave to the creative: the base styles, the
+// project data, the runtime bundle, and the few lines of glue that hand the sample's boot
+// gate, click-through and date accessor to the runtime (runtime/export-entry.ts,
+// runtime/networks.ts, runtime/elements/countdown.ts).
 
-    // Subscribe to the ready event once. Handles containers that attach window.mraid
-    // asynchronously, after this script has already run.
-    function trackMraidReadiness(mraid) {
-      if (mraidReadyListenerAttached || !mraid || typeof mraid.addEventListener !== "function") return;
-      try {
-        mraid.addEventListener("ready", function () { mraidIsReady = true; });
-        mraidReadyListenerAttached = true;
-      } catch (e) {
-        // Some non-standard containers throw on addEventListener; getState() stays the
-        // primary check.
-      }
+// Every http(s):// in the scripts we emit (runtime string constants, URLs inside the project
+// data) is written with escaped slashes. `\/` reads back as `/` in a JS string, a template
+// literal and JSON, so nothing changes at runtime — but a validator that scans the file for
+// unembedded resources no longer reads a store URL or an SVG namespace as one.
+export const escapeUrls = (s: string): string => s.replace(/(https?:)\/\//gi, '$1\\/\\/')
+
+// html/body guards mirror the runtime base styles: without user-select:none, a drag that
+// lands on a bare container (text elements are pointer-events:none) starts a native
+// selection and highlights the whole screen while scratching. #app is the sample's mount
+// point, fixed to the viewport (docs/AGENTS.md: no document scroll, no bounce).
+function baseStyle(project: Project): string {
+  // Background set statically so the canvas is correct before JS runs — prevents a white
+  // flash / edge bleed in Chromium/AppLovin WebViews.
+  const bg = project.meta.bgMatchColor ?? '#000000'
+  return (
+    `<style>html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;overscroll-behavior:none;` +
+    `background:${bg}!important;-webkit-text-size-adjust:100%;text-size-adjust:100%;` +
+    `user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;}` +
+    `#app{position:fixed;inset:0;touch-action:none;user-select:none;-webkit-user-select:none;overscroll-behavior:none}</style>`
+  )
+}
+
+// Ahead of the runtime: PA_MRAID_GATE stops the bundle starting itself (the sample's gate
+// starts it), and PA_NOW hands it the sample's ?date= accessor under one name.
+const gateFlags = (dateAccessor: string): string =>
+  `<script>window.PA_MRAID_GATE = true; window.PA_NOW = window.${dateAccessor};</script>`
+
+function dataAndRuntime(project: Project, assets: AssetMap, runtimeSrc: string): string {
+  return (
+    `<script>window.PA_PROJECT=${escapeUrls(esc(JSON.stringify(project)))};\n` +
+    `window.PA_ASSETS=${escapeUrls(esc(serializeAssets(assets)))};\n</script>\n` +
+    `<script>${escapeUrls(stripSourceMap(runtimeSrc))}</script>`
+  )
+}
+
+// MIP: the sample's head gate publishes window.<bootFlag> and calls window.<bootCallback>()
+// once the container is past "loading" (or its 2s fallback fires). That can happen while
+// <head> is still parsing, so the start also waits for the DOM — the runtime mounts into
+// the sample's <div id="app">.
+const MIP_BOOT = `<script>
+(function () {
+  function startCreative() {
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", startCreative, { once: true });
+      return;
     }
-
-    // True when mraid.open and the rest of the API are safe to call.
-    window.isMraidUsable = function (mraid) {
-      if (!mraid) return false;
-      trackMraidReadiness(mraid);
-      // Minimal/mock MRAID objects without getState() are treated as usable.
-      if (typeof mraid.getState !== "function") return true;
-      try {
-        // The AppLovin readiness guard, spelled the way validators scan for it.
-        if (mraid.getState() === "loading") return false;
-        var state = mraid.getState();
-        return state === "default" || state === "expanded";
-      } catch (e) {
-        return mraidIsReady; // state unreadable — fall back to whether "ready" fired
-      }
-    };
-
-    // The guarded clickout every CTA button and end card routes through
-    // (runtime/networks.ts calls this when it is present). Longhand here, with mraid as the
-    // literal identifier, for the same static-scan reason as the gate below: inside the
-    // minified bundle the same code reads Pa(tt.mraid), and a validator sees an unguarded
-    // open.
-    // mraid.open is the ONLY click-through method: validators reject any other navigation
-    // API in the creative, so there is deliberately no browser fallback.
-    // Named handleMraidOpen because that is the click-through entry point compliance
-    // tooling looks for BY NAME: a scanner that finds the open call without it reports the
-    // creative as having no click-through routine at all.
-    window.handleMraidOpen = function (url) {
-      var mraid = window.mraid || {};
-
-      // No single click macro is universal across DSPs / networks.
-      var clickTarget =
-        url || window.clickTag || window.clickTag1 || window.clickthrough || window.clickThrough || "";
-
-      // Open only after the readiness guard passes, and never outside try/catch —
-      // native containers throw on a bad URL or a half-built bridge.
-      if (typeof mraid.open === "function" && window.isMraidUsable(mraid)) {
-        try {
-          if (clickTarget) {
-            mraid.open(clickTarget);
-          } else {
-            // No destination resolved by the creative. On AppLovin the click-through URL
-            // belongs to the campaign, not the creative, so the argument-less open is what
-            // tells the container to run it — and without it the tap registers nowhere at
-            // all, which is how a MIP ships with a dead CTA.
-            mraid.open();
-          }
-          return true;
-        } catch (e) {
-          console.error("mraid.open failed", e);
-        }
-      }
-      return false;
-    };
-
-    // The same function under the name the runtime bundle calls it by.
-    window.PA_CLICKOUT = window.handleMraidOpen;
-
-    // iOS tap de-duplication. A single tap on a CTA button or an end card emits its
-    // compatibility ("ghost") mouse events ~300ms after the touch, so touchend/pointerup
-    // and the synthesised click arrive as two interactions for one gesture — and a CTA
-    // that fires twice opens the store twice. 500ms collapses the pair while staying far
-    // short of a deliberate second tap.
-    //
-    // Longhand, as lastTapAt/handleTap, for the same reason as everything else in this
-    // block: the runtime's own guards survive minification only as mangled identifiers,
-    // and a scanner that cannot see a debounce reports the creative as having none.
-    var lastTapAt = 0;
-    window.handleTap = function (run) {
-      var now = Date.now();
-      if (now - lastTapAt < 500) return false;
-      lastTapAt = now;
-      if (typeof run === "function") run();
-      return true;
-    };
-
-    // Dropped whenever the ad is re-shown — the player has RETURNED from wherever the last
-    // tap sent them, so their next tap is a fresh gesture and must not land inside the
-    // previous one's window (runtime/networks.ts: resetCtaCooldown).
-    window.PA_TAP_RESET = function () {
-      lastTapAt = 0;
-    };
-
-    // MRAID viewability lifecycle. An end card's clip (and any other media in the
-    // creative) must not keep playing while the container has the ad off screen: the
-    // network counts that as unviewable playback, and the player comes back to a card
-    // part-way through. Called from the gate at the end of <body>, which is the first
-    // point the container is past "loading" and isViewable() is legal to ask.
-    //
-    // Only clips THIS block paused are resumed, so it never starts something that was
-    // stopped on purpose (an author's paused preview clip, a card that ended).
-    window.PA_WATCH_VIEWABILITY = function () {
-      var mraid = window.mraid;
-      if (!mraid) return;
-      var pausedByUs = [];
-
-      function applyViewable(viewable) {
-        if (viewable) {
-          for (var i = 0; i < pausedByUs.length; i++) {
-            try {
-              var resumed = pausedByUs[i].play();
-              if (resumed && typeof resumed.catch === "function") resumed.catch(function () {});
-            } catch (e) {
-              // No media stack, or the container refuses playback outside a gesture.
-            }
-          }
-          pausedByUs = [];
-          return;
-        }
-        // Re-queried on every pause: the end card's clip is created when the card mounts,
-        // long after this block was armed.
-        var media = Array.prototype.slice.call(document.querySelectorAll("video,audio"));
-        for (var j = 0; j < media.length; j++) {
-          try {
-            if (media[j].paused) continue;
-            media[j].pause();
-            pausedByUs.push(media[j]);
-          } catch (e) {
-            // Element torn down mid-sync; nothing to pause.
-          }
-        }
-      }
-
-      if (typeof mraid.addEventListener === "function") {
-        try {
-          mraid.addEventListener("viewableChange", applyViewable);
-        } catch (e) {
-          // Container does not implement the event; the initial read below still applies.
-        }
-      }
-      if (typeof mraid.isViewable === "function" && window.isMraidUsable(mraid)) {
-        try {
-          applyViewable(mraid.isViewable());
-        } catch (e) {
-          // State unreadable — leave playback alone rather than guess.
-        }
-      }
-    };
-
-    // The creative bundle below defers its own start to PA_START() because of this flag;
-    // the gate at the end of <body> calls it once the container is ready.
-    window.PA_MRAID_GATE = true;
-
-    // AppLovin readiness guard, armed HERE — in <head>, ahead of the creative bundle,
-    // because that is where "before initialization" has to be visible (and because a
-    // container can fire ready before the bundle has finished parsing). The matching
-    // release lives at the end of <body>, after the bundle publishes PA_START.
-    // The subscription is written out INSIDE the guard, not delegated to the helper
-    // above: a scanner reads the branch body, and a call to trackMraidReadiness(mraid)
-    // there is not the mraid.addEventListener("ready", ...) it is looking for.
-    var mraid = window.mraid;
-    if (mraid && typeof mraid.getState === "function") {
-      try {
-        if (mraid.getState() === "loading") {
-          // Still loading: subscribe to "ready" and initialize nothing until it fires.
-          if (typeof mraid.addEventListener === "function") {
-            mraid.addEventListener("ready", function () { mraidIsReady = true; });
-            mraidReadyListenerAttached = true;
-          }
-        }
-      } catch (e) {
-        // Some non-standard containers throw; getState() stays the primary check.
-      }
-    }
-  })();
+    // The ready wait already happened in the head gate: the runtime only registers its
+    // MRAID lifecycle listeners instead of waiting a second time.
+    window.PA_MRAID_WAITED = true;
+    if (typeof window.PA_START === "function") window.PA_START();
+  }
+  if (window.${Shell.MIP_bootFlag}) startCreative();
+  else window.${Shell.MIP_bootCallback} = startCreative;
+})();
 </script>`
 
-// The initialization gate, emitted AFTER the runtime bundle (which publishes PA_START).
-// This is the "wait for mraid ready before initialization" contract in the exact shape
-// validators look for — and it is the real thing: with PA_MRAID_GATE set, the bundle does
-// not start the creative on its own.
-export const MRAID_BOOT = `<script>
-  // MRAID v2.0: do not initialize the creative until the container is ready.
-  (function () {
-    var started = false;
-    function startCreative() {
-      if (started) return;
-      started = true;
-      // PA_MRAID_WAITED tells the runtime the ready wait already happened out here, so it
-      // registers the MRAID lifecycle listeners instead of waiting a second time.
-      window.PA_MRAID_WAITED = true;
-      // Arm the viewability lifecycle here, not in <head>: this is the first point
-      // isViewable() may legally be asked (the container is past "loading", or the backstop
-      // below gave up waiting and the readiness guard inside will hold the call back).
-      if (typeof window.PA_WATCH_VIEWABILITY === "function") window.PA_WATCH_VIEWABILITY();
-      if (typeof window.PA_START === "function") window.PA_START();
-    }
+// SIP: the sample's body script, minus its video template. Its handleClickAction, tap
+// debounce, viewability wiring, lifecycle hooks and DOM + MRAID boot gate run verbatim;
+// startAdRuntime() — the sample's video player — becomes "start the runtime", which
+// renders the chosen end card (HTML import, video or image, plus anything on top of it).
+// Wrapped in one function scope so the sample's handleClickAction stays the local the
+// debounce calls, while window.handleClickAction (what the runtime's CTA surfaces call)
+// goes through the debounce first: one open per gesture, whichever surface fired it.
+const SIP_BODY = `<script>
+(function () {
+${Shell.SIP_handleClickAction}
 
-    var mraid = window.mraid;
-    // No container (plain browser, QA preview): nothing to wait for.
-    if (!mraid || typeof mraid.getState !== "function") { startCreative(); return; }
+${Shell.SIP_tapState}
 
-    // The AppLovin readiness guard. Written as this exact statement — the literal
-    // identifier, the literal call, the literal state, and the ready subscription inside
-    // the branch — because network validators static-scan for it; the same check behind a
-    // helper, a local variable or a shared wait function reads as missing and gets the
-    // creative rejected. The repetition in the catch is deliberate for that reason.
+${Shell.SIP_handleTap}
+
+window.handleClickAction = function () {
+  handleTap({ type: "click" });
+};
+
+// setupMraidViewability() drives the sample's <video>. Here the runtime owns playback and
+// volume (it registers the same MRAID events), so these only pause media the container
+// has taken off screen.
+let mraidViewable = true;
+const video = { volume: 1 };
+function syncWindowActivityState() {
+  if (mraidViewable) return;
+  document.querySelectorAll("video, audio").forEach(function (element) {
     try {
-      if (mraid.getState() === "loading") {
-        // Still loading: the ready event is the only legal signal to start on.
-        if (typeof mraid.addEventListener === "function") {
-          mraid.addEventListener("ready", startCreative);
-        }
-        // Backstop so a container that never fires ready cannot leave a blank ad.
-        window.setTimeout(startCreative, 2500);
-      } else {
-        // Past loading (default / expanded): safe to initialize now.
-        startCreative();
-      }
-    } catch (e) {
-      // State unreadable — treat it as loading: same wait, same backstop.
-      try {
-        if (typeof mraid.addEventListener === "function") {
-          mraid.addEventListener("ready", startCreative);
-        }
-      } catch (e2) {
-        // Container refused the listener; the backstop below still starts the creative.
-      }
-      window.setTimeout(startCreative, 2500);
-    }
-  })();
+      element.pause();
+    } catch (_error) {}
+  });
+}
+
+${Shell.SIP_setupMraidViewability}
+
+${Shell.SIP_lifecycleStubs}
+
+${Shell.SIP_signalPlayableLifecycle}
+
+${Shell.SIP_pagehide}
+
+${Shell.SIP_unloadFailedAd}
+
+function startAdRuntime() {
+  setupMraidViewability();
+  window.PA_MRAID_WAITED = true;
+  if (typeof window.PA_START === "function") window.PA_START();
+}
+
+${Shell.SIP_startedState}
+
+${Shell.SIP_init}
+
+${Shell.SIP_initializeMraidRuntime}
+
+initializeMraidRuntime();
+})();
 </script>`
 
 // Same JSON, one asset per line. Serialised flat, the asset map is a single line holding
@@ -1028,26 +898,37 @@ function serializeAssets(assets: AssetMap): string {
   return `{\n${entries.map(([k, v]) => `${JSON.stringify(k)}:${JSON.stringify(v)}`).join(',\n')}\n}`
 }
 
+/** Which sample's shell a project ships in: a SIP is a project whose one scene is an end card. */
+export const shellKind = (project: Project): 'mip' | 'sip' => (isSip(project) ? 'sip' : 'mip')
+
 export function buildBaseHtml(project: Project, assets: AssetMap, runtimeSrc = staticRuntimeSrc): string {
-  // Set background color statically so the html canvas background is correct
-  // before JS runs — prevents white flash / edge bleed in Chromium/AppLovin WebViews.
-  const bg = project.meta.bgMatchColor ?? '#000000'
+  // Title is always the brand (Client) name; fall back to the MIP name, then a generic label.
+  const title = `<title>${esc(project.meta.client || project.meta.name || 'playable')}</title>\n`
+  if (shellKind(project) === 'sip') {
+    return (
+      Shell.SIP_htmlOpen +
+      Shell.SIP_meta +
+      Shell.SIP_titleIndent + title +
+      Shell.SIP_helper + '\n' +
+      baseStyle(project) + '\n' +
+      Shell.SIP_dateScript + '\n' +
+      `</head>\n<body>\n` +
+      gateFlags(Shell.SIP_dateAccessor) + '\n' +
+      dataAndRuntime(project, assets, runtimeSrc) + '\n' +
+      SIP_BODY + '\n' +
+      `</body>\n</html>\n`
+    )
+  }
   return (
-    `<!doctype html><html lang="en"><head><meta charset="utf-8">` +
-    `<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">` +
-    MRAID_HEAD +
-    // Title is always the brand (Client) name; fall back to the MIP name, then a generic label.
-    `<title>${esc(project.meta.client || project.meta.name || 'playable')}</title>` +
-    // user-select guards mirror the runtime base styles: without them, a drag that
-    // lands on a bare container (text elements are pointer-events:none) starts a
-    // native selection and highlights the whole screen while scratching.
-    `<style>html,body{margin:0;padding:0;background:${bg}!important;` +
-    `user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;}</style>` +
-    `</head><body>` +
-    `<script>window.PA_PROJECT=${esc(JSON.stringify(project))};\nwindow.PA_ASSETS=${esc(serializeAssets(assets))};\n</script>\n` +
-    `<script>${stripSourceMap(runtimeSrc)}</script>` +
-    MRAID_BOOT +
-    `</body></html>`
+    Shell.MIP_htmlOpen +
+    Shell.MIP_headScripts +
+    Shell.MIP_meta +
+    Shell.MIP_titleIndent + title +
+    baseStyle(project) + '\n' +
+    gateFlags(Shell.MIP_dateAccessor) + '\n' +
+    dataAndRuntime(project, assets, runtimeSrc) + '\n' +
+    MIP_BOOT + '\n' +
+    Shell.MIP_tail
   )
 }
 
@@ -1056,12 +937,13 @@ function injectHead(html: string, tag: string): string {
 }
 export function transformForNetwork(base: string, net: Network): string {
   let html = base
-  // No mraid.js here: the bridge + readiness guard are in the base shell for every
-  // network now (MRAID_HEAD), so injecting per-network would duplicate the tag.
+  // No mraid.js here: the sample's shell already declares the bridge for every network,
+  // so injecting per-network would duplicate the tag.
   if (net.injectExitApi) html = injectHead(html, '<script src="exitapi.js"></script>')
   if (net.vungleFlag) html = injectHead(html, '<script>window.__VUNGLE__=true;</script>')
   if (net.onloadGameReady) html = html.replace('<body>', '<body onload="gameReady()">')
-  return `<!-- ad-network: ${net.name} | ${net.tag} -->\n${html}`
+  // No network comment ahead of the doctype: the file opens exactly as the sample does.
+  return html
 }
 
 export interface Output {

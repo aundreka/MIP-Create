@@ -19,6 +19,7 @@
     "smoke": "node scripts/smoke.mjs",
     "mraid": "node scripts/mraid-check.mjs",
     "applovin": "node scripts/applovin-check.mjs",
+    "sync:samples": "node scripts/sync-export-samples.mjs",
     "app": "electron .",
     "app:dev": "cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .",
     "dist": "npm run build && electron-builder",

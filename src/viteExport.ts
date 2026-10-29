@@ -6,7 +6,8 @@
 import JSZip from 'jszip'
 import type { Project } from '../runtime/scene'
 import type { AssetEntry, AssetMap } from '../runtime/types'
-import { downloadBlob, MRAID_HEAD, parentAssetRefs, pruneAssets } from './export'
+import { downloadBlob, parentAssetRefs, pruneAssets } from './export'
+import * as Shell from './exportShell.generated'
 import { mipFolderName } from './mipName'
 import { currentProjectId, loadProjectPreview, projectsInGroup } from './projects'
 import { getState } from './store'
@@ -67,7 +68,6 @@ import type { Project } from './runtime/scene'
 import type { AssetMap } from './runtime/types'
 
 const W = window as unknown as Record<string, any>
-const mraid = W.mraid
 
 // Media lives in public/media/ as plain files so it can be swapped. The runtime
 // registers custom fonts from inline bytes only, so read each font file into a
@@ -97,13 +97,15 @@ async function withInlineFonts(list: AssetMap): Promise<AssetMap> {
 let started = false
 function startCreative(): void {
   if (started) return
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', startCreative, { once: true })
+    return
+  }
   started = true
-  // Tells the runtime the ready wait already happened here, so it registers the MRAID
-  // lifecycle listeners instead of waiting a second time.
+  // Tells the runtime the ready wait already happened in index.html's head gate, so it
+  // registers the MRAID lifecycle listeners instead of waiting a second time.
   W.PA_MRAID_WAITED = true
-  // Viewability lifecycle: armed here, the first point isViewable() is legal to ask
-  // (index.html defines it alongside the readiness guard).
-  if (typeof W.PA_WATCH_VIEWABILITY === 'function') W.PA_WATCH_VIEWABILITY()
+  W.PA_NOW = W.${Shell.MIP_dateAccessor}
   void withInlineFonts(assets as unknown as AssetMap).then((list) =>
     boot(project as unknown as Project, list, {
       mount: document.getElementById('app') ?? document.body,
@@ -111,30 +113,11 @@ function startCreative(): void {
   )
 }
 
-// MRAID v2.0: nothing may initialize while the container is still loading — the ready
-// event is the only legal signal to start on (see index.html for the matching guard).
-// Written out longhand, subscription inside the branch: network validators static-scan
-// for this exact shape, and a shared wait helper reads to them as no guard at all.
-if (!mraid || typeof mraid.getState !== 'function') {
-  startCreative() // no container (plain browser, npm run dev)
-} else {
-  try {
-    if (mraid.getState() === 'loading') {
-      if (typeof mraid.addEventListener === 'function') mraid.addEventListener('ready', startCreative)
-      window.setTimeout(startCreative, 2500) // backstop: never leave a blank ad
-    } else {
-      startCreative()
-    }
-  } catch {
-    // State unreadable — treat it as loading: same wait, same backstop.
-    try {
-      if (typeof mraid.addEventListener === 'function') mraid.addEventListener('ready', startCreative)
-    } catch {
-      // Container refused the listener; the backstop below still starts the creative.
-    }
-    window.setTimeout(startCreative, 2500)
-  }
-}
+// MRAID v2.0: index.html's head gate (docs/mip_sample.html) holds initialization until the
+// container is past "loading", then sets window.${Shell.MIP_bootFlag} and calls
+// window.${Shell.MIP_bootCallback}().
+if (W.${Shell.MIP_bootFlag}) startCreative()
+else W.${Shell.MIP_bootCallback} = startCreative
 `
 
 function readme(name: string): string {
@@ -169,10 +152,10 @@ npm run build    # production build into dist/
 ## Notes
 
 - The runtime has zero runtime dependencies, so the build stays light.
-- \`index.html\` declares the MRAID bridge (\`<script src="mraid.js">\`), the
-  \`isMraidUsable()\` readiness guard and the guarded \`PA_CLICKOUT\` handler, and
-  \`src/main.ts\` holds initialization until \`mraid.getState()\` is past \`"loading"\`,
-  so a \`npm run build\` is ad-container ready.
+- \`index.html\` carries the MRAID head of the reference MIP: the bridge
+  (\`<script src="mraid.js">\`), the \`isMraidUsable()\` readiness guard, the guarded
+  \`handleClickAction()\` click-through and the loading-state boot gate that
+  \`src/main.ts\` waits on, so a \`npm run build\` is ad-container ready.
   The 404 for \`mraid.js\` in local dev is expected — the ad container supplies it.
 - This is a standard Vite app: \`npm run build\` produces a multi-file \`dist/\`. For
   the single-file, ad-network-ready HTML (with the 5MB gate and MRAID/ExitAPI
@@ -181,14 +164,11 @@ npm run build    # production build into dist/
 }
 
 const INDEX_HTML = (title: string): string =>
-  `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
-    <title>${title.replace(/</g, '&lt;')}</title>
-    ${MRAID_HEAD}
-    <style>html,body{margin:0;height:100%;background:#000;overflow:hidden}</style>
+  Shell.MIP_htmlOpen +
+  Shell.MIP_headScripts +
+  Shell.MIP_meta +
+  `${Shell.MIP_titleIndent}<title>${title.replace(/</g, '&lt;')}</title>
+    <style>html,body{margin:0;height:100%;background:#000;overflow:hidden}#app{position:fixed;inset:0}</style>
   </head>
   <body>
     <div id="app"></div>

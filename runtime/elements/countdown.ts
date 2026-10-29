@@ -23,17 +23,35 @@ export function setNowOverride(ms: number | null | undefined): void {
   nowOverride = typeof ms === 'number' && isFinite(ms) ? ms : null
 }
 
-/** The instant DATE rendering should describe: the preview date when one is set,
- * otherwise the real clock. */
+// An export's ?date=YYYY-MM-DD (docs/AGENTS.md "Date Query Parameter"). The sample's own
+// script parses and validates it and publishes an accessor; the shell hands that accessor
+// over as window.PA_NOW. Read once: an invalid or absent date returns the real clock, so
+// the shift rounds to 0. A valid one moves every rendered date onto that calendar day
+// (local midday) and lets it run on from there, while timers keep counting real time.
+let exportShift: number | null = null
+function exportDateShift(): number {
+  if (exportShift !== null) return exportShift
+  exportShift = 0
+  try {
+    const fn = (window as unknown as { PA_NOW?: () => Date }).PA_NOW
+    const at = typeof fn === 'function' ? fn().getTime() : NaN
+    const shift = at - Date.now()
+    if (isFinite(shift) && Math.abs(shift) > 60_000) exportShift = shift
+  } catch { /* no accessor: the real clock */ }
+  return exportShift
+}
+
+/** The instant DATE rendering should describe: the editor's preview date when one is
+ * set, else the export's ?date= day, otherwise the real clock. */
 export function runtimeNow(): number {
-  return nowOverride ?? Date.now()
+  return nowOverride ?? Date.now() + exportDateShift()
 }
 
 /** How far the rendered date is displaced from the real clock. Added to both `now`
  * and `deadline` so the REMAINING time (deadline - now) is untouched: a timer still
  * counts what it really has left while its date tokens read the preview day. */
 export function nowShift(): number {
-  return nowOverride == null ? 0 : nowOverride - Date.now()
+  return nowOverride == null ? exportDateShift() : nowOverride - Date.now()
 }
 
 // ---------------------------------------------------------------------------

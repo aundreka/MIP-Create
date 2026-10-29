@@ -71,7 +71,33 @@ export function localizeElement(el: SceneElement, locale: string | null | undefi
   }
 }
 
-/** Pick the best available locale for the browser, else null (= base copy). */
+// Chinese resolves by script, not by base language (docs/LOCALIZATION.md): a region tag
+// names the script it reads, and a bare "zh" means Simplified.
+const ZH_ALIASES: Record<string, string> = {
+  zh: 'zh-hans',
+  'zh-cn': 'zh-hans',
+  'zh-sg': 'zh-hans',
+  'zh-hans-cn': 'zh-hans',
+  'zh-hans-sg': 'zh-hans',
+  'zh-tw': 'zh-hant',
+  'zh-hk': 'zh-hant',
+  'zh-mo': 'zh-hant',
+  'zh-hant-tw': 'zh-hant',
+  'zh-hant-hk': 'zh-hant',
+}
+
+/** The QA/editor override: ?lang=, ?locale= or ?language= on the creative's URL. */
+function urlLocale(): string | null {
+  try {
+    const q = new URLSearchParams(window.location.search)
+    return q.get('lang') || q.get('locale') || q.get('language')
+  } catch {
+    return null
+  }
+}
+
+/** Pick the best available locale: the URL override, then the browser/device languages,
+ * else null (= the base copy, English). */
 export function resolveLocale(available?: string[]): string | null {
   if (!available || !available.length) return null
   const avail = available.map(norm)
@@ -81,11 +107,17 @@ export function resolveLocale(available?: string[]): string | null {
         ? navigator.languages
         : [navigator.language]
       : []
-  for (const raw of nav) {
+  const override = urlLocale()
+  for (const raw of override ? [override, ...nav] : nav) {
     if (!raw) continue
     const want = norm(raw)
     let i = avail.indexOf(want)
     if (i >= 0) return available[i]
+    const script = ZH_ALIASES[want]
+    if (script) {
+      i = avail.indexOf(script)
+      if (i >= 0) return available[i]
+    }
     const base = want.split('-')[0]
     i = avail.findIndex((a) => a === base || a.split('-')[0] === base)
     if (i >= 0) return available[i]

@@ -107,30 +107,40 @@ addEventListener('pointerdown', function () { window.__tapped = true }, true);
 })();
 `
 
-// The export shell's MRAID head, read straight out of src/export.ts so this harness
-// exercises the guard that actually ships instead of a copy that can drift. The literals
-// are plain (no interpolation), so evaluating the expression is just string concatenation.
-function exportConst(name) {
-  const src = readFileSync(join(ROOT, 'src', 'export.ts'), 'utf8')
-  // One backtick-delimited literal, no interpolation — so the match is the whole value.
-  const m = src.match(new RegExp('export const ' + name + ' = (`[^`]*`)'))
-  if (!m) throw new Error(`${name} not found in src/export.ts — the export shell no longer carries it.`)
-  return Function('return (' + m[1] + ')')()
+// The export shell exactly as buildBaseHtml (src/export.ts) emits a MIP: the sample's own
+// pieces from src/exportShell.generated.ts (docs/mip_sample.html), and the boot glue read
+// out of export.ts, so this harness exercises what actually ships.
+function generatedShell() {
+  const src = readFileSync(join(ROOT, 'src', 'exportShell.generated.ts'), 'utf8')
+  const out = {}
+  for (const line of src.split('\n')) {
+    const m = /^export const (\w+) = (".*")$/.exec(line)
+    if (m) out[m[1]] = JSON.parse(m[2])
+  }
+  return out
 }
-const HEAD = exportConst('MRAID_HEAD')
-const BOOT = exportConst('MRAID_BOOT')
+const SHELL = generatedShell()
+function exportBoot() {
+  const src = readFileSync(join(ROOT, 'src', 'export.ts'), 'utf8')
+  const m = src.match(/const MIP_BOOT = (`[^`]*`)/)
+  if (!m) throw new Error('MIP_BOOT not found in src/export.ts — the export shell no longer carries it.')
+  return Function('Shell', 'return (' + m[1] + ')')(SHELL)
+}
+const HEAD = SHELL.MIP_headScripts
+const BOOT = exportBoot()
 // Drop the bridge tag: the stub below IS the container's mraid.js, and a relative
 // <script src> would only 404 in this harness. Its presence is asserted separately.
 const GUARD = HEAD.replace('<script src="mraid.js"></script>', '')
+const escUrls = (s) => s.replace(/(https?:)\/\//gi, '$1\\/\\/')
 
 const buildHtml = (project, assets, runtimeSrc) =>
-  `<!doctype html><html lang="en"><head><meta charset="utf-8">` +
-  `<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">` +
-  // Container bridge first, then the guard — the real load order in an ad container.
-  `<script>${STUB}</script>${GUARD}</head><body>` +
-  `<script>window.PA_PROJECT=${esc(JSON.stringify(project))};window.PA_ASSETS=${esc(JSON.stringify(assets))};</script>` +
-  // Runtime, then the readiness gate that starts it — exactly as buildBaseHtml emits them.
-  `<script>${runtimeSrc}</script>${BOOT}</body></html>`
+  SHELL.MIP_htmlOpen +
+  // Container bridge first, then the sample's head — the real load order in an ad container.
+  `<script>${STUB}</script>\n` + GUARD + SHELL.MIP_meta + '<title>mraid-check</title>\n' +
+  `<script>window.PA_MRAID_GATE = true; window.PA_NOW = window.${SHELL.MIP_dateAccessor};</script>\n` +
+  `<script>window.PA_PROJECT=${escUrls(esc(JSON.stringify(project)))};window.PA_ASSETS=${escUrls(esc(JSON.stringify(assets)))};</script>\n` +
+  `<script>${escUrls(runtimeSrc)}</script>\n${BOOT}\n` +
+  SHELL.MIP_tail
 
 /** The only two things a creative may ask of a container that is still loading. */
 const PRE_READY_OK = new Set(['getState', 'addEventListener:ready'])
@@ -169,13 +179,13 @@ async function run() {
   if (!/src="mraid\.js"/.test(HEAD)) problems.push('export shell is missing the <script src="mraid.js"> bridge declaration')
   else console.log('✓ export shell declares the mraid.js bridge')
   // 0b. mraid.open() is the only click-through: validators static-scan for window.open
-  const opens = [HEAD, runtimeSrc].join('\n').match(/window\s*\.\s*open\w*|window\s*\[\s*["']open/g)
+  const opens = [HEAD, BOOT, runtimeSrc].join('\n').match(/window\s*\.\s*open\w*|window\s*\[\s*["']open/g)
   if (opens) problems.push(`window.open in the export (${[...new Set(opens)].join(', ')}) — click-throughs must use mraid.open() only`)
   else console.log('✓ no window.open anywhere in the export — mraid.open() is the only click-through')
   // Both arms of the open must ship. AppLovin keeps the click URL on the campaign, so a
   // creative that resolves no destination still has to call open with no argument or its
   // CTA registers nothing at all.
-  const src = [HEAD, runtimeSrc].join('\n')
+  const src = [HEAD, BOOT, runtimeSrc].join('\n')
   if (!/mraid\s*\.\s*open\(\s*[^)\s]/.test(src)) problems.push('no mraid.open(clickTarget) in the export — a resolved destination must reach the container')
   else if (!/mraid\s*\.\s*open\(\s*\)/.test(src)) problems.push('no argument-less mraid.open() fallback in the export — a creative with no destination would register no click')
   else console.log('✓ mraid.open ships both arms: the resolved destination and the blank fallback')

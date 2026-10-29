@@ -65,7 +65,7 @@ async function load() {
 afterEach(() => {
   vi.useRealTimers()
   const W = window as unknown as Record<string, unknown>
-  for (const key of ['mraid', 'isMraidUsable', 'PA_CLICKOUT', 'handleMraidOpen', 'handleTap', 'PA_TAP_RESET', 'clickTag', 'clickTag1', 'clickthrough', 'clickThrough']) delete W[key]
+  for (const key of ['mraid', 'isMraidUsable', 'handleClickAction', 'ALPlayableAnalytics', 'clickTag', 'clickTag1', 'clickthrough', 'clickThrough']) delete W[key]
   vi.restoreAllMocks()
 })
 
@@ -203,71 +203,76 @@ describe('MRAID readiness', () => {
     expect(open).not.toHaveBeenCalled()
   })
 
-  it('routes the clickout through the shell handler (window.PA_CLICKOUT) when present', async () => {
-    // The export shell publishes the guarded open longhand so validators can see it; the
-    // runtime must actually use it rather than duplicating the call.
+  it("routes the clickout through the shell's handleClickAction when present", async () => {
+    // The shell (docs/mip_sample.html / sip_sample.html) owns the guarded open, written
+    // longhand so validators can see it; the runtime calls it rather than duplicating it.
     const mraid = makeMraid({ state: 'default' })
     const W = window as unknown as Record<string, unknown>
     W.mraid = mraid
-    const seen: unknown[] = []
-    W.PA_CLICKOUT = (url: string) => { seen.push(url); return true }
+    let calls = 0
+    W.handleClickAction = () => { calls++ }
     const { net } = await load()
     net.setStoreUrl({ ios: 'https://apps.apple.com/x', android: 'https://apps.apple.com/x' })
     const open = vi.spyOn(window, 'open').mockReturnValue(window)
 
     net.triggerCTA()
-    expect(seen).toEqual(['https://apps.apple.com/x'])
+    expect(calls).toBe(1)
     // The shell handler owns the open — no duplicate call into the container or the browser.
     expect(mraid.calls.some((c) => c.startsWith('open:'))).toBe(false)
     expect(open).not.toHaveBeenCalled()
   })
 
-  it('prefers window.handleMraidOpen over the older PA_CLICKOUT name', async () => {
-    // The shell publishes one guarded open under both names. handleMraidOpen is the name
-    // compliance tooling scans for, so it is the one the runtime reaches for first.
-    const mraid = makeMraid({ state: 'default' })
+  it('calls the shell handler with no container too — it is the one that decides to no-op', async () => {
     const W = window as unknown as Record<string, unknown>
-    W.mraid = mraid
-    const seen: string[] = []
-    W.handleMraidOpen = (url: string) => { seen.push('handleMraidOpen:' + url); return true }
-    W.PA_CLICKOUT = (url: string) => { seen.push('PA_CLICKOUT:' + url); return true }
+    let calls = 0
+    W.handleClickAction = () => { calls++ }
     const { net } = await load()
-    net.setStoreUrl({ ios: 'https://apps.apple.com/x', android: 'https://apps.apple.com/x' })
-
-    net.triggerCTA()
-    expect(seen).toEqual(['handleMraidOpen:https://apps.apple.com/x'])
-  })
-
-  it('does not fall back to the browser when the shell handler reports nothing opened', async () => {
-    const mraid = makeMraid({ state: 'loading' })
-    const W = window as unknown as Record<string, unknown>
-    W.mraid = mraid
-    W.PA_CLICKOUT = () => false
-    const { net } = await load()
-    net.setStoreUrl({ ios: 'https://apps.apple.com/x', android: 'https://apps.apple.com/x' })
     const open = vi.spyOn(window, 'open').mockReturnValue(window)
 
     net.triggerCTA()
+    expect(calls).toBe(1)
     expect(open).not.toHaveBeenCalled()
+  })
+
+  it('logs CTA_CLICKED as analytics and delivers it to AppLovin', async () => {
+    const W = window as unknown as Record<string, unknown>
+    const delivered: string[] = []
+    W.ALPlayableAnalytics = { trackEvent: (e: string) => delivered.push(e) }
+    W.handleClickAction = () => {}
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const { net } = await load()
+
+    net.triggerCTA()
+    expect(log).toHaveBeenCalledWith('[Analytics]', 'CTA_CLICKED')
+    expect(delivered).toEqual(['CTA_CLICKED'])
   })
 })
 
-describe('click macro chain', () => {
-  // Networks publish the destination under four different global names; hardcoding only
-  // window.clickTag drops the click on the ones that use the others.
-  // The macro is the destination; the click itself still goes through mraid.open().
-  for (const key of ['clickTag', 'clickTag1', 'clickthrough', 'clickThrough']) {
-    it(`redirects to window.${key} through mraid.open()`, async () => {
+describe('click target', () => {
+  it('redirects to window.clickTag through mraid.open()', async () => {
+    const W = window as unknown as Record<string, unknown>
+    const mraid = makeMraid({ state: 'default' })
+    W.mraid = mraid
+    W.clickTag = 'https://dsp.example/click'
+    const { net } = await load()
+    const open = vi.spyOn(window, 'open').mockReturnValue(window)
+
+    net.triggerCTA()
+    expect(mraid.calls).toContain('open:https://dsp.example/click')
+    expect(open).not.toHaveBeenCalled()
+  })
+
+  // Validators reserve these names: only the platform's window.clickTag may be read.
+  for (const key of ['clickTag1', 'clickthrough', 'clickThrough']) {
+    it(`ignores the reserved window.${key}`, async () => {
       const W = window as unknown as Record<string, unknown>
       const mraid = makeMraid({ state: 'default' })
       W.mraid = mraid
-      W[key] = 'https://dsp.example/click'
+      W[key] = 'https://dsp.example/reserved'
       const { net } = await load()
-      const open = vi.spyOn(window, 'open').mockReturnValue(window)
 
       net.triggerCTA()
-      expect(mraid.calls).toContain('open:https://dsp.example/click')
-      expect(open).not.toHaveBeenCalled()
+      expect(mraid.calls).not.toContain('open:https://dsp.example/reserved')
     })
   }
 })
@@ -294,28 +299,12 @@ describe('one action per gesture (tapOnce)', () => {
     expect(ran).toEqual([1, 2])
   })
 
-  it('defers to the shell debounce (window.handleTap) when the export installs one', async () => {
-    // Both halves must share ONE window, or a tap collapsed by the runtime still counts
-    // against the shell's and the ad needs two taps to redirect.
-    const W = window as unknown as Record<string, unknown>
-    const seen: string[] = []
-    W.handleTap = (run: () => void) => { seen.push('shell'); run(); return true }
-    const { net } = await load()
-
-    expect(net.tapOnce(() => seen.push('ran'))).toBe(true)
-    expect(seen).toEqual(['shell', 'ran'])
-  })
-
-  it('clears the shell window too when the ad is re-shown', async () => {
+  it('accepts the first tap again once the ad is re-shown', async () => {
     // Returning from the store is a fresh gesture: it must redirect on the FIRST tap.
-    const W = window as unknown as Record<string, unknown>
-    let reset = 0
-    W.PA_TAP_RESET = () => { reset++ }
     const { net } = await load()
 
     net.tapOnce(() => {})
     net.resetCtaCooldown()
-    expect(reset).toBe(1)
     expect(net.tapOnce(() => {})).toBe(true)
   })
 })

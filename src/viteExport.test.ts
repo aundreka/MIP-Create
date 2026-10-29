@@ -1,4 +1,5 @@
 import JSZip from 'jszip'
+import * as Shell from './exportShell.generated'
 import { describe, expect, it } from 'vitest'
 import type { Project } from '../runtime/scene'
 import type { AssetMap } from '../runtime/types'
@@ -46,20 +47,17 @@ describe('viteExport', () => {
     expect(saved.meta.name).toBe('Playable One')
   })
 
-  it('ships the MRAID guard in index.html and the ready gate in main.ts', async () => {
+  it("ships the MIP sample's MRAID head in index.html, and main.ts waits on its gate", async () => {
     const blob = await buildViteProjectZip(project('Playable One', 'MIP1'), assets('AAA'))
     const zip = await JSZip.loadAsync(await blob.arrayBuffer())
 
     const html = await zip.file('index.html')!.async('string')
-    expect(html).toContain('<script src="mraid.js"></script>')
-    expect(html).toMatch(/window\.isMraidUsable\(mraid\)/)
-    expect(html).toMatch(/mraid\.open\(clickTarget\)/)
+    expect(html.startsWith(Shell.MIP_htmlOpen + Shell.MIP_headScripts + Shell.MIP_meta)).toBe(true)
+    expect(html.match(/<script src="mraid\.js"><\/script>/g)?.length).toBe(1)
 
-    // This export builds its own bundle, so it carries the gate in source: boot() must not
-    // run while the container reports loading.
+    // boot() must not run until the head gate has seen the container past loading.
     const main = await zip.file('src/main.ts')!.async('string')
-    expect(main).toMatch(/if \(mraid\.getState\(\) === 'loading'\)/)
-    expect(main).toMatch(/mraid\.addEventListener\('ready', startCreative\)/)
+    expect(main).toContain(`W.${Shell.MIP_bootCallback} = startCreative`)
     expect(main.indexOf('startCreative')).toBeLessThan(main.indexOf('boot(project'))
   })
 

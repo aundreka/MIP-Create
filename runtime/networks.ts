@@ -36,22 +36,47 @@ function callStub(name: string): void {
   }
 }
 export const notifyGameStart = (): void => callStub('gameStart')
-export const notifyGameEnd = (): void => callStub('gameEnd')
+export const notifyGameEnd = (): void => {
+  trackEvent('ENDCARD_SHOWN')
+  callStub('gameEnd')
+}
 export const notifyGameClose = (): void => callStub('gameClose')
+
+// ---------------------------------------------------------------------------
+// Analytics (docs/AGENTS.md, as docs/mip_sample.html ships it). Every event is logged with
+// console.log("[Analytics]", event) whether or not AppLovin's analytics object is there,
+// then delivered to it independently. Milestones are reported once per impression;
+// CTA_CLICKED every time.
+// ---------------------------------------------------------------------------
+export type AnalyticsEvent = 'LOADING' | 'LOADED' | 'DISPLAYED' | 'CHALLENGE_STARTED' | 'CHALLENGE_SOLVED' | 'ENDCARD_SHOWN' | 'CTA_CLICKED'
+const _tracked = new Set<AnalyticsEvent>()
+export function trackEvent(event: AnalyticsEvent): void {
+  if (event !== 'CTA_CLICKED') {
+    if (_tracked.has(event)) return
+    _tracked.add(event)
+  }
+  console.log('[Analytics]', event)
+  const analytics = W.ALPlayableAnalytics
+  if (analytics && typeof analytics.trackEvent === 'function') {
+    try {
+      analytics.trackEvent(event)
+    } catch (error) {
+      console.warn('[Analytics] AppLovin delivery failed', error)
+    }
+  }
+}
 
 // ---------------------------------------------------------------------------
 // MRAID v2.0 clickout guard (docs/mraid-v2-guide.md).
 // ---------------------------------------------------------------------------
-/** Click destination as the networks publish it — no single global is universal:
- *  Moloco/DSPs use clickTag, some tags number it clickTag1, others spell it
- *  clickthrough / clickThrough. Anything non-string is ignored. */
+/** The click destination the platform injects. window.clickTag is the only name a creative
+ *  may read: validators reserve the other spellings and reject a creative that mentions
+ *  them (docs/mip_sample.html resolves `window.clickTag || ""`). Non-strings are ignored. */
 function clickTagUrl(): string {
-  for (const key of ['clickTag', 'clickTag1', 'clickthrough', 'clickThrough']) {
-    try {
-      const v = W[key]
-      if (typeof v === 'string' && v) return v
-    } catch { /* */ }
-  }
+  try {
+    const v = W.clickTag
+    if (typeof v === 'string' && v) return v
+  } catch { /* */ }
   return ''
 }
 
@@ -81,19 +106,11 @@ function mraidUsable(mraid: any): boolean {
 let _lastTap = -Infinity
 /**
  * Run `run` once per gesture, collapsing the ghost pair iOS emits for one tap (the
- * touchend/pointerup, then the synthesised click ~300ms later).
- *
- * The export shell publishes this as window.handleTap, written longhand with a lastTapAt
- * timestamp (MRAID_HEAD in src/export.ts), because the runtime's own guards survive
- * minification only as mangled identifiers and a creative scanner that cannot see a
- * debounce reports the ad as having none. Prefer the shell's copy so both halves share one
- * window; the local one below is the fallback for shells without it (editor preview, Vite
- * source export). Returns true when the tap was accepted.
+ * touchend/pointerup, then the synthesised click ~300ms later). Returns true when the tap
+ * was accepted. (The SIP shell's own handleTap debounce sits behind window.handleClickAction,
+ * so it applies on top of this one there.)
  */
 export function tapOnce(run: () => void): boolean {
-  try {
-    if (typeof W.handleTap === 'function') return W.handleTap(run) === true
-  } catch { /* fall through to the local copy */ }
   const t = Date.now()
   if (t - _lastTap < 500) return false
   _lastTap = t
@@ -114,13 +131,10 @@ let _lastCta = -Infinity
 // their next tap is a fresh, deliberate interaction that must redirect on the FIRST
 // click. Without this reset that return tap lands inside the lingering 800ms window and
 // gets swallowed, so the endcard "needs two clicks" to redirect the second time around.
-// The shell's shorter tap window (handleTap above) is dropped with it, for the same reason.
+// The tap window (tapOnce above) is dropped with it, for the same reason.
 export function resetCtaCooldown(): void {
   _lastCta = -Infinity
   _lastTap = -Infinity
-  try {
-    if (typeof W.PA_TAP_RESET === 'function') W.PA_TAP_RESET()
-  } catch { /* */ }
 }
 
 export function triggerCTA(): void {
@@ -131,6 +145,7 @@ export function triggerCTA(): void {
   // deliberate tap for 800ms, so the endcard would "need 2+ clicks" to redirect.
   const t = performance.now()
   if (t - _lastCta < 800) return
+  trackEvent('CTA_CLICKED')
   const url = storeUrl()
   // 'about:blank' means "no real destination" — normalise to '' so MRAID fires an
   // empty click signal (network still registers the tap) but no navigation happens.
@@ -169,60 +184,37 @@ export function triggerCTA(): void {
   try {
     if (typeof W.openAppStore === 'function') return done(() => W.openAppStore())
   } catch { /* */ }
-  // 7. Moloco / DSP click macro (clickTag, clickTag1, clickthrough, clickThrough). The
-  // macro is only a DESTINATION: the click itself still goes through mraid.open() below,
-  // because validators reject any click-through that bypasses the MRAID container.
-  let clickDest = dest
-  try {
-    const tag = clickTagUrl()
-    if (tag) clickDest = tag
-  } catch { /* */ }
-  // 8. Vungle
+  // 7. Vungle
   try {
     if (W.__VUNGLE__ && window.parent) return done(() => window.parent.postMessage('download', '*'))
   } catch { /* */ }
-  // 9. TikTok
+  // 8. TikTok
   try {
     if (W.__TIKTOK__ && typeof W.openAppStore === 'function') return done(() => W.openAppStore())
   } catch { /* */ }
-  // 10. MRAID (Applovin / Ironsource / Unity fallback) — the ONLY click-through method
-  // when a container is present. There is deliberately no browser fallback: creative
-  // validators reject a creative whose click-through can bypass mraid.open()
-  // (docs/mraid_clickthrough_validation_fix.md).
-  // Called even without a URL: on AppLovin the destination belongs to the campaign, so an
-  // argument-less open is how a mode:'none' / about:blank creative still registers its
-  // click inside the container (AGENTS.md). Dropping it is what leaves the CTA dead.
-  // Guarded by mraidUsable(): calling open() on a container that is still 'loading'
-  // violates the MRAID spec and is what creative audits flag — that tap is dropped and
-  // the cooldown stays disarmed, so the next tap gets a fresh try.
-  //
-  // The export shell publishes the same guarded open as window.handleMraidOpen — and
-  // window.PA_CLICKOUT, the same function under its older name (MRAID_HEAD in
-  // src/export.ts) — written longhand, so the guard + try/catch + click-macro chain survive
-  // in scannable source instead of only as mangled bundle identifiers. Prefer it when it
-  // is there; this branch is the fallback for shells without it (preview, Vite source
-  // export). It returns true only when the container accepted the open.
-  if (W.mraid && typeof W.mraid.open === 'function') {
-    try {
-      const shellOpen = typeof W.handleMraidOpen === 'function' ? W.handleMraidOpen : W.PA_CLICKOUT
-      if (typeof shellOpen === 'function') {
-        if (shellOpen(clickDest) === true) _lastCta = t
-      } else if (mraidUsable(W.mraid)) {
-        done(() => (clickDest ? W.mraid.open(clickDest) : W.mraid.open()))
-      }
-    } catch (e) {
-      console.error('mraid.open failed', e)
-    }
+  // 9. MRAID — the export shell's handleClickAction, read verbatim from docs/mip_sample.html
+  // or docs/sip_sample.html (src/exportShell.generated.ts). It resolves window.clickTag and
+  // calls the guarded mraid.open(clickTarget) — or the argument-less mraid.open(), which on
+  // AppLovin is how the campaign's own URL opens — and is a safe no-op outside a container.
+  // It is the ONLY click-through: there is deliberately no browser navigation fallback
+  // anywhere in the creative (validators reject window.open / location.href click-throughs).
+  try {
+    if (typeof W.handleClickAction === 'function') return done(() => W.handleClickAction())
+  } catch (e) {
+    console.warn('handleClickAction failed', e)
     return
   }
-  // 11. No container at all — editor preview or the file opened straight in a browser.
-  // Navigate the current tab (never a popup: that would put a non-MRAID click-through in
-  // the creative). Skipped when there is no real destination (mode:'none' / about:blank).
-  if (clickDest && clickDest !== 'about:blank') {
+  // 10. No shell (editor preview, Vite source export): the same guarded open, inline.
+  // Guarded by mraidUsable(): calling open() on a container that is still 'loading'
+  // violates the MRAID spec — that tap is dropped and the cooldown stays disarmed.
+  const mraid = W.mraid
+  if (mraid && typeof mraid.open === 'function' && mraidUsable(mraid)) {
+    const clickTarget = clickTagUrl() || dest
     try {
-      window.location.href = clickDest
-      _lastCta = t
-    } catch { /* */ }
+      done(() => (clickTarget ? mraid.open(clickTarget) : mraid.open()))
+    } catch (e) {
+      console.warn('mraid.open failed', e)
+    }
   }
 }
 

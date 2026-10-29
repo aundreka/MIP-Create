@@ -4,7 +4,8 @@
 // store click URL. Pure + framework-free so it can also run in CI later.
 
 import type { Project } from '../runtime/scene'
-import { endsceneAssetIds, fmtBytes, type Network } from './export'
+import { endsceneAssetIds, fmtBytes, shellKind, type Network } from './export'
+import * as Shell from './exportShell.generated'
 import { coversYearFrom, usesHolidayToken, validatePromoCalendar } from './promoCalendar'
 import { subconceptToken } from './mipName'
 
@@ -36,6 +37,92 @@ const DEFAULT_MAX = 5 * 1024 * 1024
 // injected mraid.js / exitapi.js are relative, so they don't match either.
 const RESOURCE_URL = /(?:\b(?:src|href)\s*=\s*["']\s*https?:)|(?:url\(\s*['"]?\s*https?:)|(?:@import\s+["']\s*https?:)|(?:fetch\(\s*["'`]\s*https?:)/gi
 const PLACEHOLDER = /id000000000|com\.example\.app/i
+
+// The click identifiers networks reserve. Only the platform-injected window.clickTag may
+// appear in a creative; a scanner that finds any of these rejects it ("reserved click
+// identifier(s) … rename the rest or the tap won't redirect").
+const RESERVED_CLICK_IDS = ['clickTag1', 'clickthrough', 'clickThrough']
+// Browser navigation of any kind is a click-through that bypasses mraid.open().
+const BROWSER_NAV = /window\s*\.\s*open|window\s*\[\s*["']open|\blocation\s*\.\s*href\s*=(?!=)|\blocation\s*\.\s*(?:assign|replace)\s*\(/
+// A literal http(s):// anywhere in the file. Exports write every URL inside their scripts
+// with escaped slashes (escapeUrls in export.ts), so a literal one is an unembedded
+// reference as a validator counts it.
+const LITERAL_URL = /https?:\/\/[^\s"'`<>)\\]+/gi
+
+/** What a network validator reads the file for: the sample's shell, verbatim, and none of
+ *  the patterns it rejects. The shell itself comes from docs/mip_sample.html /
+ *  docs/sip_sample.html (src/exportShell.generated.ts), so these checks follow the
+ *  samples whenever they change. */
+function shellFindings(html: string, project: Project): Finding[] {
+  const out: Finding[] = []
+  const sip = shellKind(project) === 'sip'
+  const sample = sip ? 'docs/sip_sample.html' : 'docs/mip_sample.html'
+  const pieces: [string, string][] = sip
+    ? [
+        ['the head (<!doctype html> … <head>)', Shell.SIP_htmlOpen],
+        ['the mraid.js bridge + readiness helper', Shell.SIP_helper],
+        ['the ?date= override', Shell.SIP_dateScript],
+        ['handleClickAction()', Shell.SIP_handleClickAction],
+        ['the handleTap / lastTapAt debounce', Shell.SIP_handleTap],
+        ['the MRAID viewability wiring', Shell.SIP_setupMraidViewability],
+        ['the lifecycle hooks', Shell.SIP_lifecycleStubs],
+        ['the DOM + MRAID boot gate', Shell.SIP_initializeMraidRuntime],
+      ]
+    : [
+        ['the head (<!DOCTYPE html> … <head>)', Shell.MIP_htmlOpen],
+        ['the mraid.js bridge, readiness helper, handleClickAction, boot gate and ?date= override', Shell.MIP_headScripts],
+        // Split at the body tag: a network transform may give it attributes (Google's onload).
+        ...Shell.MIP_tail.split('<body>').map((part, i): [string, string] => [i ? 'the body (<div id="app">)' : 'the end of <head>', i ? '>' + part : part + '<body']),
+      ]
+  const missing = pieces.filter(([, src]) => !html.includes(src)).map(([what]) => what)
+  if (missing.length) out.push({ level: 'error', message: `The export shell no longer matches ${sample} — missing ${missing.join('; ')}. Run npm run sync:samples and rebuild.` })
+  if (!html.startsWith(sip ? Shell.SIP_htmlOpen : Shell.MIP_htmlOpen))
+    out.push({ level: 'error', message: `The file does not open the way ${sample} does (nothing may precede <!DOCTYPE html>).` })
+
+  const bridges = html.match(/<script\s+src="mraid\.js"><\/script>/g) ?? []
+  if (bridges.length !== 1) out.push({ level: 'error', message: `Expected exactly one <script src="mraid.js"></script>, found ${bridges.length}.` })
+
+  const reserved = RESERVED_CLICK_IDS.filter((k) => html.includes(k))
+  if (reserved.length)
+    out.push({ level: 'error', message: `Reserved click identifier(s) ${reserved.join(', ')} in the output: only the platform's injected window.clickTag may appear, or the tap won't redirect.` })
+
+  const nav = BROWSER_NAV.exec(html)
+  if (nav) out.push({ level: 'error', message: `Browser navigation (${nav[0].trim()}) in the output: click-throughs must use mraid.open() only, and validators reject any reference to it (including comments).` })
+
+  const urls = [...new Set(html.match(LITERAL_URL) ?? [])]
+  if (urls.length)
+    out.push({ level: 'error', message: `${urls.length} unembedded reference(s) — a literal URL reads as an external resource: ${urls.slice(0, 3).join(', ')}${urls.length > 3 ? ', …' : ''}` })
+
+  out.push(...embeddedHtmlFindings(html))
+  return out
+}
+
+/** Validators decode base64 HTML end cards and scan them as part of the creative, so an
+ *  imported card's own window.open / logger / click macros count against the export. */
+function embeddedHtmlFindings(html: string): Finding[] {
+  const out: Finding[] = []
+  const B64_HTML = /data:text\/html;base64,([A-Za-z0-9+/=]+)/g
+  let m: RegExpExecArray | null
+  while ((m = B64_HTML.exec(html))) {
+    let inner = ''
+    try {
+      inner = new TextDecoder().decode(Uint8Array.from(atob(m[1]), (c) => c.charCodeAt(0)))
+    } catch {
+      continue
+    }
+    const problems: string[] = []
+    const nav = BROWSER_NAV.exec(inner)
+    if (nav) problems.push(nav[0].trim())
+    const reserved = RESERVED_CLICK_IDS.filter((k) => inner.includes(k))
+    if (reserved.length) problems.push(`reserved click identifier(s) ${reserved.join(', ')}`)
+    const urls = [...new Set(inner.match(LITERAL_URL) ?? [])].filter((u) => !/^https?:\/\/www\.w3\.org\//i.test(u))
+    if (urls.length) problems.push(`external reference(s) ${urls.slice(0, 3).join(', ')}${urls.length > 3 ? ', …' : ''}`)
+    if (/<script[^>]*\bsrc\s*=\s*["']mraid\.js/i.test(inner)) problems.push('its own mraid.js bridge')
+    if (problems.length)
+      out.push({ level: 'error', message: `An imported HTML end card contains ${problems.join('; ')}. Validators decode embedded HTML and scan it too — fix the card's source and re-import it.` })
+  }
+  return out
+}
 
 /**
  * Dynamic-holiday checks. The failure this exists to catch is silent: a {holiday} label
@@ -128,73 +215,7 @@ export function preflightNetwork(net: Network, html: string, bytes: number, proj
   const interactive = project.scenes.some((s) => s.advance?.on === 'tap' || s.elements.some((e) => e.type === 'game-mount' || e.type === 'cta' || e.type === 'choice'))
   if (!interactive) findings.push({ level: 'warn', message: 'No interaction (game, CTA, choice or tap-to-advance); many networks reject static playables.' })
 
-  // MRAID is checked on EVERY network: every export now ships the bridge tag and the
-  // readiness guard (see MRAID_HEAD in export.ts), so a missing one is a build
-  // regression regardless of which network the file is headed for.
-  if (!/mraid\.js/.test(html)) findings.push({ level: 'error', message: 'mraid.js bridge declaration is not present in the output.' })
-  // Networks reject creatives that call MRAID APIs while the container is still
-  // loading. The head guard (isMraidUsable) and the runtime's initMraid() both check
-  // getState() + the 'ready' listener, so these strings surviving minification is the
-  // regression check.
-  if (!/isMraidUsable/.test(html))
-    findings.push({ level: 'error', message: 'No MRAID ready guard in the output: isMraidUsable() must gate every call into the container.' })
-  // Validators STATIC-SCAN for these two literals — an equivalent check hidden behind
-  // minified identifiers reads as missing and gets the creative rejected. The export
-  // shell writes them out longhand (MRAID_HEAD / MRAID_BOOT), so their absence means the
-  // gate was dropped or mangled.
-  if (!/mraid\.addEventListener\(\s*["']ready["']/.test(html))
-    findings.push({ level: 'error', message: 'No literal mraid.addEventListener("ready", …) in the output: initialization must visibly wait for the ready event.' })
-  // The statement form, not just the comparison: scanners look for the guard itself —
-  // `if (mraid.getState() === "loading")` — so a check hidden behind a local variable or a
-  // helper reads as missing even when it behaves correctly.
-  const guard = /if\s*\(\s*mraid\.getState\(\)\s*===\s*["']loading["']\s*\)\s*\{/.exec(html)
-  if (!guard)
-    findings.push({ level: 'error', message: 'No literal if (mraid.getState() === "loading") guard in the output: initialization must confirm the container is past loading.' })
-  // ...and the ready subscription has to be INSIDE that branch. A branch body that calls a
-  // wait helper is the same failure one level down: the scanner reads the body and finds
-  // no mraid.addEventListener("ready", …) there.
-  else if (!/mraid\.addEventListener\(\s*["']ready["']/.test(html.slice(guard.index, guard.index + 600)))
-    findings.push({ level: 'error', message: 'The if (mraid.getState() === "loading") branch does not subscribe to the ready event inline: mraid.addEventListener("ready", …) must sit inside the guard, not behind a helper.' })
-  // The clickout half of the same rule: a scanner that finds mraid.open() with no
-  // isMraidUsable(mraid) guard beside it reports an unguarded call into the container,
-  // however well the minified bundle actually behaves.
-  if (!/mraid\.open\(/.test(html))
-    findings.push({ level: 'warn', message: 'No literal mraid.open() call found; MRAID click-throughs must go through mraid.open().' })
-  else if (!/isMraidUsable\(\s*mraid\s*\)/.test(html))
-    findings.push({ level: 'error', message: 'mraid.open() is not visibly guarded: window.isMraidUsable(mraid) must gate it in unminified source.' })
-  // Click macros: no single global is universal across DSPs, so the whole chain ships.
-  const macros = ['clickTag', 'clickTag1', 'clickthrough', 'clickThrough'].filter((k) => !html.includes(k))
-  if (macros.length)
-    findings.push({ level: 'error', message: `Click macro chain incomplete — missing ${macros.join(', ')}; clickouts must fall back through all four.` })
-  // Click-throughs must use mraid.open() ONLY. Validators static-scan the file and reject
-  // "window.open() used — must use mraid.open() instead" on ANY occurrence — a call, a dead
-  // fallback, even a comment — so the bare text is the check
-  // (docs/mraid_clickthrough_validation_fix.md).
-  if (/window\s*\.\s*open|window\s*\[\s*["']open/.test(html))
-    findings.push({ level: 'error', message: 'window.open found in the output: click-throughs must use mraid.open() only, and validators reject any window.open reference (including comments).' })
-  // ...and BOTH arms of the open ship: the destination when the creative resolves one, and
-  // an argument-less open when it does not. On AppLovin the click URL belongs to the
-  // campaign rather than the creative, so without the blank arm an about:blank / 'none'
-  // export registers no click at all and the CTA is simply dead (docs/AGENTS.md).
-  if (!/mraid\s*\.\s*open\(\s*[^)\s]/.test(html))
-    findings.push({ level: 'error', message: 'No mraid.open(clickTarget) in the output: a resolved click destination must be passed to the container.' })
-  if (!/mraid\s*\.\s*open\(\s*\)/.test(html))
-    findings.push({ level: 'error', message: 'No argument-less mraid.open() fallback in the output: a creative with no resolved destination must still register its click (AppLovin supplies the URL).' })
-  // The click-through entry point by name. Scanners that find mraid.open() without it read
-  // the creative as having no click-through routine at all ("mraid present but no
-  // mraid.open() click-through"), so the name is as much the check as the call is.
-  if (!/handleMraidOpen/.test(html))
-    findings.push({ level: 'error', message: 'No handleMraidOpen in the output: the click-through entry point every CTA and end card routes through must be present under that name.' })
-  // CTA surfaces debounce their taps — iOS fires a compatibility click ~300ms after the
-  // touch for the same gesture, and an undebounced CTA opens the store twice. The runtime's
-  // guard minifies to mangled identifiers, so the shell writes it out longhand.
-  if (!/handleTap/.test(html) || !/lastTapAt/.test(html))
-    findings.push({ level: 'error', message: 'No handleTap/lastTapAt tap de-duplication in the output: a CTA or end card tap must be collapsed to one action per gesture.' })
-  // Media viewability: an end card's clip must stop when the container takes the ad off
-  // screen. Both halves ship — the event and the initial read — since a creative with only
-  // one reads as partial viewability handling.
-  if (!/viewableChange/.test(html) || !/mraid\.isViewable\(\)/.test(html))
-    findings.push({ level: 'error', message: 'No MRAID viewability lifecycle in the output: media must pause on viewableChange and honour mraid.isViewable() when the ad is armed.' })
+  findings.push(...shellFindings(html, project))
 
   return {
     net: net.name,

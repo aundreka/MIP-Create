@@ -5,7 +5,7 @@
 import type { Project } from './scene'
 import type { AssetMap } from './types'
 import { computeMetrics, setDesign, setVAlign } from './responsive'
-import { bindLifecycle, initMraid, notifyGameStart, setStoreUrl } from './networks'
+import { bindLifecycle, initMraid, notifyGameStart, setStoreUrl, trackEvent } from './networks'
 import { resolveLocale, setActiveLocale } from './i18n'
 import { setPromoCalendar } from './elements/promoCalendar'
 import { playProject, type SceneManager } from './scenes'
@@ -35,6 +35,7 @@ function viewport(): { w: number; h: number } {
 
 export async function boot(project: Project, assets: AssetMap, opts: { mount?: HTMLElement } = {}): Promise<SceneManager> {
   installLifecycleStubs()
+  trackEvent('LOADING')
   setDesign(project.meta.baseW || 1080, project.meta.baseH || 1920)
   setVAlign(project.meta.vAlign)
   // The {holiday} token's data. Export never sets a preview date, so the label always
@@ -54,6 +55,7 @@ export async function boot(project: Project, assets: AssetMap, opts: { mount?: H
   setActiveLocale(currentLocale)
 
   await initMraid()
+  trackEvent('LOADED')
 
   const first = viewport()
   computeMetrics(first.w, first.h)
@@ -95,6 +97,7 @@ export async function boot(project: Project, assets: AssetMap, opts: { mount?: H
   }
 
   bindLifecycle()
+  trackEvent('DISPLAYED')
 
   // Networks require the ad's timer to start on the FIRST user interaction, not on load.
   // gameStart() is the signal the SDKs listen for, so fire it from the first gesture and
@@ -102,6 +105,7 @@ export async function boot(project: Project, assets: AssetMap, opts: { mount?: H
   const onFirstInteraction = (): void => {
     for (const type of FIRST_TOUCH_EVENTS) window.removeEventListener(type, onFirstInteraction, true)
     notifyGameStart()
+    trackEvent('CHALLENGE_STARTED')
   }
   for (const type of FIRST_TOUCH_EVENTS)
     window.addEventListener(type, onFirstInteraction, { capture: true, passive: true })
