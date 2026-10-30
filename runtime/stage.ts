@@ -1706,6 +1706,8 @@ function runSwipeEvent(rec: Rec, event: 'swipeLike' | 'swipeNope' | 'swipeNext')
  * Until something is liked — and if nothing ever is — the image keeps its own
  * placeholder picture. Returns the unsubscribe.
  */
+const CROP_PROPS = ['position', 'width', 'height', 'left', 'top']
+
 function bindSwipeResult(img: HTMLImageElement, gameId: string): () => void {
   const placeholder = img.getAttribute('src') ?? ''
   const apply = (r: SwipeResult): void => {
@@ -1713,10 +1715,14 @@ function bindSwipeResult(img: HTMLImageElement, gameId: string): () => void {
       img.src = r.src
       img.style.objectFit = r.fit
       img.dataset.swipeResult = '1'
+      // A crop framed on the placeholder would clip the card's picture: fill the box
+      // and let object-fit place it (applyImageCrop leaves it so on later passes).
+      for (const p of CROP_PROPS) img.style.setProperty(p, '')
     } else {
       if (placeholder) img.src = placeholder
       else img.removeAttribute('src')
       img.style.objectFit = ''
+      // The next layout pass puts the placeholder's own crop back.
       delete img.dataset.swipeResult
     }
   }

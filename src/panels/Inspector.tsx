@@ -5119,6 +5119,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                           const countKey = slot.countParam ?? ''
                           const n = Number(params[countKey]) || 0
                           const arr = Array.isArray(params[slot.key]) ? (params[slot.key] as string[]) : []
+                          const cardElements = Array.isArray(params.cardElements) ? (params.cardElements as string[]) : []
                           return (
                             <div key={slot.key}>
                               <div className="group-title2" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -5134,7 +5135,27 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                               </div>
                               {Array.from({ length: n }).map((_, i) => (
                                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                  <div style={{ flex: 1 }}>
+                                  {/* Swipe cards: a card can be an element already on this screen instead of an upload. */}
+                                  {tpl.id === 'swipe' && slot.key === 'images' && (
+                                    <div style={{ flex: 1 }}>
+                                      <Select
+                                        value={cardElements[i] ?? ''}
+                                        title="Use an element already on this screen as this card — it is hidden in play and shown on the card instead"
+                                        onChange={(v) => {
+                                          const next = cardElements.slice()
+                                          next[i] = v
+                                          setParam('cardElements', next)
+                                        }}
+                                        options={[
+                                          { value: '', label: `Card ${i + 1}: uploaded image` },
+                                          ...(activeSceneDef(state)?.elements ?? [])
+                                            .filter((e) => e.id !== id && e.type !== 'game-mount' && e.type !== 'background' && e.type !== 'handguide')
+                                            .map((e) => ({ value: e.id, label: `Card ${i + 1}: ${e.name || e.id}` })),
+                                        ]}
+                                      />
+                                    </div>
+                                  )}
+                                  <div style={{ flex: 1, display: tpl.id === 'swipe' && cardElements[i] ? 'none' : undefined }}>
                                     <AssetPicker
                                       label={`${slot.label} ${i + 1}`}
                                       value={arr[i] || undefined}
@@ -5155,8 +5176,13 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                                       onClick={() => {
                                         const next = arr.slice()
                                         next.splice(i, 1)
-                                        setParam(slot.key, next)
-                                        setParam(countKey, Math.max(1, n - 1))
+                                        const patch: Record<string, unknown> = { [slot.key]: next, [countKey]: Math.max(1, n - 1) }
+                                        if (tpl.id === 'swipe') {
+                                          const els = cardElements.slice()
+                                          els.splice(i, 1)
+                                          patch.cardElements = els
+                                        }
+                                        setParams(patch)
                                       }}
                                     >
                                       ×

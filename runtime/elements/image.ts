@@ -20,7 +20,9 @@ export function createImageContent(el: SceneElement, ctx: RuntimeCtx): HTMLImage
 // WINDOW; the source image is absolutely positioned behind it at its own size/offset
 // (keeping its natural aspect) and the window clips it. No crop config → clears the
 // styles so the <img> reverts to filling the box (legacy behaviour). The window's
-// own overflow is clipped by applyFrame when el.crop is set.
+// own overflow is clipped by applyFrame when el.crop is set. A swipe RESULT showing a
+// liked card is left filling the box too: the crop was framed on the placeholder's
+// picture, and the card's own one is fitted by object-fit instead (bindSwipeResult).
 export function applyImageCrop(
   img: HTMLElement,
   anim: HTMLElement,
@@ -31,7 +33,7 @@ export function applyImageCrop(
   natH: number,
 ): void {
   const c = el.crop
-  if (!c || el.container) {
+  if (!c || el.container || img.dataset.swipeResult === '1') {
     img.style.position = ''
     img.style.width = ''
     img.style.height = ''
