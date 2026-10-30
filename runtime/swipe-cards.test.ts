@@ -27,7 +27,9 @@ function game(params: Record<string, unknown> = {}): SceneElement {
     anchor: 'center',
     zIndex: 1,
     mode: 'fit',
-    game: { templateId: 'swipecards', hintEnabled: false, params: { flingMs: 300, settleMs: 0, returnMs: 0, revealMs: 0, ...params } },
+    // No idle sway: it loops for as long as the card sits untouched, which
+    // runAllTimers would chase forever.
+    game: { templateId: 'swipecards', hintEnabled: false, params: { flingMs: 300, settleMs: 0, returnMs: 0, revealMs: 0, wigglePct: 0, ...params } },
   } as SceneElement
 }
 
@@ -164,6 +166,15 @@ describe('swipe cards', () => {
     expect(Number(c1.style.zIndex)).toBeGreaterThan(Number(q(stage, 'c2').style.zIndex))
     expect(Number(q(stage, 'c2').style.zIndex)).toBeGreaterThan(Number(q(stage, 'c3').style.zIndex))
     expect(c1.dataset.swipeHint).toBe('1')
+  })
+
+  it('sways the top card while it sits untouched, and only the top card', () => {
+    const stage = build([game({ wigglePct: 4, wiggleMs: 1600 }), card('c1', 1), card('c2', 2)])
+    stage.startGames(true)
+    expect(q(stage, 'c1').style.translate).toBe('')
+    vi.advanceTimersByTime(1000)
+    expect(q(stage, 'c1').style.translate).not.toBe('')
+    expect(q(stage, 'c2').style.translate).toBe('')
   })
 
   it('leaves the editor canvas alone', () => {
