@@ -58,6 +58,7 @@ export function createSwipe(): GameModule {
   let borderPx = 0
   let borderColor = '#ffffff'
   let cardBg = ''
+  let rootOverflow = ''
   let cw = 240
   let ch = 320
   const cards: Card[] = []
@@ -175,6 +176,10 @@ export function createSwipe(): GameModule {
       borderColor = str(params.cardBorderColor, '') || '#ffffff'
       cardBg = str(params.cardBg, '')
       ctx.root.style.touchAction = 'none'
+      // A dragged or flung card travels well past the game box; clipping it there cuts the
+      // card off mid-swipe. The stage itself still clips at the screen edge.
+      rootOverflow = ctx.root.style.overflow
+      ctx.root.style.overflow = 'visible'
       const stageRoot = ctx.root.closest('.pa-root')
       const shell = ctx.root.closest('.pa-el')
       for (let i = 0; i < count; i++) {
@@ -230,6 +235,7 @@ export function createSwipe(): GameModule {
       if (started) for (const c of cards) c.source?.classList.remove(COMBO_OFF_CLASS)
       started = false
       ctx.root.innerHTML = ''
+      ctx.root.style.overflow = rootOverflow
       cards.length = 0
     },
   }

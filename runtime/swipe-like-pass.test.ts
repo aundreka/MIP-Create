@@ -76,6 +76,12 @@ describe('swipe (like / pass)', () => {
     expect(stage.root.querySelector<HTMLElement>('[data-id="photo"]')!.classList.contains('pa-combo-off')).toBe(true)
   })
 
+  it('does not clip a card dragged past the game box', () => {
+    const stage = build([game({ count: 1, images: ['wide'] })])
+    stage.startGames(true)
+    expect(stage.root.querySelector<HTMLElement>('[data-id="g"] .pa-game')!.style.overflow).toBe('visible')
+  })
+
   it('a single card is won with one swipe', () => {
     const seen: string[] = []
     const off = on('game-complete', () => seen.push('win'))
