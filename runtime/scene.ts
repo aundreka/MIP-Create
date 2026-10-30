@@ -71,6 +71,9 @@ export type AnimPresetId =
   | 'marquee-right'
   | 'shake'
   | 'wave'
+  // Grows to `scaleTo` and STAYS there. On a swipe-hover phase it eases back to normal
+  // size when the hover ends (the card comes back to the middle or is let go).
+  | 'enlarge'
   | 'shine'
   | 'lightray'
   | 'glow'
@@ -142,6 +145,8 @@ export interface AnimSpec {
   angleDeg?: number
   // Size / colour / opacity / carved area of the 'lightray' sweep. Ignored by other presets.
   shine?: ShineStyle
+  // How big 'enlarge' grows the element: 1.15 = 15% larger. Ignored by other presets.
+  scaleTo?: number
 }
 
 export interface ElementAnimations {

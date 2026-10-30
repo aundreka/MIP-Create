@@ -129,6 +129,33 @@ describe('swipe (like / pass)', () => {
     off()
   })
 
+  it('enlarges an element while the card leans right, and eases it back when the lean ends', () => {
+    const grow = { preset: 'enlarge' as const, scaleTo: 1.3, durationMs: 200, delayMs: 0, easing: 'ease-out' }
+    const badge = { ...photo, id: 'badge', animations: { swipeHoverRight: grow } } as SceneElement
+    const stage = build([game({ count: 1, images: ['wide'] }), badge])
+    stage.startGames(true)
+    const anim = (): string => stage.root.querySelector<HTMLElement>('[data-id="badge"] .pa-el-anim')!.style.animation
+    const card = cardsOf(stage)[0]
+    const ev = (type: string, x: number): PointerEvent => {
+      const e = new MouseEvent(type, { clientX: x, clientY: 500, bubbles: true }) as unknown as PointerEvent
+      Object.defineProperty(e, 'pointerId', { value: 1 })
+      return e
+    }
+    card.dispatchEvent(ev('pointerdown', 500))
+    expect(anim()).not.toContain('pa-custom')
+    window.dispatchEvent(ev('pointermove', 600))
+    const grown = anim()
+    expect(grown).toContain('pa-custom')
+    // Still leaning right: nothing replays.
+    window.dispatchEvent(ev('pointermove', 650))
+    expect(anim()).toBe(grown)
+    // Back to the middle: a different (shrinking) animation takes over.
+    window.dispatchEvent(ev('pointermove', 500))
+    expect(anim()).toContain('pa-custom')
+    expect(anim()).not.toBe(grown)
+    window.dispatchEvent(ev('pointerup', 500))
+  })
+
   it('a single card is won with one swipe', () => {
     const seen: string[] = []
     const off = on('game-complete', () => seen.push('win'))

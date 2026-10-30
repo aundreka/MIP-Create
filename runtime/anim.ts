@@ -225,8 +225,23 @@ export function marqueeSpec(el: SceneElement): AnimSpec | undefined {
 }
 
 // ---- shorthand builders ----------------------------------------------------
+/** The size 'enlarge' grows to, clamped to something that still reads as the element. */
+export function enlargeScale(spec: AnimSpec): number {
+  const s = Number(spec.scaleTo)
+  return Number.isFinite(s) && s > 0 ? Math.min(4, Math.max(0.2, s)) : 1.15
+}
+
+function enlargeKeyframes(spec: AnimSpec, out: boolean): string {
+  const big = `scale(${enlargeScale(spec)})`
+  return ensureCustomKeyframes([
+    { at: 0, transform: out ? big : 'scale(1)' },
+    { at: 100, transform: out ? 'scale(1)' : big },
+  ])
+}
+
 function keyframeName(spec: AnimSpec): string {
   if (spec.preset === 'typewriter') return ''
+  if (spec.preset === 'enlarge') return enlargeKeyframes(spec, false)
   if (spec.preset === 'custom') return spec.custom?.length ? ensureCustomKeyframes(spec.custom) : ''
   return 'pa-' + spec.preset
 }
@@ -637,6 +652,23 @@ export function animLayerCount(el: SceneElement): number {
 }
 
 /** Per-layer form of {@link composeOneShotAnim}. */
+/**
+ * The way back from an 'enlarge' that a held phase (a swipe hover) left the element at:
+ * each enlarge spec of `phase` shrinks back to normal over its own duration and easing,
+ * and the element's loop resumes after. Empty when the phase has no enlarge to undo.
+ */
+export function composeEnlargeOutParts(el: SceneElement, phase: OneShotPhase): string[] {
+  const specs = phaseSpecs(el, phase).filter((s) => s.preset === 'enlarge')
+  if (!specs.length) return []
+  const parts = specs.map((s) => `${enlargeKeyframes(s, true)} ${s.durationMs}ms ${s.easing || 'ease'} 0ms 1 normal both`)
+  const back = Math.max(...specs.map((s) => s.durationMs))
+  for (const l of phaseSpecs(el, 'loop').filter((s) => s.preset !== 'lightray')) {
+    const css = animationCss(l, true, back)
+    if (css) parts.push(css)
+  }
+  return parts
+}
+
 export function composeOneShotAnimParts(el: SceneElement, phase: OneShotPhase): string[] {
   const parts: string[] = []
   let loopDelay = 0

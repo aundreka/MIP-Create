@@ -563,7 +563,7 @@ export function createSwipeCards(): GameModule {
         const nowSide = dx > w * 0.06 ? 1 : dx < -w * 0.06 ? -1 : 0
         if (nowSide !== side) {
           side = nowSide
-          if (nowSide) ctx.sfx.play(nowSide > 0 ? 'swipeHoverRight' : 'swipeHoverLeft')
+          ctx.sfx.play(nowSide > 0 ? 'swipeHoverRight' : nowSide < 0 ? 'swipeHoverLeft' : 'swipeHoverEnd')
         }
         setStamps(c, dx / (w * (thresholdPct / 100)), 0)
         if (display !== 'one') layPile(0, lean)
@@ -575,6 +575,7 @@ export function createSwipeCards(): GameModule {
         window.removeEventListener('pointercancel', up)
         endDrag = null
         dragging = false
+        if (side) ctx.sfx.play('swipeHoverEnd')
         delete c.el.dataset.swipeLean
         if (typeof c.el.releasePointerCapture === 'function' && c.el.hasPointerCapture?.(pid)) {
           try {

@@ -190,7 +190,7 @@ export function createSwipe(): GameModule {
         const lean = dx > cw * HOVER_SHARE ? 1 : dx < -cw * HOVER_SHARE ? -1 : 0
         if (lean !== side) {
           side = lean
-          if (lean) ctx.sfx.play(lean > 0 ? 'swipeHoverRight' : 'swipeHoverLeft')
+          ctx.sfx.play(lean > 0 ? 'swipeHoverRight' : lean < 0 ? 'swipeHoverLeft' : 'swipeHoverEnd')
         }
       }
       // A cancelled pointer (the finger ran off the screen edge, the WebView took the
@@ -202,6 +202,7 @@ export function createSwipe(): GameModule {
         window.removeEventListener('pointerup', up)
         window.removeEventListener('pointercancel', up)
         dragging = false
+        if (side) ctx.sfx.play('swipeHoverEnd')
         if (Date.now() - lastT > 90) vx = 0
         const far = Math.abs(dx) >= cw * SWIPE_SHARE
         const flick = Math.abs(vx) >= FLICK_SPEED && Math.sign(vx) === Math.sign(dx) && Math.abs(dx) >= cw * 0.06

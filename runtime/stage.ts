@@ -25,6 +25,7 @@ import {
   animLayerCount,
   composeElementAnimParts,
   composeOneShotAnimParts,
+  composeEnlargeOutParts,
   entranceLeadDelayMs,
   entranceTriggers,
   exitCssParts,
@@ -2420,7 +2421,24 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
   }
 
   // Swipe cards: a like, a pass, and the next card coming up.
-  const fireSwipeEvent = (event: 'swipeLike' | 'swipeNope' | 'swipeNext' | 'swipeHoverRight' | 'swipeHoverLeft'): void => {
+  //
+  // The two hovers are HELD: they start as a dragged card leans to a side and last until
+  // 'swipeHoverEnd' (back to the middle, or let go) or the lean flips to the other side.
+  // Ending one eases any 'enlarge' it applied back to normal size.
+  let activeHover: 'swipeHoverRight' | 'swipeHoverLeft' | null = null
+  const endHover = (): void => {
+    const phase = activeHover
+    activeHover = null
+    if (!phase) return
+    for (const target of recs) {
+      const parts = composeEnlargeOutParts(target.el, phase)
+      if (parts.length) applyAnimParts(target, parts, true)
+    }
+  }
+  const fireSwipeEvent = (event: 'swipeLike' | 'swipeNope' | 'swipeNext' | 'swipeHoverRight' | 'swipeHoverLeft' | 'swipeHoverEnd'): void => {
+    if (event === 'swipeHoverEnd' || event === 'swipeHoverRight' || event === 'swipeHoverLeft') endHover()
+    if (event === 'swipeHoverEnd') return
+    if (event === 'swipeHoverRight' || event === 'swipeHoverLeft') activeHover = event
     broadcastGameEvent(event, (target) => runSwipeEvent(target, event))
   }
 
@@ -2867,7 +2885,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
                 fireComboEvent(event)
                 return
               }
-              if (event === 'swipeLike' || event === 'swipeNope' || event === 'swipeNext' || event === 'swipeHoverRight' || event === 'swipeHoverLeft') {
+              if (event === 'swipeLike' || event === 'swipeNope' || event === 'swipeNext' || event === 'swipeHoverRight' || event === 'swipeHoverLeft' || event === 'swipeHoverEnd') {
                 fireSwipeEvent(event)
                 return
               }

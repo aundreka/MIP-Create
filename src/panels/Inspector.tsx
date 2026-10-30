@@ -48,7 +48,7 @@ import type {
   UnboxingConfig,
 } from '../../runtime/scene'
 import { headerAllowedFor } from '../../runtime/scene'
-import { isMarqueePreset } from '../../runtime/anim'
+import { enlargeScale, isMarqueePreset } from '../../runtime/anim'
 import { autoMorphMatch, morphTargets, MORPH_DEFAULT_EASING, MORPH_DEFAULT_MS } from '../../runtime/morph'
 import { ownsSlot, patchSlot, projectLayoutPatch, resolvedLayout, seedSlot, withOwnSlot, withoutSlot, type Orient } from '../headerLayout'
 import { TAP_FADE_DEFAULT_MS } from '../../runtime/elements/button'
@@ -1249,6 +1249,7 @@ const NODE_PRESETS: AnimPresetId[] = [
   'swipe-up',
   'drop',
   'pop',
+  'enlarge',
   'bounce',
   'bounce-reverse',
   'roll-right',
@@ -1302,9 +1303,12 @@ const PRESET_LABELS: Partial<Record<AnimPresetId, string>> = {
   'fade-out': 'fade out',
   'scale-out': 'scale out',
   'subtle-float': 'subtle float',
+  enlarge: 'enlarge (grows and stays)',
   typewriter: 'typewriter',
 }
 const presetLabel = (p: AnimPresetId): string => PRESET_LABELS[p] ?? (p as string)
+// A swipe hover is held while the card leans, so it opens on a grow that stays.
+const HOVER_DEFAULT: AnimSpec = { preset: 'enlarge', scaleTo: 1.15, durationMs: 220, delayMs: 0, easing: 'ease-out' }
 // Direction options for the 'lightray' reflection sweep (mapped to an angle in degrees).
 const LIGHTRAY_DIRECTIONS: { value: number; label: string }[] = [
   { value: 20, label: 'diagonal ↘ (default)' },
@@ -1432,6 +1436,9 @@ function AnimRow(props: {
             />
           </Row>
           {spec.preset === 'custom' && <KeyframeEditor steps={spec.custom ?? []} onChange={(c) => patch({ custom: c })} />}
+          {spec.preset === 'enlarge' && (
+            <Slider label="Enlarge to" value={Math.round(enlargeScale(spec) * 100)} min={100} max={200} step={1} suffix="%" onChange={(n) => patch({ scaleTo: n / 100 })} />
+          )}
           {spec.preset === 'lightray' && (
             <>
               <Row label="Direction">
@@ -4403,7 +4410,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 extra={first?.animations?.[`${phase}Extra`]}
                 presets={NODE_PRESETS}
                 extraPresets={NODE_PRESETS}
-                defaultSpec={{ preset: 'pop', durationMs: 300, delayMs: 0, easing: 'ease-out' }}
+                defaultSpec={phase === 'swipeHoverRight' || phase === 'swipeHoverLeft' ? HOVER_DEFAULT : { preset: 'pop', durationMs: 300, delayMs: 0, easing: 'ease-out' }}
                 defaultExtraSpec={{ preset: 'shine', durationMs: 700, delayMs: 0, easing: 'ease-in-out' }}
                 onChange={(primary, ex) => patchAllPhase(phase, primary, ex)}
               />
@@ -7492,7 +7499,7 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
                 extra={el.animations?.[`${phase}Extra`]}
                 presets={NODE_PRESETS}
                 extraPresets={NODE_PRESETS}
-                defaultSpec={{ preset: 'pop', durationMs: 300, delayMs: 0, easing: 'ease-out' }}
+                defaultSpec={phase === 'swipeHoverRight' || phase === 'swipeHoverLeft' ? HOVER_DEFAULT : { preset: 'pop', durationMs: 300, delayMs: 0, easing: 'ease-out' }}
                 defaultExtraSpec={{ preset: 'shine', durationMs: 700, delayMs: 0, easing: 'ease-in-out' }}
                 onChange={(primary, ex) => patchElement(id, { animations: { ...(el.animations ?? {}), [phase]: primary, [`${phase}Extra`]: ex.length ? ex : undefined } })}
               />
