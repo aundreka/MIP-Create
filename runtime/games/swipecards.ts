@@ -147,6 +147,11 @@ export function createSwipeCards(): GameModule {
   let flickSpeed = 0.5
   let winSwipes = 0
   let hintDir: 1 | -1 = 1
+  /** Idle sway of the top card, % of its width each side. 0 = off. */
+  let wigglePct = 4
+  let wiggleMs = 1600
+  /** Bumped to cancel a sway in flight: each step only carries on if it still matches. */
+  let wiggleGen = 0
   let resultFit: SwipeResultFit = 'contain'
   let progressGameId = ''
   /** The scale a mark grows in FROM as it fades up. 1 = a plain fade. */
@@ -189,6 +194,30 @@ export function createSwipeCards(): GameModule {
 
   /** Publish the card on top as `data-swipe-hint`, for a placed handguide in
    * 'swipecards' mode — it follows this marker down the pile by itself. */
+  const stopWiggle = (): void => {
+    wiggleGen++
+  }
+
+  /** Sway the top card gently left and right while the player has not touched it, so it
+   * reads as draggable. Steps are timed transitions on the same pose properties a drag
+   * uses; a grab or a swipe cancels it and the drag eases on from wherever the card is. */
+  const startWiggle = (delay = 0): void => {
+    stopWiggle()
+    if (wigglePct <= 0 || wiggleMs < 200) return
+    const gen = wiggleGen
+    const half = Math.round(wiggleMs / 2)
+    const step = (dir: 1 | -1, ms: number): void => {
+      if (gen !== wiggleGen) return
+      const c = top()
+      if (!c || busy || dragging) return
+      const base = slotPose(c, 0)
+      const amp = c.slot.w * (wigglePct / 100)
+      setPose(c, { dx: base.dx + dir * amp, dy: base.dy, rot: base.rot + dir * Math.min(tiltDeg * 0.3, 4), scale: base.scale }, ms, 'ease-in-out')
+      after(ms, () => step(dir === 1 ? -1 : 1, half))
+    }
+    after(delay, () => step(hintDir, Math.round(half / 2)))
+  }
+
   const markHint = (): void => {
     const live = busy ? undefined : top()
     for (const c of cards) {
@@ -392,6 +421,7 @@ export function createSwipeCards(): GameModule {
     c.gone = true
     swiped++
     busy = true
+    stopWiggle()
     c.el.style.pointerEvents = 'none'
     markHint()
 
@@ -439,6 +469,7 @@ export function createSwipeCards(): GameModule {
     after(Math.min(settleMs, 220), () => {
       busy = false
       markHint()
+      startWiggle(500)
     })
   }
 
@@ -449,6 +480,7 @@ export function createSwipeCards(): GameModule {
     const c = top()
     if (!c || busy || dragging) return
     busy = true
+    stopWiggle()
     markHint()
     const base = slotPose(c, 0)
     const lean: Pose = { dx: base.dx + dir * c.slot.w * 0.18, dy: base.dy - c.slot.h * 0.01, rot: base.rot + dir * tiltDeg * 0.5, scale: base.scale * liftScale }
@@ -485,6 +517,7 @@ export function createSwipeCards(): GameModule {
       event.preventDefault()
       const pid = event.pointerId
       dragging = true
+      stopWiggle()
       try {
         c.el.setPointerCapture?.(pid)
       } catch {
@@ -555,6 +588,7 @@ export function createSwipeCards(): GameModule {
           setPose(c, base, returnMs, 'cubic-bezier(.34,1.45,.55,1)')
           setStamps(c, 0, returnMs)
           if (display !== 'one') layPile(returnMs)
+          startWiggle(returnMs + 700)
         }
         if (staleSlots) after(Math.max(returnMs, flingMs), relayoutPile)
       }
@@ -641,6 +675,8 @@ export function createSwipeCards(): GameModule {
       flickSpeed = clamp(num(params.flickSpeed, 0.5), 0, 5)
       winSwipes = Math.max(0, Math.round(num(params.winSwipes, 0)))
       hintDir = str(params.hintDir, 'right') === 'left' ? -1 : 1
+      wigglePct = clamp(num(params.wigglePct, 4), 0, 30)
+      wiggleMs = clamp(num(params.wiggleMs, 1600), 0, 6000)
       const fit = str(params.resultFit, 'contain')
       resultFit = fit === 'cover' || fit === 'fill' ? fit : 'contain'
       progressGameId = str(params.progressGameId, '').trim()
@@ -680,6 +716,7 @@ export function createSwipeCards(): GameModule {
       })
       buttons.forEach(attachButton)
       markHint()
+      startWiggle(600)
     },
     relayout() {
       if (started) relayoutPile()
@@ -697,6 +734,7 @@ export function createSwipeCards(): GameModule {
       winCb = cb
     },
     destroy() {
+      stopWiggle()
       endDrag?.()
       for (const t of timers) window.clearTimeout(t)
       timers.length = 0
@@ -764,6 +802,8 @@ export const SWIPECARDS_TEMPLATE: GameTemplate = {
     { key: 'settleMs', label: 'Pile moves up (ms)', type: 'number', min: 0, max: 3000, step: 20, group: 'Animation', showIf: (p) => p.advance !== 'stay' },
     { key: 'revealMs', label: 'Next card fades in (ms)', type: 'number', min: 0, max: 3000, step: 20, group: 'Animation', showIf: (p) => p.display === 'one' },
     { key: 'markFrom', label: 'Swipe marks grow in from (1 = plain fade)', type: 'number', min: 0.2, max: 3, step: 0.05, group: 'Swipe feel' },
+    { key: 'wigglePct', label: 'Idle sway (% of card width, 0 = off)', type: 'number', min: 0, max: 30, step: 0.5, group: 'Swipe feel' },
+    { key: 'wiggleMs', label: 'Idle sway cycle (ms)', type: 'number', min: 400, max: 6000, step: 100, group: 'Animation', showIf: (p) => Number(p.wigglePct ?? 4) > 0 },
     { key: 'resultFit', label: 'Liked card in the result box', type: 'select', options: ['contain', 'cover', 'fill'], group: 'Result' },
     { key: 'hintDir', label: 'Hint hand swipes', type: 'select', options: ['right', 'left'], group: 'Result' },
   ],
@@ -782,6 +822,8 @@ export const SWIPECARDS_TEMPLATE: GameTemplate = {
     settleMs: 340,
     revealMs: 280,
     markFrom: 1.2,
+    wigglePct: 4,
+    wiggleMs: 1600,
     resultFit: 'contain',
     hintDir: 'right',
     // '' = every progress bar in the scene hears this game.
