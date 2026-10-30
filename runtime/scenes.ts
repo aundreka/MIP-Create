@@ -707,6 +707,15 @@ export function playProject(project: Project, assets: AssetMap, opts: { mount: H
     if (!opts.interactive) return
     const rule = def.advance
     const go = (): void => {
+      // This scene's rule is armed as its transition IN starts, so a quick player can win
+      // before the fade has finished — and transitionTo drops calls mid-transition. Wait
+      // for the screen to settle instead of losing the advance (the one-shot game-win
+      // listener is already spent, so nothing would ever retry it). On advanceTimer, so
+      // clearTriggers still cancels it if the scene changes some other way.
+      if (transitioning) {
+        advanceTimer = window.setTimeout(go, 50)
+        return
+      }
       const nid = pendingWinSceneId ?? nextId(def)
       pendingWinSceneId = null
       if (!nid) return

@@ -71,6 +71,34 @@ describe('game win flow', () => {
     mgr.destroy()
   })
 
+  it('still advances when the next scene is won while it is still fading in', () => {
+    const mount = document.createElement('div')
+    document.body.appendChild(mount)
+    const scene = (id: string, to?: string): Project['scenes'][number] => ({
+      id,
+      name: id,
+      kind: 'game',
+      elements: [textEl(id)],
+      advance: to ? { on: 'gameWin', to } : { on: 'manual' },
+      transition: { type: 'fade', durationMs: 650 },
+    })
+    const project: Project = {
+      meta: { schemaVersion: 1, name: 'quick', clickUrl: { ios: '', android: '' }, baseW: DESIGN_W, baseH: DESIGN_H, bgMatchColor: '#111111' },
+      startSceneId: 'one',
+      scenes: [scene('one', 'two'), scene('two', 'three'), scene('three')],
+    }
+
+    const mgr = playProject(project, {}, { mount, interactive: true })
+    emit('game-complete') // scene one won: the fade into two starts
+    vi.advanceTimersByTime(100)
+    expect(mount.querySelector('.pa-el[data-id="two"]')).toBeTruthy()
+    emit('game-complete') // scene two won mid-fade
+    vi.advanceTimersByTime(3000)
+    expect(mount.querySelector('.pa-el[data-id="three"]')).toBeTruthy()
+
+    mgr.destroy()
+  })
+
   it('freezes the header countdown on its first scene game win and keeps it frozen afterward', () => {
     const mount = document.createElement('div')
     document.body.appendChild(mount)
