@@ -13,7 +13,6 @@ import { currentProjectId, openProject } from './projects'
 import { addAsset, addElement, getState, hasElementClip, nextId, pasteElements, selectOnly, setActiveScene } from './store'
 import { readImageFile } from './bridge'
 import { makeBackground, makeImage } from './factories'
-import { getFlag, setFlag } from './uiState'
 
 // On-demand surfaces — each becomes its own chunk loaded when first opened, so the
 // initial editor (canvas + panels) ships lean (JSZip, the funnel/MIP/SVG builders,
@@ -37,9 +36,11 @@ const UploadModal = lazy(() => import('./panels/UploadModal').then((m) => ({ def
 export function App(): JSX.Element {
   const [zoom, setZoom] = useState(1)
   // Resize handles can swallow small art when zoomed right in — this hides them
-  // (the selection outline stays) without deselecting. Persisted across sessions.
-  const [showHandles, setShowHandles] = useState(() => getFlag('canvasHandles', true))
-  const toggleHandles = (): void => setShowHandles((v) => (setFlag('canvasHandles', !v), !v))
+  // (the selection outline stays) without deselecting. Session-only on purpose: a
+  // persisted "hidden" (one stray click on the toggle beside zoom +, or Ctrl+Shift+H)
+  // made resizing look permanently broken, so every launch starts with them shown.
+  const [showHandles, setShowHandles] = useState(true)
+  const toggleHandles = (): void => setShowHandles((v) => !v)
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const [fitSignal, setFitSignal] = useState(0)
   const [preview, setPreview] = useState(() => location.hash.toLowerCase().includes('preview'))
