@@ -7,7 +7,7 @@ import { computeMetrics, setDesign } from './responsive'
 import type { Scene, SceneElement } from './scene'
 import { buildScene } from './stage'
 
-function game(params: Record<string, unknown> = {}): SceneElement {
+function game(params: Record<string, unknown> = {}, extra: Partial<SceneElement> = {}): SceneElement {
   return {
     id: 'g',
     type: 'game-mount',
@@ -20,6 +20,7 @@ function game(params: Record<string, unknown> = {}): SceneElement {
     zIndex: 1,
     mode: 'fit',
     game: { templateId: 'swipe', hintEnabled: false, params },
+    ...extra,
   } as SceneElement
 }
 
@@ -36,6 +37,20 @@ function build(elements: SceneElement[]): ReturnType<typeof buildScene> {
 
 const cardsOf = (s: ReturnType<typeof buildScene>): HTMLElement[] =>
   Array.from(s.root.querySelectorAll<HTMLElement>('[data-id="g"] .pa-game > div, [data-id="g"] div[style*="cursor: grab"]')).filter((d) => d.style.cursor === 'grab')
+
+/** Drag the top card a long way toward `dir` and let go. */
+function swipeTop(stage: ReturnType<typeof buildScene>, dir: 1 | -1): void {
+  const card = cardsOf(stage).sort((a, b) => Number(b.style.zIndex) - Number(a.style.zIndex))[0]
+  const ev = (type: string, x: number): PointerEvent => {
+    const e = new MouseEvent(type, { clientX: x, clientY: 500, bubbles: true }) as unknown as PointerEvent
+    Object.defineProperty(e, 'pointerId', { value: 1 })
+    return e
+  }
+  card.dispatchEvent(ev('pointerdown', 1000))
+  window.dispatchEvent(ev('pointermove', 1000 + dir * 2000))
+  window.dispatchEvent(ev('pointerup', 1000 + dir * 2000))
+  vi.runAllTimers()
+}
 
 describe('swipe (like / pass)', () => {
   beforeEach(() => {
@@ -82,6 +97,38 @@ describe('swipe (like / pass)', () => {
     expect(stage.root.querySelector<HTMLElement>('[data-id="g"] .pa-game')!.style.overflow).toBe('visible')
   })
 
+  it('plays the sounds bound to a swipe right, a swipe left, the next card and the win', () => {
+    const played: string[] = []
+    const off = on('sfx-asset', (id: unknown) => played.push(String(id)))
+    const sfx = ['swipeLike', 'swipeNope', 'swipeNext', 'onReveal'].map((event) => ({ event, assetId: event + '.mp3' }))
+    const stage = build([game({ count: 2, images: ['wide', 'wide'] }, { sfx })])
+    stage.startGames(true)
+    swipeTop(stage, 1)
+    expect(played).toEqual(['swipeLike.mp3', 'swipeNext.mp3'])
+    swipeTop(stage, -1)
+    expect(played).toEqual(['swipeLike.mp3', 'swipeNext.mp3', 'swipeNope.mp3', 'onReveal.mp3'])
+    off()
+  })
+
+  it('fires the hover beats as a dragged card leans to each side, once per lean', () => {
+    const played: string[] = []
+    const off = on('sfx-asset', (id: unknown) => played.push(String(id)))
+    const sfx = ['swipeHoverRight', 'swipeHoverLeft'].map((event) => ({ event, assetId: event }))
+    const stage = build([game({ count: 1, images: ['wide'] }, { sfx }), photo])
+    stage.startGames(true)
+    const card = cardsOf(stage)[0]
+    const ev = (type: string, x: number): PointerEvent => {
+      const e = new MouseEvent(type, { clientX: x, clientY: 500, bubbles: true }) as unknown as PointerEvent
+      Object.defineProperty(e, 'pointerId', { value: 1 })
+      return e
+    }
+    card.dispatchEvent(ev('pointerdown', 500))
+    for (const x of [520, 560, 600, 500, 400, 420, 500]) window.dispatchEvent(ev('pointermove', x))
+    window.dispatchEvent(ev('pointerup', 500))
+    expect(played).toEqual(['swipeHoverRight', 'swipeHoverLeft'])
+    off()
+  })
+
   it('a single card is won with one swipe', () => {
     const seen: string[] = []
     const off = on('game-complete', () => seen.push('win'))
@@ -89,17 +136,7 @@ describe('swipe (like / pass)', () => {
     stage.startGames(true)
     const cards = cardsOf(stage)
     expect(cards).toHaveLength(1)
-    const card = cards[0]
-    const ev = (type: string, x: number): PointerEvent => {
-      const e = new MouseEvent(type, { clientX: x, clientY: 500, bubbles: true }) as unknown as PointerEvent
-      Object.defineProperty(e, 'pointerId', { value: 1 })
-      return e
-    }
-    card.setPointerCapture = () => {}
-    card.dispatchEvent(ev('pointerdown', 100))
-    card.dispatchEvent(ev('pointermove', 2000))
-    card.dispatchEvent(ev('pointerup', 2000))
-    vi.runAllTimers()
+    swipeTop(stage, 1)
     expect(seen).toEqual(['win'])
     off()
   })

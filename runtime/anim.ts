@@ -322,6 +322,8 @@ export type Phase =
   | 'swipeLike'
   | 'swipeNope'
   | 'swipeNext'
+  | 'swipeHoverRight'
+  | 'swipeHoverLeft'
 export function phaseSpecs(el: SceneElement, phase: Phase): AnimSpec[] {
   const a = el.animations
   if (!a) return []
@@ -358,6 +360,8 @@ export function phaseSpecs(el: SceneElement, phase: Phase): AnimSpec[] {
             | 'swipeLikeExtra'
             | 'swipeNopeExtra'
             | 'swipeNextExtra'
+            | 'swipeHoverRightExtra'
+            | 'swipeHoverLeftExtra'
         ] ?? legacyExtra)
   if (Array.isArray(extra)) for (const s of extra) if (s) out.push(s)
   return out
@@ -387,6 +391,8 @@ const LIGHTRAY_PHASES: Phase[] = [
   'swipeLike',
   'swipeNope',
   'swipeNext',
+  'swipeHoverRight',
+  'swipeHoverLeft',
 ]
 
 /** The lightray spec from ANY phase, WITH the phase that authored it — drives the .pa-lightray
@@ -585,6 +591,8 @@ export type OneShotPhase =
   | 'swipeLike'
   | 'swipeNope'
   | 'swipeNext'
+  | 'swipeHoverRight'
+  | 'swipeHoverLeft'
 function composeOneShotAnim(el: SceneElement, phase: OneShotPhase): string {
   return composeOneShotAnimParts(el, phase).join(', ') || 'none'
 }
@@ -607,6 +615,8 @@ const ONE_SHOT_PHASES: OneShotPhase[] = [
   'swipeLike',
   'swipeNope',
   'swipeNext',
+  'swipeHoverRight',
+  'swipeHoverLeft',
 ]
 
 /**

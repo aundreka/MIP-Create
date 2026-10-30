@@ -177,6 +177,18 @@ describe('swipe cards', () => {
     expect(q(stage, 'c2').style.translate).toBe('')
   })
 
+  it('fires the hover beats as the top card leans right, then left', () => {
+    const played: string[] = []
+    off = on('sfx-asset', (id: unknown) => played.push(String(id)))
+    const sfx = ['swipeHoverRight', 'swipeHoverLeft'].map((event) => ({ event, assetId: event }))
+    const stage = build([game({}), card('c1', 1, { sfx }), card('c2', 2)])
+    stage.startGames(true)
+    q(stage, 'c1').dispatchEvent(pointer('pointerdown', 500, 900))
+    for (const x of [520, 600, 700, 500, 350, 300]) window.dispatchEvent(pointer('pointermove', x, 900))
+    window.dispatchEvent(pointer('pointerup', 500, 900))
+    expect(played).toEqual(['swipeHoverRight', 'swipeHoverLeft'])
+  })
+
   it('leaves the editor canvas alone', () => {
     const stage = build([game({ display: 'one' }), card('c1', 1), card('c2', 2)])
     stage.startGames(false)

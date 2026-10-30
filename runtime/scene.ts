@@ -197,6 +197,10 @@ export interface ElementAnimations {
   swipeLike?: AnimSpec
   swipeNope?: AnimSpec
   swipeNext?: AnimSpec
+  // While a card is being dragged: it has just leaned right / left (not yet let go).
+  // Fires again each time the drag comes back through the middle and leans that way.
+  swipeHoverRight?: AnimSpec
+  swipeHoverLeft?: AnimSpec
   // Additional specs stacked ON TOP of the primary one in each phase, played together with it
   // (e.g. entrance = pop + shine). Empty/absent = just the primary. The primary must exist for
   // extras to apply; extras share the primary entrance's trigger.
@@ -220,6 +224,8 @@ export interface ElementAnimations {
   swipeLikeExtra?: AnimSpec[]
   swipeNopeExtra?: AnimSpec[]
   swipeNextExtra?: AnimSpec[]
+  swipeHoverRightExtra?: AnimSpec[]
+  swipeHoverLeftExtra?: AnimSpec[]
 }
 
 // ---- colour adjustment -----------------------------------------------------

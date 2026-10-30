@@ -2,6 +2,10 @@
 // it away (left = pass, right = like); the next card surfaces. Clear the whole
 // stack to win. Hint: swipe the top card to the right.
 //
+// Sounds: 'swipeLike' / 'swipeNope' on every swipe, 'swipeNext' when the next card is up,
+// 'swipeHoverRight' / 'swipeHoverLeft' as a dragged card leans to a side, and the win on
+// the last swipe — the same events the Swipe cards game broadcasts.
+//
 // Each card shows an uploaded image (`images[i]`) or, when `cardElements[i]` names one,
 // a copy of an element already placed on this screen — that element is hidden in play,
 // so it reads as having become the card. Either way the picture is fitted into the card
@@ -21,6 +25,8 @@ type Fit = 'contain' | 'cover' | 'fill'
 const SWIPE_SHARE = 0.25
 /** A quick flick counts even short of that, px/ms. */
 const FLICK_SPEED = 0.5
+/** How far a dragged card leans before it "hovers" on a side, as a share of its width. */
+const HOVER_SHARE = 0.06
 
 interface Card {
   el: HTMLDivElement
@@ -73,6 +79,7 @@ export function createSwipe(): GameModule {
   let done = false
   let dragging = false
   let completeCb: (() => void) | null = null
+  let winCb: (() => void) | null = null
 
   const remaining = (): Card[] => cards.filter((c) => !c.gone)
 
@@ -131,13 +138,19 @@ export function createSwipe(): GameModule {
     c.el.style.opacity = '0'
     window.setTimeout(() => c.el.remove(), 360)
     swiped++
+    // 'correct' / 'tap' keep any project-wide sounds set on those events playing; the
+    // swipe events are what the Sounds list offers for this game (and they drive the
+    // "On card swiped" animation phases), shared with the Swipe cards game.
     ctx.sfx.play(dir > 0 ? 'correct' : 'tap')
+    ctx.sfx.play(dir > 0 ? 'swipeLike' : 'swipeNope')
     if (swiped >= count && !done) {
       done = true
       ctx.sfx.play('gameWin')
+      winCb?.()
       completeCb?.()
     } else {
       layout()
+      ctx.sfx.play('swipeNext')
     }
   }
 
@@ -159,6 +172,7 @@ export function createSwipe(): GameModule {
       const sx = e.clientX
       const sy = e.clientY
       let dx = 0
+      let side = 0
       let lastX = sx
       let lastT = Date.now()
       let vx = 0
@@ -171,6 +185,13 @@ export function createSwipe(): GameModule {
         dx = (ev.clientX - sx) / k
         const dy = (ev.clientY - sy) / k
         c.el.style.transform = `translate(${dx}px,${dy}px) rotate(${dx * 0.05}deg)`
+        // The "hover" beats: the card has just leaned to one side. Back through the
+        // middle and over again fires again.
+        const lean = dx > cw * HOVER_SHARE ? 1 : dx < -cw * HOVER_SHARE ? -1 : 0
+        if (lean !== side) {
+          side = lean
+          if (lean) ctx.sfx.play(lean > 0 ? 'swipeHoverRight' : 'swipeHoverLeft')
+        }
       }
       // A cancelled pointer (the finger ran off the screen edge, the WebView took the
       // gesture) is judged like a release: a card left hanging off to the side looks
@@ -264,6 +285,9 @@ export function createSwipe(): GameModule {
     },
     onComplete(cb) {
       completeCb = cb
+    },
+    onWin(cb) {
+      winCb = cb
     },
     destroy() {
       if (started) for (const c of cards) c.source?.classList.remove(COMBO_OFF_CLASS)

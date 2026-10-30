@@ -44,10 +44,10 @@
 // (see scaleNode in combo.ts for why the outer one is the wrong place to scale).
 //
 // Won when every card has been swiped, or earlier via `winSwipes`. Every swipe is one
-// step on the progress channel. Three beats are broadcast through the SFX channel, which
+// step on the progress channel. Its beats are broadcast through the SFX channel, which
 // stage.ts fans out to every scene element as an animation phase and a sound binding:
 // 'swipeLike' (a card went right), 'swipeNope' (it went left) and 'swipeNext' (the next
-// card is up).
+// card is up), plus 'swipeHoverRight' / 'swipeHoverLeft' as a dragged card leans to a side.
 
 import type { GameContext, GameModule, GameTemplate, HintMove, Pt } from './types'
 import { num, str } from './types'
@@ -529,6 +529,7 @@ export function createSwipeCards(): GameModule {
       const sy = event.clientY
       let dx = 0
       let dy = 0
+      let side = 0
       // Velocity from the last stretch of movement only: a drag that stalled at the line
       // before letting go is not a flick, however fast it started.
       let lastX = sx
@@ -557,6 +558,13 @@ export function createSwipeCards(): GameModule {
         setPose(c, pose(), 0)
         const lean = clamp(Math.abs(dx) / (w * (thresholdPct / 100)), 0, 1)
         c.el.dataset.swipeLean = dx > 0 ? 'right' : dx < 0 ? 'left' : ''
+        // The "hover" beats: the card has just leaned to one side. Back through the
+        // middle and over again fires again.
+        const nowSide = dx > w * 0.06 ? 1 : dx < -w * 0.06 ? -1 : 0
+        if (nowSide !== side) {
+          side = nowSide
+          if (nowSide) ctx.sfx.play(nowSide > 0 ? 'swipeHoverRight' : 'swipeHoverLeft')
+        }
         setStamps(c, dx / (w * (thresholdPct / 100)), 0)
         if (display !== 'one') layPile(0, lean)
       }

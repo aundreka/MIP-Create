@@ -1693,7 +1693,7 @@ function runComboEvent(rec: Rec, event: 'comboPick' | 'comboDrop' | 'comboNext')
   applyLightray(rec, event)
 }
 
-function runSwipeEvent(rec: Rec, event: 'swipeLike' | 'swipeNope' | 'swipeNext'): void {
+function runSwipeEvent(rec: Rec, event: 'swipeLike' | 'swipeNope' | 'swipeNext' | 'swipeHoverRight' | 'swipeHoverLeft'): void {
   runOneShot(rec, event)
   applyLightray(rec, event)
 }
@@ -2393,7 +2393,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
     (rec.el.sfx ?? []).find((b) => (b.event === 'whileScratching' || b.event === 'whileSliding') && b.assetId)
   /** Templates whose win IS the player's own action, so their win sound plays at once
    * instead of waiting for the win animation's lead-in. */
-  const WIN_SFX_ON_THE_BEAT = new Set(['basket', 'carousel', 'catch', 'dragclean', 'tapremove', 'tapreveal', 'swipecards', 'slider'])
+  const WIN_SFX_ON_THE_BEAT = new Set(['basket', 'carousel', 'catch', 'dragclean', 'tapremove', 'tapreveal', 'swipecards', 'swipe', 'slider'])
   const GAME_WIN_SFX_BIAS_MS = 500
   const gameWinSoundDelayMs = (rec?: Rec): number => {
     const phaseDelay = rec ? phaseLeadDelayMs(rec.el, 'gameWin') : 0
@@ -2420,7 +2420,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
   }
 
   // Swipe cards: a like, a pass, and the next card coming up.
-  const fireSwipeEvent = (event: 'swipeLike' | 'swipeNope' | 'swipeNext'): void => {
+  const fireSwipeEvent = (event: 'swipeLike' | 'swipeNope' | 'swipeNext' | 'swipeHoverRight' | 'swipeHoverLeft'): void => {
     broadcastGameEvent(event, (target) => runSwipeEvent(target, event))
   }
 
@@ -2459,7 +2459,9 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
       | 'tapReveal'
       | 'swipeLike'
       | 'swipeNope'
-      | 'swipeNext',
+      | 'swipeNext'
+      | 'swipeHoverRight'
+      | 'swipeHoverLeft',
     run: (target: Rec) => void,
   ): void {
     for (const target of recs) {
@@ -2865,7 +2867,7 @@ export function buildScene(scene: Scene, assets: AssetMap, opts: BuildOptions = 
                 fireComboEvent(event)
                 return
               }
-              if (event === 'swipeLike' || event === 'swipeNope' || event === 'swipeNext') {
+              if (event === 'swipeLike' || event === 'swipeNope' || event === 'swipeNext' || event === 'swipeHoverRight' || event === 'swipeHoverLeft') {
                 fireSwipeEvent(event)
                 return
               }

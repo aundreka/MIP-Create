@@ -730,9 +730,9 @@ function ElementSound(props: { el: SceneElement }): JSX.Element {
   const hasTapRemove = scene.elements.some((candidate) => candidate.game?.templateId === 'tapremove')
   const isTapReveal = el.game?.templateId === 'tapreveal'
   const hasTapReveal = scene.elements.some((candidate) => candidate.game?.templateId === 'tapreveal')
-  const isSwipeCards = el.game?.templateId === 'swipecards'
+  const isSwipeCards = el.game?.templateId === 'swipecards' || el.game?.templateId === 'swipe'
   const isSlider = el.game?.templateId === 'slider'
-  const hasSwipeCards = scene.elements.some((candidate) => candidate.game?.templateId === 'swipecards')
+  const hasSwipeCards = scene.elements.some((candidate) => candidate.game?.templateId === 'swipecards' || candidate.game?.templateId === 'swipe')
   const isProgressBar = el.game?.templateId === 'progressbar'
   const hasProgressBar = scene.elements.some((candidate) => candidate.game?.templateId === 'progressbar')
   const isNameInput = el.game?.templateId === 'nameinput'
@@ -816,6 +816,8 @@ function ElementSound(props: { el: SceneElement }): JSX.Element {
           { value: 'swipeLike', label: 'When a card is swiped right' },
           { value: 'swipeNope', label: 'When a card is swiped left' },
           { value: 'swipeNext', label: 'When the next card comes up' },
+          { value: 'swipeHoverRight', label: 'When a dragged card leans right' },
+          { value: 'swipeHoverLeft', label: 'When a dragged card leans left' },
         ]
       : []),
     ...(isSwipeCards ? [{ value: 'onReveal', label: 'When the game is won' }] : []),
@@ -4218,6 +4220,8 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
         | 'swipeLike'
         | 'swipeNope'
         | 'swipeNext'
+        | 'swipeHoverRight'
+        | 'swipeHoverLeft'
         | 'configSelect'
         | 'configChange',
       primary: AnimSpec | undefined,
@@ -4382,12 +4386,14 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
               onChange={(primary, ex) => patchAllPhase('tapReveal', primary, ex)}
             />
           )}
-          {state.scene.elements.some((e) => e.game?.templateId === 'swipecards') &&
+          {state.scene.elements.some((e) => e.game?.templateId === 'swipecards' || e.game?.templateId === 'swipe') &&
             (
               [
                 ['swipeLike', 'On card swiped right'],
                 ['swipeNope', 'On card swiped left'],
                 ['swipeNext', 'On next card up'],
+                ['swipeHoverRight', 'On swipe right hover'],
+                ['swipeHoverLeft', 'On swipe left hover'],
               ] as const
             ).map(([phase, title]) => (
               <AnimPhase
@@ -7468,13 +7474,15 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
             </Help>
           </>
         )}
-        {state.scene.elements.some((e) => e.game?.templateId === 'swipecards') && (
+        {state.scene.elements.some((e) => e.game?.templateId === 'swipecards' || e.game?.templateId === 'swipe') && (
           <>
             {(
               [
                 ['swipeLike', 'On card swiped right'],
                 ['swipeNope', 'On card swiped left'],
                 ['swipeNext', 'On next card up'],
+                ['swipeHoverRight', 'On swipe right hover'],
+                ['swipeHoverLeft', 'On swipe left hover'],
               ] as const
             ).map(([phase, title]) => (
               <AnimPhase
