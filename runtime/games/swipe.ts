@@ -16,6 +16,12 @@ const PALETTE = ['#ef4444', '#f59e0b', '#22c55e', '#3b82f6', '#a855f7', '#ec4899
 
 type Fit = 'contain' | 'cover' | 'fill'
 
+/** How far a card must travel to count, as a share of its width. Low enough that a
+ * swipe toward the near screen edge still gets there. */
+const SWIPE_SHARE = 0.25
+/** A quick flick counts even short of that, px/ms. */
+const FLICK_SPEED = 0.5
+
 interface Card {
   el: HTMLDivElement
   idx: number
@@ -65,6 +71,7 @@ export function createSwipe(): GameModule {
   let swiped = 0
   let started = false
   let done = false
+  let dragging = false
   let completeCb: (() => void) | null = null
 
   const remaining = (): Card[] => cards.filter((c) => !c.gone)
@@ -136,29 +143,56 @@ export function createSwipe(): GameModule {
 
   const attach = (c: Card): void => {
     c.el.addEventListener('pointerdown', (e) => {
-      if (done || c.gone || remaining()[0] !== c) return
+      if (done || dragging || c.gone || remaining()[0] !== c) return
       e.preventDefault()
-      c.el.setPointerCapture(e.pointerId)
+      dragging = true
+      const pid = e.pointerId
+      try {
+        c.el.setPointerCapture?.(pid)
+      } catch {
+        // Best effort: the listeners below sit on window, so the drag works without it.
+      }
       c.el.style.transition = 'none'
+      // Screen px per card px, so the card stays under the finger in a scaled stage and
+      // the threshold is judged on the card as the player sees it.
+      const k = c.el.getBoundingClientRect().width / cw || 1
       const sx = e.clientX
       const sy = e.clientY
       let dx = 0
+      let lastX = sx
+      let lastT = Date.now()
+      let vx = 0
       const move = (ev: PointerEvent): void => {
-        dx = ev.clientX - sx
-        const dy = ev.clientY - sy
+        if (ev.pointerId !== pid) return
+        const now = Date.now()
+        vx = vx * 0.3 + ((ev.clientX - lastX) / Math.max(1, now - lastT)) * 0.7
+        lastX = ev.clientX
+        lastT = now
+        dx = (ev.clientX - sx) / k
+        const dy = (ev.clientY - sy) / k
         c.el.style.transform = `translate(${dx}px,${dy}px) rotate(${dx * 0.05}deg)`
       }
-      const up = (): void => {
-        c.el.removeEventListener('pointermove', move)
-        c.el.removeEventListener('pointerup', up)
-        if (Math.abs(dx) > cw * 0.4) fling(c, dx > 0 ? 1 : -1)
+      // A cancelled pointer (the finger ran off the screen edge, the WebView took the
+      // gesture) is judged like a release: a card left hanging off to the side looks
+      // swiped and must count as one, or the game can never be won.
+      const up = (ev: PointerEvent): void => {
+        if (ev.pointerId !== pid) return
+        window.removeEventListener('pointermove', move)
+        window.removeEventListener('pointerup', up)
+        window.removeEventListener('pointercancel', up)
+        dragging = false
+        if (Date.now() - lastT > 90) vx = 0
+        const far = Math.abs(dx) >= cw * SWIPE_SHARE
+        const flick = Math.abs(vx) >= FLICK_SPEED && Math.sign(vx) === Math.sign(dx) && Math.abs(dx) >= cw * 0.06
+        if (dx !== 0 && (far || flick)) fling(c, dx > 0 ? 1 : -1)
         else {
           c.el.style.transition = 'transform .2s ease'
           c.el.style.transform = 'translate(0,0) rotate(0deg)'
         }
       }
-      c.el.addEventListener('pointermove', move)
-      c.el.addEventListener('pointerup', up)
+      window.addEventListener('pointermove', move)
+      window.addEventListener('pointerup', up)
+      window.addEventListener('pointercancel', up)
     })
   }
 
