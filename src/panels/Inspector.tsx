@@ -4207,6 +4207,16 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
       for (const sid of state.selectedIds) patchElement(sid, { opacity })
       endTransaction()
     }
+    // The selected image elements share one source picker: picking an asset swaps every
+    // one of them at once. It shows the asset only when they already all use the same one.
+    const selectedImages = state.scene.elements.filter((e) => state.selectedIds.includes(e.id) && e.type === 'image')
+    const sharedAssetId = selectedImages.every((e) => e.assetId === selectedImages[0]?.assetId) ? selectedImages[0]?.assetId : undefined
+    const patchAllImages = (assetId: string | undefined): void => {
+      if (!assetId) return
+      beginTransaction()
+      for (const e of selectedImages) patchElement(e.id, { assetId })
+      endTransaction()
+    }
     const patchAllPhase = (
       phase:
         | 'entrance'
@@ -4264,6 +4274,12 @@ export function Inspector(props: { onProjectSettings: () => void }): JSX.Element
         <div className="panel-title">{state.selectedIds.length} selected</div>
         <div className="group-title">Align to canvas</div>
         <AlignRow />
+        {selectedImages.length > 1 && (
+          <Accordion id="inspector.multiImage" title={`Image (${selectedImages.length} images)`}>
+            <Help>Picks one source for every selected image element — swaps them all at once instead of one by one.</Help>
+            <AssetPicker label="Source" value={sharedAssetId} onChange={patchAllImages} />
+          </Accordion>
+        )}
         <Accordion id="inspector.multiAdjust" title="Adjust (all selected)" defaultOpen={false}>
           <Help>Sets the same opacity / brightness / contrast / saturation on every selected element — the usual way a batch of art is matched to one another.</Help>
           <Slider label="Opacity" value={Math.round((first?.opacity ?? 1) * 100)} min={0} max={100} suffix="%" onChange={(n) => patchAllOpacity(n === 100 ? undefined : n / 100)} />
